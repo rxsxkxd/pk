@@ -1,0 +1,95 @@
+# Compose サービスの定義を開始する。
+services:
+  # Go で実装したバックエンド API サービス。
+  api:
+    # API イメージのビルド設定。
+    build:
+      # API 用 Dockerfile を含むビルドコンテキスト。
+      context: ./api
+    # API プロセスに渡す環境変数。
+    environment:
+      # API が待ち受けるコンテナ内ポート。
+      PORT: 3000
+    # Compose ネットワーク内だけに API ポートを公開する。
+    expose:
+      # API の HTTP ポート番号。
+      - "3000"
+    # API が利用可能かを Docker に判定させる設定。
+    healthcheck:
+      # Go 製ヘルスチェッカーでヘルスエンドポイントへ GET し、失敗時は非ゼロ終了する。
+      test: ["CMD", "/healthcheck"]
+      # ヘルスチェックの実行間隔。
+      interval: 5s
+      # 1 回のヘルスチェックの制限時間。
+      timeout: 3s
+      # unhealthy とみなすまでの連続失敗回数。
+      retries: 10
+      # コンテナ起動直後の猶予時間。
+      start_period: 5s
+
+  # Vue アプリケーションを Vite dev で配信するフロントサービス。
+  front:
+    # フロントエンド イメージのビルド設定。
+    build:
+      # フロントエンド用 Dockerfile を含むビルドコンテキスト。
+      context: ./front
+    # ホストへ公開するポート設定。
+    ports:
+      # ホストの 8080 番を Vite dev の 5173 番へ転送する。
+      - "8080:5173"
+    # API との起動順序・起動条件を定義する。
+    depends_on:
+      # API サービスを依存先にする。
+      api:
+        # API のヘルスチェック成功後にフロントを起動する。
+        condition: service_healthy
+    # Vite に渡す環境変数。
+    environment:
+      # Docker Desktop 上でもファイル変更を検知するためポーリングを有効にする。
+      CHOKIDAR_USEPOLLING: "true"
+    # 開発中に共有・永続化するボリューム設定。
+    volumes:
+      # ホストのフロントソースをコンテナの作業ディレクトリへ bind mount する。
+      - ./front:/app
+      # コンテナ用 node_modules を名前付きボリュームとして保持する。
+      - front_node_modules:/app/node_modules
+    # Vite dev server が起動済みかを Docker に判定させる設定。
+    healthcheck:
+      # Node.js の fetch で Vite の HTTP エンドポイントへ接続する。
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5173').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      # ヘルスチェックの実行間隔。
+      interval: 5s
+      # 1 回のヘルスチェックの制限時間。
+      timeout: 3s
+      # unhealthy とみなすまでの連続失敗回数。
+      retries: 10
+      # Vite の起動を待つ猶予時間。
+      start_period: 3s
+
+  # ブラウザ E2E テスト専用の Playwright サービス。
+  playwright:
+    # Playwright イメージのビルド設定。
+    build:
+      # Playwright 用 Dockerfile を含むビルドコンテキスト。
+      context: ./playwright
+    # Playwright テストに渡す環境変数。
+    environment:
+      # Compose ネットワーク上でアクセスするフロントの URL。
+      BASE_URL: http://front:5173
+      # CI 向けのリトライ設定を有効にするフラグ。
+      CI: "true"
+    # テスト開始前の依存サービス条件を定義する。
+    depends_on:
+      # フロントサービスを依存先にする。
+      front:
+        # フロントのヘルスチェック成功後にテストを開始する。
+        condition: service_healthy
+    # Chromium の共有メモリ不足を防ぐための /dev/shm 容量。
+    shm_size: 1gb
+    # 通常の開発起動では実行せず、e2e プロファイルでのみ有効にする。
+    profiles: ["e2e"]
+
+# Compose が管理する名前付きボリュームの定義を開始する。
+volumes:
+  # フロント用の node_modules をホストから分離して永続化する。
+  front_node_modules:

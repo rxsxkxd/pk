@@ -1,0 +1,332 @@
+AWSTemplateFormatVersion: "2010-09-09"
+# 下書き（未検証）。EC2 Image Builder で、Amazon Linux 2023 に mise でビルド済みの Ruby（既定は 3 系の最新に追従）を入れた土台の AMI を作る。
+# 説明は同じフォルダの README.md。手順は ../../docker/al2023-ruby3.4-mise/Dockerfile と揃えている（mise の置き場所だけ違う）。
+Description: Base AMI of Amazon Linux 2023 with a precompiled Ruby installed by mise (EC2 Image Builder)
+
+Parameters:
+  NamePrefix:
+    Type: String
+    Default: myapp-base-mise
+    Description: Image Builder の資源と AMI の名前の先頭
+  ComponentVersion:
+    Type: String
+    Default: 1.0.0
+    Description: コンポーネントの版。コンポーネントの中身を変えたら上げる（同じ版のまま中身は変えられない）
+  RecipeVersion:
+    Type: String
+    Default: 1.0.0
+    Description: イメージのレシピの版。レシピ・コンポーネントの版・mise と Ruby のバージョンの指定のどれかを変えたら上げる
+  MiseVersion:
+    Type: String
+    Default: 2026.10.21
+    Description: 入れる mise のバージョン。空なら mise のリポジトリにある最新
+  RubyVersion:
+    Type: String
+    Default: "3"
+    Description: mise に渡す Ruby のバージョン。3 なら作るたびにその時点の 3 系の最新。決まったバージョンにするなら 3.4.12 のように指定する
+  ParentImage:
+    Type: String
+    Default: ""
+    Description: 親イメージ。空なら AWS が管理する最新の AL2023（x86_64）のイメージ
+  InstanceType:
+    Type: String
+    Default: t3a.medium
+    Description: ビルドとテストに使うインスタンスタイプ（x86_64。コンパイルしないので小さめでよい）
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: インターネットに出られるサブネット（mise のリポジトリと GitHub の jdx/ruby から取得するため）
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: 受信なし、送信は TCP 443 だけを許可したセキュリティグループ
+  LogBucketName:
+    Type: String
+    Default: ""
+    Description: ビルドのログを置く S3 バケット。空ならログを S3 に置かない
+  ScheduleExpression:
+    Type: String
+    Default: ""
+    Description: 定期実行の式（例 cron(0 0 1 * ? *)）。空なら定期実行せず、手動で起動する
+  ScheduleStartCondition:
+    Type: String
+    Default: EXPRESSION_MATCH_ONLY
+    AllowedValues:
+      - EXPRESSION_MATCH_ONLY
+      - EXPRESSION_MATCH_AND_DEPENDENCY_UPDATES_AVAILABLE
+    Description: 定期実行の条件。新しい Ruby への追従は Image Builder の依存の更新として扱われないため、既定は式に合えば毎回作る
+
+Conditions:
+  UseManagedParentImage:
+    Fn::Equals:
+      - Ref: ParentImage
+      - ""
+  HasLogBucket:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: LogBucketName
+          - ""
+  HasSchedule:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: ScheduleExpression
+          - ""
+  HasMiseVersion:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: MiseVersion
+          - ""
+
+Resources:
+  # ビルド用・テスト用のインスタンスのロール
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/EC2InstanceProfileForImageBuilder
+      Policies:
+        Fn::If:
+          - HasLogBucket
+          - - PolicyName: put-build-logs
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:s3:::${LogBucketName}/image-builder/${NamePrefix}/*
+          - Ref: AWS::NoValue
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: InstanceRole
+
+  # mise を入れ、mise でビルド済みの Ruby を /opt/mise に入れるコンポーネント
+  RubyComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name:
+        Fn::Sub: ${NamePrefix}-ruby-mise
+      Version:
+        Ref: ComponentVersion
+      Platform: Linux
+      SupportedOsVersions:
+        - Amazon Linux 2023
+      Description: Install mise and a precompiled Ruby to /opt/mise
+      Data: |
+        name: ruby-mise
+        description: Install mise and a precompiled Ruby to /opt/mise
+        schemaVersion: 1.0
+        parameters:
+          - MisePackageSpec:
+              type: string
+              description: dnf に渡す mise のパッケージの指定（例 mise-2026.10.21。バージョンを指定しないなら mise）
+          - RubyVersion:
+              type: string
+              description: mise に渡す Ruby のバージョン（例 3、3.4.12）
+        phases:
+          - name: build
+            steps:
+              # mise の公式の dnf のリポジトリを足し、mise を入れる（パッケージは GPG の署名で確かめる）
+              - name: InstallMise
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - curl -fsSL https://mise.jdx.dev/rpm/mise.repo -o /etc/yum.repos.d/mise.repo
+                    - dnf install -y "{{ MisePackageSpec }}"
+              # ネイティブ拡張の gem をリリース用インスタンスでビルドするために残す。
+              # gem が使うライブラリの開発用のパッケージ（openssl-devel など）が要るかは、ビルド済みの Ruby が
+              # ライブラリを同梱しているかによる（Docker の定義で確かめる）
+              - name: InstallBuildTools
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - dnf install -y gcc make
+                    - dnf clean all
+              # mise の置き場所を /opt/mise にまとめ、ログインのシェルで shims を PATH に足す。
+              # MISE_RUBY_COMPILE=false: ビルド済みの Ruby だけを使う（見つからなければ、コンパイルに切り替えずに失敗する）
+              - name: ConfigureEnvironment
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - mkdir -p /opt/mise
+                    - |
+                      cat > /etc/profile.d/mise.sh <<'EOS'
+                      export MISE_DATA_DIR=/opt/mise
+                      export MISE_CONFIG_DIR=/opt/mise
+                      export MISE_CACHE_DIR=/opt/mise/cache
+                      export MISE_RUBY_COMPILE=false
+                      export PATH=/opt/mise/shims:$PATH
+                      export LANG="${LANG:-C.UTF-8}"
+                      EOS
+                    - "echo 'gem: --no-document' > /etc/gemrc"
+              # Ruby を入れ、全体の既定（/opt/mise/config.toml）にする。取得したアーカイブはイメージに残さない
+              - name: InstallRuby
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - source /etc/profile.d/mise.sh
+                    - mise use --global "ruby@{{ RubyVersion }}"
+                    - rm -rf /opt/mise/cache
+                    - mise ls
+          # スナップショットを撮る前に、ビルド用のインスタンスで確かめる
+          - name: validate
+            steps:
+              - name: CheckRuby
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - source /etc/profile.d/mise.sh
+                    - version="{{ RubyVersion }}"
+                    - ruby -v | grep -E "^ruby ${version//./\\.}[. ]"
+                    - ruby -e 'require "openssl"; require "psych"; require "zlib"; require "fiddle"; puts OpenSSL::OPENSSL_LIBRARY_VERSION'
+                    - ruby --yjit -e 'exit RubyVM::YJIT.enabled?'
+                    - gem -v
+                    - bundle -v
+          # できた AMI から起動したテスト用のインスタンスで確かめる
+          - name: test
+            steps:
+              - name: CheckRubyOnNewInstance
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - bash -lc 'ruby -v'
+                    - bash -lc 'ruby -e "require %q(openssl); require %q(psych); require %q(zlib); require %q(fiddle)"'
+                    - bash -lc 'ruby --yjit -e "exit RubyVM::YJIT.enabled?"'
+                    - bash -lc 'ruby -e "exit(Encoding.default_external == Encoding::UTF_8)"'
+                    - bash -lc 'bundle -v'
+                    - bash -lc 'mise ls'
+
+  ImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name:
+        Ref: NamePrefix
+      Version:
+        Ref: RecipeVersion
+      ParentImage:
+        Fn::If:
+          - UseManagedParentImage
+          - Fn::Sub: arn:${AWS::Partition}:imagebuilder:${AWS::Region}:aws:image/amazon-linux-2023-x86/x.x.x
+          - Ref: ParentImage
+      Components:
+        - ComponentArn:
+            Fn::GetAtt:
+              - RubyComponent
+              - Arn
+          Parameters:
+            - Name: MisePackageSpec
+              Value:
+                - Fn::If:
+                    - HasMiseVersion
+                    - Fn::Sub: mise-${MiseVersion}
+                    - mise
+            - Name: RubyVersion
+              Value:
+                - Ref: RubyVersion
+      AdditionalInstanceConfiguration:
+        SystemsManagerAgent:
+          UninstallAfterBuild: false
+
+  InfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name:
+        Ref: NamePrefix
+      InstanceProfileName:
+        Ref: InstanceProfile
+      InstanceTypes:
+        - Ref: InstanceType
+      SubnetId:
+        Ref: SubnetId
+      SecurityGroupIds:
+        - Ref: SecurityGroupId
+      TerminateInstanceOnFailure: true
+      InstanceMetadataOptions:
+        HttpTokens: required
+      Logging:
+        Fn::If:
+          - HasLogBucket
+          - S3Logs:
+              S3BucketName:
+                Ref: LogBucketName
+              S3KeyPrefix:
+                Fn::Sub: image-builder/${NamePrefix}
+          - Ref: AWS::NoValue
+
+  DistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name:
+        Ref: NamePrefix
+      Distributions:
+        - Region:
+            Ref: AWS::Region
+          AmiDistributionConfiguration:
+            Name:
+              Fn::Sub: "${NamePrefix}-{{ imagebuilder:buildDate }}"
+            AmiTags:
+              Layer: base
+              RubyInstall: mise
+              # 指定（3 など）であって、入った Ruby のバージョンではない。入ったものはインスタンスで mise ls か ruby -v で確かめる
+              RubyVersionSpec:
+                Ref: RubyVersion
+              RecipeVersion:
+                Ref: RecipeVersion
+
+  ImagePipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name:
+        Ref: NamePrefix
+      ImageRecipeArn:
+        Fn::GetAtt:
+          - ImageRecipe
+          - Arn
+      InfrastructureConfigurationArn:
+        Fn::GetAtt:
+          - InfrastructureConfiguration
+          - Arn
+      DistributionConfigurationArn:
+        Fn::GetAtt:
+          - DistributionConfiguration
+          - Arn
+      ImageTestsConfiguration:
+        ImageTestsEnabled: true
+        TimeoutMinutes: 60
+      EnhancedImageMetadataEnabled: true
+      Status: ENABLED
+      Schedule:
+        Fn::If:
+          - HasSchedule
+          - ScheduleExpression:
+              Ref: ScheduleExpression
+            PipelineExecutionStartCondition:
+              Ref: ScheduleStartCondition
+          - Ref: AWS::NoValue
+
+Outputs:
+  ImagePipelineArn:
+    Value:
+      Fn::GetAtt:
+        - ImagePipeline
+        - Arn
+  ImageRecipeArn:
+    Value:
+      Fn::GetAtt:
+        - ImageRecipe
+        - Arn

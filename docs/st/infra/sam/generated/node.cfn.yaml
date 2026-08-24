@@ -1,0 +1,391 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Ticket QR API, node implementation (AWS SAM): sam build builds the Lambda code and sam deploy uploads it and deploys the HTTP API and the two functions. Node.js (nodejs24.x): sam build bundles src/ticketqr.ts
+  with esbuild. The tickets function goes into the private subnets made beforehand by infra/cloudformation/tickets-network-*.yaml (outputs PrivateSubnetIds, SecurityGroupId) and reaches the analysis server
+  through their NAT gateway. Same API as infra/cloudformation/api.yaml (Impl=node), which is kept for comparison. See infra/sam/README.md.
+Parameters:
+  VpcSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnets for the tickets function (PrivateSubnetIds output of the network stack).
+  VpcSecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: Security group for the tickets function (SecurityGroupId output of the network stack).
+  SigningSaltParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store SecureString {"current":"...","previous":"..."}, e.g. /ticketqr/node/signing-salt (created outside this stack).
+  AnalyzerMode:
+    Type: String
+    Default: mock
+    AllowedValues:
+      - mock
+      - http
+    Description: mock = in-process, always PASS. http = POST to AnalyzerUrl.
+  AnalyzerUrl:
+    Type: String
+    Default: ''
+    Description: Image analysis endpoint for AnalyzerMode=http.
+  AnalyzerApiKeyParameterName:
+    Type: String
+    Default: ''
+    AllowedPattern: ^(/.+)?$
+    Description: Optional. Parameter Store SecureString holding the analysis server's x-api-key. Empty sends no x-api-key.
+  TicketCodeSuffixParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store String holding the fixed suffix of ticket codes (1-32 letters or digits), e.g. /ticketqr/node/ticket-code-suffix (created outside this stack).
+  PublicBaseUrl:
+    Type: String
+    Default: ''
+    Description: 'Public API URL: a custom domain, or the CloudFront URL (web.yaml WebUrl) when CloudFront forwards /v1/* to this API (unified layout). Empty uses the execute-api default URL.'
+  MaxImageBytes:
+    Type: Number
+    Default: 4194304
+    MinValue: 1
+    MaxValue: 4194304
+    Description: >-
+      Upload limit of the certificate image in bytes (MAX_IMAGE_BYTES). 4194304 (4MB) is the ceiling (Lambda's 6MB request, base64 by API Gateway); lower it when the path to the API has a smaller limit.
+      Keep the SPA's config.json maxImageBytes the same (DESIGN.md 5).
+  ThrottlingRateLimit:
+    Type: Number
+    Default: 50
+    Description: Steady-state requests per second for every route.
+  ThrottlingBurstLimit:
+    Type: Number
+    Default: 100
+    Description: Maximum burst of requests for every route (API Gateway throttling).
+  GrantReservedConcurrency:
+    Type: Number
+    Default: -1
+    Description: Reserved concurrency for the tickets function (protects the analysis server). -1 = not set.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues:
+      - 1
+      - 3
+      - 5
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+      - 180
+      - 365
+    Description: Days to keep the Lambda and API access logs.
+  NamePrefix:
+    Type: String
+    Default: ''
+    AllowedPattern: ^([A-Za-z0-9][A-Za-z0-9_-]{0,56})?$
+    Description: Prefix of the function, API and log group names (e.g. ticketqr-node gives ticketqr-node-tickets). Empty = the stack name.
+Conditions:
+  UseDefaultUrl: !Equals
+    - !Ref 'PublicBaseUrl'
+    - ''
+  HasGrantReservedConcurrency: !Not
+    - !Equals
+      - !Ref 'GrantReservedConcurrency'
+      - -1
+  HasAnalyzerApiKey: !Not
+    - !Equals
+      - !Ref 'AnalyzerApiKeyParameterName'
+      - ''
+  HasNamePrefix: !Not
+    - !Equals
+      - !Ref 'NamePrefix'
+      - ''
+Resources:
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub
+        - /aws/apigateway/${Prefix}
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
+      RetentionInDays: !Ref 'LogRetentionDays'
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !If
+        - HasNamePrefix
+        - !Ref 'NamePrefix'
+        - !Ref 'AWS::StackName'
+      ProtocolType: HTTP
+  DefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref 'HttpApi'
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref 'ThrottlingRateLimit'
+        ThrottlingBurstLimit: !Ref 'ThrottlingBurstLimit'
+      AccessLogSettings:
+        DestinationArn: !GetAtt 'ApiAccessLogGroup.Arn'
+        Format: >-
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","routeKey":"$context.routeKey","status":"$context.status","latency":"$context.responseLatency","integrationError":"$context.integrationErrorMessage"}
+  TicketsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub
+        - /aws/lambda/${Prefix}-tickets
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
+      RetentionInDays: !Ref 'LogRetentionDays'
+  TicketsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref 'HttpApi'
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt 'TicketsFunction.Arn'
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 20000
+  GrantInlineRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref 'HttpApi'
+      RouteKey: POST /v1/tickets/qr-inline
+      Target: !Sub 'integrations/${TicketsIntegration}'
+  GrantRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref 'HttpApi'
+      RouteKey: POST /v1/tickets
+      Target: !Sub 'integrations/${TicketsIntegration}'
+  GetViewRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref 'HttpApi'
+      RouteKey: GET /v1/tickets/{ticketCode}/view
+      Target: !Sub 'integrations/${TicketsIntegration}'
+  TicketsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref 'TicketsFunction'
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*'
+  GetQRLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub
+        - /aws/lambda/${Prefix}-get-qr
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
+      RetentionInDays: !Ref 'LogRetentionDays'
+  GetQRIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref 'HttpApi'
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt 'GetQRFunction.Arn'
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 10000
+  GetQRRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref 'HttpApi'
+      RouteKey: GET /v1/tickets/{ticketCode}/qr
+      Target: !Sub 'integrations/${GetQRIntegration}'
+  GetQRPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref 'GetQRFunction'
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*'
+  TicketsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: TicketsLogGroup
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/ticketqr.ts
+        Format: esm
+        OutExtension:
+          - .js=.mjs
+        Target: node24
+        Minify: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      Code:
+        S3Bucket: ARTIFACT_BUCKET
+        S3Key: sam-placeholder/TicketsFunction.zip
+      FunctionName: !Sub
+        - ${Prefix}-tickets
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
+      Handler: ticketqr.handler
+      MemorySize: 256
+      Role: !GetAtt 'TicketsFunctionRole.Arn'
+      Runtime: nodejs24.x
+      Timeout: 15
+      VpcConfig:
+        SubnetIds: !Ref 'VpcSubnetIds'
+        SecurityGroupIds: !Ref 'VpcSecurityGroupIds'
+      Environment:
+        Variables:
+          PUBLIC_BASE_URL: !If
+            - UseDefaultUrl
+            - !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+            - !Ref 'PublicBaseUrl'
+          ANALYZER_MODE: !Ref 'AnalyzerMode'
+          ANALYZER_URL: !Ref 'AnalyzerUrl'
+          ANALYZER_API_KEY_PARAMETER_NAME: !If
+            - HasAnalyzerApiKey
+            - !Ref 'AnalyzerApiKeyParameterName'
+            - !Ref 'AWS::NoValue'
+          SIGNING_SALT_PARAMETER_NAME: !Ref 'SigningSaltParameterName'
+          TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref 'TicketCodeSuffixParameterName'
+          MAX_IMAGE_BYTES: !Ref 'MaxImageBytes'
+      Tags:
+        - Key: lambda:createdBy
+          Value: SAM
+      ReservedConcurrentExecutions: !If
+        - HasGrantReservedConcurrency
+        - !Ref 'GrantReservedConcurrency'
+        - !Ref 'AWS::NoValue'
+      Architectures:
+        - arm64
+  TicketsFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: TicketsFunctionRolePolicy0
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TicketCodeSuffixParameterName}'
+        - !If
+          - HasAnalyzerApiKey
+          - PolicyName: TicketsFunctionRolePolicy1
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action: ssm:GetParameter
+                  Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AnalyzerApiKeyParameterName}'
+          - !Ref 'AWS::NoValue'
+      Tags:
+        - Key: lambda:createdBy
+          Value: SAM
+  GetQRFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GetQRLogGroup
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        EntryPoints:
+          - src/ticketqr.ts
+        Format: esm
+        OutExtension:
+          - .js=.mjs
+        Target: node24
+        Minify: true
+        External:
+          - '@aws-sdk/*'
+    Properties:
+      Code:
+        S3Bucket: ARTIFACT_BUCKET
+        S3Key: sam-placeholder/GetQRFunction.zip
+      FunctionName: !Sub
+        - ${Prefix}-get-qr
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
+      Handler: ticketqr.handler
+      MemorySize: 256
+      Role: !GetAtt 'GetQRFunctionRole.Arn'
+      Runtime: nodejs24.x
+      Timeout: 5
+      Environment:
+        Variables:
+          PUBLIC_BASE_URL: !If
+            - UseDefaultUrl
+            - !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+            - !Ref 'PublicBaseUrl'
+          ANALYZER_MODE: !Ref 'AnalyzerMode'
+          ANALYZER_URL: !Ref 'AnalyzerUrl'
+          ANALYZER_API_KEY_PARAMETER_NAME: !If
+            - HasAnalyzerApiKey
+            - !Ref 'AnalyzerApiKeyParameterName'
+            - !Ref 'AWS::NoValue'
+          SIGNING_SALT_PARAMETER_NAME: !Ref 'SigningSaltParameterName'
+          TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref 'TicketCodeSuffixParameterName'
+      Tags:
+        - Key: lambda:createdBy
+          Value: SAM
+      Architectures:
+        - arm64
+  GetQRFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GetQRFunctionRolePolicy0
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TicketCodeSuffixParameterName}'
+        - !If
+          - HasAnalyzerApiKey
+          - PolicyName: GetQRFunctionRolePolicy1
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action: ssm:GetParameter
+                  Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AnalyzerApiKeyParameterName}'
+          - !Ref 'AWS::NoValue'
+      Tags:
+        - Key: lambda:createdBy
+          Value: SAM
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API (PUBLIC_BASE_URL when no custom domain is set).
+    Value: !If
+      - UseDefaultUrl
+      - !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'
+      - !Ref 'PublicBaseUrl'
+  ApiId:
+    Value: !Ref 'HttpApi'
+  ApiDomain:
+    Description: Domain of the execute-api endpoint, for web.yaml ApiOriginDomain (unified layout, CloudFront forwards /v1/* here).
+    Value: !Sub '${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'

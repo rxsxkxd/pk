@@ -1,0 +1,16 @@
+{
+  "Parameters": [
+    {
+      "ParameterName": "binlog_format",
+      "ParameterValue": "ROW",
+      "Source": "user",
+      "ApplyType": "dynamic"
+    },
+    {
+      "ParameterName": "time_zone",
+      "ParameterValue": "Asia/Tokyo",
+      "Source": "user",
+      "ApplyType": "dynamic"
+    }
+  ]
+}

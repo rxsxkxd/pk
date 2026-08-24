@@ -1,0 +1,32 @@
+environment: development
+aws_region: ap-northeast-1
+services:
+  example-service-test-development-mysql80:
+    source_db_instance_identifier: example-service-test-development-mysql80
+    source_engine_version: "8.0"
+    source_db_parameter_group_name: example-service-test-development-mysql80-v1
+    target_engine_version: 8.4.11
+    target_db_instance_class: db.t4g.small
+    target_db_parameter_group_name: example-service-test-development-mysql84-v1
+    target_parameter_group_template_path: examples/config-blue-green-generation/target-parameter-groups/example-service-test-development-mysql84.yaml
+    protection_snapshot_identifier: example-service-test-development-mysql80-pre-bg
+    final_snapshot_identifier: example-service-test-development-mysql80-final
+    schemas:
+      - example_service_test
+      - example_service_test_audit
+    source_db_parameters:
+      time_zone:
+        value: UTC
+        source: engine-default
+    mysql_verification:
+      enabled: true
+      auth_method: parameter_store
+      parameter_name: /rds-bg-test/mysql-password
+      user_parameter_name: /rds-bg-test/mysql-user
+      ssl_ca: ""
+      port: 3306
+    actions:
+      build: pending
+      switchover: pending
+      switchover_timeout: 300
+      cleanup: pending

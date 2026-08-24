@@ -1,0 +1,41 @@
+#!/bin/bash
+# 対象のポートを、許可する IP と日本の IP の範囲からだけ受け付ける。
+# --sets-only: 集合の中身だけを入れ替える（ルールは触らない）
+set -euo pipefail
+source /etc/port-guard/port-guard.conf
+ALLOW_FILE=/etc/port-guard/allow.txt
+JP_FILE=/etc/port-guard/jp.txt
+JP_MIN_ENTRIES="${JP_MIN_ENTRIES:-1000}"   # これより少なければ、取得の失敗とみなして入れ替えない
+
+# ファイルの中身で集合を作り直す（一時的な集合に入れてから swap する）
+load_set() {
+  local name=$1 file=$2 tmp="${1}_tmp"
+  ipset create -exist "$name" hash:net family inet maxelem 65536
+  ipset create -exist "$tmp" hash:net family inet maxelem 65536
+  ipset flush "$tmp"
+  sed 's/#.*//' "$file" | awk -v set="$tmp" 'NF { print "add " set " " $1 }' | ipset restore -exist
+  ipset swap "$tmp" "$name"
+  ipset destroy "$tmp"
+}
+
+jp_entries=$(grep -cvE '^\s*(#|$)' "$JP_FILE" || true)
+if [ "$jp_entries" -lt "$JP_MIN_ENTRIES" ]; then
+  echo "port-guard: $JP_FILE has only $jp_entries entries; keep the current set" >&2
+  ipset create -exist port_guard_jp hash:net family inet maxelem 65536
+else
+  load_set port_guard_jp "$JP_FILE"
+fi
+load_set port_guard_allow "$ALLOW_FILE"
+
+[ "${1:-}" = "--sets-only" ] && exit 0
+
+iptables -N PORT_GUARD 2>/dev/null || true
+iptables -F PORT_GUARD
+iptables -A PORT_GUARD -i lo -j ACCEPT
+iptables -A PORT_GUARD -m set --match-set port_guard_allow src -j ACCEPT
+iptables -A PORT_GUARD -m set --match-set port_guard_jp src -j ACCEPT
+iptables -A PORT_GUARD -m limit --limit 10/min -j LOG --log-prefix "port-guard drop: "
+iptables -A PORT_GUARD -j DROP
+
+rule=(INPUT -p tcp -m multiport --dports "$PORT_GUARD_PORTS" -j PORT_GUARD)
+iptables -C "${rule[@]}" 2>/dev/null || iptables -I "${rule[0]}" 1 "${rule[@]:1}"

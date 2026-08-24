@@ -1,0 +1,212 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Hourly and daily caps on ticket grants (infra/RATE_LIMITING.md). Two CloudWatch alarms count invocations of the
+  tickets function (requests refused by API Gateway do not invoke it, so they are not counted). When either alarm
+  is in ALARM, a small function sets the throttling of the grant routes to 0 (API Gateway answers 429); when both are
+  OK again, it puts the normal values back. Attach it to an API made by api.yaml or infra/sam (separate stack).
+
+Parameters:
+  # 上限をかける HTTP API の ID（API のスタックの出力 ApiId）
+  ApiId:
+    Type: String
+    AllowedPattern: ^[a-z0-9]+$
+    Description: ID of the HTTP API (the ApiId output of the API stack).
+  # API のステージの名前（api.yaml・SAM は $default）
+  StageName:
+    Type: String
+    Default: $default
+    Description: Stage of the HTTP API ($default in api.yaml and infra/sam).
+  # 数える Lambda 関数の名前（チケットの発行を受ける tickets 関数。例: ticketqr-go-tickets）
+  TicketsFunctionName:
+    Type: String
+    AllowedPattern: ^[A-Za-z0-9_-]+$
+    Description: Name of the tickets function, whose invocations are counted (e.g. ticketqr-go-tickets).
+  # 上限に達したときに止めるルート（カンマ区切り。発行の2つ。QR 画像やチケット表示は止めない）
+  GuardedRoutes:
+    Type: CommaDelimitedList
+    Default: POST /v1/tickets,POST /v1/tickets/qr-inline
+    Description: Route keys stopped while over a cap (the grant routes; QR images and ticket pages stay available).
+  # 1時間あたりの上限（tickets 関数の呼び出し回数）
+  HourlyLimit:
+    Type: Number
+    Default: 10000
+    MinValue: 1
+    Description: Cap on tickets function invocations per hour.
+  # 1日あたりの上限（tickets 関数の呼び出し回数）
+  DailyLimit:
+    Type: Number
+    Default: 100000
+    MinValue: 1
+    Description: Cap on tickets function invocations per day.
+  # 上限に達していないときの、止めるルートの1秒あたりの量（API のスタックの ThrottlingRateLimit と同じにする）
+  RateLimit:
+    Type: Number
+    Default: 50
+    MinValue: 1
+    Description: Normal steady-state rate of the grant routes, put back when under the caps (same as the API stack's ThrottlingRateLimit).
+  # 上限に達していないときの、止めるルートの一時的に受けられる量（API のスタックの ThrottlingBurstLimit と同じにする）
+  BurstLimit:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    Description: Normal burst of the grant routes, put back when under the caps (same as the API stack's ThrottlingBurstLimit).
+  # ログの保持日数
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 180, 365]
+    Description: Days to keep the guard function's logs.
+
+Resources:
+  # ---------- Counting: invocations of the tickets function per hour and per day ----------
+  HourlyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DependsOn: HourlyAlarmPermission # the alarm may act as soon as it exists
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-hourly
+      AlarmDescription: !Sub Ticket grants reached ${HourlyLimit} in an hour; the grant routes are stopped (429) until it is OK again.
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions: [{ Name: FunctionName, Value: !Ref TicketsFunctionName }]
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: !Ref HourlyLimit
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching # no grants (or all refused) = under the cap
+      AlarmActions: [!GetAtt GuardFunction.Arn]
+      OKActions: [!GetAtt GuardFunction.Arn]
+  DailyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DependsOn: DailyAlarmPermission
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-daily
+      AlarmDescription: !Sub Ticket grants reached ${DailyLimit} in a day; the grant routes are stopped (429) until it is OK again.
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions: [{ Name: FunctionName, Value: !Ref TicketsFunctionName }]
+      Statistic: Sum
+      Period: 86400
+      EvaluationPeriods: 1
+      Threshold: !Ref DailyLimit
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!GetAtt GuardFunction.Arn]
+      OKActions: [!GetAtt GuardFunction.Arn]
+
+  # ---------- Stopping and restoring the grant routes ----------
+  GuardLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-guard
+      RetentionInDays: !Ref LogRetentionDays
+  GuardRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: guard
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: cloudwatch:DescribeAlarms
+                Resource: "*" # DescribeAlarms does not support resource-level permissions
+              - Effect: Allow
+                Action: apigateway:PATCH # UpdateStage of the HTTP API
+                Resource: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/${ApiId}/stages/${StageName}
+  GuardFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GuardLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-guard
+      Description: Stops the grant routes (throttling 0) while an hourly / daily cap alarm is in ALARM.
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      Timeout: 30
+      MemorySize: 128
+      ReservedConcurrentExecutions: 1 # one change at a time
+      Role: !GetAtt GuardRole.Arn
+      Environment:
+        Variables:
+          API_ID: !Ref ApiId
+          STAGE_NAME: !Ref StageName
+          ROUTES: !Join [",", !Ref GuardedRoutes]
+          ALARMS: !Sub ${AWS::StackName}-hourly,${AWS::StackName}-daily # names, not Refs: the alarms refer to this function
+          RATE_LIMIT: !Ref RateLimit
+          BURST_LIMIT: !Ref BurstLimit
+      Code:
+        ZipFile: |
+          # Sets the grant routes' throttling from the current state of the cap alarms. The event is not trusted for
+          # the state: both alarms are read every time, so any trigger (either alarm, the schedule) gives the same result.
+          import json
+          import os
+
+          import boto3
+
+          apigw = boto3.client("apigatewayv2")
+          cloudwatch = boto3.client("cloudwatch")
+
+
+          def handler(event, context):
+              names = os.environ["ALARMS"].split(",")
+              alarms = cloudwatch.describe_alarms(AlarmNames=names)["MetricAlarms"]
+              over = sorted(a["AlarmName"] for a in alarms if a["StateValue"] == "ALARM")
+              # Throttling 0 refuses every request (429). The normal values are set explicitly, not by deleting the
+              # route settings: deleting may leave the limits at 0.
+              rate, burst = (0, 0) if over else (float(os.environ["RATE_LIMIT"]), int(os.environ["BURST_LIMIT"]))
+              routes = [r.strip() for r in os.environ["ROUTES"].split(",") if r.strip()]
+              apigw.update_stage(
+                  ApiId=os.environ["API_ID"],
+                  StageName=os.environ["STAGE_NAME"],
+                  RouteSettings={r: {"ThrottlingRateLimit": rate, "ThrottlingBurstLimit": burst} for r in routes},
+              )
+              print(json.dumps({"msg": "grant routes " + ("stopped" if over else "open"), "alarms_in_alarm": over,
+                                "routes": routes, "rate": rate, "burst": burst}))
+              return {"stopped": bool(over)}
+  # CloudWatch alarms invoke the function directly (alarm actions).
+  HourlyAlarmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GuardFunction
+      Principal: lambda.alarms.cloudwatch.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${AWS::StackName}-hourly
+  DailyAlarmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GuardFunction
+      Principal: lambda.alarms.cloudwatch.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:${AWS::StackName}-daily
+
+  # Safety net: re-applies the state every 10 minutes, in case an alarm action was missed or the API stack was
+  # redeployed (which may reset the route settings).
+  GuardSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(10 minutes)
+      Targets: [{ Id: guard, Arn: !GetAtt GuardFunction.Arn }]
+  GuardSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GuardFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt GuardSchedule.Arn
+
+Outputs:
+  HourlyAlarmName:
+    Value: !Ref HourlyAlarm
+  DailyAlarmName:
+    Value: !Ref DailyAlarm
+  GuardFunctionName:
+    Value: !Ref GuardFunction

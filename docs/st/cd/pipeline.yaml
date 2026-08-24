@@ -1,0 +1,343 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CD pipeline (cd/README.md): CodePipeline V2 with three CodeBuild stages. Test runs the unit tests and builds the
+  Lambda zip and the SPA; E2E is an empty placeholder for now; Deploy only replaces the Lambda code and the SPA files
+  (cd/UPDATE_ONLY.md). The API and web stacks, config.json and the Parameter Store values are not touched.
+
+Parameters:
+  # パイプライン・CodeBuild・ロールの名前の先頭
+  NamePrefix:
+    Type: String
+    Default: ticketqr-st
+    AllowedPattern: ^[a-z0-9-]+$
+    Description: Prefix of the pipeline, CodeBuild project and role names.
+  # GitHub との接続（CodeConnections）の ARN。スタックの外で作り、GitHub 側で承認しておく
+  ConnectionArn:
+    Type: String
+    AllowedPattern: ^arn:aws[a-z-]*:(codestar-connections|codeconnections):.+
+    Description: ARN of the CodeConnections connection to GitHub (created and approved outside this stack).
+  # リポジトリ（owner/name）
+  FullRepositoryId:
+    Type: String
+    AllowedPattern: ^[^/]+/[^/]+$
+    Description: GitHub repository, owner/name.
+  # このブランチへの push でパイプラインが動く
+  BranchName:
+    Type: String
+    Default: master
+    Description: A push to this branch starts the pipeline.
+  # Lambda の zip を置く成果物バケット（DEPLOY.md 2章。スタックの外で作る）
+  ArtifactBucket:
+    Type: String
+    Description: S3 bucket for the Lambda zips (DEPLOY.md 2). The API stack reads the zip from here.
+  # 成果物バケットの中の置き場所。API のスタックの ArtifactPrefix は <ここ>/current にしておく
+  ArtifactPrefix:
+    Type: String
+    Default: ticketqr/go
+    AllowedPattern: ^[A-Za-z0-9._/-]*[A-Za-z0-9._-]$
+    Description: >-
+      Key prefix in ArtifactBucket. The API stack's ArtifactPrefix must be <this>/current (cd/UPDATE_ONLY.md 3.1).
+  # 発行の関数の名前（api.yaml なら ticketqr-go-tickets）
+  TicketsFunctionName:
+    Type: String
+    Default: ticketqr-go-tickets
+    Description: Name of the tickets function (ticketqr-go-tickets with api.yaml).
+  # QR 画像の関数の名前（api.yaml なら ticketqr-go-get-qr）
+  GetQRFunctionName:
+    Type: String
+    Default: ticketqr-go-get-qr
+    Description: Name of the get-qr function (ticketqr-go-get-qr with api.yaml).
+  # SPA を置くバケット（Web のスタックの出力 BucketName）
+  WebBucketName:
+    Type: String
+    Description: SPA bucket (the BucketName output of the web stack).
+  # CloudFront のディストリビューションの ID（Web のスタックの出力 DistributionId）
+  DistributionId:
+    Type: String
+    AllowedPattern: ^[A-Z0-9]+$
+    Description: CloudFront distribution ID (the DistributionId output of the web stack).
+  # 画面の URL（Web のスタックの出力 WebUrl）。空ならスモークテストを飛ばす
+  WebUrl:
+    Type: String
+    Default: ""
+    Description: URL of the SPA (the WebUrl output of the web stack). Empty skips the smoke test.
+  # SPA の発行方式（web/DESIGN.md 4.1）
+  GrantMode:
+    Type: String
+    Default: page
+    AllowedValues: [page, inline, form]
+    Description: Grant mode the SPA is built with (web/DESIGN.md 4.1).
+  # CodeBuild のログを残す日数
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 180, 365]
+    Description: Retention of the CodeBuild logs.
+
+Resources:
+  # パイプラインの段の間で成果物を受け渡すバケット（成果物バケットとは別）
+  PipelineArtifactStore:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-pipeline-artifacts
+            Status: Enabled
+            ExpirationInDays: 30
+
+  PipelineArtifactStorePolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PipelineArtifactStore
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt PipelineArtifactStore.Arn
+              - !Sub ${PipelineArtifactStore.Arn}/*
+            Condition:
+              Bool: { aws:SecureTransport: "false" }
+
+  TestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${NamePrefix}-test
+      RetentionInDays: !Ref LogRetentionDays
+
+  E2ELogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${NamePrefix}-e2e
+      RetentionInDays: !Ref LogRetentionDays
+
+  DeployLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${NamePrefix}-deploy
+      RetentionInDays: !Ref LogRetentionDays
+
+  # テストと E2E の CodeBuild のロール: ログと、パイプラインの成果物の読み書きだけ（AWS の資源には触れない）
+  BuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-build
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: build
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource:
+                  - !Sub ${TestLogGroup.Arn}
+                  - !Sub ${E2ELogGroup.Arn}
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject]
+                Resource: !Sub ${PipelineArtifactStore.Arn}/*
+
+  # デプロイの CodeBuild のロール: zip と SPA のファイルの差し替えだけ（cd/UPDATE_ONLY.md 4.1）
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-deploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub ${DeployLogGroup.Arn}
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion]
+                Resource: !Sub ${PipelineArtifactStore.Arn}/*
+              # zip と SPA の控え（releases・web-releases）と、スタックが指す current
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/*
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::${ArtifactBucket}
+                Condition:
+                  StringLike: { s3:prefix: !Sub "${ArtifactPrefix}/*" }
+              - Effect: Allow
+                Action: [lambda:UpdateFunctionCode, lambda:GetFunctionConfiguration]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${TicketsFunctionName}
+                  - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${GetQRFunctionName}
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::${WebBucketName}
+              - Effect: Allow
+                Action: [s3:PutObject, s3:DeleteObject]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${WebBucketName}/*
+              - Effect: Allow
+                Action: cloudfront:CreateInvalidation
+                Resource: !Sub arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${DistributionId}
+
+  # 単体テストとビルド（Go の zip と SPA の dist）。cd/buildspec/test.yml
+  TestProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${NamePrefix}-test
+      ServiceRole: !GetAtt BuildRole.Arn
+      Source: { Type: CODEPIPELINE, BuildSpec: cd/buildspec/test.yml }
+      Artifacts: { Type: CODEPIPELINE }
+      Environment:
+        Type: ARM_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-aarch64-standard:4.0
+        EnvironmentVariables:
+          - { Name: GRANT_MODE, Value: !Ref GrantMode }
+      LogsConfig:
+        CloudWatchLogs: { Status: ENABLED, GroupName: !Ref TestLogGroup }
+      TimeoutInMinutes: 30
+
+  # E2E（今は何もしない。cd/README.md 6章）。cd/buildspec/e2e.yml
+  E2EProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${NamePrefix}-e2e
+      ServiceRole: !GetAtt BuildRole.Arn
+      Source: { Type: CODEPIPELINE, BuildSpec: cd/buildspec/e2e.yml }
+      Artifacts: { Type: CODEPIPELINE }
+      Environment:
+        Type: ARM_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-aarch64-standard:4.0
+      LogsConfig:
+        CloudWatchLogs: { Status: ENABLED, GroupName: !Ref E2ELogGroup }
+      TimeoutInMinutes: 10
+
+  # Lambda のコードと SPA のファイルの差し替え。cd/buildspec/deploy.yml → cd/deploy.sh
+  DeployProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${NamePrefix}-deploy
+      ServiceRole: !GetAtt DeployRole.Arn
+      Source: { Type: CODEPIPELINE, BuildSpec: cd/buildspec/deploy.yml }
+      Artifacts: { Type: CODEPIPELINE }
+      Environment:
+        Type: ARM_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-aarch64-standard:4.0
+        EnvironmentVariables:
+          - { Name: ARTIFACT_BUCKET, Value: !Ref ArtifactBucket }
+          - { Name: ARTIFACT_PREFIX, Value: !Ref ArtifactPrefix }
+          - { Name: FUNCTION_NAMES, Value: !Sub "${TicketsFunctionName} ${GetQRFunctionName}" }
+          - { Name: WEB_BUCKET, Value: !Ref WebBucketName }
+          - { Name: DISTRIBUTION_ID, Value: !Ref DistributionId }
+          - { Name: WEB_URL, Value: !Ref WebUrl }
+      LogsConfig:
+        CloudWatchLogs: { Status: ENABLED, GroupName: !Ref DeployLogGroup }
+      TimeoutInMinutes: 20
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${NamePrefix}-pipeline
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codepipeline.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: pipeline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [codestar-connections:UseConnection, codeconnections:UseConnection]
+                Resource: !Ref ConnectionArn
+              - Effect: Allow
+                Action: [codebuild:StartBuild, codebuild:BatchGetBuilds]
+                Resource:
+                  - !GetAtt TestProject.Arn
+                  - !GetAtt E2EProject.Arn
+                  - !GetAtt DeployProject.Arn
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject]
+                Resource: !Sub ${PipelineArtifactStore.Arn}/*
+              - Effect: Allow
+                Action: [s3:GetBucketVersioning, s3:GetBucketLocation, s3:ListBucket]
+                Resource: !GetAtt PipelineArtifactStore.Arn
+
+  # Source → Test → E2E → Deploy。同じブランチの実行は順番に流す（QUEUED。デプロイが重ならない）
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Ref NamePrefix
+      PipelineType: V2
+      ExecutionMode: QUEUED
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore: { Type: S3, Location: !Ref PipelineArtifactStore }
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              Namespace: SourceVariables
+              ActionTypeId: { Category: Source, Owner: AWS, Provider: CodeStarSourceConnection, Version: "1" }
+              Configuration:
+                ConnectionArn: !Ref ConnectionArn
+                FullRepositoryId: !Ref FullRepositoryId
+                BranchName: !Ref BranchName
+                OutputArtifactFormat: CODE_ZIP
+                DetectChanges: true
+              OutputArtifacts: [{ Name: SourceOutput }]
+        - Name: Test
+          Actions:
+            - Name: UnitTestAndBuild
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
+              Configuration: { ProjectName: !Ref TestProject }
+              InputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: BuildOutput }]
+        - Name: E2E
+          Actions:
+            - Name: E2E
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
+              Configuration: { ProjectName: !Ref E2EProject }
+              InputArtifacts: [{ Name: BuildOutput }]
+        - Name: Deploy
+          Actions:
+            - Name: UpdateCode
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
+              Configuration:
+                ProjectName: !Ref DeployProject
+                EnvironmentVariables: '[{"name":"COMMIT_ID","value":"#{SourceVariables.CommitId}","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: BuildOutput }]
+
+Outputs:
+  PipelineName:
+    Value: !Ref Pipeline
+  PipelineArtifactStoreName:
+    Value: !Ref PipelineArtifactStore

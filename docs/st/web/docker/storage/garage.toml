@@ -1,0 +1,21 @@
+# Single-node Garage for E2E only (no durability, fixed test secrets).
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "e2e0000000000000000000000000000000000000000000000000000000000000"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.e2e.internal"
+
+# Website endpoint: the bucket is chosen by the Host header, so http://web:3902 and http://evil:3902 serve
+# the buckets "web" and "evil" as two separate origins.
+[s3_web]
+bind_addr = "[::]:3902"
+root_domain = ".web.e2e.internal"
+index = "index.html"

@@ -1,0 +1,563 @@
+# チケットQR発行API 設計
+
+## 1. 概要
+
+クライアントから画像を受け取り、外部の画像解析サーバーで検証する。valid と判定された場合のみチケットコードを採番し、QRコード画像を生成して返す。
+
+- 実行環境: AWS Lambda（API Gateway HTTP API 経由）
+- 実装言語: **Go**
+- QRの返却方式は2パターン
+  - パターンA: base64エンコード済みQR画像を JSON で返す（1エンドポイント）
+  - パターンB: QR生成URLを埋め込んだ HTML ビューを返す（発行・ビュー・QR生成の3エンドポイント）
+    - 当初は発行＋QR取得の2エンドポイント想定だったが、リロード対策（6章 案1）を採用したためビュー表示用 GET を追加
+
+### 前提
+
+- チケット利用側は、**ルールに従って生成されたチケットコードをそのまま利用可能**とする（利用側への事前登録・連携は行わない）
+- 採番したコードは **DynamoDB 等の外部ストアで管理しない**
+- QR PNG も **S3 等に書き出さず、キャッシュもしない**。必要になるたびにチケットコードから生成する
+- → API は**完全ステートレス**。永続化するのはログのみ
+
+### エンドポイント一覧
+
+| ID | メソッド / パス | リクエスト | 成功時レスポンス |
+|---|---|---|---|
+| A | `POST /v1/tickets/qr-inline` | `multipart/form-data`（画像ファイル） | `201` JSON（QR base64） |
+| B-1 | `POST /v1/tickets` | `multipart/form-data`（画像ファイル） | `303 See Other` → B-3。`Accept: application/json` のときは `201` JSON（署名付き QR URL。SPA 用） |
+| B-3 | `GET /v1/tickets/{ticketCode}/view?sig=...` | - | `200` HTML（`<img src=B-2>`） |
+| B-2 | `GET /v1/tickets/{ticketCode}/qr?sig=...` | - | `200` `image/png` |
+| EX | `GET /v1/example/qr` | - | `200` `image/png`（`https://example.com` の QR。固定） |
+
+EX はチケット機能とは独立した、固定の QR を返すだけのエンドポイント。デプロイパッケージ（`exampleqr.zip`）、実行ロール、HTTP API、CloudFormation テンプレート（`infra/cloudformation/example.yaml`）も、チケット系（`api.yaml`）とは分ける。設定・シークレット・署名・画像解析は使わない。
+
+## 2. 全体構成
+
+```mermaid
+flowchart LR
+  C[Client] -->|HTTPS| APIGW[API Gateway<br/>HTTP API]
+  APIGW -->|A / B-1 / B-3| L1[Lambda<br/>tickets]
+  APIGW --> L3[Lambda<br/>get-qr]
+  L1 -->|画像検証| IA[画像解析サーバー]
+  L1 & L3 -.-> SM[Parameter Store<br/>解析サーバーの API キー / 署名 salt]
+```
+
+| リソース | 用途 |
+|---|---|
+| API Gateway (HTTP API) | ルーティング、認証、スロットリング |
+| Lambda × 2（チケット系） | `tickets`（A / B-1 / B-3: 画像解析・採番・ビュー）と `get-qr`（B-2: QR 画像の生成）。コードは**1つのパッケージを共有**し、イベントの `routeKey` で振り分ける（関数の分け方はインフラ設定だけで変えられる）。`get-qr` を分けるのは、`<img>` から呼ばれる QR 生成を、画像解析の同時実行数の上限から切り離すため |
+| Parameter Store（SecureString） | 画像解析サーバーのAPIキー、署名用salt（発行側と検証側で共有）。CloudFormation の外で作る |
+| CloudWatch Logs | 発行ログ（唯一の記録） |
+
+データストア（DynamoDB / S3）は使わない。
+
+## 3. 処理フロー
+
+### 共通処理（A / B-1）
+
+画像データの受け渡し:
+
+```
+ブラウザ ──multipart/form-data（フィールド image）──▶ API ──application/octet-stream（画像バイト列そのまま）──▶ 画像解析サーバー
+```
+
+API が変えるのは**送り方（multipart → octet-stream）だけ**。画像の中身はパススルーで、圧縮・リサイズ・形式変換・メタデータ（EXIF など）の除去は行わない。ただし SPA（画面遷移方式・その場表示方式）は、上限（4MB）を超えた写真だけをブラウザで縮めて JPEG にしてから送る（web/DESIGN.md 3章。上限以下の写真は加工しない）。そのため、解析サーバーには縮めた JPEG（長辺 2048〜4096、EXIF なし）が届くことがある
+
+1. **入力検証**（置き場所を性質で分ける）
+   - HTTP 層: Content-Type が boundary 付きの `multipart/form-data` か（なければ 415）、ボディ全体が正しい multipart か（壊れていれば 400）、`image` フィールドがあるか、サイズ上限（4MB。実行環境の制約）、画像形式の判定（技術的な処理）
+   - ユースケース: 受け付ける形式か（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone・主要 Android で撮った画像をそのまま送った場合の形式）、空でないか（業務上のルール）
+2. **画像解析連携**: 検証済みの画像バイト列を `application/octet-stream` でそのまま送る（7章）。タイムアウト付きHTTP呼び出し。5xx/タイムアウトのみ限定リトライ（例: 最大1回）
+3. **採番**: valid 時のみ実施。外部ストアを参照せずに生成する（4章）
+4. 発行の記録は構造化ログにのみ残す
+
+### パターンA: `POST /v1/tickets/qr-inline`（JSON で返す）
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant L as Lambda (tickets)
+  participant IA as 画像解析サーバー
+
+  C->>L: POST /v1/tickets/qr-inline（fetch: multipart/form-data）
+  L->>L: 入力検証
+  L->>IA: POST application/octet-stream（画像バイト列）
+  IA-->>L: valid / invalid
+  alt invalid
+    L-->>C: 422 JSON { error }
+  else valid
+    L->>L: チケットコード生成
+    L->>L: QR PNG生成 → base64
+    L-->>C: 201 JSON { ticketCode, issuedAt, qr }
+  end
+```
+
+1リクエストで完結。QR画像はレスポンスJSONに含まれる。
+
+### パターンB-1: `POST /v1/tickets`（発行 → リダイレクト）
+
+```mermaid
+sequenceDiagram
+  participant B as ブラウザ
+  participant L as Lambda (tickets)
+  participant IA as 画像解析サーバー
+
+  B->>L: POST /v1/tickets（form送信: multipart/form-data）
+  L->>L: 入力検証
+  L->>IA: POST application/octet-stream（画像バイト列）
+  IA-->>L: valid / invalid
+  alt invalid / エラー
+    L-->>B: 4xx/5xx HTML（エラービュー）
+  else valid
+    L->>L: チケットコード生成
+    L->>L: sig = HMAC(salt, ticketCode)
+    L-->>B: 303 See Other<br/>Location: /v1/tickets/{code}/view?sig=...
+  end
+```
+
+POSTの結果はHTMLで直接返さず、ビューURLへリダイレクトする（PRG: Post/Redirect/Get）。
+
+### パターンB-3: `GET /v1/tickets/{ticketCode}/view`（HTMLビュー）
+
+```mermaid
+sequenceDiagram
+  participant B as ブラウザ
+  participant L as Lambda (tickets)
+
+  Note over B: 303 を受けて自動で GET（リロード時もここから）
+  B->>L: GET /v1/tickets/{code}/view?sig=...
+  L->>L: sig 照合
+  alt 不一致
+    L-->>B: 403 HTML（エラービュー）
+  else 一致
+    L->>L: qrUrl = PUBLIC_BASE_URL + /v1/tickets/{code}/qr?sig=...
+    L->>L: HTMLテンプレートに ticketCode, qrUrl を埋め込み
+    L-->>B: 200 text/html（<img src=qrUrl>）
+  end
+```
+
+- 画像解析・採番は行わない。何度リロードしても同じ HTML が返る
+
+### パターンB-2: `GET /v1/tickets/{ticketCode}/qr`（QR画像）
+
+```mermaid
+sequenceDiagram
+  participant B as ブラウザ
+  participant L as Lambda (get-qr)
+
+  Note over B: B-3 のHTMLを描画し<br/><img src=qrUrl> を自動取得
+  B->>L: GET /v1/tickets/{code}/qr?sig=...（認証ヘッダなし）
+  L->>L: sig 照合
+  alt 不一致
+    L-->>B: 403 JSON { error }
+  else 一致
+    L->>L: QR PNG生成
+    L-->>B: 200 image/png
+  end
+```
+
+- QRはチケットコードの決定的な関数なので、保存せずに毎回再生成すれば同じQRが得られる
+- チケットコード自体の形式チェックは行わない。署名照合のみで「API が発行したURLか」を簡易的に判定する
+- 画像解析サーバーは呼ばない
+
+## 4. チケットコード仕様
+
+### フォーマット（確定。2026-10-09）
+
+```
+{YYYYMMDD}{HHmmss}{UUIDv4（ハイフンなし、小文字の16進32桁）}{固定文字列}
+例: 20261001194300 3f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5e TQR
+  → 202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR（2026-10-01 19:43:00 JST に発行、固定文字列 TQR）
+```
+
+| 要素 | 桁 | 内容 |
+|---|---|---|
+| 日付・時刻 | 14 | 発行日時（秒まで）。**タイムゾーンは JST 固定**（Lambda は UTC のため明示変換）。レスポンスの `issuedAt` と同じ時刻 |
+| UUIDv4 | 32 | 暗号論的乱数（`crypto/rand`）の16バイトから作る UUID のバージョン4（RFC 9562。乱数122ビット）。ハイフンなし、**小文字**の16進 |
+| 固定文字列 | 1〜32 | Parameter Store の **String**（`TICKET_CODE_SUFFIX_PARAMETER_NAME`。秘密ではないので、ローカル実行と E2E は環境変数 `TICKET_CODE_SUFFIX` で直接渡せる）。**英数字だけ**（URL のパスと QR にそのまま入るため）。起動時に読み込み、形が違えば起動に失敗する |
+
+- 区切り文字はない。日時は14桁・UUID は32桁で固定なので、固定文字列は47文字目から最後まで
+- 全体の形: `^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$`（47〜78文字）。SPA は、チケット画面の URL のコードをこの形で確かめる（`web/src/api/client.ts`）
+- 以前の案（`{YYYYMMDDHHmmss}-{Crockford Base32 の乱数8文字}`、環境変数 `TICKET_SUFFIX_LENGTH`）は廃止した
+
+### ステートレス採番
+
+カウンタ等の共有状態を持たないため、**連番は採用できない**。一意性は UUIDv4 の乱数（122ビット）で確率的に担保する。
+
+- 衝突は**同じ秒に発行されたコード同士でしか起こらない**（日時が1秒でも違えば別コード）。さらに UUIDv4 が 122 ビットあるので、想定の発行量（ピーク 1秒あたり2件、1日 数千件）でも、スロットリングの上限（50件/秒）いっぱいの発行が続いても、衝突は事実上起こらない（1秒に50件で、その秒に衝突する確率 ≈ 50² / 2^123 ≈ 2.4×10⁻³⁴）
+- 固定文字列は衝突の確率に影響しない（すべてのコードで同じ）
+
+### ルールとの関係
+
+- 生成ルールはチケット利用側と共有された仕様であり、APIはそれに**厳密に準拠したコードのみ**を生成する
+- 採番ロジックは生成器（`ticket.Generator`）に分離し、ルール変更の影響をここに閉じ込める（コードの形式チェックは API では行わない。署名で照合する）
+- 時刻と乱数源はインターフェース化し、テスト時は固定値を注入する。**共通のテストベクタ**（`testdata/ticketcode.json`。入力: 時刻・乱数16バイト・固定文字列 → 期待コード。UTC→JST の日付またぎ、UUID の版と種別のビット、32文字の固定文字列も含む）で確かめる
+
+## 5. API 仕様
+
+共通事項:
+- ベースパス: `/v1`
+- 画像の受け取り: A・B-1 とも `multipart/form-data` の `image` フィールド（ブラウザの `<input type="file">` / `FormData` で送る形式に統一）
+- 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため）。環境ごとに**下げられる**（API の環境変数 `MAX_IMAGE_BYTES`、CloudFormation の `MaxImageBytes`、SPA の `config.json` の `maxImageBytes`。両方を同じ値にする）。4MB より大きい値は、API は起動時のエラー、SPA は設定の読み込みのエラーにする。経路ごとの上限は次の表
+- 画像の形式判定はファイルの中身で行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）。先頭のバイトで形式を決め、その形式のヘッダーを画像サイズまで解析できることまで確かめる（画像本体はデコードしない）。先頭数バイトだけの偽の画像は 415
+  - 形式は `github.com/gabriel-vasile/mimetype`、確認は形式ごとのパーサー（JPEG / PNG は標準の `DecodeConfig`、WebP は `golang.org/x/image/webp`、HEIC / HEIF / AVIF は `go4.org/media/heif` で primary item の ispe ボックスを読む）。バイト列を直接比べる処理は自前で持たない
+- 受け付ける形式: JPEG、PNG、HEIC / HEIF（iPhone の標準、Samsung などの HEIF）、AVIF、WebP。画像は変換せずにそのまま解析サーバーへ送る
+- `Cache-Control: no-store`（全エンドポイント）
+
+画像のアップロードの経路と上限（2026-10-09 時点の AWS の公式の値）:
+
+| 区間 | 上限 | 直結（ブラウザ → API Gateway） | 統合（ブラウザ → CloudFront → API Gateway） |
+|---|---|---|---|
+| CloudFront のリクエストのボディ | 64GB | - | 効かない |
+| API Gateway HTTP API のペイロード | 10MB | 効かない（Lambda が先） | 効かない（同左） |
+| Lambda の同期呼び出しのリクエスト | 6MB（base64 後。元の画像で 約4.5MB、multipart の分を引いて 4MB） | **これで 4MB** | **これで 4MB** |
+| AWS WAF のマネージドルール（Core rule set の `SizeRestrictions_BODY`） | ボディ 8KB を超えるとブロック | HTTP API には WAF を付けられない | **WAF を付けたとき、何もしないと画像のアップロードがすべて 403 になる** |
+| AWS WAF のボディの検査 | 先頭 16KB（64KB まで広げられる）だけを検査。超えた分の扱いは設定（Continue / Match / No match） | - | 上限ではないが、画像の中身はほぼ検査されない |
+| Lambda@Edge・CloudFront Functions | Lambda@Edge がボディを読むのは 1MB まで（CloudFront Functions は読めない） | - | 今は使っていない。ボディを読む Lambda@Edge を `/v1/*` に付けると 1MB に下がる |
+| タイムアウト | API Gateway の統合 30 秒（`tickets` は 20 秒）、CloudFront のオリジンの応答 30 秒（`web.yaml` で設定） | 30 秒 | 30 秒（同じ） |
+
+- 今の構成では、どちらの経路でも上限は **4MB** で同じ。違いが出るのは、統合の CloudFront に WAF を付けるとき（`SizeRestrictions_BODY` を `/v1/tickets` と `/v1/tickets/qr-inline` で除外するか、Count にしてから本体のサイズ制限を別のルールで書く。Web ACL の案は web/DEPLOY.md 13章）と、ボディを読む Lambda@Edge を付けるとき（1MB）
+- どちらかの経路でもっと小さい上限が必要になったら、その環境の `MaxImageBytes` と `config.json` の `maxImageBytes` を下げる（コードの変更は要らない）。4MB より大きくしたい場合は、この設計（Lambda にボディを渡す）のままではできない。S3 の署名付き URL に直接アップロードし、Lambda には S3 のキーを渡す、などの設計の変更が要る
+- Lambda の上限（6MB）を超えたリクエストは Lambda まで届かず、API Gateway がエラーを返す（API の JSON の 413 `PAYLOAD_TOO_LARGE` にはならない。確かめ方と記録の表は web/DEPLOY.md 12章）。SPA は送る前に `maxImageBytes` で止めるので、SPA からは通常は起きない
+
+### 5.1 パターンA: `POST /v1/tickets/qr-inline`
+
+ブラウザの `fetch` から呼ばれる想定。
+
+Request `Content-Type: multipart/form-data`
+
+| フィールド | 内容 |
+|---|---|
+| `image` | 画像ファイル（JPEG / PNG / HEIC / HEIF / AVIF / WebP） |
+
+```js
+const body = new FormData();
+body.append("image", fileInput.files[0]);
+const res = await fetch(`${apiBaseUrl}/v1/tickets/qr-inline`, { method: "POST", body }); // Content-Type はブラウザが boundary 付きで設定する
+```
+
+Response `201 Created`, `Content-Type: application/json`
+```json
+{
+  "ticketCode": "202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR",
+  "issuedAt": "2026-10-01T19:43:00+09:00",
+  "qr": {
+    "mimeType": "image/png",
+    "data": "<base64>"
+  }
+}
+```
+
+### 5.2 パターンB-1: `POST /v1/tickets`
+
+ブラウザのフォーム送信（6章 案1）と、SPA（`web/`）の `fetch` の両方から呼ばれる。返し方は `Accept` ヘッダーで切り替える。
+
+Request `Content-Type: multipart/form-data`
+
+| フィールド | 内容 |
+|---|---|
+| `image` | 画像ファイル（`<input type="file" name="image" accept="image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp">`） |
+
+Response（成功。フォーム送信など、`Accept` に `application/json` を含まないとき）
+```
+HTTP/1.1 303 See Other
+Location: https://api.example.com/v1/tickets/202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR/view?sig=Xq3v9bJk2mPz8RtY1cWnHA
+Cache-Control: no-store
+```
+
+Response（成功。`Accept: application/json` のとき。SPA がチケット画面を自分で描画する）
+```
+HTTP/1.1 201 Created
+Content-Type: application/json
+Vary: Accept
+
+{
+  "ticketCode": "202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR",
+  "issuedAt": "2026-10-01T19:43:00+09:00",
+  "sig": "Xq3v9bJk2mPz8RtY1cWnHA",
+  "qrUrl": "https://api.example.com/v1/tickets/202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
+}
+```
+
+- `Location` / `qrUrl` は `PUBLIC_BASE_URL` から組み立てた絶対URL（`Host` ヘッダは信用しない）
+- `qrUrl` は B-2 の URL。SPA は `<img src="{qrUrl}">` で表示し、`ticketCode` と `sig` を自分の URL（`#/tickets/{code}?sig=…`）に入れて、リロードや共有に使う（web/DESIGN.md）
+- 判定は `Accept` に `application/json` が含まれるかどうか。ブラウザのフォーム送信の `Accept`（`text/html,…`）は含まないので 303 になる。`Accept` は CORS の単純リクエストで許されるヘッダーなので、SPA が付けてもプリフライトは発生しない
+- エラー時はリダイレクトせず、該当ステータスで直接返す。形式は成功時と同じ基準で、JSON（`Accept: application/json`）か HTMLエラービュー
+- どちらの応答にも `Vary: Accept` を付ける
+
+### 5.3 パターンB-3: `GET /v1/tickets/{ticketCode}/view`
+
+`sig` を検証し、QR生成URLを埋め込んだHTMLを返す。
+
+Response `200 OK`, `Content-Type: text/html; charset=utf-8`
+```html
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>チケット 202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR</title>
+</head>
+<body>
+  <main data-ticket-code="202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR">
+    <h1>チケット</h1>
+    <img src="https://api.example.com/v1/tickets/202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
+         alt="チケットQRコード" width="256" height="256">
+    <p>202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR</p>
+  </main>
+</body>
+</html>
+```
+
+#### HTMLビュー仕様
+
+| 項目 | 方針 |
+|---|---|
+| テンプレート | Go は `go/internal/view/templates/ticket.html` / `error.html` を `embed` で同梱 |
+| 埋め込みデータ | `ticketCode`, `qrUrl` のみ。発行日時は保存していないため別途は表示しない（日時はコードの先頭14桁に含まれる） |
+| `qrUrl` | **絶対URL**。`PUBLIC_BASE_URL` から組み立てる |
+| エスケープ | 自動エスケープ必須（`html/template`）。属性値・本文とも |
+| 機械可読性 | `data-*` 属性にコード等を載せ、HTMLをパースする利用側でも値を取り出せるようにする |
+| 外部リソース | 使わない（CSS はインライン、JS なし） |
+| セキュリティヘッダ | `Content-Security-Policy: default-src 'none'; img-src {PUBLIC_BASE_URL}; style-src 'unsafe-inline'`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` |
+
+> 上記は最小構成の例。
+
+### 5.4 パターンB-2: `GET /v1/tickets/{ticketCode}/qr`
+
+- `sig` を検証し、一致した場合のみQR画像をその場で生成して返す
+- `ticketCode` 自体の形式チェックは行わない
+- Response `200 OK`, `Content-Type: image/png`, ボディはPNGバイナリ
+  （Lambda からは `isBase64Encoded: true` で返却し、API Gateway がバイナリに変換）
+
+### 5.5 署名（sig）仕様
+
+目的は**ビュー / QR生成APIが無関係なアクセスで使われるのを防ぐ簡易チェック**。発行側（B-1）と検証側（B-3, B-2）で salt を共有し、ステートレスに検証する。
+
+```
+sig = base64url( HMAC-SHA256(salt, ticketCode) ) の先頭 22 文字（128bit）
+```
+
+| 項目 | 方針 |
+|---|---|
+| アルゴリズム | HMAC-SHA256。`SHA256(salt + code)` のような単純連結ではなくHMACを使う（実装コストは同等で、長さ拡張攻撃等の落とし穴がない） |
+| 署名対象 | `ticketCode` のみ（UTF-8）。B-3 と B-2 で同じ `sig` を使う |
+| 長さ | 128bit に切り詰め（URLを短く保ちつつ総当たりは非現実的） |
+| エンコード | base64url、パディングなし |
+| 比較 | 定数時間比較（`hmac.Equal`） |
+| salt 管理 | Parameter Store の SecureString（`/ticketqr/{impl}/signing-salt`）。コールド起動時に取得しメモリに保持 |
+| salt ローテーション | 検証側は「現行 + 旧」の2つの salt を受け入れる期間を設けて切り替える |
+| 有効期限 | なし（簡易チェックのため）。必要になれば `exp` を署名対象に追加する拡張余地のみ残す |
+
+- 同じ `ticketCode` からは常に同じ `sig` が得られる（ステートレス・保存不要）
+- 署名は**共通テストベクタ**（salt, ticketCode → sig）で確かめる
+- パターンA はQRを直接返すため署名不要
+- B-3 はブラウザのリダイレクト追従、B-2 は `<img>` の自動取得で呼ばれ、いずれも認証ヘッダを付けられないため、**API Gateway の認証をかけず `sig` をアクセス制御とする**
+
+### 5.6 エラーレスポンス
+
+| エンドポイント | エラー形式 |
+|---|---|
+| A, B-2 | JSON `{ "error": { "code": "IMAGE_REJECTED", "message": "..." } }` |
+| B-3、B-1（フォーム送信） | HTMLエラービュー（`<main data-error-code="IMAGE_REJECTED">` に code を載せる） |
+| B-1（`Accept: application/json`） | JSON（A・B-2 と同じ） |
+
+| HTTP | code | 条件 |
+|---|---|---|
+| 400 | `BAD_REQUEST` | multipart の形式不正、`image` フィールドなし |
+| 403 | `FORBIDDEN` | `sig` 欠落・不一致（B-3, B-2） |
+| 413 | `PAYLOAD_TOO_LARGE` | 画像サイズ上限超過 |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | Content-Type が `multipart/form-data` でない、非対応の画像形式 |
+| 422 | `IMAGE_REJECTED` | 画像解析サーバーの判定（`result`）が `REJECT`（証明書として受け付けられない） |
+| 422 | `IMAGE_RETRY` | 画像解析サーバーの判定（`result`）が `RETRY`（この画像では判定できない。撮り直してもらう） |
+| 502 | `ANALYSIS_UPSTREAM_ERROR` | 解析サーバーが 5xx / 想定外レスポンス |
+| 504 | `ANALYSIS_TIMEOUT` | 解析サーバーのタイムアウト |
+| 500 | `INTERNAL_ERROR` | その他 |
+
+## 6. パターンB の表示方式とリロード対策（案）
+
+パターンBはHTMLを表示する方式のため、クライアントの作りによってリロード時の挙動が変わる。
+APIはステートレスで「同じリクエストの再送か」を判定できないため、**POSTが再送されると別のチケットコードが発行され、利用側ではいずれも有効になる**。これを避ける方式として以下3案を挙げる。
+
+| | 案1: PRG（採用） | 案2: fetch + DOM差し込み | 案3: WebView に HTML 直接ロード |
+|---|---|---|---|
+| クライアント | ブラウザのフォーム送信 | ページ内JSで `fetch` し、返ったHTMLをDOMに挿入 | ネイティブアプリが POST し、HTML文字列を WebView に `loadHTMLString` 等で表示 |
+| B-1 のリクエスト | `multipart/form-data` | `multipart/form-data`（`FormData`） | `multipart/form-data` |
+| B-1 のレスポンス | `303` → B-3 | `201` HTML | `201` HTML |
+| エンドポイント数（B） | 3（B-1, B-3, B-2） | 2（B-1, B-2） | 2（B-1, B-2） |
+| リロード時 | B-3 を再GET。同じHTMLが表示され、**再発行されない** | 元ページに戻り、チケット表示は消える。再発行はされないが**コードを失う** | 同じHTMLを再描画。再発行されない |
+| 戻る / URL共有 | ビューURLをブックマーク・共有でき、後から再表示可能 | 不可（クライアントで保持しない限り） | 不可（アプリが保持しない限り） |
+| 発行APIの認証 | ヘッダを付けられないため認証なし（レート制限のみ。10章） | ヘッダで API キー / JWT を付与可能 | ヘッダで API キー / JWT を付与可能 |
+| 主な懸念 | エンドポイント増。ビューURL漏えいで第三者がQRを表示可能（期限なしの場合） | クライアント実装依存。リロードでチケットを見失う | アプリ前提。ブラウザ単体では使えない |
+
+### 採用: 案1（PRG）
+
+- ブラウザ単体で完結し、リロード・戻る操作でも二重発行が起きない
+- ビュー / QR いずれも `sig` で保護され、ステートレスのまま再表示できる
+- 5章の仕様は案1を前提に記載している。案2・案3に切り替える場合は B-1 を `201` HTML 返却に変え、B-3 を廃止する（リクエスト形式は変わらない）
+
+### 共通の残課題: 同一画像の繰り返し送信
+
+いずれの案でも、**クライアントが意図的に同じ画像を繰り返しPOSTすれば、その回数分チケットが発行される**（ステートレスのため判別不可）。防ぐ必要がある場合の選択肢:
+
+- 画像解析サーバー側で同一画像の判定を行ってもらう
+- 前提を緩め、画像ハッシュ等を短期TTL付きで記録する（DynamoDB TTL 等）
+- API Gateway のスロットリング / WAF のレート制限で回数を抑える（完全防止ではない）
+
+## 7. 画像解析サーバー連携
+
+| 項目 | 方針 |
+|---|---|
+| 送信形式 | **確定**: `POST`、`Content-Type: application/octet-stream`、ボディは画像バイト列そのもの（multipart から取り出した `image` パートの中身。圧縮・リサイズ・形式変換・再エンコードはしないパススルー） |
+| レスポンス | **確定（2026-10-08）**: `{ "confidence": 数値, "detected": 文字列, "reason": 文字列, "result": "PASS" \| "REJECT" \| "RETRY", "status": 整数 }`。**API が見るのは `result` だけ**: `PASS` → チケットを発行、`REJECT` → 422 `IMAGE_REJECTED`、`RETRY` → 422 `IMAGE_RETRY`（Web はそれぞれ別の文言を出す）、それ以外の値・`result` なし → 502 `ANALYSIS_UPSTREAM_ERROR`。ほかの項目の意味（`status` など）は解析側に確認中 |
+| ローカルでの確認 | ローカル PC の API・SPA から、インターネット上のテスト用の解析 API につないで確かめる手順: [LOCAL_ANALYZER_TEST.md](LOCAL_ANALYZER_TEST.md) |
+| ログ | 解析サーバーの応答の本文は、2xx でもそれ以外でも、**JSON として読まずにそのまま**ログに出す（`"msg":"analyzer response"`、`status` と `body`（本文の文字列）。2xx は INFO、それ以外は WARN。リトライしたときは1回ごと）。判定に使うのは、そのあと読む `result` だけ（2026-10-08） |
+| 認証 | APIキー等を Parameter Store（SecureString）から取得し、コールド起動時にキャッシュ（メモリ内のみ） |
+| タイムアウト | 接続 1s / 全体 5s 程度（解析時間の実測で調整）。API Gateway の 29s 上限内に収める |
+| リトライ | 5xx・タイムアウトのみ 1回。4xx はリトライしない |
+| ネットワーク | **確定（2026-10-08）**: `tickets` は VPC のプライベートサブネットに置き、NAT ゲートウェイ経由で外の解析サーバーにつなぐ（解析サーバーから見える送信元は NAT の固定 IP）。解析サーバーの置き場所と経路は未確定。ネットワークは「既存の VPC・新規のプライベートサブネット・既存の NAT」か「すべて新規」の2パターンで検討中: [notes/tickets-network.md](notes/tickets-network.md) |
+
+ImageAnalyzer はインターフェースとして抽象化し、テスト時はスタブに差し替える。
+
+> 実装状況: HTTP クライアント（`ANALYZER_MODE=http`）を実装済み（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`（任意）、レスポンスは本物の形式で `result` だけを読む。2026-10-08 に仮の `{valid, reason}` から切り替えた）。`x-api-key` は任意（API キーを指定したときだけ付ける）。本番の解析サーバーは、VPC 内で Lambda のセキュリティグループからのアクセスだけを許可し、API キーを使わない想定（[notes/lambda-vpc.md](notes/lambda-vpc.md)）。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。`ANALYZER_MODE=mock` では、通信せずに常に valid を返す。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 3章（スタブ）と go/DEPLOY.md・node/DEPLOY.md 6章（API の切り替え）。
+
+## 8. 状態・データ
+
+| 対象 | 扱い |
+|---|---|
+| 採番したチケットコード | 保存しない |
+| QR PNG | 保存・キャッシュしない。都度生成 |
+| アップロード画像 | 保存しない（解析サーバーへ転送のみ） |
+| 発行ログ | 構造化ログに `ticketCode`, `issuedAt`, `endpoint`, 解析結果を出力。保持期間は CloudWatch Logs 側で設定 |
+
+ステートレスであることの帰結:
+- 冪等性キーによる再送時の二重発行防止はできない（案1のPRGでリロードによる再送は回避）
+- 同一コードの重複発行は確率的にのみ防止（4章）
+- 発行済みかの照会・取消はAPIではできない
+
+## 9. 実装構成
+
+両言語で同じレイヤ構成にし、比較しやすくする。
+
+```
+st/
+├── DESIGN.md
+├── PAGES.md                   # 画面と HTML テンプレートの構成（SPA・API の HTML・ローカル試験フォーム）
+├── ci/                        # CI（GitHub Actions。単体テストだけ）
+├── cd/                        # CD（CodePipeline / CodeBuild。テンプレート・buildspec・手順書）
+├── scripts/client_log_summary.py  # ログの後処理のサンプル（ブラウザと OS ごとの件数。10章）
+├── testdata/                  # 両実装共通のテストベクタ（ticketcode.json, signature.json）
+├── go/                       # Go モジュールルート（go.mod）
+│   ├── go.mod
+│   ├── Makefile               # run / run-example / test / build（ticketqr.zip と exampleqr.zip）
+│   ├── cmd/                   # 実行ファイル（依存の組み立ては main で行う）
+│   │   ├── ticketqr/          # チケット系の唯一のエントリポイント。Lambda 上ならハンドラとして、それ以外ならローカル HTTP サーバーとして起動
+│   │   │   ├── main.go        # AWS_LAMBDA_RUNTIME_API の有無で起動方法を切り替える
+│   │   │   ├── local.go       # ローカルモードの起動（アップロードフォーム付き）
+│   │   │   └── wire.go        # 依存の組み立て（設定・secret の読み込み、analyzer の選択、handler の組み立て）
+│   │   ├── exampleqr/         # example.com の QR エンドポイント（main.go と handler.go。別パッケージ。Lambda / ローカル両対応）
+│   │   └── apigw-local/       # E2E 用の API Gateway 役のゲートウェイ（デプロイしない）
+│   └── internal/              # 責務ごとのパッケージ。依存は外側から内側への一方向（ticket は internal のどこにも依存しない）
+│       ├── ticket/            # 中心: チケットコードの採番、VerifyAndGrant（証明書の画像を検証してチケットを与える）、業務のエラー、Verifier のインターフェース
+│       ├── signer/            # 署名付き URL の署名と照合（salt + HMAC）
+│       ├── analyzer/          # 画像解析サーバー（証明書の画像の検証）のクライアント（ticket.Verifier を実装。mock と HTTP）
+│       ├── httpapi/           # HTTP 層: API Gateway イベント ⇔ ticket、routeKey による振り分け、業務のエラー → HTTP の応答
+│       ├── view/              # HTML レンダリング（templates/ticket.html・error.html を embed）
+│       ├── imageinput/        # 画像形式の判定とサイズ上限（HTTP 層で使う。受け付けるかは ticket が判断。重い依存をここに閉じ込める）
+│       ├── config/            # 環境変数と Parameter Store（salt、解析サーバーの API キー）
+│       ├── qr/                # QR の PNG（チケット系と example で共有）
+│       └── localhttp/         # ローカル実行用 net/http → Lambda イベント変換（routeKey を付与。cmd で共有）
+├── infra/cloudformation/      # IaC: api.yaml（チケット API）、example.yaml（EX。別スタック）
+└── tests/
+    ├── contract/              # 契約テスト
+    └── load/                  # k6 シナリオ
+```
+
+ローカル開発では、Lambda エミュレータを使わずに `go/cmd/ticketqr` をそのまま起動する（ローカル HTTP サーバーとして動く）。ハンドラは Lambda と同じものを呼び出す。画像解析サーバーのプロトコルが決まるまでは、`ANALYZER_MODE=mock`（常に valid を返す）で動かす。
+
+| 項目 | 内容 |
+|---|---|
+| ランタイム | `provided.al2023`（arm64, `bootstrap`） |
+| Lambda アダプタ | `aws-lambda-go` |
+| AWS SDK | aws-sdk-go-v2（SSM のみ） |
+| QR ライブラリ | `github.com/skip2/go-qrcode` |
+| multipart 解析 | 標準 `mime/multipart` |
+| HTMLテンプレート | `html/template` + `embed` |
+| ビルド | `GOOS=linux GOARCH=arm64 go build` |
+
+QR 生成パラメータ: 誤り訂正レベル M、256px、余白4モジュール、PNG。
+
+## 10. 非機能・運用
+
+- **認証**:
+  - A: API Gateway で API キー / JWT（Cognito等）/ IAM のいずれか
+  - B-1: **認証なし（公開）**。ブラウザのフォーム送信ではヘッダ認証が使えないため、発行者の制限は行わず、レート制限で濫用を抑える
+    - API Gateway のスロットリング（ルート単位のレート / バースト上限）
+    - AWS WAF のレートベースルール（送信元IP単位）を HTTP API 前段の CloudFront 等に適用（WAF は HTTP API に直接関連付けできないため。統合の構成での Web ACL の案と作り方は web/DEPLOY.md 13章）
+    - Lambda 予約同時実行数で画像解析サーバーへの同時リクエスト数に上限を設ける
+    - Cookie を使わないため CSRF 対策は不要
+    - 将来制限が必要になった場合の拡張候補: フォームトークン（有効期限付き HMAC を hidden フィールドに埋め込む）/ Cookie ログイン + Lambda オーソライザ
+  - B-3, B-2: 認証なし・`sig` 検証のみ
+- **GET の負荷**: B-3/B-2 は呼ばれるたびにHTML/QRを生成する。署名照合を生成より前に行い、不正アクセスは生成処理に到達させない。加えてスロットリングで保護し、生成コストは評価項目で計測する
+- **salt の扱い**: salt が漏れると誰でも有効な `sig` を作れるため、ログ・環境変数への平文出力は禁止。Lambda の実行ロールのみ読み取り可とする
+- **ビューURLの扱い**: `sig` 付きURLを知っていれば誰でもチケットを表示できる（有効期限なし）。共有されて困る場合は `exp` 付き署名の導入を検討
+- **偽造耐性**: 利用側がルール適合のみで受け入れる場合、ルールを知る者はAPIを通さずに有効なコードを作れる。偽造耐性が必要ならルール側に秘密鍵ベースの署名・チェックディジットを含めることを検討（利用側との合意事項）
+- **ログ**: JSON 構造化ログ（requestId, ticketCode, 解析結果, レイテンシ）。画像データ・`sig` はログに出さない。証明書の画像を受け取る2つの API では、ブラウザと OS の情報も記録する（下の「ブラウザと OS の記録」）
+- **トレース / メトリクス**: X-Ray、CloudWatch カスタムメトリクス（発行数、invalid率、解析サーバーレイテンシ）
+- **スロットリング**: API Gateway のレート制限、Lambda 予約同時実行数（解析サーバー保護）
+
+### ブラウザと OS の記録（QR 同梱付与 API・チケット付与 API）
+
+証明書の画像を受け取る2つの API（`grant-inline`、`grant`）では、完了ログ（`"msg":"request completed"`）に、ブラウザが送ってきた情報を `client` グループとして**そのまま**記録する。成功もエラーも記録する。ほかの API（チケット表示ページ、QR 画像 API）では記録しない。
+
+| キー | リクエストヘッダー | 内容 |
+|---|---|---|
+| `client.userAgent` | `User-Agent` | ブラウザ・OS の名前とバージョン（下の制約あり） |
+| `client.secChUa` | `Sec-CH-UA` | ブラウザのブランドとメジャーバージョン（Chromium 系だけが送る） |
+| `client.secChUaMobile` | `Sec-CH-UA-Mobile` | `?1` ならモバイル |
+| `client.secChUaPlatform` | `Sec-CH-UA-Platform` | OS の名前（`"Android"` など） |
+| `client.secChUaPlatformVersion` | `Sec-CH-UA-Platform-Version` | OS の正確なバージョン。ブラウザに求めたときだけ届く（下の「Android の OS バージョン」） |
+
+```json
+{"time":"…","level":"INFO","msg":"request completed","requestId":"…","endpoint":"grant","status":201,"durationMs":312,
+ "client":{"userAgent":"Mozilla/5.0 (iPhone; CPU iPhone OS 13_3 like Mac OS X) … Version/13.0.4 Mobile/15E148 Safari/604.1"}}
+```
+
+- 届いたヘッダーだけを記録し、1つもなければ `client` を出さない。値はクライアントが自由に送れるので、1つあたり 512 文字で切る
+- API では解析・加工せず、生の値を残す（解釈の規則を後から変えられるようにするため。解釈は後処理のスクリプトで行う）
+- IP アドレスや端末の型番（`Sec-CH-UA-Model`）は記録しない
+- `Sec-CH-UA*` は、Chromium 系のブラウザが HTTPS の通信にだけ付ける（Safari と Firefox は送らない。ローカルや E2E の `http://` では届かない）
+
+分かること・分からないこと:
+
+| 端末 | ブラウザ | OS のバージョン |
+|---|---|---|
+| iPhone / iPad（iOS 18 まで） | `Version/xx`（Safari のバージョン） | `User-Agent` の `iPhone OS 13_3` から分かる |
+| iPhone / iPad（iOS 26 以降） | 同上 | `User-Agent` の OS は **18_x に固定**されていて分からない。Safari の `Version/26` が iOS のメジャーバージョンとほぼ一致するので、それで代わりに見る |
+| Android（Chrome 110 以降） | `Chrome/138.0.0.0`、`Sec-CH-UA` | `User-Agent` は **`Android 10; K` に固定**されていて分からない（Android 9 の端末も 10 と出る）。`Sec-CH-UA-Platform-Version` が届けば分かる |
+
+Android の OS バージョン（未設定）: SPA と API はオリジンが違うので、正確な OS バージョン（高エントロピーの Client Hints）を API に届けるには、**SPA の HTML の応答**に次の2つのヘッダーを付ける必要がある。CloudFront の Response Headers Policy（`web.yaml`）のカスタムヘッダーで付けられる。今は付けていない。
+
+```
+Accept-CH: Sec-CH-UA-Platform-Version
+Permissions-Policy: ch-ua-platform-version=(self "https://{API のオリジン}")
+```
+
+見方（後処理）: ログは加工せずに残し、集計はログを取り出してから行う。サンプルのスクリプト `scripts/client_log_summary.py`（Python の標準ライブラリだけで動く）が、User-Agent を解釈して、OS・ブラウザごとの件数とエラー数を表にする。上の「分かること・分からないこと」の扱い（iOS 26 以降は Safari の版から推定、Android の固定値は Client Hints があれば使う）も、スクリプトの中で行う。
+
+```sh
+# CloudWatch Logs から直近1日分を取り出して集計する
+aws logs tail /aws/lambda/ticketqr-go-tickets --since 1d --filter-pattern '"request completed"' \
+  | python3 scripts/client_log_summary.py             # OS とブラウザの組み合わせごと
+... | python3 scripts/client_log_summary.py --by os   # OS と版ごと（--by browser でブラウザと版ごと）
+```
+
+```
+OS       OS の版                           ブラウザ        ブラウザの版  件数  エラー（4xx/5xx）
+iOS      13.3                              Safari          13            2     0
+iOS      26（推定。UA の OS は 18.6 に固定）  Safari          26            1     1
+Android  不明（UA は 10 に固定）              Chrome          138           1     0
+Android  13                                Chrome          138           1     0
+```
+
+- 入力は1行に1つのログで、JSON の前に付いた文字（`aws logs tail` の時刻とストリーム名など）は読み飛ばす
+- 対象は QR 同梱付与 API・チケット付与 API の完了ログだけ。ほかのログや JSON でない行は無視する
+- あくまでサンプル。User-Agent の解釈の規則は、ブラウザの変化に合わせて直していく

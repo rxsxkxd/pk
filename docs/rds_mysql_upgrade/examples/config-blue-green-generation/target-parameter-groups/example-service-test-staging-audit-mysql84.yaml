@@ -1,0 +1,13 @@
+# 自動テスト専用。Step 2 の生成物（8.4 DB パラメータグループ）を模したテンプレート。
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Test fixture for example-service-test-staging-audit-mysql84
+Resources:
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: example-service-test-staging-audit-mysql84
+      Family: mysql8.4
+      DBParameterGroupName: example-service-test-staging-audit-mysql84
+      Parameters:
+        character_set_server: utf8mb4
+        time_zone: UTC

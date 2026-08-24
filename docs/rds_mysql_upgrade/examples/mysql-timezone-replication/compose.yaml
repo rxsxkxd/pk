@@ -1,0 +1,192 @@
+# タイムゾーン差異のレプリケーション検証用のローカル擬似環境。
+# ソース = MySQL 8.0（Blue 相当）、レプリカ = MySQL 8.4（Green 相当）とし、
+# 本プロジェクトの移行構成をそのまま再現する。
+#
+# リポジトリルートの compose.yaml とは独立しており、プロジェクト名も分けてある。
+#
+# 使い方:
+#   cp .env.example .env
+#   docker compose up -d
+#   ./setup.sh            # レプリケーション構成と time_zone の設定
+#
+# 使い捨ての検証環境である。実データを入れない。ポートは 127.0.0.1 にだけ公開する。
+name: mysql-timezone-replication
+
+services:
+  # ソースは MySQL 8.0。本プロジェクトの移行元（Blue）と同じバージョンにしてある。
+  # --mysql-native-password は 8.4 で追加されたオプションであり、8.0 に渡すと起動に失敗する。
+  source:
+    image: mysql:8.0.46
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: tzcheck
+      # MySQL 公式 image が初回初期化時に作成する、root 以外の検証用アプリケーションユーザー。
+      # tzcheck データベースにのみ権限を付与する。既存 volume には追加されないため、
+      # 初期化済み環境では README の volume 再作成手順を使う。
+      MYSQL_USER: tzcheck_app
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:-tzcheck-app-local-only}
+    ports:
+      # ホストのドライバ検証スクリプト（Go / Ruby / Python）から接続するために公開する。
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - type: bind
+        source: ./conf/source.cnf
+        target: /etc/mysql/conf.d/source.cnf
+        read_only: true
+      - source-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # レプリカは MySQL 8.4。移行先（Green）と同じバージョンにしてある。
+  replica:
+    image: mysql:8.4.11
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:13307:3306"
+    volumes:
+      - type: bind
+        source: ./conf/replica.cnf
+        target: /etc/mysql/conf.d/replica.cnf
+        read_only: true
+      - replica-data:/var/lib/mysql
+    depends_on:
+      source:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # SQL での検証用クライアント。source / replica と同じネットワークに入る。
+  # 例: docker compose run --rm client mysql -h source -uroot -p tzcheck
+  client:
+    image: mysql:8.4.11
+    entrypoint: []
+    command: ["mysql", "--version"]
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    working_dir: /work
+    volumes:
+      - type: bind
+        source: .
+        target: /work
+        read_only: true
+
+  # --- ドライバ検証（docs/references/mysql-timezone-replication-verification.md の手順 6）---
+  # profiles を付けているため docker compose up -d では起動しない。
+  # 実行例: docker compose run --rm probe-go
+  #
+  # 各スクリプトは判定を行い、probe/reports/<言語>-report.md へ Markdown の
+  # レポートを出力する。すべての判定が通れば終了コード 0、通らなければ 1 を返す。
+  # reports/ は probe/ ごとバインドマウントされるため、ホスト側から参照できる。
+  #
+  # コンテナは compose のネットワーク内にいるため、接続先は source / replica の
+  # ホスト名と 3306 番になる（ホストから叩く場合の 127.0.0.1:13306 ではない）。
+  #
+  # Go は追加インストールが不要なため素のイメージを使い、モジュールキャッシュだけ
+  # ボリュームに保持する。Ruby と Python は依存の導入が必要なため dockerfile_inline
+  # でイメージへ焼き込む（個別の Dockerfile を作らず、定義をこのファイルに集約する）。
+
+  probe-go:
+    profiles: ["probe"]
+    image: golang:1.25
+    working_dir: /probe
+    command: ["go", "run", "."]
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      SOURCE_HOST: source
+      REPLICA_HOST: replica
+    volumes:
+      - type: bind
+        source: ./probe
+        target: /probe
+      # 初回実行時に取得したモジュールを保持し、2 回目以降を高速化する。
+      - go-module-cache:/go/pkg/mod
+    depends_on:
+      source:
+        condition: service_healthy
+      replica:
+        condition: service_healthy
+
+  probe-ruby:
+    profiles: ["probe"]
+    build:
+      context: ./probe
+      # mysql2 はネイティブ拡張のため、ビルドツールと MySQL クライアント
+      # ライブラリの開発パッケージが必要になる。実行のたびに導入すると遅いので
+      # イメージへ焼き込む。
+      dockerfile_inline: |
+        FROM ruby:3.4.11-slim-bookworm
+        RUN apt-get update \
+          && apt-get install --no-install-recommends -y build-essential libmariadb-dev \
+          && rm -rf /var/lib/apt/lists/*
+        RUN gem install mysql2 -v 0.5.6
+        WORKDIR /probe
+    command: ["ruby", "probe.rb"]
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      SOURCE_HOST: source
+      REPLICA_HOST: replica
+      # mysql2 の database_timezone は :utc か :local しか受け付けない。
+      # レプリカ（セッション Asia/Tokyo）に :local で合わせるため、
+      # プロセスのタイムゾーンを Asia/Tokyo にしておく。
+      TZ: Asia/Tokyo
+    volumes:
+      - type: bind
+        source: ./probe
+        target: /probe
+    depends_on:
+      source:
+        condition: service_healthy
+      replica:
+        condition: service_healthy
+
+  probe-python:
+    profiles: ["probe"]
+    build:
+      context: ./probe
+      # PyMySQL は純 Python 実装のためビルドツールは不要だが、
+      # 実行のたびの取得を避けるためイメージへ焼き込む。
+      # Python はこの検証装置でだけ使う（移行の実行経路・ツールには Python は無い）。
+      dockerfile_inline: |
+        FROM python:3.14.7-slim-bookworm
+        RUN python3 -m pip install --no-cache-dir --disable-pip-version-check 'PyMySQL==1.1.1'
+        WORKDIR /probe
+    command: ["python3", "probe.py"]
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      SOURCE_HOST: source
+      REPLICA_HOST: replica
+    volumes:
+      - type: bind
+        source: ./probe
+        target: /probe
+    depends_on:
+      source:
+        condition: service_healthy
+      replica:
+        condition: service_healthy
+
+  # 収集済み JSON から Markdown レポートを生成する（判定もここで行う）。
+  # DB へ接続しないため、素の Ruby イメージで足りる（mysql2 のビルドは不要）。
+  probe-report:
+    profiles: ["probe"]
+    image: ruby:3.4.11-slim-bookworm
+    working_dir: /probe
+    command: ["ruby", "generate_report.rb"]
+    volumes:
+      - type: bind
+        source: ./probe
+        target: /probe
+
+volumes:
+  source-data:
+  replica-data:
+  go-module-cache:

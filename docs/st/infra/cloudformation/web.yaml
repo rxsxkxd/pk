@@ -1,0 +1,194 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Web frontend (SPA) of the ticket QR API — private S3 bucket behind CloudFront (OAC) with security headers. Two
+  layouts: direct (ApiOriginDomain empty; the SPA calls the API Gateway URL, another origin, with CORS) and
+  unified (ApiOriginDomain set; this CloudFront also forwards /v1/* to the API, one origin, no CORS). Separate
+  from the API stacks. See web/DEPLOY.md.
+
+Parameters:
+  # 統合の構成だけ: /v1/* を振り分ける API のドメイン（API のスタックの出力 ApiDomain）。空なら直結の構成
+  ApiOriginDomain:
+    Type: String
+    Default: ""
+    AllowedPattern: "^([a-z0-9.-]+)?$"
+    Description: >-
+      Unified layout only. Domain of the ticket API to forward /v1/* to (the ApiDomain output of the API stack),
+      e.g. xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com. Empty = direct layout (S3 only).
+  # 直結の構成だけ（必須）: API のオリジン（CSP に入れる）。統合の構成では使わない
+  ApiBaseUrl:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(https://[^/]+)?$"
+    Description: >-
+      Direct layout only (required there). Origin of the ticket API (the SPA's apiBaseUrl), e.g.
+      https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com. Used in the CSP. Ignored in the unified layout.
+  # CSP の form-action。フォーム送信方式の環境だけ、直結は API のオリジン、統合は 'self' にする
+  FormActionSource:
+    Type: String
+    Default: "'none'"
+    Description: >-
+      CSP form-action. Keep 'none' unless the SPA's form mode is enabled in config.json; then set it to the API
+      origin (direct) or 'self' (unified).
+  # CloudFront に付ける WAF の Web ACL の ARN（任意。us-east-1 で作る。web/DEPLOY.md 13章）
+  WebAclArn:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional. ARN of an AWS WAF web ACL (scope CLOUDFRONT, made in us-east-1) to attach. In the unified layout it
+      also covers the API. Image uploads are larger than 8 KB: exclude the managed rule SizeRestrictions_BODY for
+      /v1/tickets (DESIGN.md 5). Empty = no WAF.
+  # CloudFront の配信地域（PriceClass_200 は日本を含む）
+  PriceClass:
+    Type: String
+    Default: PriceClass_200
+    AllowedValues: [PriceClass_100, PriceClass_200, PriceClass_All]
+    Description: PriceClass_200 includes edge locations in Japan.
+
+Rules:
+  DirectLayoutNeedsApiBaseUrl:
+    RuleCondition: !Equals [!Ref ApiOriginDomain, ""]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ApiBaseUrl, ""]]
+        AssertDescription: The direct layout (ApiOriginDomain empty) needs ApiBaseUrl for the CSP.
+
+Conditions:
+  Unified: !Not [!Equals [!Ref ApiOriginDomain, ""]]
+  HasWebAcl: !Not [!Equals [!Ref WebAclArn, ""]]
+
+Resources:
+  # Private bucket: only CloudFront (OAC) can read it.
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Security headers of the SPA (web/DESIGN.md 9). Unified: the API is the same origin, so 'self' covers it.
+  # img-src blob:: Compressor.js loads a photo over the limit through a blob: URL to shrink it.
+  ResponseHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "${AWS::StackName}-headers"
+        # Keep the site out of search results; anyone with the link may still view it (infra/NOINDEX.md).
+        CustomHeadersConfig:
+          Items:
+            - Header: X-Robots-Tag
+              Value: noindex, nofollow, noarchive
+              Override: true
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            ContentSecurityPolicy: !If
+              - Unified
+              - !Sub "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; form-action ${FormActionSource}; frame-ancestors 'none'"
+              - !Sub "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: ${ApiBaseUrl}; connect-src 'self' ${ApiBaseUrl}; form-action ${FormActionSource}; frame-ancestors 'none'"
+            Override: true
+          ContentTypeOptions:
+            Override: true
+          FrameOptions:
+            FrameOption: DENY
+            Override: true
+          ReferrerPolicy:
+            ReferrerPolicy: no-referrer
+            Override: true
+          StrictTransportSecurity:
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: false
+            Override: true
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !If [Unified, !Sub "${AWS::StackName} SPA + API", !Sub "${AWS::StackName} SPA"]
+        Enabled: true
+        WebACLId: !If [HasWebAcl, !Ref WebAclArn, !Ref AWS::NoValue]
+        DefaultRootObject: index.html # hash routing: no other path needs to fall back to index.html
+        # No CustomErrorResponses: they apply to every behavior, /v1/* included, and would replace the API's own
+        # error responses (e.g. 403 for a bad signature). API errors pass through unchanged (web/DEPLOY.md 7.1).
+        HttpVersion: http2and3
+        PriceClass: !Ref PriceClass
+        Origins:
+          - Id: s3
+            DomainName: !GetAtt Bucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+          - !If
+            - Unified
+            - Id: api
+              DomainName: !Ref ApiOriginDomain
+              CustomOriginConfig:
+                OriginProtocolPolicy: https-only
+                OriginSSLProtocols: [TLSv1.2]
+                OriginReadTimeout: 30 # the HTTP API's integration timeout is at most 30 s
+            - !Ref AWS::NoValue
+        # Unified: the ticket API under the same origin. Not cached; every viewer header except Host (API
+        # Gateway needs its own), the query string (sig) and the body go to the API. The API sets its own
+        # response headers (its view page has its own CSP), so the SPA's policy is not attached.
+        CacheBehaviors: !If
+          - Unified
+          - - PathPattern: /v1/*
+              TargetOriginId: api
+              ViewerProtocolPolicy: https-only
+              AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+              CachedMethods: [GET, HEAD]
+              Compress: false
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+              OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+          - !Ref AWS::NoValue
+        DefaultCacheBehavior:
+          TargetOriginId: s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized
+          ResponseHeadersPolicyId: !Ref ResponseHeadersPolicy
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontOAC
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${Bucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+Outputs:
+  BucketName:
+    Value: !Ref Bucket
+  DistributionId:
+    Value: !Ref Distribution
+  WebUrl:
+    Description: >-
+      Origin of the SPA. Direct: allow it in the ticket API's CORS (web/DEPLOY.md 5). Unified: also the API's
+      PublicBaseUrl, and the SPA's apiBaseUrl is "".
+    Value: !Sub "https://${Distribution.DomainName}"
+  Layout:
+    Value: !If [Unified, unified, direct]

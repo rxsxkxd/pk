@@ -1,0 +1,5 @@
+{
+  "app": ".venv/bin/python app.py",
+  "watch": { "include": ["app.py", "stub_cdk/**"] },
+  "context": {}
+}

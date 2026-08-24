@@ -1,0 +1,129 @@
+# RDS for MySQL 8.0 → 8.4 アップグレード
+
+AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するための、手順書・実行スクリプト・CI 定義一式。期限は MySQL 8.0 の標準サポート終了(2026-07-31、8/1 以降は Extended Support が自動課金)。
+
+## まず読むもの
+
+**初めて 1 つの DB を移行する作業者は、[チュートリアル: 1 つの DB を MySQL 8.0 から 8.4 へ移行する](tutorial-migrate-one-db.md) から始める。**作業者が行う 4 ステップ（成立条件チェック → パイプラインで Green を作る → 検証レポートの確認 → 切替）だけを、順に追えるようにまとめてある。成立条件チェックで `REVIEW` が出たときは、補足の [成立条件チェックの REVIEW の見方](tutorial-prereqs-review.md) を参照する。
+
+**実際に移行を動かすための手順は次の 2 本である。**この 2 本で完結する。
+
+1. **[operations-environment-setup.md](operations-environment-setup.md)** — オペレーション編 1／2: 環境構築。CloudFormation でパイプラインを作るまでの事前作業と手順。**一度だけ**
+2. **[operations-migration-run.md](operations-migration-run.md)** — オペレーション編 2／2: 移行の実行。成立条件チェック・設定生成から、パイプラインでの Blue/Green 移行まで。**移行対象ごとに繰り返す**
+
+設計・分類の背骨は次の1本。他のドキュメントはすべてこれらの詳細リファレンスか、周辺の技術メモ・記録である。
+
+- **[upgrade-flow-steps.md](docs/upgrade-flow-steps.md)** — Step 1〜7 の分割、実装状況、実行形態(ローカル/CI)、設定ファイルによるアクション管理。**現在レビュー中のため内容・番号体系は変更しない。**
+
+## 移行判断の流れ（3 つのレビューゲート）
+
+Step の並びとは別に、**「人が何を見て何を決めるか」**という軸がある。移行はレポートを起点に 3 回判断する。
+
+```text
+Step 1 成立条件チェック ─┐
+                          ├─► ① 移行できるか／どれを対象にするか
+Step 2 パラメータ変換 ───┘        │
+                                   ▼
+                          対象インスタンスの設定 YAML を生成
+                          （同時に設定レビューレポートも出る）
+                                   │
+                                   ▼
+                          ② この移行設定でよいか  → actions.build: approved
+                                   │
+                                   ▼
+                          Step 3 Blue/Green 構築 → Step 4 Green 検証レポート
+                                   │
+                                   ▼
+                          ③ 切り替えてよいか      → actions.switchover: approved
+                                   │
+                                   ▼
+                          Step 5 切替
+```
+
+| ゲート | 何を決めるか | 材料 |
+|---|---|---|
+| ① | 移行可否と**対象インスタンスの選定** | Step 1 の成立条件チェックレポートと Step 2 のパラメータレポート |
+| ② | **移行設定の妥当性** | 設定 YAML と同時に生成されるレビューレポート |
+| ③ | **切り替えの可否** | Green 検証レポート（宣言値・適用値・実効値の突き合わせ） |
+
+**レポートは作って終わりではなく、次のアクションを承認するための入力である。**承認は設定ファイルの `actions`（`pending` / `approved`）で表明し、CI はその宣言と AWS の実状態を突き合わせて動く。
+
+各レポートの入力・実行形態・実装言語は [report-generation-flows.md](report-generation-flows.md) にまとめてある。
+
+Step の詳細を掘り下げる際に参照する:
+
+- [rds-mysql-84-migration-guide.md](docs/rds-mysql-84-migration-guide.md) — Phase 0〜5 の詳細手順書(移行元の親ドキュメント)
+- [phase-0-precheck.md](docs/phase-0-precheck.md) — Step 1 の詳細。Blue/Green 成立条件チェックリスト(0-1-01〜14)
+- [phase-1-parameter-group-cloudformation.md](docs/phase-1-parameter-group-cloudformation.md) — Step 2 の詳細。CloudFormation による DB パラメータグループ管理
+- [config-blue-green-generation-design.md](docs/config-blue-green-generation-design.md) — RDS インベントリと人が管理する対応表から Blue/Green 設定 YAML を生成する支援ツールの最小設計
+- [report-generation-flows.md](report-generation-flows.md) — **レポート生成の全体像**。3 つの生成器（設定レビュー / パラメータ変換 / Green 検証）の役割・入力・実行タイミングを図で整理
+- [migration-catalog-er.md](docs/migration-catalog-er.md) — 移行カタログ(アプリケーション、接続、環境、パラメータグループ)の ER 図。YAML 構造の正本
+- [direct-blue-green-execution.md](docs/direct-blue-green-execution.md) — `scripts/*.rb` を直接実行する場合の、構築前チェック（移行先パラメータグループの確認）から後始末までの一連手順
+- [local-build-verify-green.md](docs/local-build-verify-green.md) — BuildGreen（Step 3）と VerifyGreen（Step 4）だけをローカルで実行する手順
+- [ci/verify-green-vpc-architecture.md](ci/verify-green-vpc-architecture.md) — Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だけを RDS のある VPC 内へ置く構成（図つき）
+- [ci/verify-green-security-group-setup.md](ci/verify-green-security-group-setup.md) — 上記構成で必要なセキュリティグループの設定手順（テンプレートは SG を作らない）
+- [ci/build-report-tool-troubleshooting.md](ci/build-report-tool-troubleshooting.md) — Go ビルド（BuildReportTool）が失敗したときの切り分け。ログの何を見て何をするかの対応表
+- [ci/codepipeline-all-in-one-parameters.md](ci/codepipeline-all-in-one-parameters.md) — パイプラインを AWS CLI で登録する手順と、CloudFormation の全パラメータ一覧
+- [ci/build-report-tool-local-verification.md](ci/build-report-tool-local-verification.md) — その Go ビルドを AWS に近い構成でローカル実行して確かめる手順
+
+エージェント向けの作業ガイドは [CLAUDE.md](CLAUDE.md)。
+
+## Step 3〜5 の実行方式
+
+BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、実行目的に応じて次の三つの方式を使い分ける。実行方式が違っても、各 Step が呼び出す Ruby スクリプトと設定 YAML は共通である。
+
+| 実行方式 | 主な用途 | 実行対象 | 起動元 |
+|---|---|---|---|
+| スクリプト直接ローカル実行 | 個別スクリプトの切り分け・日常確認 | `scripts/{build_green,verify_green,switchover}.rb` | `ruby` で直接起動 |
+| CodeBuild Local Agent | buildspec・環境変数・artifact・Docker を含む CodeBuild 互換性確認 | `ci/codebuild/{build-green,verify-green,switchover}.yml` | Local Agent 経由で buildspec を起動 |
+| AWS CodeBuild / GitHub Actions | CI 上の継続的な検証 | CodeBuild buildspec / GitHub Actions workflow | リモート CI から起動 |
+
+VerifyGreen の判定とレポートは Go のバイナリが行う。直接実行時に `GREEN_REPORT_GENERATOR` / `GREEN_RUNTIME_COLLECTOR` を指定しなければ、その場で `.tools/green-report/` へビルドする（Go が必要）。AWS CodeBuild では BuildReportTool がビルドしたものを artifact で受け取り、GitHub Actions は workflow の中で `go build` する（どちらも Docker は使わない）。どの経路でも同じプログラムなので、検証対象・判定内容は変わらない。
+
+直接実行の一連手順は [direct-blue-green-execution.md](docs/direct-blue-green-execution.md)、CodeBuild Local Agent の手順は [ci/codebuild-local-verification.md](ci/codebuild-local-verification.md) を参照する。
+
+## フォルダ構成
+
+| フォルダ | 内容 |
+|---|---|
+| (ルート直下) | **オペレーション手順 2 本**とこの README、レポート生成の全体像。ほかにローカル実行用コンテナ定義（`compose.yaml`、`aws-config/`、`global-bundle.pem`、`my.cnf`） |
+| `docs/` | 詳細リファレンス。Step の分割、各 Phase の手順、設定生成の設計、ローカル実行環境 |
+| `scripts/` | **CI（CodeBuild / GitHub Actions）から到達する**実行スクリプト。Step 3〜5 と Step 4 のレポート生成器 |
+| `tools/` | **人が手で実行する**コマンド。Step 1・2 の収集と判定、Blue/Green 設定の生成、Step 7 の後始末。使い方の索引は [tools/README.md](tools/README.md) |
+| `tests/` | テスト一式(`bash tests/*.sh` と `go test ./...`) |
+| `config/` | 環境別設定ファイル(`blue-green/<環境>.yml`)とパラメータ変換ルール |
+| `ci/` | GitHub Actions / CodeBuild・CodePipeline の実行定義。[ci/README.md](ci/README.md) |
+| `examples/` | サンプル入出力・CLI 実行例・ローカル検証環境。ゴールデンファイルによる回帰確認に使う |
+| `docs/references/` | 判断に使う技術リファレンス(手順書ではない) |
+| `docs/decisions/` | 結論→理由→代替案評価の意思決定記録(ADR)。未採択の検討中メモも含む |
+| `auxiliary/` | 補足ドキュメント（作業の実施記録や、現状の整理） |
+
+### `docs/references/`
+
+- [innodb-mysql80-to-84-parameter-mapping.md](docs/references/innodb-mysql80-to-84-parameter-mapping.md) — InnoDB 関連パラメータの 8.0→8.4 マッピング
+- [mysql-slow-query-log.md](docs/references/mysql-slow-query-log.md) — スロークエリログ関連パラメータの整理
+- [mysql-timezone-problem-summary.md](docs/references/mysql-timezone-problem-summary.md) — **判断材料の要約**。`time_zone` を `Asia/Tokyo` へ変更すると `DEFAULT CURRENT_TIMESTAMP` の `datetime` 列で何が起きるか
+- [mysql-timezone.md](docs/references/mysql-timezone.md) — タイムゾーン関連パラメータ(`time_zone`、`system_time_zone`、`explicit_defaults_for_timestamp`)の整理
+- [mysql-timezone-replication-verification.md](docs/references/mysql-timezone-replication-verification.md) — ソースとレプリカで `time_zone` が異なる場合の挙動を AWS 上で実証する検証手順(使い捨て構成の作成・検証・後始末)。AWS を使わない場合は [examples/mysql-timezone-replication/](examples/mysql-timezone-replication) のローカル擬似環境を使う
+- [shared-instance-upgrade-verification.md](docs/references/shared-instance-upgrade-verification.md) — **ステージと本番が同一インスタンスに同居している場合**の移行手順。使い捨て検証機の構築・検証・後始末と、同居構成での既存スクリプトの誤動作
+- [step-script-language-matrix.md](docs/references/step-script-language-matrix.md) — Step 別のスクリプト対応表と、実行に必要な言語環境(Ruby/Go/AWS CLI/MySQL クライアント。Python と jq は使わない)の一覧
+- [source-article-notes.md](docs/references/source-article-notes.md) — 出典記事の要約メモ(参考。正典ではない)
+
+### `docs/decisions/`
+
+- [cdk-adoption-considerations.md](docs/decisions/cdk-adoption-considerations.md) — CDK 導入の判断資料(結論: 現状は CloudFormation のみで運用)
+- [binlog-format-bluegreen-compatibility.md](docs/decisions/binlog-format-bluegreen-compatibility.md) — Blue `MIXED` → Green `ROW` の Blue/Green レプリケーション互換性
+- [structure-review-proposal.md](docs/decisions/structure-review-proposal.md) — リポジトリ構成・フロー全体の見直し対案(**未採択**。着手順を含む)
+- [improvement-proposals.md](docs/decisions/improvement-proposals.md) — 2026-10 時点の改善提案を重要な順に並べたもの(**未採択**。見送った案の記録を含む)
+- [idempotency-strategy.md](docs/decisions/idempotency-strategy.md) — 各フェーズの冪等性の現状評価とあるべき姿(**未採択**)。switchover が 2 回目に必ず失敗する点、cleanup が部分完了で成功を返す点など
+- [implementation-language-policy.md](docs/decisions/implementation-language-policy.md) — 実装言語の役割分担(**採択済み**)。人が実行するツールは Go、パイプラインの AWS 操作と設定 YAML の読み取りは Ruby、パイプラインの MySQL クエリと判定は Go（Python と jq は使わない）。Step 4 をローカル実行前提に寄せる判断を含む
+
+### `auxiliary/`
+
+- [inline-python-reduction-report.md](auxiliary/inline-python-reduction-report.md) — `scripts/*.sh` のインライン `python3 -c` 削減対応記録(38→8箇所)
+- [verify-green-vpc-current-state.md](auxiliary/verify-green-vpc-current-state.md) — VerifyGreen の VPC 設定の現状整理。既存 VPC に載せる方式であること、設定の粒度がスタック単位であること、VPC なしでも検証の結論が変わらないこと
+
+## 現在の既知の未決事項
+
+- `structure-review-proposal.md` の論点1〜8(実装言語の統一、判定ロジックのテスト、切り戻し Step 化、ワンショット/二段階昇格の選択など)は未着手。
+- `runbook`(このREADMEの「まず読むもの」節)は物理的なフォルダ移動を見送っている。レビュー完了後に再検討する。

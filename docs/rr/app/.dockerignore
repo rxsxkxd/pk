@@ -1,0 +1,15 @@
+# アプリのリポジトリのルートに Dockerfile と一緒に置く
+.git
+.bundle
+vendor/bundle
+node_modules
+log/*
+tmp/*
+public/assets
+public/packs
+coverage
+spec
+test
+.env*
+config/master.key
+config/credentials/*.key

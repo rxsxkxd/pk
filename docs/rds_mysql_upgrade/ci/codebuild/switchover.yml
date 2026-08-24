@@ -1,0 +1,32 @@
+# CodePipeline の ManualApproval 後に実行する CodeBuild buildspec。
+version: 0.2
+
+env:
+  # Linux で指定できるのは bash または /bin/sh。既定シェルに依存しないよう明示する。
+  shell: bash
+
+phases:
+  install:
+    commands:
+      # 設定 YAML の読み取りに Ruby の標準ライブラリ（psych / json）を使う。
+      # 追加パッケージの導入は不要で、PyPI へも到達しない。
+      # CodeBuild の managed image は rbenv で複数の Ruby を持つため、使う版を固定する。
+      # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.11; fi
+      - ruby --version
+      # scripts/lib/aws_cli.rb が exec する AWS CLI の版を記録する。Python/x.y.z は AWS CLI 同梱の Python。
+      - aws --version
+      # 比較用。イメージにプリインストールの Python（AWS CLI はこれを使わない）。無ければ表示しないだけ。
+      - python3 --version || true
+      # AWS CLI が使う CA バンドル。AWS_CA_BUNDLE が空なら同梱の cacert.pem（OS の証明書ストアや certifi ではない）。
+      - echo "AWS_CA_BUNDLE=${AWS_CA_BUNDLE:-}"
+      - sha256sum /usr/local/aws-cli/v2/current/dist/awscli/botocore/cacert.pem || true
+  build:
+    commands:
+      # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
+      - ruby scripts/switchover.rb --config "$CONFIG_FILE" --service "$SERVICE_NAME" --approve --output-dir artifacts
+
+artifacts:
+  files:
+    - artifacts/**/*
+  discard-paths: false

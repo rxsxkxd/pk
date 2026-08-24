@@ -1,0 +1,3 @@
+service,path
+shop,./sample-services/shop
+accounts,./sample-services/accounts

@@ -1,0 +1,56 @@
+{
+  "EngineDefaults": {
+    "DBParameterGroupFamily": "mysql8.4",
+    "Parameters": [
+      {
+        "ParameterName": "binlog_format",
+        "ParameterValue": "ROW",
+        "AllowedValues": "ROW,MIXED,STATEMENT",
+        "ApplyType": "dynamic",
+        "IsModifiable": true
+      },
+      {
+        "ParameterName": "log_replica_updates",
+        "ParameterValue": "0",
+        "AllowedValues": "0,1",
+        "ApplyType": "dynamic",
+        "IsModifiable": true
+      },
+      {
+        "ParameterName": "replica_parallel_workers",
+        "ParameterValue": "4",
+        "AllowedValues": "0-1024",
+        "ApplyType": "dynamic",
+        "IsModifiable": true
+      },
+      {
+        "ParameterName": "max_allowed_packet",
+        "ParameterValue": "67108864",
+        "AllowedValues": "1024-1073741824",
+        "ApplyType": "dynamic",
+        "IsModifiable": true
+      },
+      {
+        "ParameterName": "authentication_policy",
+        "ParameterValue": "*,",
+        "AllowedValues": "*",
+        "ApplyType": "dynamic",
+        "IsModifiable": true
+      },
+      {
+        "ParameterName": "mysql_native_password",
+        "ParameterValue": "OFF",
+        "AllowedValues": "ON,OFF",
+        "ApplyType": "static",
+        "IsModifiable": true
+      },
+      {
+        "ParameterName": "restrict_fk_on_non_standard_key",
+        "ParameterValue": "ON",
+        "AllowedValues": "ON,OFF",
+        "ApplyType": "dynamic",
+        "IsModifiable": true
+      }
+    ]
+  }
+}

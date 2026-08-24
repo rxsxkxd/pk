@@ -1,0 +1,30 @@
+# CodeBuild / Local Agent の疎通確認専用 buildspec。AWS API は呼び出さない。
+version: 0.2
+
+env:
+  # Linux で指定できるのは bash または /bin/sh。既定シェルに依存しないよう明示する。
+  shell: bash
+
+phases:
+  install:
+    commands:
+      # 設定 YAML の読み取りに Ruby の標準ライブラリ（psych / json）を使う。
+      # 追加パッケージの導入は不要で、PyPI へも到達しない。
+      # CodeBuild の managed image は rbenv で複数の Ruby を持つため、使う版を固定する。
+      # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.11; fi
+      - ruby --version
+      - echo 'Entered install phase.'
+      - aws --version
+  build:
+    commands:
+      - echo 'Entered build phase. No AWS changes are made.'
+      - echo "CONFIG_FILE=${CONFIG_FILE:-not-set}"
+      - echo "SERVICE_NAME=${SERVICE_NAME:-not-set}"
+      - mkdir -p artifacts
+      - echo 'CodeBuild echo build completed.' > artifacts/echo-result.txt
+
+artifacts:
+  files:
+    - artifacts/echo-result.txt
+  discard-paths: false

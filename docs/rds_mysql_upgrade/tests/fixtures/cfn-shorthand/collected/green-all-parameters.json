@@ -1,0 +1,5 @@
+{"Parameters":[
+ {"ParameterName":"binlog_format","ParameterValue":"ROW","Source":"user"},
+ {"ParameterName":"max_allowed_packet","ParameterValue":"67108864","Source":"user"},
+ {"ParameterName":"replica_parallel_workers","ParameterValue":"8","Source":"user"},
+ {"ParameterName":"log_replica_updates","ParameterValue":"1","Source":"user"}]}

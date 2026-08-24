@@ -1,0 +1,1080 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  RDS for MySQL 8.0 -> 8.4 Blue/Green 移行パイプライン（IAM・CI 作成版）。
+  IAM ロール、CodeBuild プロジェクト、CodePipeline を 1 つのスタックで作成する。
+  アーティファクト用 S3 バケットは、ArtifactBucketName が空なら新規作成し、
+  指定があれば既存バケットを使う。対象サービスは実行時に SERVICE_NAME で指定する。
+
+# 既存の codepipeline.yml との違い:
+#   codepipeline.yml         … S3 バケットと IAM ロールを既存リソースとして受け取る。
+#                              組織側でロールを一元管理している場合はこちらを使う。
+#   codepipeline-all-in-one  … 本ファイル。S3 バケット（省略時は新規作成）、IAM、CI リソースを作成する。
+#                              検証環境や、スタック単位で権限を閉じたい場合に使う。
+#
+# 環境（development / staging / production）ごとに 1 スタックを作成する。サービスはパイプライン変数で
+# 切り替えるため、同一環境の複数サービスで 1 つのパイプラインを共用できる。
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: パイプライン }
+        Parameters: [PipelineNamePrefix, EnvironmentName, DefaultServiceName, ArtifactBucketName, ArtifactRetentionDays]
+      - Label: { default: ソース（GitHub または CodeCommit） }
+        Parameters: [SourceProvider, CodeStarConnectionArn, RepositoryId, CodeCommitRepositoryName, BranchName]
+      - Label: { default: Step 4 の MySQL 実効値収集（任意） }
+        Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterPath, MySqlCredentialsKmsKeyArn]
+      - Label: { default: Step 4 検証の VPC 配置（任意。VerifyGreen だけが対象） }
+        Parameters:
+          - VpcId
+          - VerifyGreenSubnetIds
+          - VerifyGreenSecurityGroupIds
+      - Label: { default: 承認通知（任意） }
+        Parameters: [ApprovalNotificationTopicArn]
+      - Label: { default: 拡張モニタリング（移行元で有効なときだけ） }
+        Parameters: [RdsMonitoringRoleName]
+      - Label: { default: 保護対象の RDS リソース }
+        Parameters: [ProtectedRdsResourceArns]
+
+Parameters:
+  PipelineNamePrefix:
+    Type: String
+    Default: rds-bg
+    # 自動作成するアーティファクトバケット名（S3 の上限 63 文字）に収める。
+    # 接頭辞以外の部分は最長 50 文字（-development-artifacts-<12 桁>-<14 文字のリージョン>）。
+    MaxLength: 13
+    AllowedPattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+    # 英小文字・数字・ハイフンの 13 文字以内（先頭と末尾は英小文字か数字）。
+    ConstraintDescription: Up to 13 lowercase letters, digits, or hyphens (must start and end with a letter or digit).
+    # 生成するリソース名の接頭辞。アーティファクトバケット名にも入るため、
+    # 英小文字・数字・ハイフンの 13 文字以内。
+    Description: >-
+      Prefix for generated resource names. Because it is also part of the artifact
+      bucket name, use up to 13 lowercase letters, digits, or hyphens.
+
+  EnvironmentName:
+    Type: String
+    AllowedValues: [development, staging, production]
+    # 対象環境。config/blue-green/<環境>.yml を CONFIG_FILE として使う
+    # （リポジトリにそのファイルが無いと、パイプラインの最初の CodeBuild で失敗する）。
+    Description: >-
+      Target environment. config/blue-green/<environment>.yml is used as CONFIG_FILE
+      (if the file is missing from the repository, the first CodeBuild in the pipeline fails).
+
+  DefaultServiceName:
+    Type: String
+    Default: example-service
+    # SERVICE_NAME の既定値。パイプライン実行時に --variables で上書きできる。
+    # config の services 配下に定義したサービス名を指定する。
+    Description: >-
+      Default value of SERVICE_NAME. Can be overridden with --variables when starting
+      the pipeline. Specify a service name defined under services in the config.
+
+  ArtifactBucketName:
+    Type: String
+    Default: ''
+    # CodePipeline のソースおよび各 Step の成果物を保存する S3 バケット名。
+    # **空にするとこのスタックが新規作成する**（名前は
+    # <PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>）。
+    # 既存バケット名を指定した場合は、このスタックはバケットおよび
+    # バケットポリシーを作成・変更・削除しない。同一リージョンであること。
+    Description: >-
+      S3 bucket that stores the CodePipeline source and the artifacts of each step.
+      If empty, this stack creates a new bucket (named
+      <PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>).
+      If an existing bucket name is given, this stack does not create, modify, or
+      delete the bucket or its bucket policy. The bucket must be in the same region.
+
+  ArtifactRetentionDays:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 3650
+    # 新規作成するバケットで、アーティファクトを保持する日数。経過後は失効させる。
+    # アーティファクトは使い捨てだが、移行作業の記録（レポート、収集した JSON）が
+    # 入るため短くしすぎない。ArtifactBucketName を指定した場合は使わない。
+    Description: >-
+      Number of days to keep artifacts in the newly created bucket; they expire afterwards.
+      Artifacts are disposable but include records of the migration (reports, collected
+      JSON), so do not make this too short. Not used when ArtifactBucketName is given.
+
+  SourceProvider:
+    Type: String
+    Default: CodeConnections
+    AllowedValues: [CodeConnections, CodeCommit]
+    # ソースの取得元。CodeConnections なら GitHub（CodeStarConnectionArn と
+    # RepositoryId を使う）、CodeCommit なら CodeCommitRepositoryName を使う。
+    # 選ばなかった側のパラメータは無視される。
+    Description: >-
+      Where to fetch the source from. CodeConnections uses GitHub (CodeStarConnectionArn
+      and RepositoryId); CodeCommit uses CodeCommitRepositoryName.
+      Parameters for the provider not selected are ignored.
+
+  CodeStarConnectionArn:
+    Type: String
+    # 仮置き。事前に GitHub と接続して AVAILABLE にした接続の ARN へ置き換える。
+    Default: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/00000000-0000-0000-0000-000000000000
+    # CodeConnections（GitHub）の接続 ARN。事前に AVAILABLE にしておく。
+    # SourceProvider=CodeConnections のときだけ使う。
+    Description: >-
+      ARN of the CodeConnections (GitHub) connection. It must be AVAILABLE beforehand.
+      Used only when SourceProvider=CodeConnections.
+
+  RepositoryId:
+    Type: String
+    # 仮置き。
+    Default: your-org/your-repository
+    # GitHub リポジトリ（owner/repo）。SourceProvider=CodeConnections のときだけ使う。
+    Description: >-
+      GitHub repository (owner/repo). Used only when SourceProvider=CodeConnections.
+
+  CodeCommitRepositoryName:
+    Type: String
+    Default: ''
+    # CodeCommit のリポジトリ名。SourceProvider=CodeCommit のときは必須である。
+    Description: >-
+      CodeCommit repository name. Required when SourceProvider=CodeCommit.
+
+  MySqlCredentialsKmsKeyArn:
+    Type: String
+    Default: ''
+    # 上記 SecureString を暗号化しているカスタマー管理キー（CMK）の ARN。
+    # **AWS 管理キー（alias/aws/ssm）なら空のままでよい**
+    # （SSM が代理で復号するため、呼び出し側に kms:Decrypt は要らない）。
+    # CMK の場合は指定する。指定すると VerifyGreen のロールへ、そのキーに限った
+    # kms:Decrypt を kms:ViaService=ssm.<region>.amazonaws.com 条件付きで付与する。
+    # どちらのキーを使っているかは次で確認できる。
+    # aws ssm describe-parameters --parameter-filters
+    # "Key=Name,Values=<パラメータ名>" --query 'Parameters[0].KeyId'
+    # （alias/aws/ssm なら AWS 管理キー、キー ID / ARN が返れば CMK）
+    # **注意: KMS は IAM ポリシーとキーポリシーの両方で許可されて初めて通る。**
+    # キーはこのスタックの外にあるため、キーポリシー側の許可はテンプレートでは
+    # 設定できない。キーポリシーがアカウントのルートへ委任する標準の形なら
+    # この指定だけで足りるが、principal を絞っている場合は VerifyGreen の
+    # ロールをキーポリシーへ手で追記する必要がある。
+    Description: >-
+      ARN of the customer managed key (CMK) that encrypts the SecureString parameters
+      (see MySqlCredentialsParameterPath). Leave empty for the AWS managed key
+      (alias/aws/ssm): SSM decrypts on the caller's behalf, so kms:Decrypt is not needed.
+      Specify it for a CMK; the VerifyGreen role then gets kms:Decrypt on that key only,
+      with the condition kms:ViaService=ssm.<region>.amazonaws.com.
+      Check which key is used with:
+      aws ssm describe-parameters --parameter-filters
+      "Key=Name,Values=<parameter name>" --query 'Parameters[0].KeyId'
+      (alias/aws/ssm means the AWS managed key; a key ID / ARN means a CMK).
+      NOTE: KMS requires both the IAM policy and the key policy to allow access.
+      The key is outside this stack, so the template cannot set the key policy.
+      If the key policy delegates to the account root (the default form), this is enough;
+      if it restricts principals, add the VerifyGreen role to the key policy manually.
+
+  RdsMonitoringRoleName:
+    Type: String
+    Default: rds-monitoring-role
+    # 移行元 DB の拡張モニタリング（Enhanced Monitoring）が使っている IAM ロール名。
+    # Blue/Green 作成時に RDS が Green へこの設定をコピーするため、BuildGreen の
+    # 実行ロールに iam:PassRole が必要になる。移行元で拡張モニタリングを使って
+    # いない場合は空文字にしてよい（その場合この権限は付かない）。
+    # 移行元の設定は次で確認できる。
+    # aws rds describe-db-instances --db-instance-identifier <blue-id>
+    # --query 'DBInstances[0].[MonitoringInterval,MonitoringRoleArn]'
+    Description: >-
+      IAM role name used by Enhanced Monitoring on the source DB. RDS copies this setting
+      to Green when creating the Blue/Green deployment, so the BuildGreen role needs
+      iam:PassRole. Leave empty if the source does not use Enhanced Monitoring
+      (the permission is then not granted).
+      Check the source setting with:
+      aws rds describe-db-instances --db-instance-identifier <blue-id>
+      --query 'DBInstances[0].[MonitoringInterval,MonitoringRoleArn]'
+
+  BranchName:
+    Type: String
+    Default: main
+    # ソースとして取得するブランチ。
+    Description: Branch to fetch as the source.
+
+  CollectMySqlRuntimeValues:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    # Step 4 で Green DB へ MySQL 接続し実効値を収集するか。
+    # true にする場合は VpcId 以下を指定して VerifyGreen を RDS へ到達できる
+    # subnet へ配置する。**カスタムイメージは要らない。**収集は BuildReportTool が
+    # ビルドする静的リンクの Go バイナリが行い、MySQL クライアントを使わない。
+    Description: >-
+      Whether Step 4 connects to the Green DB over MySQL to collect effective values.
+      If true, set VpcId and the following parameters so that VerifyGreen runs in a subnet
+      that can reach RDS. No custom image is needed: collection is done by a statically
+      linked Go binary built by BuildReportTool, without a MySQL client.
+
+  # Step 4 の 2 つのプロジェクトを配置する VPC。**両方とも同一 VPC 内に置く。**
+  # レポート実行（VerifyGreen）は専用のサブネットへ隔離し、そこには外部経路を置かない。
+  # ビルドは外部へ出られる既存のサブネットでよい。
+  # VpcConfig は CodeBuild プロジェクトのプロパティなので、実行時には切り替えられない。
+  # 空のままなら両方とも VPC 外で実行する（AWS API による検証だけ。現状の既定）。
+  VpcId:
+    Type: String
+    Default: ''
+    # VerifyGreen（Step 4 の検証実行）を配置する VPC。空なら VPC 外で実行する
+    # （その場合 Green DB へは接続できない）。
+    # **BuildReportTool はここに入れない。**Go ビルドは AWS API も RDS も呼ばず、
+    # Go module の取得で外部へ出るだけなので、他の VPC 外プロジェクトと揃える。
+    Description: >-
+      VPC in which VerifyGreen (the Step 4 verification run) is placed. If empty, it runs
+      outside a VPC (and cannot connect to the Green DB).
+      BuildReportTool is not placed here: the Go build calls neither AWS APIs nor RDS and
+      only goes out to fetch Go modules, so it stays outside the VPC like the other projects.
+
+  VerifyGreenSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    # **レポート実行（VerifyGreen）専用の private subnet。**RDS へ到達できること。
+    # 外部経路を持たせないため、他の用途と共有せず専用に用意する。
+    # 障害耐性のため 2 アベイラビリティゾーン以上を推奨する。**外部 egress は不要**で、その場合は
+    # s3／logs／rds／monitoring／ssm の VPC endpoint を用意する。
+    Description: >-
+      Private subnets dedicated to the report run (VerifyGreen). They must reach RDS.
+      To keep them without an outbound route, do not share them with other uses.
+      Two or more Availability Zones are recommended for resilience. No external egress
+      is needed; provide VPC endpoints for s3, logs, rds, monitoring, and ssm instead.
+
+  VerifyGreenSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ''
+    # VerifyGreen に付けるセキュリティグループ。RDS 側の inbound でこの SG からの
+    # 3306/tcp を許可する。
+    Description: >-
+      Security groups attached to VerifyGreen. Allow inbound 3306/tcp from these
+      security groups on the RDS side.
+
+  MySqlCredentialsParameterPath:
+    Type: String
+    Default: ''
+    # 先頭の / は必須、末尾の / は付けない。パラメータ ARN は
+    # arn:...:parameter/<階層> の形で、名前の先頭 / がそのまま ARN の区切りになるため。
+    AllowedPattern: '^$|^/[A-Za-z0-9_.\-/]*[A-Za-z0-9_.\-]$'
+    # / で始まり / で終わらない SSM パラメータの階層を指定する（例: /rds-bg/staging）。
+    ConstraintDescription: >-
+      Specify an SSM parameter hierarchy that starts with / and does not end with / (e.g. /rds-bg/staging).
+    # VerifyGreen へ ssm:GetParameter を許可する SSM パラメータ（SecureString）の**階層**。
+    # 例: /rds-bg/staging → /rds-bg/staging/ 配下のパラメータをすべて読める。
+    # **これは IAM の許可範囲であり、読むパラメータ名を決めるものではない。**
+    # どのパラメータを読むかは config/blue-green/<env>.yml の
+    # services.<name>.mysql_verification（parameter_name / user_parameter_name）が決める。
+    # パイプラインは環境ごとに 1 本でサービスは実行時に切り替えるため、
+    # **その環境の全サービスのパラメータをこの階層の下に置く。**
+    # サービスを増やしてもスタックの更新は要らない。
+    # **この階層には移行作業用のパラメータだけを置く**（配下すべてが読めるため）。
+    # 空なら Parameter Store の読み取り権限を付与しない。
+    # 暗号化がカスタマー管理キー（CMK）の場合は MySqlCredentialsKmsKeyArn も渡す。
+    Description: >-
+      Hierarchy of SSM parameters (SecureString) that VerifyGreen is allowed to read with
+      ssm:GetParameter. Example: /rds-bg/staging allows reading every parameter under
+      /rds-bg/staging/. This is the IAM permission scope, not the parameter names to read;
+      those are set by services.<name>.mysql_verification (parameter_name /
+      user_parameter_name) in config/blue-green/<env>.yml.
+      There is one pipeline per environment and the service is chosen at run time, so put
+      the parameters of every service in that environment under this hierarchy; adding
+      services needs no stack update. Put only migration parameters here, because
+      everything under it is readable. If empty, no Parameter Store read permission is
+      granted. If the parameters are encrypted with a CMK, also set MySqlCredentialsKmsKeyArn.
+
+  ApprovalNotificationTopicArn:
+    Type: String
+    Default: ''
+    # 手動承認の通知先 SNS トピック ARN。空なら通知しない。
+    Description: SNS topic ARN notified for manual approvals. If empty, no notification is sent.
+
+  ProtectedRdsResourceArns:
+    Type: CommaDelimitedList
+    Default: ''
+    # RDS の変更権限（保護スナップショットの作成）の対象を絞る ARN。
+    # **複数指定できる。**移行対象が複数ある場合は全部を列挙する。
+    # 対象は db と snapshot の 2 種類で、**両方を入れること**
+    # （snapshot を忘れると保護スナップショットの作成が AccessDenied で失敗する）。
+    # 例（1 サービス分。カンマ区切りで続けて書く）:
+    # arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging*,
+    # arn:aws:rds:ap-northeast-1:123456789012:snapshot:example-service-staging*
+    # 空にすると、このアカウント・このリージョンの db:* と snapshot:* になる
+    # （種類とアカウントとリージョンでは絞られるが、識別子では絞られない）。
+    # '*' 1 つだけを渡すこともできる——動作はするが**全リソースが対象になるため
+    # 推奨しない**。実運用では識別子まで絞る。
+    Description: >-
+      ARNs that scope the RDS write permission (creating the protection snapshot).
+      Multiple values are allowed; list every migration target.
+      Include both kinds, db and snapshot (without snapshot, creating the protection
+      snapshot fails with AccessDenied).
+      Example (one service; continue comma-separated):
+      arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging*,
+      arn:aws:rds:ap-northeast-1:123456789012:snapshot:example-service-staging*
+      If empty, db:* and snapshot:* in this account and region are used (scoped by type,
+      account, and region, but not by identifier).
+      A single '*' also works but covers all resources and is not recommended;
+      in production, scope down to identifiers.
+
+Conditions:
+  # ソースの取得元を切り替える。Source アクションと、CodePipeline ロールへ
+  # 付与する権限（接続の利用 / CodeCommit の読み取り）をまとめて差し替える。
+  UseCodeConnections: !Equals [!Ref SourceProvider, CodeConnections]
+  UseCodeCommit: !Equals [!Ref SourceProvider, CodeCommit]
+  # 移行元が拡張モニタリングを使っている場合だけ iam:PassRole を付ける。
+  HasRdsMonitoringRole: !Not [!Equals [!Ref RdsMonitoringRoleName, '']]
+  # ArtifactBucketName が空ならバケットをこのスタックで作る。
+  CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, '']
+  # 保護対象の ARN を明示したか。空ならアカウント・リージョン内の db / snapshot 全体を
+  # 対象にする（種類では絞るが識別子では絞らない）。
+  HasProtectedRdsResourceArns: !Not [!Equals [!Join ['', !Ref ProtectedRdsResourceArns], '']]
+  HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
+  # Step 4 の 2 プロジェクトを VPC 内で実行するか。
+  # VpcConfig と Elastic Network Interface 権限をまとめて切り替える。
+  HasVpc: !Not [!Equals [!Ref VpcId, '']]
+  # config の mysql_verification.auth_method は parameter_store 固定である。
+  HasMySqlCredentials: !Not [!Equals [!Ref MySqlCredentialsParameterPath, '']]
+  # SecureString がカスタマー管理キーで暗号化されている場合だけ kms:Decrypt を付ける。
+  # AWS 管理キー（alias/aws/ssm）なら不要である（SSM が代理で復号する）。
+  HasMySqlCredentialsKmsKey: !Not [!Equals [!Ref MySqlCredentialsKmsKeyArn, '']]
+
+Resources:
+
+  # --- アーティファクト用 S3 バケット -----------------------------------------
+  # ArtifactBucketName が空のときだけ作る。指定があればそのバケットを使い、
+  # このスタックは一切触らない。
+  #
+  # **スタックを削除するとバケットも消える（DeletionPolicy: Delete）。**ただし S3 は中身が
+  # 残っているとバケットを削除できず、スタック削除が DELETE_FAILED で止まる。削除は
+  # pipeline-stack.sh down で行う（先にバケットを空にしてからスタックを削除する）。
+  # アーティファクトには移行作業の記録（検証レポート、収集した JSON）が入るので、
+  # 残したいものは削除の前に取り出しておく。
+  #
+  # **バージョニングは使わない。**CodePipeline がバージョニングを必須とするのは S3 を
+  # ソースにするアクションのバケットだけで、アーティファクトストアには要らない
+  # （このパイプラインのソースは GitHub / CodeCommit）。版が残らないので空にするのも簡単になる。
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateArtifactBucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      # グローバルに一意である必要があるため、アカウント ID とリージョンを含める。
+      BucketName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-artifacts-${AWS::AccountId}-${AWS::Region}'
+      # SSE-S3。カスタマー管理キーを使う場合は、両実行ロールへ鍵の利用権限も要る。
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # ACL を無効化する。アクセス制御は IAM とバケットポリシーだけで行う。
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      # 保持日数を過ぎたアーティファクトは失効させる。
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireArtifacts
+            Status: Enabled
+            ExpirationInDays: !Ref ArtifactRetentionDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  # 非 TLS のアクセスを拒否する。バケットを作る場合だけ付ける。
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateArtifactBucket
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub '${ArtifactBucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+
+  # --- CodeBuild 共通権限 -----------------------------------------------------
+  # ログ出力、アーティファクトの読み書き、RDS の読み取り。
+  # 変更操作は各ロールの個別ポリシーでのみ許可する。
+  CodeBuildCommonPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-codebuild-common'
+      Description: RDS Blue/Green CodeBuild 共通権限（ログ・アーティファクト・読み取り API）
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Logs
+            Effect: Allow
+            Action:
+              - 'logs:CreateLogGroup'
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${PipelineNamePrefix}-${EnvironmentName}-*'
+              - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${PipelineNamePrefix}-${EnvironmentName}-*:*'
+          - Sid: Artifacts
+            Effect: Allow
+            Action:
+              - 's3:GetObject'
+              - 's3:GetObjectVersion'
+              - 's3:PutObject'
+              - 's3:GetBucketLocation'
+            Resource: !Sub
+              - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+              - Bucket: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
+          - Sid: ArtifactBucketList
+            Effect: Allow
+            Action: 's3:ListBucket'
+            Resource: !Sub
+              - 'arn:${AWS::Partition}:s3:::${Bucket}'
+              - Bucket: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
+          - Sid: RdsReadOnly
+            Effect: Allow
+            # Describe 系はリソースレベルの制御に対応しないものがあるため * とする。
+            # 読み取りのみであり、変更操作は含まない。
+            Action:
+              - 'rds:DescribeDBInstances'
+              - 'rds:DescribeDBParameters'
+              - 'rds:DescribeDBParameterGroups'
+              # Blue/Green 作成時に引き継がれる移行元 OptionGroup の確認に使う。
+              - 'rds:DescribeOptionGroups'
+              - 'rds:DescribeDBSnapshots'
+              - 'rds:DescribeBlueGreenDeployments'
+              - 'rds:DescribeDBEngineVersions'
+              - 'rds:DescribeEngineDefaultParameters'
+              - 'rds:DescribeOrderableDBInstanceOptions'
+              - 'rds:DescribeEvents'
+              - 'rds:ListTagsForResource'
+            Resource: '*'
+          - Sid: CloudWatchRead
+            Effect: Allow
+            # Step 4 の ReplicaLag、Step 1 の FreeStorageSpace の取得に使う。
+            Action: 'cloudwatch:GetMetricStatistics'
+            Resource: '*'
+
+  # --- CodeBuild ロール（Step ごとに変更権限を分ける）-------------------------
+  # docs/upgrade-flow-steps.md「CI 実行ロールに必要な権限」の分割に対応する。
+
+  # config の承認宣言を読み出すだけ。AWS API は呼び出さない。
+  ReadApprovalsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-read-approvals'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+
+  # Step 4 のレポート生成器のビルド専用。AWS リソースへは一切触らない。
+  # ログ出力と artifact の読み書きだけを共通ポリシーから得る。
+  BuildReportToolRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-build-report-tool'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      # VPC 外で動くため Elastic Network Interface の権限は要らない。
+      # ログ出力と artifact の読み書きは CodeBuildCommonPolicy が持つ。
+      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+
+  # 構築前チェック（BuildGreen の直前。移行先パラメータグループの確認）: 読み取りのみ。
+  PrecheckRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-precheck'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+
+  # Step 3: 保護スナップショットの作成と Blue/Green の作成。
+  BuildGreenRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-build-green'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+      Policies:
+        - PolicyName: build-green-mutations
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: CreateProtectionSnapshot
+                Effect: Allow
+                Action:
+                  - 'rds:CreateDBSnapshot'
+                  - 'rds:AddTagsToResource'
+                # ProtectedRdsResourceArns をそのまま使う。IAM の Resource は
+                # リストを取れるため、複数の移行対象をそのまま列挙できる。
+                # 空のときだけ、このアカウント・リージョンの db / snapshot 全体へ落とす。
+                Resource: !If
+                  - HasProtectedRdsResourceArns
+                  - !Ref ProtectedRdsResourceArns
+                  - - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:*'
+                    - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:*'
+              # 移行元が拡張モニタリング（Enhanced Monitoring）を使っている場合、
+              # RDS は Green へその設定をコピーするため、呼び出し側に
+              # そのロールを渡す権限を要求する。これが無いと
+              # create-blue-green-deployment が iam:PassRole の
+              # AccessDenied で失敗する。
+              # 渡し先のサービスを Condition で固定し、他用途への流用を防ぐ。
+              - !If
+                - HasRdsMonitoringRole
+                - Sid: PassRdsMonitoringRole
+                  Effect: Allow
+                  Action: 'iam:PassRole'
+                  Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${RdsMonitoringRoleName}'
+                  Condition:
+                    StringEquals:
+                      'iam:PassedToService': rds.amazonaws.com
+                - !Ref 'AWS::NoValue'
+              - Sid: CreateBlueGreenDeployment
+                Effect: Allow
+                # Blue/Green の Green DB、関連する DB parameter group／OptionGroup は RDS が
+                # 内部命名で作成・関連付けする。AWS はこの操作に部分一致 ARN を使えず、
+                # Resource: * を要求している。対象は本アクション群だけに限定する。
+                # CreateBlueGreenDeployment の従属操作として、RDS が Green のレプリカを
+                # 作成し、作成リソースへタグを付与するための権限も含める。
+                Action:
+                  - 'rds:CreateBlueGreenDeployment'
+                  - 'rds:CreateDBInstanceReadReplica'
+                  - 'rds:AddTagsToResource'
+                Resource: '*'
+
+  # Step 4: 読み取りのみ。Go レポート生成器は buildspec の runtime-versions で
+  # 同一イメージ内をビルドするため、Docker も PrivilegedMode も要らない。
+  VerifyGreenRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-verify-green'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+      Policies:
+        # パラメータ ARN が未指定ならこのポリシーを省く。
+        - !If
+          - HasMySqlCredentials
+          - PolicyName: read-mysql-credentials
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                # auth_method: parameter_store で使う 2 本（パスワード・ユーザー名）を
+                # サービスごとに読む。対象は MySqlCredentialsParameterPath の階層配下に限る。
+                #
+                # 名前のリストから ARN を組み立てる形にはしていない。CloudFormation には
+                # リストの各要素へ !Sub をかける手段が無いためで、階層 1 つなら
+                # !Sub で ARN を組める。
+                #
+                # AWS 管理キー（alias/aws/ssm）なら SSM が代理で復号するため
+                # kms:Decrypt は要らない。CMK の場合は下の decrypt-mysql-credentials が付く。
+                - Sid: GetMySqlParameter
+                  Effect: Allow
+                  Action:
+                    - 'ssm:GetParameter'
+                    - 'ssm:GetParameters'
+                  Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${MySqlCredentialsParameterPath}/*'
+          - !Ref 'AWS::NoValue'
+        # SecureString がカスタマー管理キー（CMK）で暗号化されている場合だけ必要。
+        #
+        # **AWS 管理キー（alias/aws/ssm）なら不要である。**その場合は SSM が
+        # 代理で復号し、呼び出し側に kms:Decrypt を要求しない。
+        #
+        # kms:ViaService で「SSM 経由でのみ使える」ように縛る。これが無いと、
+        # このロールはこのキーで暗号化された**あらゆる暗号文**を自力で復号できて
+        # しまう。付ければできるのは Parameter Store のパラメータを読むことだけになる。
+        #
+        # **ネットワークは増えない。**復号は SSM の側で行われ、ビルドコンテナが
+        # KMS を直接呼ぶことはない。したがって kms の VPC endpoint は要らない。
+        #
+        # **KMS は IAM ポリシーとキーポリシーの両方で許可されて初めて通る。**
+        # キーはこのスタックの外にあるため、キーポリシー側はここでは設定できない。
+        # キーポリシーがアカウントのルートへ委任する標準の形ならこれで足りるが、
+        # principal を絞っている場合は VerifyGreenRole をキーポリシーへ手で追記する。
+        - !If
+          - HasMySqlCredentialsKmsKey
+          - PolicyName: decrypt-mysql-credentials
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Sid: DecryptMySqlCredentials
+                  Effect: Allow
+                  Action: 'kms:Decrypt'
+                  # 対象はこのキー 1 つに限る。
+                  Resource: !Ref MySqlCredentialsKmsKeyArn
+                  Condition:
+                    StringEquals:
+                      'kms:ViaService': !Sub 'ssm.${AWS::Region}.amazonaws.com'
+          - !Ref 'AWS::NoValue'
+        # VPC 内で動く CodeBuild は実行ごとに Elastic Network Interface を作る。この権限が無いと起動に失敗する。
+        - !If
+          - HasVpc
+          - PolicyName: vpc-network-interface
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Sid: DescribeVpcResources
+                  Effect: Allow
+                  Action:
+                    - 'ec2:CreateNetworkInterface'
+                    - 'ec2:DescribeNetworkInterfaces'
+                    - 'ec2:DeleteNetworkInterface'
+                    - 'ec2:DescribeSubnets'
+                    - 'ec2:DescribeSecurityGroups'
+                    - 'ec2:DescribeDhcpOptions'
+                    - 'ec2:DescribeVpcs'
+                  # これらの Describe / Create は個別リソースを指定できない。
+                  Resource: '*'
+                # Elastic Network Interface を CodeBuild へ渡す許可。サービス指定で絞る。
+                # さらに絞るなら Condition へ ec2:Subnet（subnet の ARN）も加える。
+                - Sid: CreateNetworkInterfacePermissionForCodeBuild
+                  Effect: Allow
+                  Action: 'ec2:CreateNetworkInterfacePermission'
+                  Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
+                  Condition:
+                    StringEquals:
+                      'ec2:AuthorizedService': codebuild.amazonaws.com
+          - !Ref 'AWS::NoValue'
+
+  # Step 5: 切替に必要な変更だけを許可する。作成・削除の権限は持たせない。
+  SwitchoverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-switchover'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+      Policies:
+        - PolicyName: switchover-mutations
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SwitchoverBlueGreenDeployment
+                Effect: Allow
+                # Blue/Green deployment 自体を切り替える権限。
+                Action: 'rds:SwitchoverBlueGreenDeployment'
+                Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:deployment:*'
+              - Sid: CompleteSwitchoverOnDbInstances
+                Effect: Allow
+                # 切替に伴い RDS が Green DB instance を ModifyDBInstance し、
+                # read replica を PromoteReadReplica するために必要な権限。
+                Action:
+                  - 'rds:ModifyDBInstance'
+                  - 'rds:PromoteReadReplica'
+                Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:*'
+
+  # Step 7（後始末: 旧 Blue と Deployment の削除）はパイプラインから外した。
+  # 人が実行するツール tools/cleanup/ になっている。以前あった CleanupRole
+  # （rds:DeleteDBInstance 等の破壊的権限を持つ唯一のロール）も削除したため、
+  # **このスタックが作るロールは、どれも旧 Blue を削除できない。**
+
+  # --- CodePipeline ロール ----------------------------------------------------
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-pipeline'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codepipeline.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: pipeline-permissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: Artifacts
+                Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:GetObjectVersion'
+                  - 's3:PutObject'
+                  - 's3:GetBucketVersioning'
+                Resource:
+                  - !Sub
+                    - 'arn:${AWS::Partition}:s3:::${Bucket}'
+                    - Bucket: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
+                  - !Sub
+                    - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                    - Bucket: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
+              - Sid: StartBuilds
+                Effect: Allow
+                Action:
+                  - 'codebuild:StartBuild'
+                  - 'codebuild:BatchGetBuilds'
+                  - 'codebuild:StopBuild'
+                Resource:
+                  - !GetAtt ReadApprovalsProject.Arn
+                  - !GetAtt PrecheckProject.Arn
+                  - !GetAtt BuildGreenProject.Arn
+                  - !GetAtt BuildReportToolProject.Arn
+                  - !GetAtt VerifyGreenProject.Arn
+                  - !GetAtt SwitchoverProject.Arn
+              # ソースの取得に必要な権限。SourceProvider で一方だけを付ける。
+              - !If
+                - UseCodeConnections
+                - Sid: UseSourceConnection
+                  Effect: Allow
+                  # 接続は codestar-connections / codeconnections のどちらの名前空間でも
+                  # 作られうるため、両方を許可する。対象は指定した接続 1 つに限る。
+                  Action:
+                    - 'codestar-connections:UseConnection'
+                    - 'codeconnections:UseConnection'
+                  Resource: !Ref CodeStarConnectionArn
+                - !Ref 'AWS::NoValue'
+              - !If
+                - UseCodeCommit
+                - Sid: ReadSourceFromCodeCommit
+                  Effect: Allow
+                  # CodePipeline が CodeCommit から取得するのに要る最小の読み取り。
+                  # UploadArchive 系は CodePipeline が成果物を S3 へ渡すために使う。
+                  Action:
+                    - 'codecommit:GetBranch'
+                    - 'codecommit:GetCommit'
+                    - 'codecommit:GetRepository'
+                    - 'codecommit:UploadArchive'
+                    - 'codecommit:GetUploadArchiveStatus'
+                    - 'codecommit:CancelUploadArchive'
+                  Resource: !Sub 'arn:${AWS::Partition}:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitRepositoryName}'
+                - !Ref 'AWS::NoValue'
+              - !If
+                - HasApprovalTopic
+                - Sid: NotifyApproval
+                  Effect: Allow
+                  Action: 'sns:Publish'
+                  Resource: !Ref ApprovalNotificationTopicArn
+                - !Ref 'AWS::NoValue'
+
+  # --- CodeBuild プロジェクト -------------------------------------------------
+  # SERVICE_NAME はプロジェクト定義に既定値を置き、パイプライン実行時に
+  # アクション側の EnvironmentVariables で上書きする。
+  # これにより start-build による個別実行でも既定値で動く。
+
+  # config の actions をパイプライン変数として公開する。後続ステージの
+  # BeforeEntry 条件がこれを見て、承認していないフェーズをスキップする。
+  ReadApprovalsProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-read-approvals'
+      Description: config の actions（承認宣言）をパイプライン変数として公開する
+      ServiceRole: !GetAtt ReadApprovalsRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/read-approvals.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0   # 8.0 にしない（ci/codebuild-codepipeline-setup.md の 0 章）
+        EnvironmentVariables:
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
+
+  PrecheckProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-precheck-parameter-group'
+      Description: 構築前チェック - 移行先 DB パラメータグループの存在と family を確認する
+      ServiceRole: !GetAtt PrecheckRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/precheck-target-parameter-group.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:8.0
+        EnvironmentVariables:
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
+
+  BuildGreenProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-build-green'
+      Description: Step 3 - 保護スナップショット取得と Blue/Green 作成
+      ServiceRole: !GetAtt BuildGreenRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/build-green.yml
+      # Green の AVAILABLE 待機を含むため既定の 60 分では不足しうる。
+      TimeoutInMinutes: 120
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:8.0
+        EnvironmentVariables:
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
+
+  # Go レポート生成器をビルドするだけのプロジェクト。
+  # **外部ネットワーク（Go module の取得）へ出るのはここだけである。**
+  # VPC には入れない（VerifyGreen 以外のプロジェクトと同じ扱い）。AWS API は呼ばない。
+  BuildReportToolProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-build-report-tool'
+      Description: Step 4 - Go レポート生成器のビルド（AWS API は呼ばない）
+      ServiceRole: !GetAtt BuildReportToolRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/build-report-tool.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        # buildspec の runtime-versions で Go を用意し、go.mod / go.sum でビルドする。
+        Image: aws/codebuild/standard:8.0
+      # VpcConfig を付けない。VerifyGreen 以外のプロジェクトと同じく VPC 外で動く。
+      # このビルドは AWS API も RDS も呼ばず、Go module の取得で外部へ出るだけである。
+      # VPC へ入れると NAT gateway 経由の外向き経路が必須になり、
+      # Elastic Network Interface の作成権限も要るため、得るものが無い。
+
+  VerifyGreenProject:
+    Type: AWS::CodeBuild::Project
+    # VerifyGreenSubnetIds / VerifyGreenSecurityGroupIds の既定値は空である。
+    # VpcConfig は HasVpc が真のときだけ展開されるため空値は渡らないが、
+    # cfn-lint は既定値をそのまま型検査して W1030 を出すので、ここだけ抑止する。
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [W1030]
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-verify-green'
+      Description: Step 4 - Green 構成とレプリカ遅延の検証
+      ServiceRole: !GetAtt VerifyGreenRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/verify-green.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        # **既定イメージで足りる。**必要なものはすべて揃っている。
+        #   jq / rbenv（Ruby 3.4.11）/ AWS CLI v2 … このイメージに同梱
+        #   レポート生成器と実効値収集バイナリ … BuildReportTool の artifact から受け取る
+        # MySQL クライアントは使わない（収集は静的リンクの Go バイナリが行う）ため、
+        # カスタムイメージも ECR からの pull も要らない。
+        Image: aws/codebuild/standard:8.0
+        EnvironmentVariables:
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
+          - { Name: COLLECT_MYSQL_RUNTIME_VALUES, Type: PLAINTEXT, Value: !Ref CollectMySqlRuntimeValues }
+      # BuildReportTool と同一 VPC の、**レポート実行専用**の private subnet で実行する。
+      # VpcConfig はプロジェクトのプロパティなので実行ごとの切り替えはできない。
+      # 未指定なら VPC 外で動く。**この subnet に外部 egress は要らない。**
+      VpcConfig: !If
+        - HasVpc
+        - VpcId: !Ref VpcId
+          Subnets: !Ref VerifyGreenSubnetIds
+          SecurityGroupIds: !Ref VerifyGreenSecurityGroupIds
+        - !Ref 'AWS::NoValue'
+
+  SwitchoverProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-switchover'
+      Description: Step 5 - Blue/Green の切替（config の actions.switchover が approved の場合のみ）
+      ServiceRole: !GetAtt SwitchoverRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/switchover.yml
+      # 切替完了まで待機するため余裕を持たせる。
+      TimeoutInMinutes: 60
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:8.0
+        EnvironmentVariables:
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
+
+
+  # --- CodePipeline -----------------------------------------------------------
+  BlueGreenPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}'
+      # V2 でないとパイプライン変数を使えない。
+      PipelineType: V2
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
+      # 実行時に指定する変数。start-pipeline-execution の --variables で上書きする。
+      Variables:
+        - Name: ServiceName
+          DefaultValue: !Ref DefaultServiceName
+          Description: 対象サービス名（config の services 配下のキー）
+      Stages:
+        # SourceProvider でどちらか一方だけを展開する。後続ステージは
+        # どちらの場合も SourceOutput を受け取るので、変更の影響はここに閉じる。
+        - Name: Source
+          Actions:
+            - !If
+              - UseCodeConnections
+              - Name: SourceFromGitHub
+                ActionTypeId: { Category: Source, Owner: AWS, Provider: CodeStarSourceConnection, Version: '1' }
+                Configuration:
+                  ConnectionArn: !Ref CodeStarConnectionArn
+                  FullRepositoryId: !Ref RepositoryId
+                  BranchName: !Ref BranchName
+                  # push では起動しない。作業者が明示的に開始する。
+                  DetectChanges: 'false'
+                OutputArtifacts: [{ Name: SourceOutput }]
+                RunOrder: 1
+              - Name: SourceFromCodeCommit
+                ActionTypeId: { Category: Source, Owner: AWS, Provider: CodeCommit, Version: '1' }
+                Configuration:
+                  RepositoryName: !Ref CodeCommitRepositoryName
+                  BranchName: !Ref BranchName
+                  # push では起動しない（EventBridge ルールも作らない）。
+                  # DetectChanges: 'false' と同じ意図である。
+                  PollForSourceChanges: 'false'
+                OutputArtifacts: [{ Name: SourceOutput }]
+                RunOrder: 1
+
+        # 準備: 互いに依存しない 3 つを並列に動かす（同じ RunOrder のアクションは並列に走る）。
+        # どれも入力は SourceOutput だけで、結果を使うのは後ろのステージである。
+        # 1 つでも失敗すればステージが失敗し、BuildGreen へは進まない（直列だったときと同じ安全性）。
+        #
+        #   ReadApprovals          config の actions を変数として公開する。Namespace を付けたので
+        #                          後ろのステージの条件から #{Approvals.SWITCHOVER_APPROVED} で参照できる
+        #   BuildReportTool        Step 4 で使う Go バイナリをビルドし、artifact で VerifyGreen へ渡す。
+        #                          VerifyGreen を VPC 内へ置く構成でも、外部ネットワークが要るのはここだけになる
+        #   PrecheckParameterGroup Step 2 の成果物（8.4 パラメータグループ）が適用済みかを確かめる
+        - Name: Prepare
+          Actions:
+            - Name: ReadApprovals
+              Namespace: Approvals
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref ReadApprovalsProject
+                EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }]
+              RunOrder: 1
+            - Name: BuildReportTool
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref BuildReportToolProject
+              InputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: ReportToolOutput }]
+              RunOrder: 1
+            - Name: PrecheckParameterGroup
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref PrecheckProject
+                EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: PrecheckOutput }]
+              RunOrder: 1
+        
+        - Name: BuildGreen
+          Actions:
+            - Name: BuildGreen
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref BuildGreenProject
+                EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: BuildGreenOutput }]
+              RunOrder: 1
+
+        - Name: VerifyGreen
+          Actions:
+            - Name: VerifyGreen
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref VerifyGreenProject
+                # 入力が複数あるため、どれをソースとして展開するかを明示する。
+                # 2 つ目は CODEBUILD_SRC_DIR_ReportToolOutput に展開され、
+                # buildspec がそこからレポート生成器を受け取る。
+                PrimarySource: SourceOutput
+                EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
+              InputArtifacts:
+                - { Name: SourceOutput }
+                - { Name: ReportToolOutput }
+              OutputArtifacts: [{ Name: VerifyGreenOutput }]
+              RunOrder: 1
+
+        # config の actions.switchover が approved のときだけ入る。
+        # pending ならステージごとスキップされるため、手動承認も表示されない。
+        # これにより「承認しても何も起きない」クリックが発生しない。
+        - Name: Switchover
+          BeforeEntry:
+            Conditions:
+              - Result: SKIP
+                Rules:
+                  - Name: SwitchoverApproved
+                    RuleTypeId: { Category: Rule, Owner: AWS, Provider: VariableCheck, Version: '1' }
+                    Configuration:
+                      Variable: '#{Approvals.SWITCHOVER_APPROVED}'
+                      Value: approved
+                      Operator: EQ
+          Actions:
+            - Name: ManualApproval
+              ActionTypeId: { Category: Approval, Owner: AWS, Provider: Manual, Version: '1' }
+              Configuration:
+                NotificationArn: !If [HasApprovalTopic, !Ref ApprovalNotificationTopicArn, !Ref 'AWS::NoValue']
+                CustomData: >-
+                  Step 4 の検証レポートを確認してから承認する。本番トラフィックが切り替わる。
+                  config の actions.switchover は approved である（このステージに入った時点で確認済み）。
+              RunOrder: 1
+            - Name: Switchover
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref SwitchoverProject
+                EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: SwitchoverOutput }]
+              RunOrder: 2
+
+
+Outputs:
+  ArtifactBucket:
+    Description: >-
+      使用しているアーティファクト用 S3 バケット。このスタックが作った場合は
+      スタックの削除で一緒に消える（中身は pipeline-stack.sh down が先に空にする）
+    Value: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
+
+  PipelineName:
+    Description: 作成した CodePipeline 名
+    Value: !Ref BlueGreenPipeline
+
+  StartCommand:
+    Description: サービスを指定してパイプラインを開始するコマンド
+    Value: !Sub >-
+      aws codepipeline start-pipeline-execution --name ${BlueGreenPipeline}
+      --variables name=ServiceName,value=<service-name>

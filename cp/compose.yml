@@ -1,0 +1,32 @@
+services:
+  rails:
+    build:
+      context: .
+    working_dir: /app
+    volumes:
+      - .:/app
+      - bundle:/usr/local/bundle
+      - node_modules:/app/node_modules
+    environment:
+      CAPYBARA_APP_HOST: http://rails:3001
+      SELENIUM_URL: http://selenium:4444/wd/hub
+      RAILS_ENV: development
+    depends_on:
+      selenium:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    command: sh -c "npm run build && bundle exec ruby bin/rails server -b 0.0.0.0 -p 3000"
+
+  selenium:
+    image: selenium/standalone-chrome:latest
+    shm_size: 2gb
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4444/wd/hub/status >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  bundle:
+  node_modules:

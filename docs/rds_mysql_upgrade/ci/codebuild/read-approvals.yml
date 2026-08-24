@@ -1,0 +1,49 @@
+# 設定ファイルの actions（承認宣言）をパイプライン変数として公開する buildspec。
+#
+# AWS API は呼び出さない。config を読むだけである。
+# ここで公開した変数を、後続ステージの BeforeEntry 条件（VariableCheck）が参照し、
+# 承認していないフェーズのステージをスキップする。
+#
+# これにより手動承認は「config で承認済みのフェーズ」でだけ表示される。
+# 承認ゲートの実体は従来どおり config の actions であり、運用は変わらない。
+version: 0.2
+
+env:
+  # Linux で指定できるのは bash または /bin/sh。既定シェルに依存しないよう明示する。
+  shell: bash
+  exported-variables:
+    - BUILD_APPROVED
+    - SWITCHOVER_APPROVED
+
+phases:
+  install:
+    commands:
+      # 設定 YAML の読み取りに Ruby の標準ライブラリ（psych / json）を使う。
+      # 追加パッケージの導入は不要で、PyPI へも到達しない。
+      # CodeBuild の managed image は rbenv で複数の Ruby を持つため、使う版を固定する。
+      # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.11; fi
+      - ruby --version
+  build:
+    commands:
+      # **set -e / set -u をこのシェルに残さない（予防）。**CodeBuild は同じフェーズのコマンドを
+      # 1 つのシェルで続けて実行し、フェーズの終わりに自分の後処理（exported-variables の回収など）も
+      # 同じシェルで動かすので、シェルの設定を後処理へ持ち込まない。失敗の検出は CodeBuild に任せる。
+      # コマンドを 1 行ずつ分ければ、0 以外でフェーズが止まる。
+      #
+      # **イメージは standard:7.0 に固定する。**standard:8.0 では、このプロジェクトだけが最後の
+      # コマンドまで実行した後に完了せず、タイムアウトした（7.0 へ戻すと解消。原因は未特定で、
+      # このプロジェクトにしか無い exported-variables が疑わしい。set -eu を外しても直らなかった）。
+      #
+      # eval で shell 変数にした後、exported-variables として拾わせるため export する。
+      # **eval "$(...)" と書かない。**その形だとスクリプトが失敗しても終了コードが
+      # eval のものに化け、承認状態が空のまま後続ステージへ渡ってしまう。
+      # 代入の行は Ruby の終了コードをそのまま返すので、失敗すればここで止まる。
+      # 未定義のアクションは pending として扱う（承認されていない側に倒す）。
+      - >-
+        approvals=$(ruby scripts/lib/deployment_config.rb vars "$CONFIG_FILE" "$SERVICE_NAME"
+        BUILD_APPROVED=optional:service.actions.build=pending
+        SWITCHOVER_APPROVED=optional:service.actions.switchover=pending)
+      - eval "$approvals"
+      - export BUILD_APPROVED SWITCHOVER_APPROVED
+      - echo "service=${SERVICE_NAME} build=${BUILD_APPROVED} switchover=${SWITCHOVER_APPROVED}"

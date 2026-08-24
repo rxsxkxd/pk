@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1070" height="960" viewBox="0 0 1070 960" role="img">
+
+  <style>
+    .bg { fill: #ffffff; }
+    .box { stroke-width: 1.5; rx: 8; }
+    .command { fill: #e8f0fe; stroke: #1a56db; }
+    .check { fill: #fff4e5; stroke: #c2410c; }
+    .manual { fill: #ecfdf3; stroke: #15803d; stroke-dasharray: 6 4; }
+    .done { fill: #f1f5f9; stroke: #475569; }
+    .ok { fill: #dcfce7; stroke: #15803d; }
+    .ng { fill: #fee2e2; stroke: #b91c1c; }
+    .note { fill: #fafafa; stroke: #9ca3af; stroke-dasharray: 3 3; }
+    text { font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif; fill: #111827; }
+    .t { font-size: 15px; }
+    .s { font-size: 12.5px; fill: #374151; }
+    .lbl { font-size: 12.5px; fill: #1f2937; }
+    .title { font-size: 18px; font-weight: bold; }
+    .edge { stroke: #374151; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    .bracket { stroke: #6b7280; stroke-width: 1.4; fill: none; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1070" height="960"/>
+  <text class="title" x="20" y="30">ssm-setup: SSM の有効化の流れ</text>
+  <rect class="box done" x="260" y="60" width="420" height="58"/>
+  <text class="t" x="470.0" y="84.5" text-anchor="middle">0. 準備</text>
+  <text class="s" x="470.0" y="103.5" text-anchor="middle">対象の一覧・インスタンスプロファイルを用意する</text>
+  <rect class="box command" x="260" y="150" width="420" height="58"/>
+  <text class="t" x="470.0" y="174.5" text-anchor="middle">1. ssm-role（AWS の API だけ）</text>
+  <text class="s" x="470.0" y="193.5" text-anchor="middle">IAM ロールが未設定の台にインスタンスプロファイルを関連付ける</text>
+  <rect class="box check" x="260" y="240" width="420" height="58"/>
+  <text class="t" x="470.0" y="264.5" text-anchor="middle">2. ssm-check</text>
+  <text class="s" x="470.0" y="283.5" text-anchor="middle">入れる・SSM Agent で直す・手で直す に分ける</text>
+  <rect class="box command" x="260" y="350" width="420" height="58"/>
+  <text class="t" x="470.0" y="374.5" text-anchor="middle">3. backup（ng.txt の台だけ）</text>
+  <text class="s" x="470.0" y="393.5" text-anchor="middle">AMI を作る（再起動しない・完了は待たない）</text>
+  <rect class="box check" x="260" y="440" width="420" height="58"/>
+  <text class="t" x="470.0" y="464.5" text-anchor="middle">backup-check（補助）</text>
+  <text class="s" x="470.0" y="483.5" text-anchor="middle">作成済み（available）で 12 時間以内か</text>
+  <rect class="box command" x="260" y="540" width="420" height="58"/>
+  <text class="t" x="470.0" y="564.5" text-anchor="middle">4. ssm-agent（SSH）</text>
+  <text class="s" x="470.0" y="583.5" text-anchor="middle">SSM Agent を入れる・有効にする・起動し直す</text>
+  <rect class="box check" x="260" y="640" width="420" height="58"/>
+  <text class="t" x="470.0" y="664.5" text-anchor="middle">5. ssm-check（もう一度。ng.txt の台）</text>
+  <text class="s" x="470.0" y="683.5" text-anchor="middle">入れる・入れない に分ける</text>
+  <rect class="box manual" x="260" y="750" width="420" height="58"/>
+  <text class="t" x="470.0" y="774.5" text-anchor="middle">手で直す</text>
+  <text class="s" x="470.0" y="793.5" text-anchor="middle">理由と「見るところ」を見て直し、ssm-check で確かめる</text>
+  <path class="edge" d="M 470.0 118 L 470.0 150"/>
+  <path class="edge" d="M 470.0 208 L 470.0 240"/>
+  <path class="edge" d="M 470.0 298 L 470.0 350"/>
+  <text class="lbl" x="478.0" y="328" text-anchor="start">SSM Agent で直す（ng.txt）</text>
+  <path class="edge" d="M 470.0 408 L 470.0 440"/>
+  <path class="edge" d="M 470.0 498 L 470.0 540"/>
+  <text class="lbl" x="478.0" y="528" text-anchor="start">そろった</text>
+  <path class="edge" d="M 470.0 598 L 470.0 640"/>
+  <path class="edge" d="M 470.0 698 L 470.0 750"/>
+  <text class="lbl" x="478.0" y="728" text-anchor="start">入れない（ng2.txt）</text>
+  <rect class="box done" x="750" y="640" width="290" height="58"/>
+  <text class="t" x="895.0" y="664.5" text-anchor="middle">フェーズ 2 へ（port-guard-rollout）</text>
+  <text class="s" x="895.0" y="683.5" text-anchor="middle">ok.txt と ok2.txt の台に iptables ＋ ipset</text>
+  <path class="edge" d="M 680 269 L 970 269 L 970 640"/>
+  <text class="lbl" x="688" y="261" text-anchor="start">入れる（ok.txt）</text>
+  <path class="edge" d="M 680 669 L 750 669"/>
+  <text class="lbl" x="692" y="661" text-anchor="start">入れる</text>
+  <rect class="box done" x="750" y="440" width="160" height="58"/>
+  <text class="t" x="830.0" y="464.5" text-anchor="middle">作成を待つ</text>
+  <text class="s" x="830.0" y="483.5" text-anchor="middle">（pending）</text>
+  <path class="edge" d="M 680 460 L 750 460"/>
+  <text class="lbl" x="688" y="454" text-anchor="start">まだ</text>
+  <path class="edge" d="M 750 480 L 680 480"/>
+  <path class="edge" d="M 260 469 L 200 469 L 200 379 L 260 379"/>
+  <text class="s" x="192" y="414" text-anchor="end">12 時間を</text>
+  <text class="s" x="192" y="432" text-anchor="end">過ぎたら</text>
+  <text class="s" x="192" y="450" text-anchor="end">作り直す</text>
+  <path class="edge" d="M 260 269 L 40 269 L 40 779 L 260 779"/>
+  <text class="s" x="48" y="261" text-anchor="start">手で直す</text>
+  <text class="s" x="48" y="290" text-anchor="start">（ng.txt に</text>
+  <text class="s" x="48" y="308" text-anchor="start"># で残る）</text>
+  <rect class="box command" x="750" y="60" width="28" height="16"/>
+  <text class="s" x="786" y="73" text-anchor="start">道具のコマンド</text>
+  <rect class="box check" x="750" y="84" width="28" height="16"/>
+  <text class="s" x="786" y="97" text-anchor="start">確認（道具）</text>
+  <rect class="box manual" x="750" y="108" width="28" height="16"/>
+  <text class="s" x="786" y="121" text-anchor="start">作業者が手で行う</text>
+  <rect class="box done" x="750" y="132" width="28" height="16"/>
+  <text class="s" x="786" y="145" text-anchor="start">準備・待ち・次のフェーズ</text>
+  <text class="s" x="20" y="850" text-anchor="start">ほとんどの台は、SSM Agent は入って動いていて、IAM ロールがないだけと見込んでいる。まずインスタンスプロファイルを関連付けて確かめ、</text>
+  <text class="s" x="20" y="872" text-anchor="start">SSM Agent で直る見込みの台（running・インスタンスプロファイルとロールの権限がある・Online でない）だけにバックアップを取って SSM Agent を入れる。</text>
+  <text class="s" x="20" y="894" text-anchor="start">それ以外の入れない台（止まっている、権限がない、Online なのにつながらない、など）は手で直す。バックアップが要るのは ssm-agent だけ。</text>
+  <text class="s" x="20" y="916" text-anchor="start">ssm-check --ok-out / --ng-out で書き出した一覧を、そのまま次のコマンドの標準入力に渡す。どの手順も、OS の再起動は要らない。</text>
+</svg>

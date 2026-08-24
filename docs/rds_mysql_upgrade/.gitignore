@@ -1,0 +1,23 @@
+# Local Docker credentials, certificates, and client connection settings
+.env
+aws-config/*
+!aws-config/.gitkeep
+global-bundle.pem
+# my.cnf は空プレースホルダとして追跡する。実接続情報は書き込まず、
+# 必要な場合は .env の MYSQL_CLIENT_CONFIG_FILE でリポジトリ外の絶対パスを指す。
+.act.env
+.act-assets/
+
+# Local-only CodeBuild env files and script output directories (see ci/codebuild-local-verification.md)
+.local/
+artifacts/
+# Go build output for the Step 4 report generator (CI and local both write here)
+.tools/
+# rbenv local が書き出すファイル。buildspec の install フェーズが生成する
+.ruby-version
+
+# Generated verification reports (see examples/mysql-timezone-replication/)
+examples/mysql-timezone-replication/probe/reports/
+
+# Python bytecode
+__pycache__/

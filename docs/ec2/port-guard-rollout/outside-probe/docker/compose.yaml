@@ -1,0 +1,17 @@
+# 海外からの確認の拠点（チェック用のクライアント）を、手元で再現する。説明は同じフォルダの README.md。
+services:
+  outside-probe:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: port-guard-rollout/outside-probe:local
+    hostname: outside-probe
+    networks:
+      - default
+      - al2-instance
+
+networks:
+  # 手元の al2-instance（../../al2-instance）の compose が作るネットワーク。先に al2-instance を起動しておく
+  al2-instance:
+    external: true
+    name: al2-instance_default

@@ -1,0 +1,1 @@
+{"DBInstances":[{"DBInstanceIdentifier":"green","EngineVersion":"8.4.10","DBInstanceClass":"db.t4g.medium","DBParameterGroups":[{"DBParameterGroupName":"example-production-mysql84-v1","ParameterApplyStatus":"in-sync"}]}]}

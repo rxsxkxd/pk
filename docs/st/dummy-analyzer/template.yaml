@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Dummy image analysis server for the verification environment (AWS SAM: Python Lambda + public Function URL). Returns
+  the result, delay or failure chosen by its settings, to check the ticket QR API's analysis client on AWS
+  (timeouts, retries, REJECT / RETRY, upstream errors). Reads no image. Separate from analyzer-stub. Do not use in
+  production. See dummy-analyzer/README.md.
+
+Parameters:
+  # 関数とロググループの名前の先頭。空ならスタック名を使う
+  NamePrefix:
+    Type: String
+    Default: ""
+    AllowedPattern: ^([A-Za-z0-9][A-Za-z0-9_-]{0,63})?$
+    Description: Prefix of the function and log group names. Empty = the stack name.
+  # 返す判定（クエリの result で、その要求だけ変えられる）
+  Result:
+    Type: String
+    Default: PASS
+    AllowedValues: [PASS, REJECT, RETRY]
+    Description: Result to return (the query parameter result overrides it per request).
+  # 応答の前に待つ秒数（0〜50。クエリの delay で、その要求だけ変えられる）
+  Delay:
+    Type: String
+    Default: "0"
+    AllowedPattern: ^[0-9]+(\.[0-9]+)?$
+    Description: Seconds to wait before answering, 0 to 50 (the query parameter delay overrides it).
+  # 返すステータス。200 以外なら本文なしでそのステータスを返す（クエリの status で変えられる）
+  Status:
+    Type: Number
+    Default: 200
+    MinValue: 200
+    MaxValue: 599
+    Description: HTTP status to return; other than 200 answers with no body (the query parameter status overrides it).
+  # 本文の形。garbage なら JSON でない本文を返す（クエリの body で変えられる）
+  Body:
+    Type: String
+    Default: json
+    AllowedValues: [json, garbage]
+    Description: json, or garbage for a body that is not JSON (the query parameter body overrides it).
+  # 予約同時実行数（公開の URL の使われすぎを抑える）
+  ReservedConcurrency:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: Caps how much the public URL can be used.
+  # ログの保持日数
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+    AllowedValues: [1, 3, 5, 7, 14, 30]
+    Description: Days to keep the dummy's logs.
+
+Conditions:
+  HasNamePrefix: !Not [!Equals [!Ref NamePrefix, ""]]
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub
+        - /aws/lambda/${Prefix}
+        - Prefix: !If [HasNamePrefix, !Ref NamePrefix, !Ref AWS::StackName]
+      RetentionInDays: !Ref LogRetentionDays
+
+  Function:
+    Type: AWS::Serverless::Function
+    DependsOn: LogGroup
+    Properties:
+      FunctionName: !If [HasNamePrefix, !Ref NamePrefix, !Ref AWS::StackName]
+      CodeUri: src/
+      Handler: app.handler
+      Runtime: python3.13
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 60 # the longest delay (50 seconds) plus margin
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      Environment:
+        Variables:
+          DUMMY_RESULT: !Ref Result
+          DUMMY_DELAY: !Ref Delay
+          DUMMY_STATUS: !Ref Status
+          DUMMY_BODY: !Ref Body
+      # Public: the ticket QR API calls it from the internet (through its NAT gateway) without signing.
+      FunctionUrlConfig:
+        AuthType: NONE
+
+Outputs:
+  AnalyzeUrl:
+    Description: Pass this as AnalyzerUrl of the ticket QR API stack (AnalyzerMode=http). Query parameters may be added.
+    Value: !GetAtt FunctionUrl.FunctionUrl
+  FunctionName:
+    Value: !Ref Function
+  LogGroupName:
+    Value: !Ref LogGroup

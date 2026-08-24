@@ -1,0 +1,7 @@
+# 今のインスタンスの設定と同じ形（rbenv の Ruby の gem の中の Passenger を読み込む）
+LoadModule passenger_module /home/@APP_USER@/.rbenv/versions/@RUBY_VERSION@/lib/ruby/gems/@RUBY_API_VERSION@/gems/passenger-@PASSENGER_VERSION@/buildout/apache2/mod_passenger.so
+
+<IfModule mod_passenger.c>
+  PassengerRoot /home/@APP_USER@/.rbenv/versions/@RUBY_VERSION@/lib/ruby/gems/@RUBY_API_VERSION@/gems/passenger-@PASSENGER_VERSION@
+  PassengerDefaultRuby /home/@APP_USER@/.rbenv/versions/@RUBY_VERSION@/bin/ruby
+</IfModule>

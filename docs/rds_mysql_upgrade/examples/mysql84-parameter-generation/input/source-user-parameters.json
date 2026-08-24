@@ -1,0 +1,34 @@
+{
+  "Parameters": [
+    {
+      "ParameterName": "binlog_format",
+      "ParameterValue": "MIXED",
+      "Source": "user"
+    },
+    {
+      "ParameterName": "log_slave_updates",
+      "ParameterValue": "1",
+      "Source": "user"
+    },
+    {
+      "ParameterName": "slave_parallel_workers",
+      "ParameterValue": "8",
+      "Source": "user"
+    },
+    {
+      "ParameterName": "innodb_log_file_size",
+      "ParameterValue": "536870912",
+      "Source": "user"
+    },
+    {
+      "ParameterName": "default_authentication_plugin",
+      "ParameterValue": "mysql_native_password",
+      "Source": "user"
+    },
+    {
+      "ParameterName": "max_allowed_packet",
+      "ParameterValue": "67108864",
+      "Source": "user"
+    }
+  ]
+}

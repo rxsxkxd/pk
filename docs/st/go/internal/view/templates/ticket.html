@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>チケット {{.TicketCode}}</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #fff; color: #111; }
+    main { max-width: 360px; margin: 0 auto; padding: 32px 16px; text-align: center; }
+    img { width: 256px; height: 256px; }
+    .code { font-family: ui-monospace, monospace; font-size: 18px; letter-spacing: 0.05em; }
+  </style>
+</head>
+<body>
+  <main data-ticket-code="{{.TicketCode}}">
+    <h1>チケット</h1>
+    <img src="{{.QRURL}}" alt="チケットQRコード" width="256" height="256">
+    <p class="code">{{.TicketCode}}</p>
+  </main>
+</body>
+</html>

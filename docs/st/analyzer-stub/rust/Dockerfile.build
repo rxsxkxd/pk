@@ -1,0 +1,6 @@
+# Build environment for the Lambda binary: same OS as the provided.al2023 runtime, so the glibc matches.
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+RUN dnf install -y gcc gcc-c++ cmake make perl zip tar gzip && dnf clean all
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+ENV PATH=/root/.cargo/bin:$PATH
+RUN rustup component add rustfmt clippy

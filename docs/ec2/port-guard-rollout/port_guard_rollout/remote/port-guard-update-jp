@@ -1,0 +1,23 @@
+#!/bin/bash
+# APNIC の割り当ての統計から日本の IPv4 の範囲を取り直し、集合の中身を入れ替える
+set -euo pipefail
+URL=https://ftp.apnic.net/stats/apnic/delegated-apnic-latest
+JP_FILE=/etc/port-guard/jp.txt
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+curl -fsS --max-time 120 -o "$work/delegated" "$URL"
+python3 - "$work/delegated" > "$work/jp.txt" <<'EOF'
+import ipaddress, sys
+for line in open(sys.argv[1]):
+    f = line.strip().split('|')
+    if len(f) >= 7 and f[1] == 'JP' and f[2] == 'ipv4' and f[6] in ('allocated', 'assigned'):
+        start = ipaddress.IPv4Address(f[3])
+        end = start + int(f[4]) - 1
+        for network in ipaddress.summarize_address_range(start, end):
+            print(network)
+EOF
+
+install -m 644 "$work/jp.txt" "$JP_FILE"
+/usr/local/sbin/port-guard-apply --sets-only
+logger -t port-guard "updated $JP_FILE: $(wc -l < "$JP_FILE") entries" || true

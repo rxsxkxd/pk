@@ -1,0 +1,94 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Image analysis server stub for checking the ticket QR API on AWS (AWS SAM: Lambda + Function URL, public,
+  limited by the x-api-key check in the function). The code is the zip that the chosen implementation's build
+  makes, copied to dist/analyzer-stub.zip; sam deploy uploads it. See DEPLOY.md 3.2.
+
+Parameters:
+  # スタブの実装（node / python / rust）。dist/ の zip と合わせる。実装ごとに1スタック
+  Impl:
+    Type: String
+    AllowedValues: [node, python, rust]
+    Default: node
+    Description: Stub implementation (must match the zip in dist/). One stack per implementation.
+  # x-api-key の値の Parameter Store（SecureString）の名前。スタックの外で作る
+  ApiKeyParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store SecureString holding the x-api-key value, e.g. /ticketqr/analyzer-stub/node/api-key (created outside this stack; CloudFormation cannot create SecureString).
+  # スタブの予約同時実行数（公開 URL の使われすぎを抑える）
+  ReservedConcurrency:
+    Type: Number
+    Default: 5
+    Description: Caps how much the public URL can be used.
+  # ログ（スタブの Lambda）の保持日数
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+    AllowedValues: [1, 3, 5, 7, 14, 30]
+    Description: Days to keep the stub's Lambda logs.
+
+Mappings:
+  ImplMap:
+    node:
+      Runtime: nodejs24.x
+      Handler: index.handler
+    python:
+      Runtime: python3.13
+      Handler: index.handler
+    rust:
+      Runtime: provided.al2023
+      Handler: bootstrap
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ticketqr-analyzer-stub-${Impl}
+      RetentionInDays: !Ref LogRetentionDays
+
+  Function:
+    Type: AWS::Serverless::Function
+    DependsOn: LogGroup
+    Properties:
+      FunctionName: !Sub ticketqr-analyzer-stub-${Impl}
+      # The built zip of the chosen implementation (npm run build / python/build.sh / rust/build.sh), copied here.
+      CodeUri: dist/analyzer-stub.zip
+      Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
+      Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
+      Architectures: [arm64]
+      MemorySize: 128
+      Timeout: 10
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      Environment:
+        Variables:
+          API_KEY_PARAMETER_NAME: !Ref ApiKeyParameterName
+      Policies:
+        # SecureString with the AWS managed key (aws/ssm) needs no kms:Decrypt. (The SAM policy template
+        # SSMParameterReadPolicy expects a name without the leading slash, so the statement is written out.)
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParameterName}
+      # Public HTTPS endpoint; access is limited by the x-api-key check in the function. SAM adds the
+      # lambda:InvokeFunctionUrl permission for AuthType NONE.
+      FunctionUrlConfig:
+        AuthType: NONE
+
+  # Function URLs with AuthType NONE also need lambda:InvokeFunction (InvokedViaFunctionUrl).
+  FunctionInvokeViaUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref Function
+      Principal: "*"
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  AnalyzeUrl:
+    Description: POST endpoint for the API's ANALYZER_URL.
+    Value: !Sub ${FunctionUrl.FunctionUrl}v1/analyze
+  ApiKeyParameterName:
+    Description: Parameter holding the x-api-key value; pass to the API stack as AnalyzerApiKeyParameterName.
+    Value: !Ref ApiKeyParameterName

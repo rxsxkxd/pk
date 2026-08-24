@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: "2010-09-09"
+# 下書き（未検証）。EC2 Image Builder で、Amazon Linux 2023 に Ruby（ruby-build でソースからビルド）を入れた土台の AMI を作る。
+# 説明は同じフォルダの README.md。手順は ../../docker/al2023-ruby3.4/Dockerfile と揃えている。
+Description: Base AMI of Amazon Linux 2023 with Ruby built by ruby-build (EC2 Image Builder)
+
+Parameters:
+  NamePrefix:
+    Type: String
+    Default: myapp-base
+    Description: Image Builder の資源と AMI の名前の先頭
+  ComponentVersion:
+    Type: String
+    Default: 1.0.0
+    Description: コンポーネントの版。コンポーネントの中身を変えたら上げる（同じ版のまま中身は変えられない）
+  RecipeVersion:
+    Type: String
+    Default: 1.0.0
+    Description: イメージのレシピの版。レシピ・コンポーネントの版・Ruby のバージョンのどれかを変えたら上げる
+  RubyVersion:
+    Type: String
+    Default: 3.4.12
+  RubyBuildVersion:
+    Type: String
+    Default: "20261023"
+    Description: RubyVersion を知っている ruby-build のリリース（v を除いた日付）
+  ParentImage:
+    Type: String
+    Default: ""
+    Description: 親イメージ。空なら AWS が管理する最新の AL2023（x86_64）のイメージ
+  InstanceType:
+    Type: String
+    Default: c7a.large
+    Description: ビルドとテストに使うインスタンスタイプ（x86_64。Ruby のコンパイルに CPU を使う）
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: インターネットに出られるサブネット（GitHub と cache.ruby-lang.org から取得するため）
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: 受信なし、送信は TCP 443 だけを許可したセキュリティグループ
+  LogBucketName:
+    Type: String
+    Default: ""
+    Description: ビルドのログを置く S3 バケット。空ならログを S3 に置かない
+  ScheduleExpression:
+    Type: String
+    Default: ""
+    Description: 定期実行の式（例 cron(0 0 1 * ? *)）。空なら定期実行せず、手動で起動する
+
+Conditions:
+  UseManagedParentImage:
+    Fn::Equals:
+      - Ref: ParentImage
+      - ""
+  HasLogBucket:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: LogBucketName
+          - ""
+  HasSchedule:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: ScheduleExpression
+          - ""
+
+Resources:
+  # ビルド用・テスト用のインスタンスのロール
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/EC2InstanceProfileForImageBuilder
+      Policies:
+        Fn::If:
+          - HasLogBucket
+          - - PolicyName: put-build-logs
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:s3:::${LogBucketName}/image-builder/${NamePrefix}/*
+          - Ref: AWS::NoValue
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: InstanceRole
+
+  # Ruby を ruby-build でソースからビルドして /opt/ruby に入れるコンポーネント
+  RubyComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name:
+        Fn::Sub: ${NamePrefix}-ruby-from-source
+      Version:
+        Ref: ComponentVersion
+      Platform: Linux
+      SupportedOsVersions:
+        - Amazon Linux 2023
+      Description: Build Ruby from source with ruby-build and install it to /opt/ruby
+      Data: |
+        name: ruby-from-source
+        description: Build Ruby from source with ruby-build and install it to /opt/ruby
+        schemaVersion: 1.0
+        parameters:
+          - RubyVersion:
+              type: string
+              description: Ruby のバージョン
+          - RubyBuildVersion:
+              type: string
+              description: RubyVersion を知っている ruby-build のリリース（v を除いた日付）
+        phases:
+          - name: build
+            steps:
+              # ビルドの後も残すもの。gcc などは、リリース用インスタンスでネイティブ拡張の gem をビルドするために残す
+              - name: InstallBuildDependencies
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - dnf install -y gcc make tar gzip patch openssl-devel libyaml-devel zlib-devel libffi-devel gmp-devel
+              # YJIT を組み込むためだけに使う。ビルドの後に外す
+              - name: InstallRust
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - dnf install -y rust
+              - name: BuildRuby
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - curl -fsSL "https://github.com/rbenv/ruby-build/archive/refs/tags/v{{ RubyBuildVersion }}.tar.gz" | tar -xz -C /tmp
+                    - RUBY_CONFIGURE_OPTS="--disable-install-doc" "/tmp/ruby-build-{{ RubyBuildVersion }}/bin/ruby-build" "{{ RubyVersion }}" /opt/ruby
+                    - rm -rf "/tmp/ruby-build-{{ RubyBuildVersion }}"
+              - name: RemoveRust
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - dnf remove -y rust
+                    - dnf clean all
+              - name: ConfigureEnvironment
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - echo 'export PATH=/opt/ruby/bin:$PATH' > /etc/profile.d/ruby.sh
+                    - echo 'export LANG="${LANG:-C.UTF-8}"' >> /etc/profile.d/ruby.sh
+                    - "echo 'gem: --no-document' > /etc/gemrc"
+          # スナップショットを撮る前に、ビルド用のインスタンスで確かめる
+          - name: validate
+            steps:
+              - name: CheckRuby
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - /opt/ruby/bin/ruby -v | grep -F "ruby {{ RubyVersion }}"
+                    - /opt/ruby/bin/ruby -e 'require "openssl"; require "psych"; require "zlib"; require "fiddle"; puts OpenSSL::OPENSSL_LIBRARY_VERSION'
+                    - /opt/ruby/bin/ruby --yjit -e 'exit RubyVM::YJIT.enabled?'
+                    - /opt/ruby/bin/bundle -v
+          # できた AMI から起動したテスト用のインスタンスで確かめる
+          - name: test
+            steps:
+              - name: CheckRubyOnNewInstance
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - bash -lc 'ruby -v | grep -F "ruby {{ RubyVersion }}"'
+                    - bash -lc 'ruby -e "require %q(openssl); require %q(psych); require %q(zlib); require %q(fiddle)"'
+                    - bash -lc 'ruby --yjit -e "exit RubyVM::YJIT.enabled?"'
+                    - bash -lc 'ruby -e "exit(Encoding.default_external == Encoding::UTF_8)"'
+                    - "! rpm -q rust"
+
+  ImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name:
+        Ref: NamePrefix
+      Version:
+        Ref: RecipeVersion
+      ParentImage:
+        Fn::If:
+          - UseManagedParentImage
+          - Fn::Sub: arn:${AWS::Partition}:imagebuilder:${AWS::Region}:aws:image/amazon-linux-2023-x86/x.x.x
+          - Ref: ParentImage
+      Components:
+        - ComponentArn:
+            Fn::GetAtt:
+              - RubyComponent
+              - Arn
+          Parameters:
+            - Name: RubyVersion
+              Value:
+                - Ref: RubyVersion
+            - Name: RubyBuildVersion
+              Value:
+                - Ref: RubyBuildVersion
+      AdditionalInstanceConfiguration:
+        SystemsManagerAgent:
+          UninstallAfterBuild: false
+
+  InfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name:
+        Ref: NamePrefix
+      InstanceProfileName:
+        Ref: InstanceProfile
+      InstanceTypes:
+        - Ref: InstanceType
+      SubnetId:
+        Ref: SubnetId
+      SecurityGroupIds:
+        - Ref: SecurityGroupId
+      TerminateInstanceOnFailure: true
+      InstanceMetadataOptions:
+        HttpTokens: required
+      Logging:
+        Fn::If:
+          - HasLogBucket
+          - S3Logs:
+              S3BucketName:
+                Ref: LogBucketName
+              S3KeyPrefix:
+                Fn::Sub: image-builder/${NamePrefix}
+          - Ref: AWS::NoValue
+
+  DistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name:
+        Ref: NamePrefix
+      Distributions:
+        - Region:
+            Ref: AWS::Region
+          AmiDistributionConfiguration:
+            Name:
+              Fn::Sub: "${NamePrefix}-ruby${RubyVersion}-{{ imagebuilder:buildDate }}"
+            AmiTags:
+              Layer: base
+              RubyVersion:
+                Ref: RubyVersion
+              RecipeVersion:
+                Ref: RecipeVersion
+
+  ImagePipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name:
+        Ref: NamePrefix
+      ImageRecipeArn:
+        Fn::GetAtt:
+          - ImageRecipe
+          - Arn
+      InfrastructureConfigurationArn:
+        Fn::GetAtt:
+          - InfrastructureConfiguration
+          - Arn
+      DistributionConfigurationArn:
+        Fn::GetAtt:
+          - DistributionConfiguration
+          - Arn
+      ImageTestsConfiguration:
+        ImageTestsEnabled: true
+        TimeoutMinutes: 60
+      EnhancedImageMetadataEnabled: true
+      Status: ENABLED
+      Schedule:
+        Fn::If:
+          - HasSchedule
+          - ScheduleExpression:
+              Ref: ScheduleExpression
+            PipelineExecutionStartCondition: EXPRESSION_MATCH_AND_DEPENDENCY_UPDATES_AVAILABLE
+          - Ref: AWS::NoValue
+
+Outputs:
+  ImagePipelineArn:
+    Value:
+      Fn::GetAtt:
+        - ImagePipeline
+        - Arn
+  ImageRecipeArn:
+    Value:
+      Fn::GetAtt:
+        - ImageRecipe
+        - Arn

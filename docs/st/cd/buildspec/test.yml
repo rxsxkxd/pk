@@ -1,0 +1,46 @@
+# CD pipeline, Test stage (cd/README.md 3): unit tests, then the Lambda zip and the SPA. The output goes to the
+# E2E and Deploy stages unchanged (built once). The unit tests make no outside calls (analyzer and fetch are stubbed).
+version: 0.2
+
+env:
+  shell: bash
+  variables:
+    # The image has Go 1.26; go.mod asks for a newer one, so the go command fetches that toolchain (checksum-verified).
+    GOTOOLCHAIN: auto
+
+phases:
+  install:
+    runtime-versions:
+      golang: 1.26
+      nodejs: 24
+    commands:
+      # goenv (preinstalled in the image): update its version list, then try Go 1.26.10. Any failure here is
+      # skipped and the build goes on with the Go chosen by runtime-versions.
+      - git -C "$(goenv root)" pull --ff-only || echo "goenv update skipped"
+      - goenv --version || true
+      - |
+        if goenv install --skip-existing 1.26.10 && goenv global 1.26.10; then
+          goenv rehash
+        else
+          echo "Go 1.26.10 not installed by goenv; keeping the runtime-versions Go"
+        fi
+      - goenv version || true
+  pre_build:
+    commands:
+      - (cd go && go version)
+      - node --version
+      - npm --prefix web ci
+  build:
+    commands:
+      - make -C go test
+      - make -C go build
+      - npm --prefix web run format:check
+      - npm --prefix web test
+      # GRANT_MODE comes from the CodeBuild project (pipeline.yaml GrantMode).
+      - npm --prefix web run build
+
+artifacts:
+  files:
+    - go/bin/ticketqr.zip
+    - web/dist/**/*
+    - cd/**/*

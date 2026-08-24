@@ -1,0 +1,345 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  S3 上の画像の上半分にガウスぼかしを適用してマスキングし、同じバケットの
+  別階層へ保存する。キーは <prefix>/<x>/<y>/<infix>/<z>/<n> の形に固定し、
+  原本とマスク済みは infix だけが異なる。
+  設計: docs/image-blur-lambda-design.md
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, stg, prod]
+  BucketName:
+    Type: String
+    AllowedPattern: '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    ConstraintDescription: 既存の S3 バケット名を指定してください（小文字・数字・ハイフン・ドット、3〜63 文字）。
+    Description: >
+      原本とマスク済みを置く既存の S3 バケット名。このテンプレートではバケットを作らない。
+      バケットの暗号化・バージョニング・パブリックアクセスブロック・バケットポリシーは
+      バケット側の管理になる。
+  BucketKmsKeyArn:
+    Type: String
+    Default: ''
+    Description: >
+      バケットがカスタマー管理の KMS キーで暗号化されている場合、そのキーの ARN。
+      Lambda に kms:Decrypt / kms:GenerateDataKey を付与する。
+      SSE-S3 や AWS 管理キー（aws/s3）なら空でよい。
+  EnableS3Trigger:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >
+      Amazon S3 イベント通知（`s3:ObjectCreated:*`）で起動するかどうか。既定は無効で、リクエスト起動のみ。
+      実装は両方に対応しているので、true にすればイベント通知による起動も使える。
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: >
+      アラート通知先のメールアドレス。空なら通知先を作らない（CloudWatch アラーム自体は動く）。
+      指定した場合、デプロイ後にそのアドレス宛の確認メールに承認リンクが届く。
+      承認するまで通知は届かない（CloudFormation では自動承認できない）。
+  KeyPrefix:
+    Type: String
+    Default: ''
+    Description: >
+      共有バケット内でこのアプリが使うルート。任意で、空なら付けない。
+      キーは [<prefix>/]<tid>/<infix>/<date>/<lid>/<eid> の形に固定する。
+      空にすると IAM もイベント通知フィルタもバケット全体が対象になるため、
+      他のリソースと共有するバケットでは指定を推奨。
+  OriginalInfix:
+    Type: String
+    Default: no-masked
+    Description: 原本の階層名。
+  MaskedInfix:
+    Type: String
+    Default: masked
+    Description: マスク済みの階層名。原本とはこの階層だけが異なる。
+  MaskingPolicyVersion:
+    Type: String
+    Default: v1
+    Description: >
+      マスクの強度設定を識別するラベル。キーには含めず、出力のメタデータにだけ記録する。
+      強度に関わる設定（MaskHeightRatio / BlurRatio / DownscaleFactor など）を変えたら
+      これも上げる。上げると過去の出力が作り直され、同じキーが上書きされる。
+      上げないと、処理済みのオブジェクトは古い強度のまま残る。
+  MaskHeightRatio:
+    Type: String
+    Default: '0.5'
+    Description: 画像上部からマスクする高さの比率。0.5 = 上半分。
+  BlurRatio:
+    Type: String
+    Default: '0.04'
+    Description: ぼかし半径を短辺に対する比率で指定。絶対値では指定させない。
+  DownscaleFactor:
+    Type: Number
+    Default: 4
+    Description: >
+      マスク領域を 1/N に縮小してからぼかす。処理量が減り、縮小で情報が物理的に
+      失われるため復元耐性も上がる。1 で無効。縮小は領域内だけで、領域外には影響しない。
+  MaxAllowedLaplacianVar:
+    Type: String
+    Default: '15.0'
+    Description: >
+      マスク強度の自己検証しきい値。超えたら出力せず失敗にする。
+      マスクの強さ自体は BlurRatio で担保しており、これは設定を桁で取り違えた
+      事故を拾うための粗い網。厳しくしすぎると正常な画像まで失敗になる。
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  S3TriggerEnabled: !Equals [!Ref EnableS3Trigger, 'true']
+  HasKeyPrefix: !Not [!Equals [!Ref KeyPrefix, '']]
+  HasBucketKmsKey: !Not [!Equals [!Ref BucketKmsKeyArn, '']]
+
+Globals:
+  Function:
+    Runtime: provided.al2023
+    Architectures: [arm64]
+    Timeout: 60
+    MemorySize: 2048
+    Tracing: Active
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+  # ---------- KMS ----------
+  # 原本とマスク済みを同じバケットに置くため、バケット既定の暗号化キーは 1 つになる。
+  # 別バケット構成なら原本用と出力用でキーを分けられたが、この構成では分けられない。
+  # バケットは既存のものを使う（BucketName パラメータ）。このテンプレートでは作らない。
+  #
+  # そのため、以前バケットに付けていた次の設定はここでは管理しない。
+  #   暗号化 / バージョニング / パブリックアクセスブロック / ライフサイクル / バケットポリシー
+  # バケットポリシーは既存バケットに CloudFormation で付けると既存のポリシー全体を
+  # 上書きしてしまうため、特に置いてはいけない。
+  #
+  # S3 イベント通知も同じ理由で設定できない（通知設定はバケットのリソースにしか書けない）。
+  # EnableS3Trigger=true のときは、S3 から Lambda を呼ぶ許可だけをここで作り、
+  # 通知設定そのものはバケット側で行う（設計書 §8.2）。
+
+  # S3 イベント通知を使うときだけ作る。S3 がこのバケットから Lambda を呼ぶ許可。
+  # 通知設定はバケット側で行うので、この許可を先にデプロイしておく必要がある。
+  MaskFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: S3TriggerEnabled
+    Properties:
+      FunctionName: !GetAtt MaskFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub 'arn:${AWS::Partition}:s3:::${BucketName}'
+
+  # ---------- アラート通知 ----------
+  # CloudWatch アラーム -> SNS -> メール。
+  # 暗号化は掛けていない。掛ける場合は SNS 管理の既定キーではなく
+  # カスタマー管理キーが必要で、CloudWatch からの発行を許可する
+  # キーポリシーを書く必要がある（既定キーはポリシーを変更できない）。
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'image-mask-alerts-${Env}'
+      DisplayName: !Sub 'image-mask ${Env}'
+
+  AlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ---------- API Gateway（HTTP API） ----------
+  # POST /mask に変数の JSON を送ると、同期で処理して結果を返す。
+  #
+  # 認証は IAM（SigV4 署名）。呼び出し元が未定のまま無認証で公開すると、
+  # 誰でも任意のテナントの画像処理を走らせられるため。呼び出し側には
+  # execute-api:Invoke の権限が要る。
+  #
+  # 統合のタイムアウトは HTTP API の上限 30 秒に縛られる（Lambda の Timeout は 60 秒）。
+  MaskApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Auth:
+        EnableIamAuthorizer: true
+        DefaultAuthorizer: AWS_IAM
+
+  # ---------- Lambda ----------
+  MaskFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      # go1.x ではなく makefile を使う。ldflags を渡してバイナリを小さくするため
+      # （デバッグ情報とシンボルを落とす）。ビルド手順はリポジトリ直下の Makefile の
+      # build-MaskFunction ターゲットにある。
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub 'image-mask-${Env}'
+      CodeUri: .
+      Handler: bootstrap
+      ReservedConcurrentExecutions: 200
+      Events:
+        MaskApiPost:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref MaskApi
+            Method: POST
+            Path: /mask
+            PayloadFormatVersion: '2.0'
+            TimeoutInMillis: 29000
+      Environment:
+        Variables:
+          INPUT_BUCKET: !Ref BucketName
+          OUTPUT_BUCKET: !Ref BucketName
+          KEY_PREFIX: !Ref KeyPrefix
+          ORIGINAL_INFIX: !Ref OriginalInfix
+          MASKED_INFIX: !Ref MaskedInfix
+          MASKING_POLICY_VERSION: !Ref MaskingPolicyVersion
+          MASK_HEIGHT_RATIO: !Ref MaskHeightRatio
+          MIN_BLUR_RATIO: !Ref BlurRatio
+          MIN_BLUR_RADIUS_PX: '8'
+          BLUR_PASSES: '2'
+          DOWNSCALE_FACTOR: !Ref DownscaleFactor
+          STRENGTH_BLOCK_PX: '64'
+          MAX_ALLOWED_LAPLACIAN_VAR: !Ref MaxAllowedLaplacianVar
+          MAX_INPUT_BYTES: '20971520'
+          MAX_INPUT_PIXELS: '64000000'
+          JPEG_QUALITY: '85'
+          LOG_LEVEL: INFO
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2
+        MaximumEventAgeInSeconds: 3600
+        # 失敗イベントの退避先（DLQ）は置いていない。リトライを使い切った
+        # イベントは破棄される。どのオブジェクトで失敗したかは CloudWatch Logs と
+        # アラームで分かるので、再処理は変数を渡したリクエスト起動で行う（設計書 §10.2）。
+      Policies:
+        # 最小権限。原本は読むだけ、マスク済みは書くだけ。
+        # tid は可変なのでワイルドカードで受ける。
+        #   [<prefix>/]<tid>/<infix>/<date>/<lid>/<eid>
+        #
+        # バケットは既存のものなので、ARN は BucketName パラメータから組み立てる。
+        - Statement:
+            - Sid: ReadOriginals
+              Effect: Allow
+              Action: ['s3:GetObject', 's3:GetObjectVersion']
+              Resource: !If
+                - HasKeyPrefix
+                - !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/${KeyPrefix}/*/${OriginalInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/*/${OriginalInfix}/*'
+            - Sid: WriteMasked
+              Effect: Allow
+              Action: 's3:PutObject'
+              Resource: !If
+                - HasKeyPrefix
+                - !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/${KeyPrefix}/*/${MaskedInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/*/${MaskedInfix}/*'
+            - Sid: HeadMaskedForIdempotency
+              Effect: Allow
+              Action: 's3:GetObject'
+              Resource: !If
+                - HasKeyPrefix
+                - !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/${KeyPrefix}/*/${MaskedInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::${BucketName}/*/${MaskedInfix}/*'
+            # バケットがカスタマー管理キーで暗号化されている場合だけ付ける。
+            - !If
+              - HasBucketKmsKey
+              - Sid: UseBucketKey
+                Effect: Allow
+                Action: ['kms:Decrypt', 'kms:GenerateDataKey']
+                Resource: !Ref BucketKmsKeyArn
+              - !Ref AWS::NoValue
+
+  # ---------- CloudWatch アラーム ----------
+  MaskStrengthCheckFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-strength-check-failed'
+      AlarmDescription: >
+        マスク強度の自己検証に失敗した。出力は行われていないが、
+        半径算出やパラメータに問題がある可能性が高い。即調査。
+      Namespace: ImageMask
+      MetricName: StrengthCheckFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      AlarmActions: [!Ref AlertTopic]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ValidationErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-validation-errors'
+      AlarmDescription: >
+        入力が不正で処理できなかった。リトライしても直らない。
+        投入元の問題か、対応形式の想定漏れ。ログで対象のキーを確認すること。
+      Namespace: ImageMask
+      MetricName: ValidationErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      AlarmActions: [!Ref AlertTopic]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-errors'
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref MaskFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      AlarmActions: [!Ref AlertTopic]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-throttles'
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{ Name: FunctionName, Value: !Ref MaskFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      AlarmActions: [!Ref AlertTopic]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  ApiEndpoint:
+    Description: マスク処理を呼ぶ URL（POST、IAM 署名が必要）
+    Value: !Sub 'https://${MaskApi}.execute-api.${AWS::Region}.amazonaws.com/mask'
+  ApiInvokeArn:
+    Description: 呼び出し側の IAM ポリシーで execute-api:Invoke を許可する対象
+    Value: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${MaskApi}/*/POST/mask'
+  S3TriggerEnabled:
+    Description: S3 イベント通知で起動するか。false ならリクエスト起動のみ
+    Value: !Ref EnableS3Trigger
+  AlertTopicArn:
+    Description: アラートの通知先。メールは確認リンクの承認が必要
+    Value: !Ref AlertTopic
+  BucketName:
+    Description: 原本とマスク済みを置くバケット
+    Value: !Ref BucketName
+  OriginalKeyPattern:
+    Description: 原本のキー
+    Value: !If
+      - HasKeyPrefix
+      - !Sub '${KeyPrefix}/<tid>/${OriginalInfix}/<date>/<lid>/<eid>'
+      - !Sub '<tid>/${OriginalInfix}/<date>/<lid>/<eid>'
+  MaskedKeyPattern:
+    Description: マスク済みのキー
+    Value: !If
+      - HasKeyPrefix
+      - !Sub '${KeyPrefix}/<tid>/${MaskedInfix}/<date>/<lid>/<eid>'
+      - !Sub '<tid>/${MaskedInfix}/<date>/<lid>/<eid>'
+  FunctionName:
+    Description: Lambda 関数名。リクエスト起動のときに指定する
+    Value: !Ref MaskFunction

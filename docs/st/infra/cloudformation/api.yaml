@@ -1,0 +1,301 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Ticket QR API (ticketqr package on 2 functions behind one HTTP API). The example.com QR endpoint is a separate stack (example.yaml). See go/DEPLOY.md or node/DEPLOY.md.
+
+Parameters:
+  # 実装（go / node）。実装ごとに1スタック
+  Impl:
+    Type: String
+    AllowedValues: [go, node]
+    Default: go
+    Description: Implementation to deploy. One stack per implementation.
+  # Lambda の zip（ticketqr.zip）を置いた S3 バケット
+  ArtifactBucket:
+    Type: String
+    Description: S3 bucket holding the Lambda zip files.
+  # zip のキーの接頭辞。デプロイのたびに変える（変えないと Lambda のコードが更新されない）
+  ArtifactPrefix:
+    Type: String
+    Description: Key prefix of ticketqr.zip, e.g. ticketqr/go/<git-sha>. Change it on every deploy so Lambda picks up new code.
+  # 署名用 salt の Parameter Store（SecureString）の名前。スタックの外で作る
+  SigningSaltParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store SecureString {"current":"...","previous":"..."}, e.g. /ticketqr/go/signing-salt (created outside this stack).
+  # 画像解析の呼び方。mock = 呼ばずに常に PASS、http = AnalyzerUrl に画像を POST
+  AnalyzerMode:
+    Type: String
+    Default: mock
+    AllowedValues: [mock, http]
+    Description: mock = in-process, always valid. http = POST to AnalyzerUrl (Go and Node).
+  # 画像解析サーバーの URL（AnalyzerMode=http のとき）
+  AnalyzerUrl:
+    Type: String
+    Default: ""
+    Description: Image analysis endpoint for AnalyzerMode=http, e.g. the analyzer-stub stack's AnalyzeUrl output.
+  # 画像解析サーバーの API キー（x-api-key）の Parameter Store の名前（任意。空なら送らない）
+  AnalyzerApiKeyParameterName:
+    Type: String
+    Default: ""
+    AllowedPattern: ^(/.+)?$
+    Description: Optional. Parameter Store SecureString holding the analysis server's x-api-key (AnalyzerMode=http), e.g. /ticketqr/analyzer-stub/node/api-key. Empty sends no x-api-key (e.g. an analyzer in the VPC that only admits the Lambda's security group).
+  # チケットコードの末尾の固定文字列（英数字1〜32文字）の Parameter Store（String）の名前。スタックの外で作る
+  TicketCodeSuffixParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store String holding the fixed suffix of ticket codes (1-32 letters or digits), e.g. /ticketqr/{impl}/ticket-code-suffix (created outside this stack).
+  # 公開する API の URL。独自ドメイン、または統合の構成での CloudFront の URL。空なら execute-api の URL
+  PublicBaseUrl:
+    Type: String
+    Default: ""
+    Description: >-
+      Public API URL: a custom domain, or the CloudFront URL (web.yaml WebUrl) when CloudFront forwards /v1/* to
+      this API (unified layout). Empty uses the execute-api default URL.
+  # 証明書の画像の上限（バイト。最大 4MB）。SPA の config.json の maxImageBytes と同じ値にする
+  MaxImageBytes:
+    Type: Number
+    Default: 4194304
+    MinValue: 1
+    MaxValue: 4194304
+    Description: >-
+      Upload limit of the certificate image in bytes (MAX_IMAGE_BYTES). 4194304 (4MB) is the ceiling (Lambda's
+      6MB request, base64 by API Gateway); lower it when the path to the API has a smaller limit. Keep the SPA's
+      config.json maxImageBytes the same (DESIGN.md 5).
+  # 全ルート共通のスロットリング（1秒あたりの定常のリクエスト数）
+  ThrottlingRateLimit:
+    Type: Number
+    Default: 50
+    Description: Steady-state requests per second for every route.
+  # 全ルート共通のスロットリング（一時的に受けられるリクエスト数の上限）
+  ThrottlingBurstLimit:
+    Type: Number
+    Default: 100
+    Description: Maximum burst of requests for every route (API Gateway throttling).
+  # tickets 関数の予約同時実行数（画像解析サーバーを守るため）。-1 = 設定しない
+  GrantReservedConcurrency:
+    Type: Number
+    Default: -1
+    Description: Reserved concurrency for the tickets function (grant + view; protects the analysis server). -1 = not set.
+  # tickets 関数を置く既存のプライベートサブネット（任意。2つの AZ 以上。空ならすべての関数が VPC の外）
+  VpcSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional. Existing private subnets (2+ AZs) for the tickets function, which calls the analysis server. Empty = every function outside any VPC. See notes/lambda-vpc.md.
+  # tickets 関数に付ける既存のセキュリティグループ（VpcSubnetIds を指定したときは必須）
+  VpcSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Existing security groups for the tickets function (admitted by the analysis server). Required with VpcSubnetIds.
+  # ログ（Lambda と API のアクセスログ）の保持日数
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 180, 365]
+    Description: Days to keep the Lambda and API access logs.
+
+Mappings:
+  ImplMap:
+    go:
+      Runtime: provided.al2023
+      Handler: bootstrap
+    node:
+      Runtime: nodejs24.x
+      Handler: index.handler
+
+Conditions:
+  UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]
+  HasGrantReservedConcurrency: !Not [!Equals [!Ref GrantReservedConcurrency, -1]]
+  HasAnalyzerApiKey: !Not [!Equals [!Ref AnalyzerApiKeyParameterName, ""]]
+  # The VPC, subnets and security groups are existing ones outside this stack; only tickets goes in (get-qr stays out).
+  InVpc: !Not [!Equals [!Join ["", !Ref VpcSubnetIds], ""]]
+
+Resources:
+  # ---------- IAM ----------
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If [InVpc, !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole", !Ref AWS::NoValue]
+      Policies:
+        # SecureString with the AWS managed key (aws/ssm) needs no kms:Decrypt; add it if a custom KMS key is used.
+        - PolicyName: read-signing-salt
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TicketCodeSuffixParameterName}
+        - !If
+          - HasAnalyzerApiKey
+          - PolicyName: read-analyzer-api-key
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: ssm:GetParameter
+                  Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AnalyzerApiKeyParameterName}
+          - !Ref AWS::NoValue
+
+  # ---------- HTTP API ----------
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ticketqr-${Impl}
+      ProtocolType: HTTP
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/ticketqr-${Impl}
+      RetentionInDays: !Ref LogRetentionDays
+
+  DefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ThrottlingRateLimit
+        ThrottlingBurstLimit: !Ref ThrottlingBurstLimit
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","routeKey":"$context.routeKey","status":"$context.status","latency":"$context.responseLatency","integrationError":"$context.integrationErrorMessage"}'
+
+  # ---------- A / B-1 / B-3: grant (verification + code generation) and view, one function ----------
+  # handler.Route dispatches on routeKey, so all three routes share one integration.
+  TicketsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ticketqr-${Impl}-tickets
+      RetentionInDays: !Ref LogRetentionDays
+  TicketsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: TicketsLogGroup
+    Properties:
+      FunctionName: !Sub ticketqr-${Impl}-tickets
+      Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
+      Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 15
+      Role: !GetAtt FunctionRole.Arn
+      ReservedConcurrentExecutions: !If [HasGrantReservedConcurrency, !Ref GrantReservedConcurrency, !Ref AWS::NoValue]
+      VpcConfig: !If
+        - InVpc
+        - SubnetIds: !Ref VpcSubnetIds
+          SecurityGroupIds: !Ref VpcSecurityGroupIds
+        - !Ref AWS::NoValue
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Sub ${ArtifactPrefix}/ticketqr.zip
+      Environment:
+        Variables:
+          PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+          ANALYZER_MODE: !Ref AnalyzerMode
+          ANALYZER_URL: !Ref AnalyzerUrl
+          ANALYZER_API_KEY_PARAMETER_NAME: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeyParameterName, !Ref AWS::NoValue]
+          SIGNING_SALT_PARAMETER_NAME: !Ref SigningSaltParameterName
+          TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref TicketCodeSuffixParameterName
+          MAX_IMAGE_BYTES: !Ref MaxImageBytes
+  TicketsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt TicketsFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 20000
+  GrantInlineRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /v1/tickets/qr-inline
+      Target: !Sub integrations/${TicketsIntegration}
+  GrantRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /v1/tickets
+      Target: !Sub integrations/${TicketsIntegration}
+  GetViewRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /v1/tickets/{ticketCode}/view
+      Target: !Sub integrations/${TicketsIntegration}
+  TicketsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref TicketsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+  # ---------- B-2: GET /v1/tickets/{ticketCode}/qr ----------
+  GetQRLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ticketqr-${Impl}-get-qr
+      RetentionInDays: !Ref LogRetentionDays
+  GetQRFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GetQRLogGroup
+    Properties:
+      FunctionName: !Sub ticketqr-${Impl}-get-qr
+      Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
+      Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 5
+      Role: !GetAtt FunctionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Sub ${ArtifactPrefix}/ticketqr.zip
+      Environment:
+        Variables:
+          PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+          ANALYZER_MODE: !Ref AnalyzerMode
+          ANALYZER_URL: !Ref AnalyzerUrl
+          ANALYZER_API_KEY_PARAMETER_NAME: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeyParameterName, !Ref AWS::NoValue]
+          SIGNING_SALT_PARAMETER_NAME: !Ref SigningSaltParameterName
+          TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref TicketCodeSuffixParameterName
+  GetQRIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GetQRFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 10000
+  GetQRRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /v1/tickets/{ticketCode}/qr
+      Target: !Sub integrations/${GetQRIntegration}
+  GetQRPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetQRFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API (PUBLIC_BASE_URL when no custom domain is set).
+    Value: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+  ApiId:
+    Value: !Ref HttpApi
+  ApiDomain:
+    Description: Domain of the execute-api endpoint, for web.yaml ApiOriginDomain (unified layout, CloudFront forwards /v1/* here).
+    Value: !Sub "${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"

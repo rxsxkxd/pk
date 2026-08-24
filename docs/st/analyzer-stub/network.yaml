@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Network for the VPC stub (test only): a new VPC with one public subnet (route to an internet gateway) and the
+  task's security group. The stub is reached from outside over the internet at the task's public IP, allowed
+  by source CIDR (like an analysis server that admits the caller's fixed NAT IP). How the ticket API reaches it
+  (its own NAT, peering, ...) is not part of this stack. No NAT gateway and no VPC endpoints, so nothing here is
+  billed by the hour. The stub itself (image, ECS) is the CDK app in cdk/. See DEPLOY.md 3.4.
+
+Parameters:
+  # スタブ用の VPC の CIDR
+  VpcCidr:
+    Type: String
+    Default: 10.99.0.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: CIDR of the stub VPC.
+  # 公開サブネットの CIDR（VpcCidr の中）
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.99.0.0/26
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: CIDR of the public subnet (inside VpcCidr).
+  # 公開サブネットの AZ。空ならリージョンの最初の AZ
+  AvailabilityZone:
+    Type: String
+    Default: ""
+    Description: AZ of the public subnet. Empty = the first AZ of the region.
+  # スタブ（TCP 8090）を呼べる送信元。例: チケット API の NAT ゲートウェイの固定 IP（x.x.x.x/32）。0.0.0.0/0 は全公開
+  AllowedSourceCidr:
+    Type: String
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: >-
+      Sources allowed to call the stub on TCP 8090, e.g. the fixed public IP of the ticket API's NAT gateway
+      (x.x.x.x/32). 0.0.0.0/0 opens the stub (no API key) to the whole internet.
+  # 2つ目の許可する送信元（任意。例: 確認する人の事務所の IP）
+  AllowedSourceCidrB:
+    Type: String
+    Default: ""
+    AllowedPattern: ^((\d{1,3}\.){3}\d{1,3}/\d{1,2})?$
+    Description: A second allowed source (optional), e.g. a tester's office IP.
+
+Conditions:
+  HasAz: !Not [!Equals [!Ref AvailabilityZone, ""]]
+  HasSourceB: !Not [!Equals [!Ref AllowedSourceCidrB, ""]]
+
+Resources:
+  # ---------- Stub VPC: one public subnet ----------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub }]
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # The task gets its public IP from run-task (assignPublicIp=ENABLED), not from the subnet.
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !If [HasAz, !Ref AvailabilityZone, !Select [0, !GetAZs ""]]
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub-public }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub-public }]
+
+  PublicSubnetRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Inbound calls to the stub and the task's outbound (image pull, logs) both go through the internet gateway.
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # ---------- The task's security group ----------
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ticketqr analyzer stub task (public subnet)
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8090
+          ToPort: 8090
+          CidrIp: !Ref AllowedSourceCidr
+          Description: callers of the stub (e.g. the NAT IP of the ticket API)
+      # Replaces the default allow-all egress: HTTPS only (ECR, S3 and CloudWatch Logs through the internet
+      # gateway). Replies to callers need no egress rule (security groups are stateful).
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: ECR, S3 and CloudWatch Logs
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub-task }]
+
+  TaskIngressB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasSourceB
+    Properties:
+      GroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8090
+      ToPort: 8090
+      CidrIp: !Ref AllowedSourceCidrB
+      Description: second allowed source
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+  SubnetId:
+    Description: Public subnet for the task (cdk deploy -c subnetId=...; run-task with assignPublicIp=ENABLED).
+    Value: !Ref PublicSubnet
+  RouteTableId:
+    Value: !Ref PublicRouteTable
+  TaskSecurityGroupId:
+    Description: Security group of the task (cdk deploy -c taskSecurityGroupId=...).
+    Value: !Ref TaskSecurityGroup

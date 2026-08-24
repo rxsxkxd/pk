@@ -1,0 +1,76 @@
+{
+  "DBInstances": [
+    {
+      "DBInstanceIdentifier": "example-service-test-development-mysql80",
+      "Engine": "mysql",
+      "DBInstanceClass": "db.t4g.small",
+      "EngineVersion": "8.0.43",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-test-development-mysql80-v1",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    },
+    {
+      "DBInstanceIdentifier": "example-service-test-development-audit-mysql80",
+      "Engine": "mysql",
+      "DBInstanceClass": "db.t4g.small",
+      "EngineVersion": "8.0.43",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-test-development-audit-mysql80-v1",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    },
+    {
+      "DBInstanceIdentifier": "example-service-test-staging-mysql80",
+      "Engine": "mysql",
+      "DBInstanceClass": "db.t4g.medium",
+      "EngineVersion": "8.0.44",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-test-staging-mysql80-v1",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    },
+    {
+      "DBInstanceIdentifier": "example-service-test-staging-audit-mysql80",
+      "Engine": "mysql",
+      "DBInstanceClass": "db.t4g.medium",
+      "EngineVersion": "8.0.44",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-test-staging-audit-mysql80-v1",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    },
+    {
+      "DBInstanceIdentifier": "example-service-test-production-mysql80",
+      "Engine": "mysql",
+      "DBInstanceClass": "db.r6g.large",
+      "EngineVersion": "8.0.45",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-test-production-mysql80-v1",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    },
+    {
+      "DBInstanceIdentifier": "example-service-test-production-audit-mysql80",
+      "Engine": "mysql",
+      "DBInstanceClass": "db.r6g.large",
+      "EngineVersion": "8.0.45",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-test-production-audit-mysql80-v1",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,154 @@
+# コンテナでの AWS CLI・MySQL クライアント実行
+
+リポジトリルートの `compose.yaml`、`aws-config/`(ディレクトリ)、`global-bundle.pem`・`my.cnf`(ファイル)は、AWS CLI、`mysql`、`mysqlsh` をローカルインストールせずに実行するためのものです。DB インスタンスやパラメータグループを作成・変更する権限を付与するものではありません。実行できる AWS 操作は、マウントした認証情報に付与された IAM 権限に従います。
+
+使用するコンテナは 4 つである。`public.ecr.aws/aws-cli/aws-cli:2.37.9`、MySQL CLI と MySQL Shell を同梱する公式イメージ `mysql:8.4.11`、`ruby:3.4.11-slim-bookworm`、`golang:1.25` を使用する。`latest` タグは使用しない。AWS CLI・MySQL・Ruby はパッチバージョンまで、Go はマイナーまでを固定する。**Ruby は `slim` バリアントに統一している**（このリポジトリで使うのは標準ライブラリの psych / json だけで、full イメージの同梱物を必要としない）。
+
+> 現時点では定義ファイルと手順のみを用意しており、イメージの取得・実行検証は未実施である。MySQL 用の Dockerfile は不要であり、初回実行時に `mysql:8.4.11` が取得される。
+
+CI（CodeBuild Local Agent、Step 4 の Go レポート生成器ビルド）専用のコンテナ定義は [ci/](../ci) 配下にある。本書が扱うのは、Step 1・2 や DB 接続確認など、ローカルでの通常の作業に使うコンテナだけである。
+
+## 1. ホスト側の準備
+
+`global-bundle.pem`・`my.cnf` はディレクトリではなく単一ファイルを直接 bind mount する。Docker はマウント元のファイルが存在しないと空ディレクトリを自動生成してしまうため、**実体のないまま `docker compose run` すると意図しない空ディレクトリができる**。
+
+`my.cnf` は空プレースホルダとしてリポジトリに追跡済みであり、clone した時点で既に存在する。**実接続情報を書き込んだまま commit しないこと。** DB ユーザーやパスワードを保存したい場合は、直接編集せず `.env` の `MYSQL_CLIENT_CONFIG_FILE` でリポジトリ外の絶対パスを指す。
+
+`global-bundle.pem` は Git 管理外なので、実接続時に取得する。
+
+```bash
+curl -o global-bundle.pem \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+cp .env.example .env
+```
+
+いずれもリポジトリ外の絶対パスに置きたい場合は、`.env` の `RDS_CA_FILE`／`MYSQL_CLIENT_CONFIG_FILE` でファイルパスを直接指定する（ディレクトリではなくファイルそのものを指す）。
+
+`.env` は実接続時だけ作成し、値を絶対パスに置き換える。`aws-config/` は今回もディレクトリ mount のまま維持しており、`global-bundle.pem`／`my.cnf` のファイル化とは無関係に、AWS 認証の扱い（SSO のキャッシュディレクトリを含む）は変わらない。未作成でも `docker compose create` は可能で、その場合は Git 管理下の空ディレクトリを読み取り専用でマウントする（空ディレクトリでは AWS 認証はできない）。AWS SSO を利用する場合は、ホスト上で先に `aws sso login --profile <profile>` を完了する。
+
+### STS の一時認証情報を使う場合
+
+`AssumeRole`、SSO、MFA などで取得した一時認証情報は、**環境変数としてコンテナへ渡る**。`.env` には書かず、実行するシェルの環境変数から渡す。
+
+```sh
+# 例: ロールを引き受けて一時認証情報を取得し、そのままコンテナで使う
+eval "$(aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/YourRole \
+  --role-session-name local-verification \
+  --query 'Credentials.[
+      `export AWS_ACCESS_KEY_ID=` + AccessKeyId,
+      `export AWS_SECRET_ACCESS_KEY=` + SecretAccessKey,
+      `export AWS_SESSION_TOKEN=` + SessionToken]' \
+  --output text | tr '\t' '\n')"
+
+docker compose --env-file .env run --rm awscli sts get-caller-identity
+```
+
+`compose.yaml` が転送するのは `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`・`AWS_SESSION_TOKEN` の 3 つである。次の挙動を実測で確認している。
+
+| 状態 | 認証情報の解決 | リージョンの解決 |
+|---|---|---|
+| 一時認証情報を設定した | 環境変数が優先される | プロファイルの `region` |
+| 未設定（空文字が渡る） | `~/.aws` の named profile へフォールバックする | プロファイルの `region` |
+
+> **`AWS_REGION` は意図的に転送していない。** 空文字を渡すとプロファイルの `region` 設定を上書きしてしまい、リージョン未指定エラーになるためである。リージョンを環境変数で指定したい場合は、各スクリプトの `--region` オプションを使う。
+
+任意で、DB 接続情報を `my.cnf` に保存できる。ただしリポジトリ直下の `my.cnf` は追跡済みファイルであるため、パスワードなど実接続情報を書き込む場合は `.env` の `MYSQL_CLIENT_CONFIG_FILE` でリポジトリ外の絶対パスを指し、そちらのファイルに `chmod 600` を設定する。
+
+```ini
+[client]
+host=<rds-endpoint>
+user=<db-user>
+# password は可能なら記載せず、実行時に -p で入力する
+ssl-mode=VERIFY_CA
+ssl-ca=/certs/rds/global-bundle.pem
+```
+
+`my.cnf` はコンテナの `/client-config/my.cnf` として読み取り専用でマウントされる。RDS CA bundle は `/certs/rds/global-bundle.pem` として読み取り専用でマウントされる。
+
+## 2. Docker Compose で実行する
+
+リポジトリのルートから実行する。
+
+```bash
+# AWS 認証・プロファイルを確認
+docker compose --env-file .env run --rm awscli sts get-caller-identity
+
+# Phase 0 の読み取り収集
+docker compose --env-file .env run --rm awscli \
+  rds describe-db-instances --db-instance-identifier <blue-instance-id>
+
+# mysql。my.cnf を使い、パスワードは必要時に対話入力する
+docker compose --env-file .env run --rm mysql \
+  mysql --defaults-extra-file=/client-config/my.cnf -p \
+  -e "SELECT VERSION();"
+
+# mysqlsh。同じ mysql コンテナで接続情報を明示する例
+docker compose --env-file .env run --rm mysql \
+  mysqlsh \
+  --sql --host=<rds-endpoint> --user=<db-user> --password \
+  --ssl-mode=VERIFY_CA --ssl-ca=/certs/rds/global-bundle.pem \
+  -e "SELECT VERSION();"
+
+# Ruby スクリプトの実行（scripts/ 側。tools/ は Go である）
+docker compose --env-file .env run --rm ruby \
+  scripts/lib/migration_phase.rb major-minor 8.0.44
+
+# Go プログラムの実行（tools/。AWS を呼ぶツールは下の注意を参照）
+docker compose --env-file .env run --rm go run ./tools/generate_mysql84_parameter_group --help
+```
+
+`mysql:8.4.11` は公式のマルチアーキテクチャイメージであり、Docker がホストに対応するイメージを選択する。
+
+## 3. `docker run` で直接実行する
+
+`docker compose` を使わない場合も、同じボリュームを明示して実行できる。以下では、`AWS_CONFIG_DIR`（ディレクトリ）、`RDS_CA_FILE`、`MYSQL_CLIENT_CONFIG_FILE`（いずれもファイルそのもの）をホスト上の絶対パスとして設定済みとする。
+
+```bash
+# AWS CLI（認証情報を read-only マウント）
+docker run --rm -it \
+  -v "$AWS_CONFIG_DIR:/root/.aws:ro" \
+  -v "$(pwd):/workspace" -w /workspace \
+  -e AWS_SDK_LOAD_CONFIG=1 -e AWS_PROFILE="${AWS_PROFILE:-default}" \
+  public.ecr.aws/aws-cli/aws-cli:2.37.9 \
+  rds describe-db-instances --db-instance-identifier <blue-instance-id>
+
+# mysql（RDS CA と接続設定を read-only マウント）
+docker run --rm -it \
+  -v "$RDS_CA_FILE:/certs/rds/global-bundle.pem:ro" \
+  -v "$MYSQL_CLIENT_CONFIG_FILE:/client-config/my.cnf:ro" \
+  mysql:8.4.11 \
+  mysql --defaults-extra-file=/client-config/my.cnf -p -e "SELECT VERSION();"
+
+# mysqlsh（上記と同じ公式イメージ）
+docker run --rm -it \
+  -v "$RDS_CA_FILE:/certs/rds/global-bundle.pem:ro" \
+  -v "$MYSQL_CLIENT_CONFIG_FILE:/client-config/my.cnf:ro" \
+  mysql:8.4.11 \
+  mysqlsh --sql --host=<rds-endpoint> --user=<db-user> --password \
+  --ssl-mode=VERIFY_CA --ssl-ca=/certs/rds/global-bundle.pem \
+  -e "SELECT VERSION();"
+
+# Ruby。AWS credential・RDS 証明書はマウントしない
+docker run --rm -it -v "$(pwd):/workspace" -w /workspace \
+  ruby:3.4.11-slim-bookworm scripts/lib/migration_phase.rb major-minor 8.0.44
+
+# Go。AWS credential・RDS 証明書はマウントしない
+docker run --rm -it -v "$(pwd):/workspace" -w /workspace \
+  golang:1.25 version
+```
+
+## セキュリティ上の注意
+
+- `.env`、AWS credential、CA bundle は Git 管理しない。リポジトリ直下の `my.cnf` は空プレースホルダとして例外的に追跡しているため、実接続情報を書き込んだまま commit しない。
+- **ファイルとしての** AWS 認証情報と接続設定はすべて `:ro` でマウントする。コンテナから認証情報を変更しない。
+- STS の一時認証情報は環境変数で渡す。ファイルを書き換えないため `:ro` 方針と両立する。**`.env` には書かない**（`.env` は `.gitignore` 済みだが、期限付きの認証情報をファイルへ残す必要がない）。シェルの履歴に残さないよう、`export` を直接打たず `eval "$(aws sts assume-role ...)"` の形で渡す。
+- DB パスワードを Compose ファイル、コマンド履歴、環境変数に書かない。`-p`／`--password` による対話入力、またはアクセス権を制限した Git 管理外の `my.cnf`（`.env` の `MYSQL_CLIENT_CONFIG_FILE` で指す）を使う。
+- 本番接続には `VERIFY_CA` 以上を使い、RDS の CA ローテーション時はホスト側の CA bundle を更新する。
+- AWS CLI と MySQL は公式コンテナを使用する。組織のイメージ許可・脆弱性スキャン方針に従って、固定タグを検証または社内レジストリへ取り込む。
+
+## 参考
+
+- [AWS CLI v2 の公式 Docker イメージ](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-docker.html)
+- [RDS SSL/TLS の CA bundle](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html)
+- [MySQL Shell 8.4](https://dev.mysql.com/doc/mysql-shell/8.4/en/)

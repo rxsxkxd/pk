@@ -1,0 +1,43 @@
+# Ticket QR API and SPA: unit tests on every pull request and push (ci/README.md). Nothing is built or deployed here;
+# the CD pipeline (cd/README.md) runs the same tests again, builds and deploys. Template for the ticket repository:
+# copy this file to .github/workflows/ci.yml (ci/README.md 4). The image analysis server stub has its own CI.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (vet, unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
+      - run: make -C go test
+
+  web:
+    name: Web (format, unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web run format:check
+      - run: npm --prefix web test

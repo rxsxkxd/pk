@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "scripts": {
+    "build": "esbuild app/javascript/application.jsx --bundle --outfile=app/assets/builds/application.js --format=iife"
+  },
+  "dependencies": {
+    "esbuild": "0.25.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0"
+  }
+}

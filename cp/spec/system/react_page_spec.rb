@@ -1,6 +1,6 @@
 require "rails_helper"
 
-RSpec.describe "React page", type: :system, js: true do
+RSpec.describe "React page", type: :feature, js: true do
   it "renders the React content" do
     visit root_path
 

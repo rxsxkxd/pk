@@ -1,3 +1,5 @@
+require "selenium-webdriver"
+
 Capybara.server = :puma, { Silent: true }
 Capybara.server_host = "0.0.0.0"
 Capybara.server_port = 3001

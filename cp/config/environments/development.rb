@@ -1,11 +1,9 @@
 require "active_support/core_ext/integer/time"
 
 Rails.application.configure do
-  config.cache_classes = true
+  config.enable_reloading = true
   config.eager_load = false
   config.consider_all_requests_local = true
   config.action_controller.allow_forgery_protection = false
   config.assets.compile = true
-  config.hosts << "rails"
-  config.hosts << "rails"
 end

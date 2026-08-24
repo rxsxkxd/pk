@@ -8,13 +8,15 @@ services:
       - bundle:/usr/local/bundle
       - node_modules:/app/node_modules
     environment:
-      RAILS_ENV: test
       CAPYBARA_APP_HOST: http://rails:3001
       SELENIUM_URL: http://selenium:4444/wd/hub
+      RAILS_ENV: development
     depends_on:
       selenium:
         condition: service_healthy
-    command: bundle exec rspec
+    ports:
+      - "3000:3000"
+    command: sh -c "npm run build && bundle exec ruby bin/rails server -b 0.0.0.0 -p 3000"
 
   selenium:
     image: selenium/standalone-chrome:latest

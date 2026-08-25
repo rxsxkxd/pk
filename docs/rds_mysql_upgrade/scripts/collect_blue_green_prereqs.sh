@@ -49,7 +49,7 @@ parameter_group=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("DBI
 option_group=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("DBInstances").first.fetch("OptionGroupMemberships").first.fetch("OptionGroupName")' "$output_dir/db-instance.json")
 
 # [0-1-02] 対象 Blue に適用中のパラメータグループの全パラメータを取得する。
-# Blue/Green の必須条件である binlog_format=ROW を Ruby で判定する。
+# binlog_format の現行値を記録する。RDS for MySQL の Blue/Green 作成では ROW は必須ではないため、運用方針として Ruby で報告する。
 aws "${aws_args[@]}" rds describe-db-parameters --db-parameter-group-name "$parameter_group" --output json > "$output_dir/db-parameters.json"
 
 # [0-1-03][0-1-04] 適用中オプショングループの全オプションを取得する。

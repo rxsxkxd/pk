@@ -1,0 +1,27 @@
+# MySQL 8.0 -> 8.4 DB パラメータグループ移行ルール。
+# action:
+#   force  : source の値に関係なく value を target へ設定する。
+#   copy   : source の user 値を target へコピーする（target に存在し変更可能な場合のみ）。
+#   omit   : target へ設定せず、レポートでは対応済みとして記録する。
+#   review : target へ設定せず、手動判断が必要としてレポートに記録する。
+version: 1
+rules:
+  binlog_format:
+    action: force
+    target: binlog_format
+    value: ROW
+    rationale: MySQL 8.4 Green 側のログ形式を明示する運用方針（Blue/Green 作成の前提条件ではない）
+  innodb_log_file_size:
+    action: omit
+    rationale: MySQL 8.4 では innodb_redo_log_capacity を使用。個別の容量設計は別途レビューする。
+  innodb_log_files_in_group:
+    action: omit
+    rationale: MySQL 8.4 では innodb_redo_log_capacity を使用。個別の容量設計は別途レビューする。
+
+# 未登録の Source=user パラメータはレビュー対象として YAML に出力しない。
+# 互換性と意図を確認した値だけ、次のように copy ルールを追加する。
+# 例:
+#   max_allowed_packet:
+#     action: copy
+#     target: max_allowed_packet
+#     rationale: アプリケーション要求により 8.4 でも同じ値を維持する

@@ -62,7 +62,7 @@ aws --region "$AWS_REGION" --profile "$AWS_PROFILE" rds describe-db-parameters \
   --output json > "$OUTPUT_DIR/db-parameters.json"
 ```
 
-`Parameters[]` から `ParameterName == binlog_format` の `ParameterValue` を確認し、`ROW` であることを判定する。
+`Parameters[]` から `ParameterName == binlog_format` の `ParameterValue` を記録する。RDS for MySQL の Blue/Green 作成で `ROW` は必須ではない。`MIXED`／`STATEMENT` の場合は、`ROW` 統一の必要性を通常のレプリケーション運用の方針として別途判断する。
 
 ## 4. オプショングループと `MEMCACHED`
 

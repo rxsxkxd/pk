@@ -40,7 +40,13 @@ add(results, backup >= 1 ? 'PASS' : 'STOP', '0-1-01 自動バックアップ', "
 
 binlog = parameters.find { |parameter| parameter['ParameterName'] == 'binlog_format' }
 binlog_value = binlog && binlog['ParameterValue']
-add(results, binlog_value == 'ROW' ? 'PASS' : 'STOP', '0-1-02 binlog_format', "#{binlog_value || '取得不可'}（期待値: ROW）")
+binlog_status = binlog_value == 'ROW' ? 'PASS' : 'REVIEW'
+binlog_detail = if binlog_value == 'ROW'
+                  'ROW（Green 作成の必須条件ではないが、運用方針と一致）'
+                else
+                  "#{binlog_value || '取得不可'}（Blue/Green 作成の阻害要因ではない。ROW 統一は別変更として判断）"
+                end
+add(results, binlog_status, '0-1-02 binlog_format', binlog_detail)
 
 statuses = instance.fetch('DBParameterGroups', []).map { |group| group['ParameterApplyStatus'] }.uniq
 add(results, statuses == ['in-sync'] ? 'PASS' : 'STOP', '0-1-05 パラメータ適用状態', statuses.join(', '))

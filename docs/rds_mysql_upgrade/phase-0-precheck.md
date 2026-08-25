@@ -17,7 +17,7 @@
 | No. | 状態 | 確認項目 | AWS 取得情報 | 合格条件／対応 |
 |---|---|---|---|---|
 | 0-1-01 | [停止] | 自動バックアップ | `describe-db-instances` の `BackupRetentionPeriod` | `1` 以上。`0` の場合は自動バックアップを有効化し、設定が反映されるまで待つ。 |
-| 0-1-02 | [停止] | バイナリログ形式 | `describe-db-parameters` の `binlog_format` | `ROW`。`MIXED`／`STATEMENT` の場合は、Phase 1 でカスタムパラメータグループに `ROW` を設定する。 |
+| 0-1-02 | [要判断] | バイナリログ形式 | `describe-db-parameters` の `binlog_format` | 値を記録する。RDS for MySQL の Blue/Green 作成では `ROW` は必須ではない。Blue を `ROW` に統一する場合は、移行と分離した運用判断として扱う。 |
 | 0-1-03 | [停止] | オプショングループ | `describe-db-instances` の `OptionGroupMemberships` | メジャーアップグレードの Blue/Green で使用可能なデフォルトのオプショングループを使用する。カスタムグループを使っている場合は、デフォルトへ戻す影響を確認・解消する。 |
 | 0-1-04 | [停止] | memcached | `describe-option-groups` の `Options[].OptionName` | `MEMCACHED` がないこと。ある場合は利用停止・アプリ設定変更・オプショングループ変更を先に完了する。 |
 | 0-1-05 | [停止] | パラメータ適用状態 | `describe-db-instances` の `DBParameterGroups[].ParameterApplyStatus` | `in-sync`。`pending-reboot` 等の場合は、必要なパラメータ反映を完了する。 |

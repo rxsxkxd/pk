@@ -27,8 +27,7 @@
 
 満たしていないと **作成リクエスト自体が弾かれる**ため最初に確認する。
 
-- [ ] 自動バックアップが有効（`backup_retention_period >= 1`）
-- [ ] `binlog_format = ROW`（エンジンデフォルトの `MIXED` では不可）
+- [ ] 自動バックアップが有効（`backup_retention_period >= 1`）で、Blue が DB パラメータグループと `In Sync` であること（RDS for MySQL の Blue/Green 作成に必要）
 - [ ] **デフォルトのオプショングループ**を使用している
       - メジャーアップの Blue/Green は「default option groups のみ対応」。中身が空のカスタム OG なら default に戻す
       - `memcached` オプションが入っている場合は 8.4 で廃止のため必ず外す
@@ -40,6 +39,16 @@
 - [ ] **インスタンスクラスが latest-generation / current-generation であること**（MySQL 5.7/8.0/8.4 は前世代クラスでの作成不可。前世代のままだと Blue/Green 作成自体が失敗するため、先に `modify-db-instance` でクラス変更が必要）
 - [ ] RDS Proxy を使っている場合、Blue を事前にプロキシへ登録済みであること（Blue/Green 作成後の新規登録はブロックされる。既存デプロイがある状態での登録もブロックされる）
 - [ ] IAM データベース認証を使っている場合、切替後に Green へ接続できるよう、IAM ポリシーの `Resource` に Blue・Green 双方の ARN を含めておく（Green 用に後から追加が必要）
+
+#### `binlog_format` と Blue/Green レプリケーションの関係
+
+RDS for MySQL の Blue/Green Deployments は、Blue をコピーして Green を作成し、Blue → Green のレプリケーションを RDS が構成する。**作成前に移行元 Blue の `binlog_format` を `ROW` に変更することは、Blue/Green 作成の必須条件ではない。** AWS 公式の MySQL 向け事前準備として求められているのは自動バックアップの有効化である（[Blue/Green 作成の事前準備](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/blue-green-deployments-creating.html)）。
+
+自動バックアップが有効な RDS for MySQL ではバイナリログが利用される。MySQL 8.0 では `binlog_format` の既定値が `MIXED`、MySQL 8.4 では既定値が `ROW` である（[RDS for MySQL のバイナリログ設定](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_LogAccess.MySQL.BinaryFormat.html)）。したがって、8.0 の Blue が `MIXED` であっても、それだけを理由に Blue/Green の Green 作成が拒否されるわけではない。
+
+`ROW` を採用するかは、Blue/Green の成立条件ではなく、通常のレプリケーション運用における整合性・標準化の判断である。Blue を `ROW` に統一したい場合は、移行作業に混在させず、影響評価をした別変更として実施する。`binlog_format` は RDS for MySQL では動的パラメータのため、変更後の再起動は不要である。
+
+Green の MySQL 8.4 用パラメータグループは、8.4 の既定値 `ROW` を利用できる。CloudFormation テンプレートで `binlog_format: ROW` を明示する場合も、それは Green 側の設定意図を固定するためであり、Blue のレプリカ作成を成立させるための事前変更ではない。
 
 ```bash
 # 明示的に変更しているパラメータの洗い出し
@@ -156,16 +165,11 @@ WHERE plugin = 'mysql_native_password';
 
 ### 1-1. Blue（8.0）側
 
-```bash
-# binlog_format = ROW（動的パラメータ。再起動不要）
-aws rds modify-db-parameter-group \
-  --db-parameter-group-name <current-pg> \
-  --parameters "ParameterName=binlog_format,ParameterValue=ROW,ApplyMethod=immediate"
-```
+Blue/Green 作成のために、Blue の `binlog_format` を `ROW` へ変更する作業は不要。現行値を記録するだけとし、`ROW` への統一が必要な場合は本移行と分離した変更として扱う。
 
 ```sql
--- 実効値の確認
-SHOW VARIABLES LIKE 'binlog_format';   -- ROW
+-- 現行値を記録する（MIXED でも Blue/Green 作成の阻害要因ではない）
+SHOW VARIABLES LIKE 'binlog_format';
 
 -- 切り戻し経路を用意するなら binlog 保持を 24 時間以上に
 CALL mysql.rds_set_configuration('binlog retention hours', 24);
@@ -176,18 +180,9 @@ CALL mysql.rds_show_configuration;
 
 **パラメータグループはファミリーをまたげないため、`mysql8.4` ファミリーで作り直しが必須。**
 
-```bash
-aws rds create-db-parameter-group \
-  --db-parameter-group-name <name>-mysql84 \
-  --db-parameter-group-family mysql8.4 \
-  --description "MySQL 8.4 for <system>"
+新規の 8.4 用パラメータグループは AWS CLI で直接作成・変更せず、CloudFormation の専用スタックで管理する。既存 8.0 の設定は AWS CLI の読み取り操作で採取し、8.4 への移植判断をレビューしてからテンプレートへ明示する。
 
-aws rds modify-db-parameter-group \
-  --db-parameter-group-name <name>-mysql84 \
-  --parameters "ParameterName=binlog_format,ParameterValue=ROW,ApplyMethod=immediate"
-```
-
-Phase 0-1 で洗い出した `Source=='user'` のパラメータを、**次章の差分表と突き合わせながら**移植する。
+具体的なフロー、テンプレート例、Change Set レビュー、作成後の読み取り検証は、[Phase 1 — MySQL 8.4 パラメータグループの CloudFormation 管理](phase-1-parameter-group-cloudformation.md)を参照する。本段階では DB インスタンスおよび Blue/Green Deployments を CloudFormation で作成・変更しない。
 
 ### 1-3. 保護スナップショットの取得
 

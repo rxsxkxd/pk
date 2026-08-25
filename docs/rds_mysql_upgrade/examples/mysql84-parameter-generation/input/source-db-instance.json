@@ -1,0 +1,13 @@
+{
+  "DBInstances": [
+    {
+      "DBInstanceIdentifier": "sample-production-blue",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "sample-production-mysql80",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    }
+  ]
+}

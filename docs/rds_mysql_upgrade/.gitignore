@@ -1,0 +1,8 @@
+# Local Docker credentials, certificates, and client connection settings
+docker/.env
+docker/aws-config/*
+!docker/aws-config/.gitkeep
+docker/rds-ca/*
+!docker/rds-ca/.gitkeep
+docker/mysql-client-config/*
+!docker/mysql-client-config/.gitkeep

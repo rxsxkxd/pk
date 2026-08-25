@@ -1,0 +1,13 @@
+{
+  "EngineDefaults": {
+    "DBParameterGroupFamily": "mysql8.0",
+    "Parameters": [
+      { "ParameterName": "binlog_format", "ParameterValue": "MIXED" },
+      { "ParameterName": "log_slave_updates", "ParameterValue": "0" },
+      { "ParameterName": "slave_parallel_workers", "ParameterValue": "4" },
+      { "ParameterName": "innodb_log_file_size", "ParameterValue": "134217728" },
+      { "ParameterName": "default_authentication_plugin", "ParameterValue": "mysql_native_password" },
+      { "ParameterName": "max_allowed_packet", "ParameterValue": "67108864" }
+    ]
+  }
+}

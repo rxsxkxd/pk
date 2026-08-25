@@ -1,0 +1,66 @@
+name: rds-mysql-upgrade-tools
+
+# 使い方:
+#   docker compose create  # 認証情報なしでも作成可能
+#   # 実接続時だけ docker/.env でホスト側の認証情報・証明書ディレクトリを指定
+#   docker compose --env-file docker/.env run --rm awscli sts get-caller-identity
+#
+# すべての認証情報・証明書・接続設定は read_only でマウントする。
+services:
+  awscli:
+    image: public.ecr.aws/aws-cli/aws-cli:2.32.25
+    entrypoint: ["aws"]
+    working_dir: /workspace
+    environment:
+      AWS_SDK_LOAD_CONFIG: "1"
+      AWS_PROFILE: ${AWS_PROFILE:-default}
+    volumes:
+      - type: bind
+        source: ${AWS_CONFIG_DIR:-./docker/aws-config}
+        target: /root/.aws
+        read_only: true
+      - type: bind
+        source: ${WORKSPACE_DIR:-.}
+        target: /workspace
+
+  mysql:
+    # mysql:8.4.8 には MySQL CLI と MySQL Shell (mysqlsh) の両方が含まれる。
+    image: mysql:8.4.8
+    # `docker compose up` で DB サーバーを起動しない。run 時のコマンドで mysql / mysqlsh を指定する。
+    entrypoint: []
+    command: ["mysqlsh", "--version"]
+    working_dir: /workspace
+    environment:
+      HOME: /tmp
+    volumes:
+      - type: bind
+        source: ${RDS_CA_DIR:-./docker/rds-ca}
+        target: /certs/rds
+        read_only: true
+      - type: bind
+        source: ${MYSQL_CLIENT_CONFIG_DIR:-./docker/mysql-client-config}
+        target: /client-config
+        read_only: true
+      - type: bind
+        source: ${WORKSPACE_DIR:-.}
+        target: /workspace
+
+  # Ruby スクリプト実行専用。AWS credential や RDS 証明書はマウントしない。
+  ruby:
+    image: ruby:3.4
+    working_dir: /workspace
+    entrypoint: ["ruby"]
+    volumes:
+      - type: bind
+        source: ${WORKSPACE_DIR:-.}
+        target: /workspace
+
+  # Go プログラム実行専用。AWS credential や RDS 証明書はマウントしない。
+  go:
+    image: golang:1.25
+    working_dir: /workspace
+    entrypoint: ["go"]
+    volumes:
+      - type: bind
+        source: ${WORKSPACE_DIR:-.}
+        target: /workspace

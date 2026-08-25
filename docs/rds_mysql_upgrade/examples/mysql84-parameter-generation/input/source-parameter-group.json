@@ -1,0 +1,9 @@
+{
+  "DBParameterGroups": [
+    {
+      "DBParameterGroupName": "sample-production-mysql80",
+      "DBParameterGroupFamily": "mysql8.0",
+      "Description": "Sample production MySQL 8.0 parameter group"
+    }
+  ]
+}

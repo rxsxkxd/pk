@@ -32,15 +32,25 @@ RDS for MySQL の DB パラメータグループは、MySQL の動作を構成�
 
 DB パラメータグループは 1 つのファミリーにのみ属し、互換性のあるエンジン／バージョンでだけ使える。そのため `mysql8.0` のグループを `mysql8.4` に転用・変換することはできない。8.4 用には `Family: mysql8.4` の新規グループを作る。
 
-バージョン差異は次の手順で吸収する。8.0 のグループ全体をコピーせず、明示設定だけを 8.4 の公開パラメータ・許容値・既定値と突き合わせる。
+バージョン差異は次の手順で吸収する。8.0 のグループ全体をコピーせず、明示設定だけを 8.4 の公開パラメータ・許容値・**engine default** と突き合わせる。RDS が返す `Source=system` の値は、インスタンス構成に依存する別の値として扱う。
 
 1. `describe-db-parameters --source user` で、現行 `mysql8.0` グループの上書き値を採取する。
-2. `describe-engine-default-parameters --db-parameter-group-family mysql8.0` と `mysql8.4` を取得し、対象パラメータの存在、既定値、`AllowedValues`、`ApplyType`、`IsModifiable` を比較する。
+2. `describe-db-parameters --source system` で現行 8.0 グループの値の由来が RDS system であるパラメータを、`describe-engine-default-parameters --db-parameter-group-family mysql8.0` と `mysql8.4` で各ファミリーの engine default を取得する。これらを区別したうえで、対象パラメータの存在、値、`AllowedValues`、`ApplyType`、`IsModifiable` を比較する。
 3. 各値を「8.4 へ移植」「8.4 の既定値を採用」「代替パラメータへ変更」「除外」に分類し、理由をレビューする。
 4. 「移植」または「代替」と判断した値だけを `mysql8.4` の CloudFormation `Parameters` に記載する。
 5. 作成後に `describe-db-parameters` で `Source=user`、値、`ApplyType` を検証する。静的パラメータの影響は、後続で DB に関連付ける際に評価する。
 
 この方式により、8.4 で廃止されたパラメータ、許容値が変わったパラメータ、8.4 の改善された既定値を盲目的に 8.0 の値で上書きすることを防ぐ。
+
+### 8.4 の既定値・インスタンス依存値を固定しない理由
+
+移行レポートの「RDS・インスタンスクラス依存の自動算出」「CPU・メモリ依存の既定値または算出方式」「エンジン既定値・挙動変更」という分類は、`Source` が必ず `system` であることを示すものではない。8.4 での値の決まり方と、8.0 の固定値を CloudFormation で再設定するリスクを示すレビュー分類である。
+
+- `innodb_buffer_pool_size`、`innodb_redo_log_capacity`、`innodb_dedicated_server` は、8.4 では `innodb_dedicated_server` が既定で有効になり、DB インスタンスクラスのメモリ・vCPU を基にエンジンが算出する。RDS は小さいインスタンスクラスで実効値を調整することもあるため、単純な固定既定値ではなく、実質的にインスタンス依存の値である。8.0 の明示値をそのまま CloudFormation に移植せず、Green のインスタンスクラスで算出結果、メモリ使用量、ストレージ容量を確認する。 [AWS: MySQL 8.4 のバッファプールと redo ログ容量](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.MySQL.CommonDBATasks.Config.Size.8.4.html)
+- `innodb_purge_threads`、`innodb_buffer_pool_instances`、`innodb_parallel_read_threads` などは、8.4 の既定値または算出方式が CPU・メモリ等に依存するためレビューする。`innodb_purge_threads` は RDS で vCPU に基づく式が既定値である。 [AWS: RDS for MySQL 8.4 の機能差分](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/MySQL.Concepts.FeatureSupport.html)
+- `innodb_change_buffering`、`innodb_io_capacity`、Group Replication 系などは、主にエンジン既定値または挙動が変わる対象であり、RDS の `system` 値とは限らない。性能・整合性・障害時の挙動を Green で確認してから、8.4 の既定値を採用するか明示設定するかを決める。
+
+Phase 1 の時点では DB インスタンスにまだ関連付けないため、実効値は確定しない。関連付け後の後続フェーズで `describe-db-parameters` の `Source` と、DB 接続後の `@@innodb_buffer_pool_size` などの実効値を照合する。
 
 ## 方針
 
@@ -67,10 +77,10 @@ DB パラメータグループは 1 つのファミリーにのみ属し、互�
 
 ### 自動生成フロー（推奨）
 
-以下のスクリプトは、AWS CLI の読み取り API による収集と、Ruby によるローカル判定・YAML 生成を分離している。未登録の `Source=user` パラメータは自動でコピーせず `REVIEW` にするため、8.0 の設定を無条件に 8.4 へ持ち込まない。
+以下のスクリプトは、AWS CLI の読み取り API による収集と、Ruby によるローカル判定・YAML 生成を分離している。未登録の `Source=user` パラメータは自動でコピーせず「要レビュー」にするため、8.0 の設定を無条件に 8.4 へ持ち込まない。
 
 ```bash
-# 1. 現行の user 設定、8.0／8.4 の既定値、任意で関連付け状態を一時ディレクトリへ収集する
+# 1. 現行の user／system 値、8.0／8.4 の engine default、任意で関連付け状態を一時ディレクトリへ収集する
 bash scripts/collect_mysql84_parameter_inputs.sh \
   --source-parameter-group <current-mysql80-parameter-group> \
   --db-instance-id <blue-instance-id> \
@@ -87,10 +97,10 @@ ruby scripts/generate_mysql84_parameter_group.rb \
 
 生成時に使用するルールは [mysql80-to-84-parameter-rules.yml](config/mysql80-to-84-parameter-rules.yml) で管理する。出力は次の 2 ファイルである。
 
-- `mysql80-to-mysql84-parameter-report.md`: 8.0 の user 値・8.0／8.4 の既定値・ルール・生成可否を一覧化したレビュー報告
+- `mysql80-to-mysql84-parameter-report.md`: 8.0 の `Source=user`・`Source=system`・8.0／8.4 の engine default・ルール・生成可否を区別して一覧化したレビュー報告
 - `mysql84-parameter-group.yaml`: `AWS::RDS::DBParameterGroup` のみを含む CloudFormation テンプレート
 
-`REVIEW` または `BLOCKED` が残る場合、Ruby スクリプトは終了コード `1` を返す。ルールを追加・修正し、該当値の互換性と意図をレビューしてから再生成する。
+「要レビュー」または「生成不可」が残る場合、Ruby スクリプトは終了コード `1` を返す。ルールを追加・修正し、該当値の互換性と意図をレビューしてから再生成する。
 
 ```bash
 aws rds describe-db-parameters \

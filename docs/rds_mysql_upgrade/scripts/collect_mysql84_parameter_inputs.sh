@@ -41,23 +41,29 @@ aws "${aws_args[@]}" rds describe-db-parameter-groups \
 aws "${aws_args[@]}" rds describe-db-parameters \
   --db-parameter-group-name "$source_pg" --source user --output json > "$output_dir/source-user-parameters.json"
 
-# [P1-03] mysql8.0 のエンジン／RDS システム既定パラメータを取得する。
-# 現行の user 値が 8.0 既定値からどのように上書きされているかを Ruby で報告する。
+# [P1-03] 現行 8.0 カスタムグループで RDS が system として返す値を取得する。
+# インスタンスクラス等により RDS が決定する値を、engine default と区別して Ruby レポートに記載する。
+aws "${aws_args[@]}" rds describe-db-parameters \
+  --db-parameter-group-name "$source_pg" --source system --output json > "$output_dir/source-system-parameters.json"
+
+# [P1-04] mysql8.0 ファミリーの engine default を取得する。
+# Source=system の実効値ではない。現行 user 値がエンジン既定値を上書きしているかを Ruby で報告する。
 aws "${aws_args[@]}" rds describe-engine-default-parameters \
   --db-parameter-group-family mysql8.0 --output json > "$output_dir/mysql80-default-parameters.json"
 
-# [P1-04] mysql8.4 のエンジン／RDS システム既定パラメータを取得する。
-# パラメータの存否、変更可否、許容値、既定値を確認し、8.0 の値を無条件にコピーしないために使う。
+# [P1-05] mysql8.4 ファミリーの engine default を取得する。
+# まだ DB に関連付けない Phase 1 では Source=system は確定しない。パラメータの存否、変更可否、許容値、
+# engine default を確認し、8.0 の値を無条件にコピーしないために使う。
 aws "${aws_args[@]}" rds describe-engine-default-parameters \
   --db-parameter-group-family mysql8.4 --output json > "$output_dir/mysql84-default-parameters.json"
 
 if [[ -n "$db_instance_id" ]]; then
-  # [P1-05] 任意。現行 DB へのグループ関連付けと ParameterApplyStatus を取得する。
+  # [P1-06] 任意。現行 DB へのグループ関連付けと ParameterApplyStatus を取得する。
   # 収集対象グループとインスタンスが一致するか、pending-reboot 等がないかを Ruby で報告する。
   aws "${aws_args[@]}" rds describe-db-instances \
     --db-instance-identifier "$db_instance_id" --output json > "$output_dir/source-db-instance.json"
 fi
 
-ruby -rjson -rtime -e 'puts JSON.generate({"source_parameter_group" => ARGV[0], "collected_at" => Time.now.utc.iso8601})' "$source_pg" > "$output_dir/metadata.json"
+python3 -c 'import json, sys; from datetime import datetime, timezone; print(json.dumps({"source_parameter_group": sys.argv[1], "collected_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}))' "$source_pg" > "$output_dir/metadata.json"
 echo "Collected read-only AWS CLI results: $output_dir"
 echo "Generate: ruby scripts/generate_mysql84_parameter_group.rb --input-dir $output_dir --output-dir <generated-dir> --system <system> --environment <environment>"

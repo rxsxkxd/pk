@@ -4,6 +4,8 @@
 #   copy   : source の user 値を target へコピーする（target に存在し変更可能な場合のみ）。
 #   omit   : target へ設定せず、レポートでは対応済みとして記録する。
 #   review : target へ設定せず、手動判断が必要としてレポートに記録する。
+# target_only: true は、8.0 に存在しない 8.4 新規パラメータもレポート対象にする。
+# report_category: 移行レポート第2部で使用するレビュー分類。指定しない場合は「値・仕様変更候補」。
 version: 1
 rules:
   binlog_format:
@@ -11,6 +13,183 @@ rules:
     target: binlog_format
     value: ROW
     rationale: MySQL 8.4 Green 側のログ形式を明示する運用方針（Blue/Green 作成の前提条件ではない）
+
+  # MySQL 8.4 での非包摂的用語への名称変更。
+  # Source=user の旧名だけを新名称へ同じ値で移植する。
+  # 旧名が engine-default / system の場合は収集対象外となり、8.4 の既定値を採用する。
+  init_slave:
+    action: copy
+    target: init_replica
+    rationale: MySQL 8.4 での名称変更
+  log_slave_updates:
+    action: copy
+    target: log_replica_updates
+    rationale: MySQL 8.4 での名称変更
+  log_slow_slave_statements:
+    action: copy
+    target: log_slow_replica_statements
+    rationale: MySQL 8.4 での名称変更
+  rpl_stop_slave_timeout:
+    action: copy
+    target: rpl_stop_replica_timeout
+    rationale: MySQL 8.4 での名称変更
+  skip_slave_start:
+    action: copy
+    target: skip_replica_start
+    rationale: MySQL 8.4 での名称変更
+  slave_checkpoint_group:
+    action: copy
+    target: replica_checkpoint_group
+    rationale: MySQL 8.4 での名称変更
+  slave_checkpoint_period:
+    action: copy
+    target: replica_checkpoint_period
+    rationale: MySQL 8.4 での名称変更
+  slave_compressed_protocol:
+    action: copy
+    target: replica_compressed_protocol
+    rationale: MySQL 8.4 での名称変更
+  slave_exec_mode:
+    action: copy
+    target: replica_exec_mode
+    rationale: MySQL 8.4 での名称変更
+  slave_load_tmpdir:
+    action: copy
+    target: replica_load_tmpdir
+    rationale: MySQL 8.4 での名称変更
+  slave_max_allowed_packet:
+    action: copy
+    target: replica_max_allowed_packet
+    rationale: MySQL 8.4 での名称変更
+  slave_net_timeout:
+    action: copy
+    target: replica_net_timeout
+    rationale: MySQL 8.4 での名称変更
+  slave_parallel_type:
+    action: copy
+    target: replica_parallel_type
+    rationale: MySQL 8.4 での名称変更
+  slave_parallel_workers:
+    action: copy
+    target: replica_parallel_workers
+    rationale: MySQL 8.4 での名称変更
+  slave_pending_jobs_size_max:
+    action: copy
+    target: replica_pending_jobs_size_max
+    rationale: MySQL 8.4 での名称変更
+  slave_preserve_commit_order:
+    action: copy
+    target: replica_preserve_commit_order
+    rationale: MySQL 8.4 での名称変更
+  slave_skip_errors:
+    action: copy
+    target: replica_skip_errors
+    rationale: MySQL 8.4 での名称変更
+  slave_sql_verify_checksum:
+    action: copy
+    target: replica_sql_verify_checksum
+    rationale: MySQL 8.4 での名称変更
+  slave_transaction_retries:
+    action: copy
+    target: replica_transaction_retries
+    rationale: MySQL 8.4 での名称変更
+  slave_type_conversions:
+    action: copy
+    target: replica_type_conversions
+    rationale: MySQL 8.4 での名称変更
+  sql_slave_skip_counter:
+    action: copy
+    target: sql_replica_skip_counter
+    rationale: MySQL 8.4 での名称変更
+
+  # default_authentication_plugin から authentication_policy への移行は
+  # 単純な名称変更ではない。認証方式とクライアント互換性を個別確認する。
+  default_authentication_plugin:
+    action: review
+    report_category: 認証方式の仕様変更
+    rationale: authentication_policy への自動変換は行わない
+
+  # 2-3: MySQL 8.4 で追加されたパラメータ。
+  # 非標準キーへの外部キーをアプリが実行時に作成・変更するか確認するまで、
+  # OFF を自動設定しない。8.4 の既定値 ON を使うかを個別に判断する。
+  restrict_fk_on_non_standard_key:
+    action: review
+    target_only: true
+    rationale: 新規パラメータ。非標準キーを参照する外部キー DDL の有無を確認する
+  # authentication_policy は default_authentication_plugin の単純な後継ではない。
+  # 旧パラメータに明示設定がない場合は 8.4 の既定認証ポリシーを採用する。
+  authentication_policy:
+    action: omit
+    target_only: true
+    rationale: 新規パラメータ。8.4 の既定認証ポリシーを採用する
+
+  # 2-4: 8.4 で既定値が変更された、変更可能なパラメータ。
+  # Source=user であった場合だけレポートを REVIEW とし、8.0 の値を自動コピーしない。
+  # 未設定なら 8.4 の既定値を採用する。
+  innodb_adaptive_hash_index:
+    action: review
+    report_category: エンジン既定値・挙動変更
+    rationale: 8.4 の既定値 OFF と性能影響を Green で評価する
+  innodb_buffer_pool_instances:
+    action: review
+    report_category: CPU・メモリ依存の既定値または算出方式
+    rationale: 8.4 では vCPU 数から算出される。8.0 の固定値を自動移植しない
+  innodb_change_buffering:
+    action: review
+    report_category: エンジン既定値・挙動変更
+    rationale: 8.4 の既定値 none と性能影響を Green で評価する
+  innodb_io_capacity:
+    action: review
+    report_category: エンジン既定値・挙動変更
+    rationale: 8.4 の既定値は 10000。ストレージ IOPS と負荷試験で判断する
+  innodb_io_capacity_max:
+    action: review
+    report_category: エンジン既定値・挙動変更
+    rationale: 8.4 では innodb_io_capacity に連動する。固定値を自動移植しない
+  innodb_numa_interleave:
+    action: review
+    report_category: エンジン既定値・挙動変更
+    rationale: 8.4 の既定値 ON。インスタンスクラスと性能影響を確認する
+  innodb_page_cleaners:
+    action: review
+    report_category: エンジン既定値・挙動変更
+    rationale: 8.4 では innodb_buffer_pool_instances に連動する
+  innodb_parallel_read_threads:
+    action: review
+    report_category: CPU・メモリ依存の既定値または算出方式
+    rationale: 8.4 では vCPU 数から算出される
+  innodb_read_io_threads:
+    action: review
+    report_category: CPU・メモリ依存の既定値または算出方式
+    rationale: 8.4 では vCPU 数から算出される
+  group_replication_consistency:
+    action: review
+    report_category: エンジン既定値・挙動変更
+    rationale: 8.4 の既定値変更による整合性・待機時間への影響を確認する
+  group_replication_exit_state_action:
+    action: review
+    report_category: エンジン既定値・挙動変更
+    rationale: 8.4 の既定値変更による障害時の挙動を確認する
+
+  # 2-4: RDS for MySQL 8.4 で既定値または自動算出方法が変更された項目。
+  # 8.0 側の明示値がある場合でも、インスタンスのメモリ・vCPU に依存するためレビューする。
+  innodb_dedicated_server:
+    action: review
+    report_category: RDS・インスタンスクラス依存の自動算出
+    rationale: 8.4 では既定有効。関連する InnoDB 値の自動算出を確認する
+  innodb_buffer_pool_size:
+    action: review
+    report_category: RDS・インスタンスクラス依存の自動算出
+    rationale: 8.4 では innodb_dedicated_server によりメモリから算出される
+  innodb_redo_log_capacity:
+    action: review
+    report_category: RDS・インスタンスクラス依存の自動算出
+    rationale: 8.4 では innodb_dedicated_server によりメモリから算出される
+  innodb_purge_threads:
+    action: review
+    report_category: CPU・メモリ依存の既定値または算出方式
+    rationale: 8.4 では vCPU 数から算出される
+
   innodb_log_file_size:
     action: omit
     rationale: MySQL 8.4 では innodb_redo_log_capacity を使用。個別の容量設計は別途レビューする。

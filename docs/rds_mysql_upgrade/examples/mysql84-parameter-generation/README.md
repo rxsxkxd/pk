@@ -12,10 +12,10 @@
 | `log_slave_updates=1` | `log_replica_updates=1` へ `copy` | リネーム |
 | `slave_parallel_workers=8` | `replica_parallel_workers=8` へ `copy` | リネーム |
 | `innodb_log_file_size` | `omit` | 8.4 では `innodb_redo_log_capacity` を使用 |
-| `default_authentication_plugin` | `review` | `authentication_policy` へ自動変換しない |
-| `max_allowed_packet` | `review` | 未登録の user 設定を無条件にコピーしない |
+| `default_authentication_plugin=mysql_native_password` | `authentication_policy: "*:mysql_native_password"` を生成 | 第1認証要素の既定を維持しつつ他方式も許可 |
+| `max_allowed_packet` | 同名で `copy` | 未登録でも8.4で変更可能なら user 設定を反映 |
 
-さらに、8.4 新規の `restrict_fk_on_non_standard_key` は `target_only` の `review` としてレポートに現れる。
+さらに、8.4 新規の `restrict_fk_on_non_standard_key` は `target_only` の「要レビュー」としてレポートに現れる。
 
 ## 再生成
 
@@ -29,4 +29,4 @@ ruby scripts/generate_mysql84_parameter_group.rb \
   --environment production
 ```
 
-このサンプルには「要レビュー」が 3 件残るため、コマンドは終了コード `1` を返す。ただしレビュー用の `output/mysql84-parameter-group.yaml` と `output/mysql80-to-mysql84-parameter-report.md` は生成される。実運用では、レビュー後にルールを追加・変更して「要レビュー」を 0 件にしてから CloudFormation へ適用する。
+このサンプルには「要レビュー」が 1 件残るため、コマンドは終了コード `1` を返す。ただしレビュー用の `output/mysql84-parameter-group.yaml` と `output/mysql80-to-mysql84-parameter-report.md` は生成される。実運用では、レビュー後にルールを追加・変更して「要レビュー」を 0 件にしてから CloudFormation へ適用する。

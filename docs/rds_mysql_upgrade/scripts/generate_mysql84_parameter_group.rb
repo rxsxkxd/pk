@@ -51,7 +51,8 @@ generated = {}
 source_user.each do |parameter|
   name = parameter.fetch('ParameterName')
   value = parameter['ParameterValue']
-  rule = rules[name] || { 'action' => 'review', 'rationale' => '移行ルール未登録' }
+  # Source=user は、保留・廃止と明示したルールを除き、8.4 に存在し変更可能であれば YAML へ反映する。
+  rule = rules[name] || { 'action' => 'copy', 'rationale' => '移行ルール未登録。Source=user の値を同名で反映する' }
   action = rule.fetch('action', 'review')
   target = rule['target'] || name
   target_parameter = default84_by_name[target]
@@ -78,7 +79,14 @@ source_user.each do |parameter|
   when 'omit'
     result = 'OMITTED'
   when 'review'
-    result = 'REVIEW'
+    if target_parameter && target_parameter['IsModifiable']
+      generated[target] = value
+      result = 'GENERATED'
+      detail = "#{detail} / Source=user の値を明示設定として反映する"
+    else
+      result = 'BLOCKED'
+      detail = "#{detail} / 8.4 に存在しない、または変更不可"
+    end
   else
     result = 'BLOCKED'
     detail = "未知の action: #{action}"
@@ -96,6 +104,7 @@ rules.each do |name, rule|
   parameter = default84_by_name[target]
   case rule['action']
   when 'force'
+    next if rule['source_required']
     next if generated.key?(target)
     if parameter && parameter['IsModifiable']
       generated[target] = rule.fetch('value')
@@ -108,6 +117,9 @@ rules.each do |name, rule|
     end
   when 'review', 'omit'
     next unless rule['target_only']
+    # 8.0 の user 定義から同じ 8.4 パラメータを生成済みなら、
+    # 「8.4 新規・既定値を採用」の行は重複するため出力しない。
+    next if generated.key?(target)
     rows << { name: name, source_value: '(8.4 新規)', engine_default80: nil, system80: nil, target: target,
               default84: parameter && parameter['ParameterValue'], allowed84: parameter && parameter['AllowedValues'], apply_type84: parameter && parameter['ApplyType'],
               action: rule['action'], result: rule['action'] == 'review' ? 'REVIEW' : 'OMITTED', detail: rule['rationale'] || '' }
@@ -209,6 +221,7 @@ File.open(report_path, 'w') do |file|
   end
   non_rename_rules.sort.each do |rule_name, rule|
     target = rule['target'] || rule_name
+    next if rule['target_only'] && generated.key?(target)
     row = rows.find { |candidate| candidate[:name] == rule_name }
     target_parameter = default84_by_name[target]
     category = if rule['target_only']
@@ -240,7 +253,7 @@ File.open(report_path, 'w') do |file|
 
   file.puts '## 3. 移行処理結果'
   file.puts
-  file.puts '収集された user 定義と `target_only` ルールを、生成可否まで含めて記録する。未登録の user 定義もここで「要レビュー」として検出する。'
+  file.puts '収集された user 定義と `target_only` ルールを、生成可否まで含めて記録する。未登録の user 定義は、8.4 に同名で存在し変更可能なら同じ値を生成し、それ以外は「生成不可」として検出する。'
   file.puts
   file.puts '| Source parameter | 8.0 Source=user | 8.0 engine default | 8.0 Source=system | 8.4 target | 8.4 engine default | 8.4 allowed / apply | Rule | 処理結果 | 判断理由 |'
   file.puts '|---|---|---|---|---|---|---|---|---|---|'

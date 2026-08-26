@@ -77,7 +77,7 @@ Phase 1 の時点では DB インスタンスにまだ関連付けないため�
 
 ### 自動生成フロー（推奨）
 
-以下のスクリプトは、AWS CLI の読み取り API による収集と、Ruby によるローカル判定・YAML 生成を分離している。未登録の `Source=user` パラメータは自動でコピーせず「要レビュー」にするため、8.0 の設定を無条件に 8.4 へ持ち込まない。
+以下のスクリプトは、AWS CLI の読み取り API による収集と、Ruby によるローカル判定・YAML 生成を分離している。`Source=user` の値は、8.4 に同名または移行ルール上の対応先が存在し変更可能であれば YAML へ明示する。8.4 で廃止され保留とした値、存在しない値、変更不可の値は YAML に出力せず「生成不可」または「設定対象外」とする。
 
 ```bash
 # 1. 現行の user／system 値、8.0／8.4 の engine default、任意で関連付け状態を一時ディレクトリへ収集する
@@ -100,7 +100,7 @@ ruby scripts/generate_mysql84_parameter_group.rb \
 - `mysql80-to-mysql84-parameter-report.md`: 8.0 の `Source=user`・`Source=system`・8.0／8.4 の engine default・ルール・生成可否を区別して一覧化したレビュー報告
 - `mysql84-parameter-group.yaml`: `AWS::RDS::DBParameterGroup` のみを含む CloudFormation テンプレート
 
-「要レビュー」または「生成不可」が残る場合、Ruby スクリプトは終了コード `1` を返す。ルールを追加・修正し、該当値の互換性と意図をレビューしてから再生成する。
+「要レビュー」または「生成不可」が残る場合、Ruby スクリプトは終了コード `1` を返す。ルールを追加・修正し、該当値の互換性と意図をレビューしてから再生成する。`default_authentication_plugin=mysql_native_password` の user 定義は `authentication_policy: "*:mysql_native_password"` へ変換する。この値は `mysql_native_password` を第1認証要素の既定にしつつ他方式も許可する。Green では既存アカウントとクライアントの接続試験を必須とする。
 
 ```bash
 aws rds describe-db-parameters \

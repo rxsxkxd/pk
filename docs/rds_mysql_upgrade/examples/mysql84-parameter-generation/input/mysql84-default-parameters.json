@@ -24,6 +24,13 @@
         "IsModifiable": true
       },
       {
+        "ParameterName": "max_allowed_packet",
+        "ParameterValue": "67108864",
+        "AllowedValues": "1024-1073741824",
+        "ApplyType": "dynamic",
+        "IsModifiable": true
+      },
+      {
         "ParameterName": "authentication_policy",
         "ParameterValue": "*,",
         "AllowedValues": "*",

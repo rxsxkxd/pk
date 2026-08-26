@@ -3,8 +3,9 @@
 #   force  : source の値に関係なく value を target へ設定する。
 #   copy   : source の user 値を target へコピーする（target に存在し変更可能な場合のみ）。
 #   omit   : target へ設定せず、レポートでは対応済みとして記録する。
-#   review : target へ設定せず、手動判断が必要としてレポートに記録する。
+#   review : Source=user がある場合は同じ値を target へ設定し、ない場合は手動判断が必要として記録する。
 # target_only: true は、8.0 に存在しない 8.4 新規パラメータもレポート対象にする。
+# source_required: true は、source の user 定義がある場合だけ force ルールを適用する。
 # report_category: 移行レポート第2部で使用するレビュー分類。指定しない場合は「値・仕様変更候補」。
 version: 1
 rules:
@@ -102,12 +103,15 @@ rules:
     target: sql_replica_skip_counter
     rationale: MySQL 8.4 での名称変更
 
-  # default_authentication_plugin から authentication_policy への移行は
-  # 単純な名称変更ではない。認証方式とクライアント互換性を個別確認する。
+  # 8.0 で default_authentication_plugin が明示されている場合、8.4 では
+  # mysql_native_password を第1認証要素の既定にしつつ、他方式も許可する。
   default_authentication_plugin:
-    action: review
+    action: force
+    source_required: true
+    target: authentication_policy
+    value: "*:mysql_native_password"
     report_category: 認証方式の仕様変更
-    rationale: authentication_policy への自動変換は行わない
+    rationale: mysql_native_password を許可し第1認証要素の既定にする。8.4 でのプラグイン利用可否は Green で接続試験する
 
   # 2-3: MySQL 8.4 で追加されたパラメータ。
   # 非標準キーへの外部キーをアプリが実行時に作成・変更するか確認するまで、
@@ -197,10 +201,6 @@ rules:
     action: omit
     rationale: MySQL 8.4 では innodb_redo_log_capacity を使用。個別の容量設計は別途レビューする。
 
-# 未登録の Source=user パラメータはレビュー対象として YAML に出力しない。
-# 互換性と意図を確認した値だけ、次のように copy ルールを追加する。
-# 例:
-#   max_allowed_packet:
-#     action: copy
-#     target: max_allowed_packet
-#     rationale: アプリケーション要求により 8.4 でも同じ値を維持する
+# 未登録の Source=user パラメータは、8.4 に同名で存在し変更可能な場合は YAML へ同じ値を出力する。
+# 8.4 に存在しない・変更不可の場合は生成不可として YAML に出力しない。
+# 明示的に保留・除外する項目は omit ルールを追加する。

@@ -59,6 +59,16 @@ source_user.each do |parameter|
   result = 'REVIEW'
   detail = rule['rationale'] || ''
 
+  # 値に依存する移行ルール。例: mysql_native_password を既定にしていた場合だけ、
+  # 8.4 のプラグイン有効化と authentication_policy の設定を行う。
+  if rule['source_value'] && value != rule['source_value']
+    rows << { name: name, source_value: value, engine_default80: default80_by_name.dig(name, 'ParameterValue'), system80: system80_by_name.dig(name, 'ParameterValue'), target: target,
+              default84: target_parameter && target_parameter['ParameterValue'], allowed84: target_parameter && target_parameter['AllowedValues'],
+              apply_type84: target_parameter && target_parameter['ApplyType'], action: action, result: 'OMITTED',
+              detail: "Source=user=#{value} のため適用条件（#{rule['source_value']}）に該当しない" }
+    next
+  end
+
   case action
   when 'copy'
     if target_parameter && target_parameter['IsModifiable']
@@ -72,6 +82,25 @@ source_user.each do |parameter|
     if target_parameter && target_parameter['IsModifiable']
       generated[target] = rule.fetch('value')
       result = 'GENERATED'
+
+      # 1 つの旧パラメータから複数の 8.4 パラメータを設定する場合の追加出力。
+      # 各追加先について、実際に収集した mysql8.4 の変更可否を検証してから出力する。
+      rule.fetch('additional_targets', []).each do |additional|
+        additional_target = additional.fetch('target')
+        additional_parameter = default84_by_name[additional_target]
+        additional_detail = additional['rationale'] || detail
+        if additional_parameter && additional_parameter['IsModifiable']
+          generated[additional_target] = additional.fetch('value')
+          rows << { name: name, source_value: value, engine_default80: default80_by_name.dig(name, 'ParameterValue'), system80: system80_by_name.dig(name, 'ParameterValue'), target: additional_target,
+                    default84: additional_parameter['ParameterValue'], allowed84: additional_parameter['AllowedValues'], apply_type84: additional_parameter['ApplyType'],
+                    action: 'force', result: 'GENERATED', detail: additional_detail }
+        else
+          rows << { name: name, source_value: value, engine_default80: default80_by_name.dig(name, 'ParameterValue'), system80: system80_by_name.dig(name, 'ParameterValue'), target: additional_target,
+                    default84: additional_parameter && additional_parameter['ParameterValue'], allowed84: additional_parameter && additional_parameter['AllowedValues'],
+                    apply_type84: additional_parameter && additional_parameter['ApplyType'], action: 'force', result: 'BLOCKED',
+                    detail: "#{additional_detail} / 8.4 に存在しない、または変更不可" }
+        end
+      end
     else
       result = 'BLOCKED'
       detail = "#{detail} / 8.4 に存在しない、または変更不可"
@@ -255,11 +284,11 @@ File.open(report_path, 'w') do |file|
   file.puts
   file.puts '収集された user 定義と `target_only` ルールを、生成可否まで含めて記録する。未登録の user 定義は、8.4 に同名で存在し変更可能なら同じ値を生成し、それ以外は「生成不可」として検出する。'
   file.puts
-  file.puts '| Source parameter | 8.0 Source=user | 8.0 engine default | 8.0 Source=system | 8.4 target | 8.4 engine default | 8.4 allowed / apply | Rule | 処理結果 | 判断理由 |'
+  file.puts '| Source parameter | 8.0 Source=user | 8.0 engine default | 8.0 Source=system | 8.4 target | 8.4 engine default | 8.4 Source=user（生成値） | Rule | 処理結果 | 判断理由 |'
   file.puts '|---|---|---|---|---|---|---|---|---|---|'
   rows.sort_by { |row| row[:name] }.each do |row|
-    target_info = [row[:allowed84], row[:apply_type84]].compact.join(' / ')
-    values = [row[:name], row[:source_value], row[:engine_default80], system80_value.call(row[:name]), row[:target], row[:default84], target_info, row[:action], result_label.fetch(row[:result]), row[:detail]]
+    generated_user_value = row[:result] == 'GENERATED' ? generated[row[:target]] : nil
+    values = [row[:name], row[:source_value], row[:engine_default80], system80_value.call(row[:name]), row[:target], row[:default84], generated_user_value, row[:action], result_label.fetch(row[:result]), row[:detail]]
     write_table_row.call(values)
   end
   file.puts

@@ -4,7 +4,7 @@
 - Source group apply status: `in-sync`
 - Collected at: `2026-08-25T00:00:00Z`
 - Rules: `config/mysql80-to-84-parameter-rules.yml`
-- Generated parameters: `5`
+- Generated parameters: `6`
 
 ## 値の由来
 
@@ -56,15 +56,16 @@
 
 収集された user 定義と `target_only` ルールを、生成可否まで含めて記録する。未登録の user 定義は、8.4 に同名で存在し変更可能なら同じ値を生成し、それ以外は「生成不可」として検出する。
 
-| Source parameter | 8.0 Source=user | 8.0 engine default | 8.0 Source=system | 8.4 target | 8.4 engine default | 8.4 allowed / apply | Rule | 処理結果 | 判断理由 |
+| Source parameter | 8.0 Source=user | 8.0 engine default | 8.0 Source=system | 8.4 target | 8.4 engine default | 8.4 Source=user（生成値） | Rule | 処理結果 | 判断理由 |
 |---|---|---|---|---|---|---|---|---|---|
-| binlog_format | MIXED | MIXED | なし | binlog_format | ROW | ROW,MIXED,STATEMENT / dynamic | force | 生成済み | MySQL 8.4 Green 側のログ形式を明示する運用方針（Blue/Green 作成の前提条件ではない） |
-| default_authentication_plugin | mysql_native_password | mysql_native_password | なし | authentication_policy | *, | * / dynamic | force | 生成済み | mysql_native_password を許可し第1認証要素の既定にする。8.4 でのプラグイン利用可否は Green で接続試験する |
+| binlog_format | MIXED | MIXED | なし | binlog_format | ROW | ROW | force | 生成済み | MySQL 8.4 Green 側のログ形式を明示する運用方針（Blue/Green 作成の前提条件ではない） |
+| default_authentication_plugin | mysql_native_password | mysql_native_password | なし | mysql_native_password | OFF | ON | force | 生成済み | MySQL 8.4 の mysql_native_password プラグインを有効化する |
+| default_authentication_plugin | mysql_native_password | mysql_native_password | なし | authentication_policy | *, | *:mysql_native_password | force | 生成済み | mysql_native_password を第1認証要素の既定にする。Green で既存ユーザーおよび新規ユーザーの接続試験を行う |
 | innodb_log_file_size | 536870912 | 134217728 | なし | innodb_log_file_size |  |  | omit | 設定対象外 | MySQL 8.4 では innodb_redo_log_capacity を使用。個別の容量設計は別途レビューする。 |
-| log_slave_updates | 1 | 0 | なし | log_replica_updates | 0 | 0,1 / dynamic | copy | 生成済み | MySQL 8.4 での名称変更 |
-| max_allowed_packet | 67108864 | 67108864 | なし | max_allowed_packet | 67108864 | 1024-1073741824 / dynamic | copy | 生成済み | 移行ルール未登録。Source=user の値を同名で反映する |
-| restrict_fk_on_non_standard_key | (8.4 新規) |  | なし | restrict_fk_on_non_standard_key | ON | ON,OFF / dynamic | review | 要レビュー | 新規パラメータ。非標準キーを参照する外部キー DDL の有無を確認する |
-| slave_parallel_workers | 8 | 4 | なし | replica_parallel_workers | 4 | 0-1024 / dynamic | copy | 生成済み | MySQL 8.4 での名称変更 |
+| log_slave_updates | 1 | 0 | なし | log_replica_updates | 0 | 1 | copy | 生成済み | MySQL 8.4 での名称変更 |
+| max_allowed_packet | 67108864 | 67108864 | なし | max_allowed_packet | 67108864 | 67108864 | copy | 生成済み | 移行ルール未登録。Source=user の値を同名で反映する |
+| restrict_fk_on_non_standard_key | (8.4 新規) |  | なし | restrict_fk_on_non_standard_key | ON |  | review | 要レビュー | 新規パラメータ。非標準キーを参照する外部キー DDL の有無を確認する |
+| slave_parallel_workers | 8 | 4 | なし | replica_parallel_workers | 4 | 8 | copy | 生成済み | MySQL 8.4 での名称変更 |
 
 ## 判定
 

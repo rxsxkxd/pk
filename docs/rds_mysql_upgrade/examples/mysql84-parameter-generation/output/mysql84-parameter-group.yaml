@@ -4,18 +4,19 @@ Resources:
   Mysql84ParameterGroup:
     Type: AWS::RDS::DBParameterGroup
     Properties:
-      DBParameterGroupName: sample-production-mysql84-v1
-      Description: MySQL 8.4 parameters for sample/production
+      DBParameterGroupName: example-production-mysql84-v1
+      Description: MySQL 8.4 parameters for example/production
       Family: mysql8.4
       Parameters:
         authentication_policy: "*:mysql_native_password"
         binlog_format: ROW
         log_replica_updates: '1'
         max_allowed_packet: '67108864'
+        mysql_native_password: 'ON'
         replica_parallel_workers: '8'
       Tags:
       - Key: System
-        Value: sample
+        Value: example
       - Key: Environment
         Value: production
       - Key: ManagedBy

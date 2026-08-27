@@ -103,15 +103,22 @@ rules:
     target: sql_replica_skip_counter
     rationale: MySQL 8.4 での名称変更
 
-  # 8.0 で default_authentication_plugin が明示されている場合、8.4 では
-  # mysql_native_password を第1認証要素の既定にしつつ、他方式も許可する。
+  # RDS for MySQL 8.4 では default_authentication_plugin は変更できず、既定認証方式は
+  # authentication_policy で設定する。8.0 の明示設定が mysql_native_password の場合だけ、
+  # 8.4 ではプラグインを ON にし、第1認証要素の既定も mysql_native_password にする。
+  # https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/MySQL.KnownIssuesAndLimitations.html
   default_authentication_plugin:
     action: force
     source_required: true
+    source_value: mysql_native_password
     target: authentication_policy
     value: "*:mysql_native_password"
+    additional_targets:
+      - target: mysql_native_password
+        value: "ON"
+        rationale: MySQL 8.4 の mysql_native_password プラグインを有効化する
     report_category: 認証方式の仕様変更
-    rationale: mysql_native_password を許可し第1認証要素の既定にする。8.4 でのプラグイン利用可否は Green で接続試験する
+    rationale: mysql_native_password を第1認証要素の既定にする。Green で既存ユーザーおよび新規ユーザーの接続試験を行う
 
   # 2-3: MySQL 8.4 で追加されたパラメータ。
   # 非標準キーへの外部キーをアプリが実行時に作成・変更するか確認するまで、

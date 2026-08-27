@@ -1,0 +1,36 @@
+name: Build Green
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 対象環境
+        required: true
+        type: choice
+        options: [staging, production]
+      service:
+        description: config 内のサービス名
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-green:
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ap-northeast-1
+      - name: Step 3 — snapshot and create Green
+        run: scripts/build_green.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --output-dir artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-green-${{ inputs.environment }}-${{ inputs.service }}
+          path: artifacts

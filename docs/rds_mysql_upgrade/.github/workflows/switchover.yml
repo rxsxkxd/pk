@@ -1,0 +1,36 @@
+name: Switchover Blue Green
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 対象環境（GitHub Environment の承認ルールが適用される）
+        required: true
+        type: choice
+        options: [staging, production]
+      service:
+        description: config 内のサービス名
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  switchover:
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ap-northeast-1
+      - name: Step 5 — approved switchover
+        run: scripts/switchover.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --approve --output-dir artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: switchover-${{ inputs.environment }}-${{ inputs.service }}
+          path: artifacts

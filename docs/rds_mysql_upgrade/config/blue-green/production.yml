@@ -1,0 +1,23 @@
+# production 環境の RDS Blue/Green Deployment 設定。
+# 認証情報は AWS CLI の named profile に保持し、このファイルには記載しない。
+environment: production
+aws_region: ap-northeast-1
+
+services:
+  example-service:
+    # 移行元となる MySQL 8.0 Blue DB の DB インスタンス識別子。
+    source_db_instance_identifier: example-service-production-mysql80
+    # Green DB の目標 RDS for MySQL バージョン。
+    target_engine_version: 8.4.10
+    # Green DB の RDS DB インスタンスタイプ。
+    target_db_instance_class: db.r6g.large
+    # CloudFormation で事前作成済みの MySQL 8.4 DB パラメータグループ名。
+    # RDS API の TargetDBParameterGroupName に直接指定する。
+    target_db_parameter_group_name: example-service-production-mysql84-v1
+    # Step 2 でレビュー・適用した DB パラメータグループの CloudFormation YAML。
+    target_parameter_group_template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
+    protection_snapshot_identifier: example-service-production-mysql80-pre-bg-20260828
+    actions:
+      build: pending
+      switchover: pending
+      switchover_timeout: 300

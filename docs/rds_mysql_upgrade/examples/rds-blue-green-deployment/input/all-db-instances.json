@@ -1,0 +1,30 @@
+{
+  "DBInstances": [
+    {
+      "DBInstanceIdentifier": "example-service-staging-mysql80",
+      "DBInstanceArn": "arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging-mysql80",
+      "Engine": "mysql",
+      "EngineVersion": "8.0.41",
+      "DBInstanceClass": "db.t4g.medium",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-staging-mysql80-parameter-group",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    },
+    {
+      "DBInstanceIdentifier": "example-service-production-mysql80",
+      "DBInstanceArn": "arn:aws:rds:ap-northeast-1:123456789012:db:example-service-production-mysql80",
+      "Engine": "mysql",
+      "EngineVersion": "8.0.41",
+      "DBInstanceClass": "db.r6g.large",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-production-mysql80-parameter-group",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    }
+  ]
+}

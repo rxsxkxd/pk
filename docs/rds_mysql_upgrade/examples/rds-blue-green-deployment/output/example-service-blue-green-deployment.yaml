@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: example-service の RDS for MySQL Blue/Green Deployment を作成する（自動生成）
+Metadata:
+  Documentation:
+    Purpose: RDS CreateBlueGreenDeployment API をカスタムリソース経由で呼び出す。CloudFormation にネイティブ
+      RDS Blue/Green Deployment リソースはない。
+    EnvironmentSelection: Environment パラメータで選択した環境の移行元 DB、Green DB インスタンスタイプ、MySQL
+      8.4 パラメータグループを Mappings から取得する。
+    SourceDbArn: SourceDBInstanceArn は事前収集した all-db-instances.json の describe-db-instances
+      結果から設定した値。
+    Switchover: switchover はこのスタックに含めない。承認済みの独立操作として実施する。
+Parameters:
+  Environment:
+    Type: String
+    Description: デプロイ対象環境。Mappings に定義済みの環境を指定する。
+    AllowedValues:
+    - production
+    - staging
+  BlueGreenDeploymentProviderServiceToken:
+    Type: String
+    Description: Custom::RdsBlueGreenDeployment プロバイダーの Lambda 関数等の ARN。
+  BlueGreenDeploymentName:
+    Type: String
+    Description: RDS Blue/Green Deployment の一意な名前。
+    AllowedPattern: "^[a-zA-Z][a-zA-Z0-9-]{0,59}$"
+  TargetEngineVersion:
+    Type: String
+    Description: Green DB の目標 RDS for MySQL エンジンバージョン。対象リージョンでサポートされる 8.4 系を指定する。
+Mappings:
+  DeploymentTarget:
+    staging:
+      SourceDBInstanceArn: arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging-mysql80
+      TargetDBInstanceClass: db.t4g.medium
+      TargetParameterGroupExportName: example-service-staging-mysql84-parameter-group-DBParameterGroupName
+    production:
+      SourceDBInstanceArn: arn:aws:rds:ap-northeast-1:123456789012:db:example-service-production-mysql80
+      TargetDBInstanceClass: db.r6g.large
+      TargetParameterGroupExportName: example-service-production-mysql84-parameter-group-DBParameterGroupName
+Resources:
+  RdsBlueGreenDeployment:
+    Type: Custom::RdsBlueGreenDeployment
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ServiceToken:
+        Ref: BlueGreenDeploymentProviderServiceToken
+      BlueGreenDeploymentName:
+        Ref: BlueGreenDeploymentName
+      Source:
+        Fn::FindInMap:
+        - DeploymentTarget
+        - Ref: Environment
+        - SourceDBInstanceArn
+      TargetEngineVersion:
+        Ref: TargetEngineVersion
+      TargetDBInstanceClass:
+        Fn::FindInMap:
+        - DeploymentTarget
+        - Ref: Environment
+        - TargetDBInstanceClass
+      TargetDBParameterGroupName:
+        Fn::ImportValue:
+          Fn::FindInMap:
+          - DeploymentTarget
+          - Ref: Environment
+          - TargetParameterGroupExportName
+Outputs:
+  BlueGreenDeploymentIdentifier:
+    Description: カスタムリソースプロバイダーが返す RDS Blue/Green Deployment 識別子。
+    Value:
+      Fn::GetAtt:
+      - RdsBlueGreenDeployment
+      - BlueGreenDeploymentIdentifier
+  GreenDBInstanceArn:
+    Description: カスタムリソースプロバイダーが返す Green DB インスタンス ARN。
+    Value:
+      Fn::GetAtt:
+      - RdsBlueGreenDeployment
+      - GreenDBInstanceArn

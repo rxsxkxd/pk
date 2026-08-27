@@ -1,0 +1,22 @@
+# Blue/Green Deployment のサービス別ターゲット定義。
+# 将来の生成スクリプトは services 配下のサービスごとに CloudFormation YAML を 1 ファイル生成する。
+# staging / production など環境別のファイルは作らず、同一サービス用テンプレート内の
+# Mappings と Environment パラメータで環境を選択する。
+version: 1
+
+services:
+  example-service:
+    # サービス内で許可する環境と、その環境に固有の移行元 DB・Green DB 設定。
+    environments:
+      staging:
+        # 移行元となる Blue DB の DB インスタンス識別子。生成スクリプトが AWS CLI の
+        # describe-db-instances で ARN を読み取り、生成先テンプレートの Source に設定する。
+        source_db_instance_identifier: example-service-staging-mysql80
+        # RDS API の TargetDBInstanceClass に渡す Green DB のインスタンスタイプ。
+        target_db_instance_class: db.t4g.medium
+        # MySQL 8.4 パラメータグループスタックが DBParameterGroupName に付けた Export 名。
+        target_parameter_group_export_name: example-service-staging-mysql84-parameter-group-DBParameterGroupName
+      production:
+        source_db_instance_identifier: example-service-production-mysql80
+        target_db_instance_class: db.r6g.large
+        target_parameter_group_export_name: example-service-production-mysql84-parameter-group-DBParameterGroupName

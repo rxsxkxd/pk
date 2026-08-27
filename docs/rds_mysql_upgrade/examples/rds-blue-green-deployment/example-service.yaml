@@ -1,0 +1,96 @@
+# config/rds-blue-green-deployment-targets.yml の services.example-service から生成する
+# CloudFormation テンプレートのサンプル。ファイルはサービス単位とし、環境単位には分割しない。
+AWSTemplateFormatVersion: '2010-09-09'
+Description: example-service の RDS for MySQL 8.0 から 8.4 への Blue/Green Deployment 作成。
+
+# CloudFormation には RDS Blue/Green Deployment のネイティブリソースがない。
+# ServiceToken のカスタムリソースプロバイダーが RDS CreateBlueGreenDeployment API を呼び出す。
+Parameters:
+  # このテンプレートで選択する環境。Mappings のキーとして用いるため、定義済みの値だけを許可する。
+  Environment:
+    Type: String
+    Description: デプロイ対象環境。サービス内で定義済みの環境を指定する。
+    AllowedValues:
+      - staging
+      - production
+
+  # カスタムリソースを実装する Lambda 関数等の ARN。
+  BlueGreenDeploymentProviderServiceToken:
+    Type: String
+    Description: Custom::RdsBlueGreenDeployment プロバイダーの ARN。
+
+  # RDS 上の Blue/Green Deployment 名。実行単位で一意な名前を指定する。
+  BlueGreenDeploymentName:
+    Type: String
+    Description: RDS Blue/Green Deployment の一意な名前。
+
+  # Green DB の目標エンジンバージョン。対象リージョンでサポートされる 8.4 系バージョンを指定する。
+  TargetEngineVersion:
+    Type: String
+    Description: Green DB の目標 RDS for MySQL エンジンバージョン。
+
+# サービス内の環境差分。移行元 Blue DB、Green DB のインスタンスタイプ、MySQL 8.4
+# パラメータグループの参照先をここで管理する。
+Mappings:
+  DeploymentTarget:
+    staging:
+      # config の source_db_instance_identifier を AWS CLI の describe-db-instances
+      # で解決した ARN。RDS API の Source に渡す。
+      SourceDBInstanceArn: arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging-mysql80
+      # RDS API の TargetDBInstanceClass に渡す Green DB のインスタンスタイプ。
+      TargetDBInstanceClass: db.t4g.medium
+      # パラメータグループ管理スタックが Export した DB パラメータグループ名の Export 名。
+      TargetParameterGroupExportName: example-service-staging-mysql84-parameter-group-DBParameterGroupName
+    production:
+      SourceDBInstanceArn: arn:aws:rds:ap-northeast-1:123456789012:db:example-service-production-mysql80
+      TargetDBInstanceClass: db.r6g.large
+      TargetParameterGroupExportName: example-service-production-mysql84-parameter-group-DBParameterGroupName
+
+Resources:
+  # RDS ネイティブ API を CloudFormation のライフサイクルに接続するカスタムリソース。
+  RdsBlueGreenDeployment:
+    Type: Custom::RdsBlueGreenDeployment
+    # スタック削除や置換による Green DB の暗黙削除を防ぐ。削除・switchover は別途明示実施する。
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      # CloudFormation の Create イベントを受けるプロバイダー ARN。
+      ServiceToken:
+        Ref: BlueGreenDeploymentProviderServiceToken
+      # 実行時に明示指定した Deployment 名と目標 MySQL バージョンを RDS API に渡す。
+      BlueGreenDeploymentName:
+        Ref: BlueGreenDeploymentName
+      Source:
+        # Environment で選択した移行元 Blue DB の ARN を RDS API に渡す。
+        Fn::FindInMap:
+          - DeploymentTarget
+          - Ref: Environment
+          - SourceDBInstanceArn
+      TargetEngineVersion:
+        Ref: TargetEngineVersion
+      # Environment で選択した環境の Green DB インスタンスタイプを取得する。
+      TargetDBInstanceClass:
+        Fn::FindInMap:
+          - DeploymentTarget
+          - Ref: Environment
+          - TargetDBInstanceClass
+      # Environment で選択したパラメータグループ管理スタックの Export から、実際の
+      # DB パラメータグループ名を取得する。
+      TargetDBParameterGroupName:
+        Fn::ImportValue:
+          Fn::FindInMap:
+            - DeploymentTarget
+            - Ref: Environment
+            - TargetParameterGroupExportName
+
+Outputs:
+  # カスタムリソースプロバイダーが返す Deployment 識別子。switchover の対象指定に使う。
+  BlueGreenDeploymentIdentifier:
+    Description: RDS Blue/Green Deployment 識別子。
+    Value:
+      Fn::GetAtt: [RdsBlueGreenDeployment, BlueGreenDeploymentIdentifier]
+  # カスタムリソースプロバイダーが返す Green DB ARN。作成後の接続・状態確認に使う。
+  GreenDBInstanceArn:
+    Description: Green DB インスタンス ARN。
+    Value:
+      Fn::GetAtt: [RdsBlueGreenDeployment, GreenDBInstanceArn]

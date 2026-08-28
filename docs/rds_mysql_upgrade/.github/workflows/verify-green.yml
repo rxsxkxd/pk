@@ -28,10 +28,40 @@ jobs:
     environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install AWS CLI v2 from local package (act only)
+        if: ${{ env.ACT }}
+        env:
+          ACT_AWSCLI_PACKAGE_DIR: ${{ env.ACT_AWSCLI_PACKAGE_DIR }}
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64) package_name=awscli-exe-linux-x86_64.zip ;;
+            aarch64|arm64) package_name=awscli-exe-linux-aarch64.zip ;;
+            *) echo "Unsupported architecture: $(uname -m)" >&2; exit 2 ;;
+          esac
+          package_path="${ACT_AWSCLI_PACKAGE_DIR:-/act-assets/awscli}/${package_name}"
+          test -r "$package_path" || { echo "AWS CLI package is missing: $package_path" >&2; exit 2; }
+          temporary_dir=$(mktemp -d /tmp/awscli-installer.XXXXXX)
+          trap 'rm -rf "$temporary_dir"' EXIT
+          unzip -q "$package_path" -d "$temporary_dir"
+          sudo "$temporary_dir/aws/install" --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin --update
+          aws --version
       - uses: aws-actions/configure-aws-credentials@v5
+        # nektos/act は GitHub OIDC トークンを発行できない。ローカルでは .actrc が
+        # read-only でマウントする AWS プロファイルをそのまま使う。
+        if: ${{ !env.ACT }}
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ap-northeast-1
+      - name: Prepare Python YAML parser
+        run: python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+      - name: Build Green verification report binary
+        run: |
+          docker buildx build \
+            --file docker/Dockerfile.green-verification-report \
+            --target export \
+            --output type=local,dest=.tools/green-report \
+            .
       - name: Install MySQL client
         if: inputs.collect_mysql_runtime_values
         run: sudo apt-get update && sudo apt-get install -y mysql-client
@@ -44,13 +74,13 @@ jobs:
         run: test -n "$MYSQL_USER" && test -n "$MYSQL_PASSWORD"
       - name: Step 4 — verify Green configuration and replication lag (AWS API only)
         if: ${{ !inputs.collect_mysql_runtime_values }}
-        run: scripts/verify_green.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --output-dir artifacts
+        run: GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" scripts/verify_green.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --output-dir artifacts
       - name: Step 4 — verify Green configuration, replication lag, and MySQL runtime values
         if: inputs.collect_mysql_runtime_values
         env:
           MYSQL_USER: ${{ secrets.RDS_MYSQL_USER }}
           MYSQL_PASSWORD: ${{ secrets.RDS_MYSQL_PASSWORD }}
-        run: scripts/verify_green.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --mysql-user "$MYSQL_USER" --mysql-password-env MYSQL_PASSWORD --output-dir artifacts
+        run: GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" scripts/verify_green.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --mysql-user "$MYSQL_USER" --mysql-password-env MYSQL_PASSWORD --output-dir artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

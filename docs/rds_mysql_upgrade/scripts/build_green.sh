@@ -20,12 +20,8 @@ done
 mkdir -p "$output_dir"
 
 # 設定ファイルの承認宣言と、スナップショット・移行元 DB の識別子を取得する。AWS API は呼び出さない。
-ruby -ryaml -rjson -e '
-  document = YAML.load_file(ARGV[0]); service = document.fetch("services").fetch(ARGV[1]); actions = service.fetch("actions", {})
-  %w[source_db_instance_identifier protection_snapshot_identifier].each { |key| abort("missing #{key}") if service[key].to_s.empty? }
-  puts JSON.generate("build" => actions.fetch("build", "pending"), "source" => service["source_db_instance_identifier"], "snapshot" => service["protection_snapshot_identifier"], "region" => document.fetch("aws_region"))
-' "$config" "$service" > "$output_dir/config.json"
-read_config() { ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch(ARGV[1])' "$output_dir/config.json" "$1"; }
+python3 -c 'import json,sys,yaml; d=yaml.safe_load(open(sys.argv[1])); s=d["services"][sys.argv[2]]; a=s.get("actions", {}); [(_ for _ in ()).throw(SystemExit(f"missing {k}")) for k in ("source_db_instance_identifier", "protection_snapshot_identifier") if not s.get(k)]; print(json.dumps({"build":a.get("build", "pending"), "source":s["source_db_instance_identifier"], "snapshot":s["protection_snapshot_identifier"], "region":d["aws_region"]}))' "$config" "$service" > "$output_dir/config.json"
+read_config() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$output_dir/config.json" "$1"; }
 [[ "$(read_config build)" == approved ]] || { echo 'build: pending; no changes made.'; exit 0; }
 source_id=$(read_config source); snapshot_id=$(read_config snapshot)
 [[ -n "$region" ]] || region=$(read_config region)
@@ -33,9 +29,9 @@ aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$pro
 
 # [読み取り] 移行元 ARN を取得し、同じ Source の Blue/Green Deployment が既にあれば二重作成しない。
 aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" --output json > "$output_dir/source.json"
-source_arn=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("DBInstances").fetch(0).fetch("DBInstanceArn")' "$output_dir/source.json")
+source_arn=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["DBInstances"][0]["DBInstanceArn"])' "$output_dir/source.json")
 aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" --output json > "$output_dir/deployments.json"
-existing_id=$(ruby -rjson -e 'd=JSON.parse(File.read(ARGV[0])).fetch("BlueGreenDeployments"); puts d.first["BlueGreenDeploymentIdentifier"] unless d.empty?' "$output_dir/deployments.json")
+existing_id=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["BlueGreenDeployments"]; print(d[0].get("BlueGreenDeploymentIdentifier", "") if d else "")' "$output_dir/deployments.json")
 if [[ -n "$existing_id" ]]; then
   echo "Blue/Green Deployment already exists: $existing_id"
   echo "Artifacts: $output_dir"

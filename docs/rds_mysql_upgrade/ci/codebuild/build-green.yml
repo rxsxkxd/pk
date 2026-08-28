@@ -1,0 +1,17 @@
+# CodePipeline の BuildGreen ステージから実行する CodeBuild buildspec。
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+  build:
+    commands:
+      - scripts/build_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
+
+artifacts:
+  files:
+    - artifacts/**/*
+  discard-paths: false

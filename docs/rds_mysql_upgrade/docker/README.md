@@ -4,6 +4,8 @@
 
 使用するコンテナは 4 つである。`public.ecr.aws/aws-cli/aws-cli:2.32.25`、MySQL CLI と MySQL Shell を同梱する公式イメージ `mysql:8.4.8`、`ruby:3.4`、`golang:1.25` を使用する。`latest` タグは使用しない。AWS CLI と MySQL はパッチバージョンまで、Ruby と Go はメジャー・マイナーまでを固定する。
 
+Step 4 の Go レポート生成器は [Dockerfile.green-verification-report](Dockerfile.green-verification-report) でマルチステージビルドする。`builder` ステージは `golang:1.25`、`export` ステージはコンパイル済みバイナリだけを含む `scratch` である。GitHub Actions と CodeBuild はこの export ステージからバイナリを取り出して実行する。
+
 > 現時点では定義ファイルと手順のみを用意しており、イメージの取得・実行検証は未実施である。MySQL 用の Dockerfile は不要であり、初回実行時に `mysql:8.4.8` が取得される。
 
 ## 1. ホスト側の準備

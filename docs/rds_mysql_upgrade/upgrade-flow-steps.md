@@ -240,6 +240,8 @@ Step 4 と Step 6 は読み取りのみで環境を変更しないため、対�
 | `healthcheck-green-aws` | `switchover` 成功後に自動、以降は観測期間中に定期実行 | 不要 |
 | `cleanup` | 手動トリガー | 必須（`cleanup: approved` の PR ＋ ジョブ承認） |
 
+GitHub Actions に加え、CodePipeline / CodeBuild を実行基盤にする場合は、[ci/README.md](ci/README.md) の定義を使用する。CodePipeline 版は `BuildGreen → VerifyGreen → ManualApproval → Switchover` を一つの手動開始パイプラインにし、同じ `scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` を実行する。
+
 Step 1、Step 2（生成・適用とも）、Step 6 の DB 接続部分は CI ジョブにせず、作業手順としてローカルから実行し、結果を作業チケットへ証跡として残す。
 
 `verify-green` を定期実行に載せておくと、構築から切替までの待機期間中にレプリカ遅延や構成のドリフトが発生した場合に検知できる。

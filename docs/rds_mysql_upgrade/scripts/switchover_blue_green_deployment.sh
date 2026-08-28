@@ -38,13 +38,9 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-switchover.XXXXXX")
 mkdir -p "$output_dir"
 # config から環境に紐づく AWS CLI のリージョン・プロファイルを取得する。AWS API は呼び出さない。
-config_aws=$(ruby -ryaml -rjson -e '
-  document = YAML.load_file(ARGV[0])
-  abort("#{ARGV[0]}: aws_region が未定義です") if document["aws_region"].to_s.empty?
-  puts JSON.generate("region" => document["aws_region"], "profile" => document["aws_profile"])
-' "$config")
-[[ -n "$region" ]] || region=$(ruby -rjson -e 'puts JSON.parse(ARGV[0]).fetch("region")' "$config_aws")
-[[ -n "$profile" ]] || profile=$(ruby -rjson -e 'value = JSON.parse(ARGV[0])["profile"]; puts value unless value.nil?' "$config_aws")
+config_aws=$(python3 -c 'import json,sys,yaml; d=yaml.safe_load(open(sys.argv[1])); d.get("aws_region") or (_ for _ in ()).throw(SystemExit(f"{sys.argv[1]}: aws_region が未定義です")); print(json.dumps({"region":d["aws_region"], "profile":d.get("aws_profile", "")}))' "$config")
+[[ -n "$region" ]] || region=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["region"])' "$config_aws")
+[[ -n "$profile" ]] || profile=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("profile", ""))' "$config_aws")
 aws_args=(--region "$region")
 [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
@@ -53,7 +49,7 @@ aws_args=(--region "$region")
 aws "${aws_args[@]}" rds describe-blue-green-deployments \
   --blue-green-deployment-identifier "$deployment_identifier" \
   --output json > "$output_dir/before-switchover.json"
-status=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("BlueGreenDeployments").fetch(0).fetch("Status")' "$output_dir/before-switchover.json")
+status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["BlueGreenDeployments"][0]["Status"])' "$output_dir/before-switchover.json")
 [[ "$status" == 'AVAILABLE' ]] || { echo "Switchover requires AVAILABLE status; current status: $status" >&2; exit 1; }
 
 # [変更] RDS の Blue/Green Deployment を切り替える。切替後は Green が本番 DB となる。

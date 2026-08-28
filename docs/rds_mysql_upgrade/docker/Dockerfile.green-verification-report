@@ -1,0 +1,16 @@
+# Go コンパイラを含むビルド専用ステージ。成果物は静的リンクの単一バイナリだけにする。
+FROM golang:1.25 AS builder
+WORKDIR /src
+
+# モジュール定義を先にコピーし、依存取得レイヤーをソース変更から分離する。
+COPY scripts/go.mod ./go.mod
+RUN go mod download
+
+# Step 4 のレポート生成器だけをコンパイルする。
+COPY scripts/generate_green_verification_report.go ./generate_green_verification_report.go
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+  -o /out/generate_green_verification_report ./generate_green_verification_report.go
+
+# Docker BuildKit の local exporter がこのステージのファイルだけを取り出す。
+FROM scratch AS export
+COPY --from=builder /out/generate_green_verification_report /generate_green_verification_report

@@ -1,0 +1,22 @@
+# nektos/act のローカル実行設定。ubuntu-24.04 は act 向けの runner イメージへ対応付ける。
+# https://nektosact.com/usage/runners.html
+-P ubuntu-24.04=ghcr.io/catthehacker/ubuntu:act-24.04
+
+# 成功した workflow の runner コンテナを再利用し、イメージ初期化・依存導入時間を短縮する。
+--reuse
+
+# AWS CLI はローカルの named profile を使用する。認証情報そのものはこのファイルに書かない。
+--env AWS_SDK_LOAD_CONFIG=1
+# --env AWS_PROFILE=your-local-readonly-profile
+# --env AWS_REGION=ap-northeast-1
+# --env AWS_DEFAULT_REGION=ap-northeast-1
+
+# AWS 設定・AWS CLI インストーラーのテンプレート。以下のコメントを外し、ホスト側の絶対パスに置き換える。
+# act の .actrc 内では $HOME や ~ の展開に依存しない。
+# --container-options "-v /absolute/path/to/.aws:/root/.aws:ro"
+# --container-options "-v /absolute/path/to/act-assets:/act-assets:ro"
+# --env ACT_AWSCLI_PACKAGE_DIR=/act-assets/awscli
+
+# act の利用を終えた後のクリーンアップ手順（対象がなければ何もしないワンライナー）。
+# ids=$(docker ps -aq --filter 'label=act=true'); [ -z "$ids" ] || docker rm -f $ids
+# 失敗時も自動削除したい一回限りの実行では、act コマンドに --rm を追加する。

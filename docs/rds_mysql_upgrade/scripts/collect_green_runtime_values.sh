@@ -20,14 +20,7 @@ done
 [[ -n "$template" && -n "$host" && -n "$user" && -n "$output" ]] || { usage >&2; exit 2; }
 
 # CloudFormation YAML で明示したパラメーター名だけを SQL に展開する。値は SQL に含めない。
-sql=$(ruby -ryaml -e '
-  template = YAML.load_file(ARGV[0]); resource = template.fetch("Resources").values.find { |item| item["Type"] == "AWS::RDS::DBParameterGroup" }
-  abort("AWS::RDS::DBParameterGroup not found") unless resource
-  names = resource.fetch("Properties").fetch("Parameters", {}).keys
-  abort("No declared parameters") if names.empty?
-  abort("Invalid parameter name") unless names.all? { |name| name.match?(/\A[A-Za-z0-9_]+\z/) }
-  puts "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables WHERE VARIABLE_NAME IN (#{names.map { |name| %Q{'#{name}'} }.join(",")}) ORDER BY VARIABLE_NAME;"
-' "$template")
+sql=$(python3 -c 'import re,sys,yaml; t=yaml.safe_load(open(sys.argv[1])); r=next((v for v in t["Resources"].values() if v.get("Type") == "AWS::RDS::DBParameterGroup"), None); r or (_ for _ in ()).throw(SystemExit("AWS::RDS::DBParameterGroup not found")); n=list(r.get("Properties", {}).get("Parameters", {}).keys()); n or (_ for _ in ()).throw(SystemExit("No declared parameters")); all(re.fullmatch(r"[A-Za-z0-9_]+", x) for x in n) or (_ for _ in ()).throw(SystemExit("Invalid parameter name")); print("SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables WHERE VARIABLE_NAME IN (" + ",".join(repr(x) for x in n) + ") ORDER BY VARIABLE_NAME;")' "$template")
 
 tmp_output=$(mktemp "${TMPDIR:-/tmp}/rds-green-runtime.XXXXXX")
 trap 'rm -f "$tmp_output"' EXIT
@@ -44,10 +37,5 @@ else
   # ローカル実行は MySQL クライアントの対話入力を使用する。
   mysql "${mysql_args[@]}" --password --execute="$sql" > "$tmp_output"
 fi
-ruby -rjson -rtime -e '
-  values = File.readlines(ARGV[0], chomp: true).each_with_object({}) do |line, result|
-    name, value = line.split("\t", 2); result[name] = value if name
-  end
-  File.write(ARGV[1], JSON.pretty_generate("CollectedAt" => Time.now.utc.iso8601, "Parameters" => values) + "\n")
-' "$tmp_output" "$output"
+python3 -c 'import datetime,json,sys; v={}; [v.__setitem__(p[0], p[1] if len(p)>1 else "") for p in (line.rstrip("\n").split("\t", 1) for line in open(sys.argv[1])) if p[0]]; json.dump({"CollectedAt":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"), "Parameters":v}, open(sys.argv[2], "w"), ensure_ascii=False, indent=2); open(sys.argv[2], "a").write("\n")' "$tmp_output" "$output"
 echo "Collected runtime values: $output"

@@ -39,21 +39,10 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-create.XXXXXX")
 mkdir -p "$output_dir"
 # config のサービスに対応する作成設定を読み取る。AWS API は呼び出さない。
-ruby -ryaml -rjson -e '
-  config, service = ARGV
-  document = YAML.load_file(config)
-  target = document.fetch("services").fetch(service)
-  %w[source_db_instance_identifier target_engine_version target_db_instance_class target_db_parameter_group_name].each do |key|
-    abort("#{config}: services.#{service}.#{key} が未定義です") if target[key].to_s.empty?
-  end
-  %w[environment aws_region].each do |key|
-    abort("#{config}: #{key} が未定義です") if document[key].to_s.empty?
-  end
-  puts JSON.generate(target.merge("environment" => document["environment"], "aws_region" => document["aws_region"], "aws_profile" => document.fetch("aws_profile", "")))
-' "$config" "$service" > "$output_dir/target.json"
+python3 -c 'import json,sys,yaml; c,s=sys.argv[1:]; d=yaml.safe_load(open(c)); t=d["services"][s]; [(_ for _ in ()).throw(SystemExit(f"{c}: services.{s}.{k} が未定義です")) for k in ("source_db_instance_identifier", "target_engine_version", "target_db_instance_class", "target_db_parameter_group_name") if not t.get(k)]; [(_ for _ in ()).throw(SystemExit(f"{c}: {k} が未定義です")) for k in ("environment", "aws_region") if not d.get(k)]; print(json.dumps({**t, "environment":d["environment"], "aws_region":d["aws_region"], "aws_profile":d.get("aws_profile", "")}))' "$config" "$service" > "$output_dir/target.json"
 
 read_target() {
-  ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch(ARGV[1])' "$output_dir/target.json" "$1"
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$output_dir/target.json" "$1"
 }
 source_db_instance_identifier=$(read_target source_db_instance_identifier)
 target_engine_version=$(read_target target_engine_version)
@@ -70,22 +59,14 @@ aws_args=(--region "$region")
 aws "${aws_args[@]}" rds describe-db-instances \
   --db-instance-identifier "$source_db_instance_identifier" \
   --output json > "$output_dir/source-db-instance.json"
-source_db_instance_arn=$(ruby -rjson -e '
-  instance = JSON.parse(File.read(ARGV[0])).fetch("DBInstances").fetch(0)
-  abort("Source DB engine must be mysql: #{instance["Engine"]}") unless instance["Engine"] == "mysql"
-  abort("Source DB engine must be MySQL 8.0: #{instance["EngineVersion"]}") unless instance.fetch("EngineVersion").start_with?("8.0.")
-  puts instance.fetch("DBInstanceArn")
-' "$output_dir/source-db-instance.json")
+source_db_instance_arn=$(python3 -c 'import json,sys; i=json.load(open(sys.argv[1]))["DBInstances"][0]; i["Engine"] == "mysql" or (_ for _ in ()).throw(SystemExit(f"Source DB engine must be mysql: {i[\"Engine\"]}")); i["EngineVersion"].startswith("8.0.") or (_ for _ in ()).throw(SystemExit(f"Source DB engine must be MySQL 8.0: {i[\"EngineVersion\"]}")); print(i["DBInstanceArn"])' "$output_dir/source-db-instance.json")
 
 # [作成前・読み取り] CloudFormation で事前作成した DB パラメータグループの family を取得する。
 # Green の MySQL 8.4 に適用可能な mysql8.4 ファミリーであることを確認するための操作。
 aws "${aws_args[@]}" rds describe-db-parameter-groups \
   --db-parameter-group-name "$target_db_parameter_group_name" \
   --output json > "$output_dir/target-db-parameter-group.json"
-ruby -rjson -e '
-  group = JSON.parse(File.read(ARGV[0])).fetch("DBParameterGroups").fetch(0)
-  abort("Target DB parameter group family must be mysql8.4: #{group["DBParameterGroupFamily"]}") unless group["DBParameterGroupFamily"] == "mysql8.4"
-' "$output_dir/target-db-parameter-group.json"
+python3 -c 'import json,sys; g=json.load(open(sys.argv[1]))["DBParameterGroups"][0]; g["DBParameterGroupFamily"] == "mysql8.4" or (_ for _ in ()).throw(SystemExit(f"Target DB parameter group family must be mysql8.4: {g[\"DBParameterGroupFamily\"]}"))' "$output_dir/target-db-parameter-group.json"
 
 [[ -n "$deployment_name" ]] || deployment_name="${service}-${environment}-mysql84-bg-$(date -u +%Y%m%d%H%M%S)"
 [[ "$deployment_name" =~ ^[A-Za-z][A-Za-z0-9-]{0,59}$ ]] || { echo "Invalid --deployment-name: $deployment_name" >&2; exit 2; }
@@ -99,7 +80,7 @@ aws "${aws_args[@]}" rds create-blue-green-deployment \
   --target-db-instance-class "$target_db_instance_class" \
   --target-db-parameter-group-name "$target_db_parameter_group_name" \
   --output json > "$output_dir/create-blue-green-deployment.json"
-deployment_identifier=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("BlueGreenDeployment").fetch("BlueGreenDeploymentIdentifier")' "$output_dir/create-blue-green-deployment.json")
+deployment_identifier=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["BlueGreenDeployment"]["BlueGreenDeploymentIdentifier"])' "$output_dir/create-blue-green-deployment.json")
 
 echo "Created Blue/Green Deployment: $deployment_identifier"
 echo "Waiting for status AVAILABLE before verification..."
@@ -110,7 +91,7 @@ while true; do
   aws "${aws_args[@]}" rds describe-blue-green-deployments \
     --blue-green-deployment-identifier "$deployment_identifier" \
     --output json > "$output_dir/describe-blue-green-deployment.json"
-  status=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("BlueGreenDeployments").fetch(0).fetch("Status")' "$output_dir/describe-blue-green-deployment.json")
+  status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["BlueGreenDeployments"][0]["Status"])' "$output_dir/describe-blue-green-deployment.json")
   echo "Blue/Green status: $status"
   [[ "$status" == 'AVAILABLE' ]] && break
   case "$status" in

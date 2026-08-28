@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  RDS MySQL Blue/Green の Step 3（構築）、Step 4（検証）、Step 5（切替）を
+  既存スクリプトで実行する CodePipeline / CodeBuild 定義。
+
+Parameters:
+  PipelineNamePrefix:
+    Type: String
+    Description: CodePipeline と CodeBuild プロジェクト名の共通接頭辞。
+  EnvironmentName:
+    Type: String
+    AllowedValues: [staging, production]
+    Description: config/blue-green 配下で参照する対象環境名。
+  ServiceName:
+    Type: String
+    Description: config/blue-green/{EnvironmentName}.yml の services キー。
+  CodeStarConnectionArn:
+    Type: String
+    Description: GitHub リポジトリへ接続済みの CodeConnections ARN。
+  RepositoryId:
+    Type: String
+    Description: GitHub の owner/repository 形式のリポジトリ識別子。
+  BranchName:
+    Type: String
+    Default: main
+    Description: パイプラインが取得する Git ブランチ。
+  ArtifactBucketName:
+    Type: String
+    Description: CodePipeline がソースと各 Step の成果物を保存する既存 S3 バケット名。
+  CodePipelineServiceRoleArn:
+    Type: String
+    Description: CodePipeline 用の既存 IAM ロール ARN。S3、CodeBuild、CodeConnections 利用権限が必要。
+  CodeBuildServiceRoleArn:
+    Type: String
+    Description: CodeBuild 用の既存 IAM ロール ARN。RDS/CloudWatch 読取と Step 3/5 の変更権限が必要。
+  CollectMySqlRuntimeValues:
+    Type: String
+    AllowedValues: ['false', 'true']
+    Default: 'false'
+    Description: true の場合だけ Step 4 で Green DB へ MySQL 接続して実効値を収集する。
+  MySqlCredentialsSecretId:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: >-
+      任意実行の MySQL 実効値収集で使用する Secrets Manager secret ID。
+      JSON の username と password を持つこと。CollectMySqlRuntimeValues=true の場合に必須。
+
+Resources:
+  # Step 3: actions.build が approved の場合だけ、保護スナップショットと Green を作成する。
+  BuildGreenProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-${ServiceName}-build-green'
+      Description: RDS Blue/Green Step 3 - build Green
+      ServiceRole: !Ref CodeBuildServiceRoleArn
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/build-green.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        EnvironmentVariables:
+          - Name: CONFIG_FILE
+            Type: PLAINTEXT
+            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
+          - Name: SERVICE_NAME
+            Type: PLAINTEXT
+            Value: !Ref ServiceName
+
+  # Step 4: AWS API 検証を常に行い、MySQL 接続はパラメータが true の場合だけ行う。
+  VerifyGreenProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-${ServiceName}-verify-green'
+      Description: RDS Blue/Green Step 4 - verify Green
+      ServiceRole: !Ref CodeBuildServiceRoleArn
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/verify-green.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        # Go レポート生成器を Docker のマルチステージビルドで作るために Docker を許可する。
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: CONFIG_FILE
+            Type: PLAINTEXT
+            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
+          - Name: SERVICE_NAME
+            Type: PLAINTEXT
+            Value: !Ref ServiceName
+          - Name: COLLECT_MYSQL_RUNTIME_VALUES
+            Type: PLAINTEXT
+            Value: !Ref CollectMySqlRuntimeValues
+          - Name: MYSQL_CREDENTIALS_SECRET_ID
+            Type: PLAINTEXT
+            Value: !Ref MySqlCredentialsSecretId
+
+  # Step 5: CodePipeline の手動承認後でも、設定ファイルの actions.switchover が approved でなければ変更しない。
+  SwitchoverProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-${ServiceName}-switchover'
+      Description: RDS Blue/Green Step 5 - switchover
+      ServiceRole: !Ref CodeBuildServiceRoleArn
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/switchover.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        EnvironmentVariables:
+          - Name: CONFIG_FILE
+            Type: PLAINTEXT
+            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
+          - Name: SERVICE_NAME
+            Type: PLAINTEXT
+            Value: !Ref ServiceName
+
+  # パイプラインは手動開始する。構成リポジトリへの push では Blue/Green 操作を開始しない。
+  BlueGreenPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-${ServiceName}'
+      PipelineType: V2
+      RoleArn: !Ref CodePipelineServiceRoleArn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucketName
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: SourceFromGitHub
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref CodeStarConnectionArn
+                FullRepositoryId: !Ref RepositoryId
+                BranchName: !Ref BranchName
+                DetectChanges: 'false'
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+        - Name: BuildGreen
+          Actions:
+            - Name: BuildGreen
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildGreenProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildGreenOutput
+              RunOrder: 1
+        - Name: VerifyGreen
+          Actions:
+            - Name: VerifyGreen
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref VerifyGreenProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: VerifyGreenOutput
+              RunOrder: 1
+        - Name: ApproveSwitchover
+          Actions:
+            - Name: ManualApproval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: >-
+                  Step 4 の成果物を確認し、config の actions.switchover: approved が
+                  レビュー済みであることを確認してから承認する。
+              RunOrder: 1
+        - Name: Switchover
+          Actions:
+            - Name: Switchover
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref SwitchoverProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: SwitchoverOutput
+              RunOrder: 1
+
+Outputs:
+  PipelineName:
+    Description: 手動で start-pipeline-execution する CodePipeline 名。
+    Value: !Ref BlueGreenPipeline
+  VerifyGreenProjectName:
+    Description: Step 4 専用 CodeBuild プロジェクト名。
+    Value: !Ref VerifyGreenProject

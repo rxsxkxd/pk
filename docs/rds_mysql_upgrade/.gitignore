@@ -6,3 +6,5 @@ docker/rds-ca/*
 !docker/rds-ca/.gitkeep
 docker/mysql-client-config/*
 !docker/mysql-client-config/.gitkeep
+.act.env
+.act-assets/

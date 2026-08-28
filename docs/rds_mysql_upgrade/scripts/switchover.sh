@@ -20,20 +20,17 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-switchover-step.XXXXXX")
 mkdir -p "$output_dir"
 
-ruby -ryaml -rjson -e '
-  document = YAML.load_file(ARGV[0]); service = document.fetch("services").fetch(ARGV[1]); actions = service.fetch("actions", {})
-  puts JSON.generate("approved" => actions.fetch("switchover", "pending"), "timeout" => actions.fetch("switchover_timeout", 300), "source" => service.fetch("source_db_instance_identifier"), "region" => document.fetch("aws_region"))
-' "$config" "$service" > "$output_dir/config.json"
-read_config() { ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch(ARGV[1])' "$output_dir/config.json" "$1"; }
+python3 -c 'import json,sys,yaml; d=yaml.safe_load(open(sys.argv[1])); s=d["services"][sys.argv[2]]; a=s.get("actions", {}); print(json.dumps({"approved":a.get("switchover", "pending"), "timeout":a.get("switchover_timeout", 300), "source":s["source_db_instance_identifier"], "region":d["aws_region"]}))' "$config" "$service" > "$output_dir/config.json"
+read_config() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$output_dir/config.json" "$1"; }
 [[ "$(read_config approved)" == approved ]] || { echo 'switchover: pending; no changes made.'; exit 0; }
 [[ -n "$region" ]] || region=$(read_config region)
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
 # [読み取り] Source に紐づく Deployment を検索する。設定値ではなく AWS の実状態から対象 ID を解決する。
 aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$(read_config source)" --output json > "$output_dir/source.json"
-source_arn=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0])).fetch("DBInstances").fetch(0).fetch("DBInstanceArn")' "$output_dir/source.json")
+source_arn=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["DBInstances"][0]["DBInstanceArn"])' "$output_dir/source.json")
 aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" --output json > "$output_dir/deployment.json"
-deployment_id=$(ruby -rjson -e 'd=JSON.parse(File.read(ARGV[0])).fetch("BlueGreenDeployments"); abort("Blue/Green Deployment not found") if d.empty?; puts d.first.fetch("BlueGreenDeploymentIdentifier")' "$output_dir/deployment.json")
+deployment_id=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["BlueGreenDeployments"]; d or (_ for _ in ()).throw(SystemExit("Blue/Green Deployment not found")); print(d[0]["BlueGreenDeploymentIdentifier"])' "$output_dir/deployment.json")
 
 args=(--config "$config" --blue-green-deployment-id "$deployment_id" --approve --switchover-timeout "$(read_config timeout)" --region "$region" --output-dir "$output_dir/result")
 [[ -n "$profile" ]] && args+=(--profile "$profile")

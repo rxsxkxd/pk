@@ -42,6 +42,33 @@ scripts/switchover_blue_green_deployment.sh \
 
 GitHub Actions の手動ワークフローを使用する。実行ロールは GitHub Environment ごとの `AWS_ROLE_ARN` 変数に設定し、OIDC で引き受ける。
 
+ローカルでは `nektos/act` で GitHub Actions の処理を確認できる。[.actrc](../../.actrc) は `ubuntu-24.04` を `ghcr.io/catthehacker/ubuntu:act-24.04` に対応付ける。act は GitHub OIDC を提供しないため、`ACT=true` の場合は OIDC の認証初期化ステップを省略し、`.actrc` のテンプレートに従って read-only マウントしたローカル AWS プロファイルを使用する。
+
+```bash
+# .actrc の AWS プロファイル・絶対パスマウントを設定してから実行する。
+act workflow_dispatch \
+  -W .github/workflows/verify-green.yml \
+  --input environment=staging \
+  --input service=example-service \
+  --input collect_mysql_runtime_values=false
+```
+
+`.act.env.example` を `.act.env` にコピーした場合は、`act --env-file .act.env ...` を使う。`.act.env` と AWS credential は Git 管理しない。Step 3／5 は設定ファイルが `pending` なら変更を行わないが、Step 4 は AWS 読み取り API を実行する。
+
+act の runner イメージには AWS CLI がない前提で、ワークフローは `ACT=true` の場合だけローカル配置済みの AWS CLI v2 zip をインストールする。`.actrc` でホスト側の `act-assets` を `/act-assets:ro` としてマウントし、`ACT_AWSCLI_PACKAGE_DIR=/act-assets/awscli` を設定する。ローカル側には runner のアーキテクチャに合うファイルを用意する。
+
+```bash
+# x86_64 runner 用
+curl -o /absolute/path/to/act-assets/awscli/awscli-exe-linux-x86_64.zip \
+  https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+
+# aarch64 runner 用
+curl -o /absolute/path/to/act-assets/awscli/awscli-exe-linux-aarch64.zip \
+  https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip
+```
+
+ダウンロード後、公式手順に従って署名を検証してから利用する。リモートの GitHub Actions では `ACT` がないため、このローカルインストールは実行されず、従来どおり OIDC で認証する。
+
 - Step 3: [Build Green](../../.github/workflows/build-green.yml)
 - Step 4: [Verify Green](../../.github/workflows/verify-green.yml)
 - Step 5: [Switchover Blue Green](../../.github/workflows/switchover.yml)

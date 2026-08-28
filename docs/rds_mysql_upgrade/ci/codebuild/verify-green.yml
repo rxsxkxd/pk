@@ -1,0 +1,47 @@
+# CodePipeline の VerifyGreen ステージから実行する CodeBuild buildspec。
+# COLLECT_MYSQL_RUNTIME_VALUES は既定 false。true のときだけ Green DB へ接続する。
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.11
+    commands:
+      - python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        docker buildx build \
+          --file docker/Dockerfile.green-verification-report \
+          --target export \
+          --output type=local,dest=.tools/green-report \
+          .
+        report_generator="$CODEBUILD_SRC_DIR/.tools/green-report/generate_green_verification_report"
+        if [[ "${COLLECT_MYSQL_RUNTIME_VALUES}" == "true" ]]; then
+          test -n "${MYSQL_CREDENTIALS_SECRET_ID}" || {
+            echo 'MYSQL_CREDENTIALS_SECRET_ID is required when runtime collection is enabled.' >&2
+            exit 2
+          }
+          # Secrets Manager の JSON の username / password を、その build プロセスだけに渡す。
+          secret_json=$(aws secretsmanager get-secret-value \
+            --secret-id "$MYSQL_CREDENTIALS_SECRET_ID" \
+            --query SecretString --output text)
+          export MYSQL_USER
+          export MYSQL_PASSWORD
+          MYSQL_USER=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["username"])' <<<"$secret_json")
+          MYSQL_PASSWORD=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])' <<<"$secret_json")
+          command -v mysql >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y mysql-client
+          }
+          GREEN_REPORT_GENERATOR="$report_generator" scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" \
+            --mysql-user "$MYSQL_USER" --mysql-password-env MYSQL_PASSWORD --output-dir artifacts
+        else
+          GREEN_REPORT_GENERATOR="$report_generator" scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
+        fi
+
+artifacts:
+  files:
+    - artifacts/**/*
+  discard-paths: false

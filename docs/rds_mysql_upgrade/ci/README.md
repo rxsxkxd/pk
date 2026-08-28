@@ -2,6 +2,10 @@
 
 [codepipeline.yml](../examples/rds-blue-green-deployment/codepipeline.yml) は、サービス・環境ごとに CloudFormation で作成する CodePipeline と三つの CodeBuild プロジェクトを定義する。
 
+AWS 側に用意するリソース、IAM、ネットワーク、Secrets、デプロイ・実行手順は [CodeBuild / CodePipeline セットアップ手順](codebuild-codepipeline-setup.md) を参照する。
+
+各 CodeBuild buildspec を CodePipeline なしでローカル確認する手順は [CodeBuild 各フローの単体ローカル検証](codebuild-local-verification.md) を参照する。
+
 ```text
 CodeConnections (GitHub) → BuildGreen → VerifyGreen → ManualApproval → Switchover
                              Step 3       Step 4          人の承認        Step 5

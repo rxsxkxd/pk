@@ -26,23 +26,23 @@ CodePipeline（サービス・環境ごとに 1 本）
 
 ## 0. CodeBuild の動作環境コンテナと追加導入物
 
-3 プロジェクトとも、CloudFormation テンプレートで AWS 管理イメージ `aws/codebuild/standard:7.0` を指定する。このイメージは Ubuntu 22.04 の CodeBuild managed image である。AWS CLI を含む CodeBuild の標準ツール群はイメージ側のものを利用し、buildspec から AWS CLI を追加インストールしない。
+AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS 管理イメージ `aws/codebuild/standard:7.0` を指定する。このイメージは Ubuntu 22.04 の CodeBuild managed image である。AWS CLI を含む CodeBuild の標準ツール群はイメージ側のものを利用し、buildspec から AWS CLI を追加インストールしない。ローカルの CodeBuild Local Agent 用だけは、軽量な [Dockerfile.codebuild-runner](../docker/Dockerfile.codebuild-runner) を使用できる。AWS 上の CodeBuild image はこの代替 image に変更しない。
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
-| BuildGreen | `aws/codebuild/standard:7.0` | Python 3.11、`PyYAML==6.0.2` | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
-| VerifyGreen | `aws/codebuild/standard:7.0` | Python 3.11、`PyYAML==6.0.2`。Go レポート生成器のビルド時だけ `golang:1.25` を pull | 必要、`PrivilegedMode: true` | CodeBuild コンテナ上で Go バイナリとシェルスクリプトを実行 |
-| Switchover | `aws/codebuild/standard:7.0` | Python 3.11、`PyYAML==6.0.2` | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
+| BuildGreen | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2` | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
+| VerifyGreen | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2`。Go レポート生成器のビルド時だけ `golang:1.25` を pull | 必要、`PrivilegedMode: true` | CodeBuild コンテナ上で Go バイナリとシェルスクリプトを実行 |
+| Switchover | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2` | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
 
 ### 共通コンテナ
 
-`buildspec` の `runtime-versions` で Python 3.11 を選択し、install フェーズで次だけを追加導入する。
+AWS 用と Local Agent 用で buildspec を分けないため、`runtime-versions` は指定しない。各 image に備わる `python3` を使用し、install フェーズで PyYAML の存在を確認する。
 
 ```bash
-python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
 ```
 
-用途は、`scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` と、その下位スクリプトが環境設定 YAML を読み取るためである。Ruby は CodeBuild のいずれのプロジェクトでも使用しない。
+用途は、`scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` と、その下位スクリプトが環境設定 YAML を読み取るためである。Ruby は CodeBuild のいずれのプロジェクトでも使用しない。AWS managed image では `standard:7.0` に含まれる Python 3 を、ローカル代替 image では Dockerfile で固定した Python 3.11 を使用する。
 
 ### VerifyGreen の Docker マルチステージビルド
 

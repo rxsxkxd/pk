@@ -1,0 +1,21 @@
+# CodeBuild / Local Agent の疎通確認専用 buildspec。AWS API は呼び出さない。
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo 'Entered install phase.'
+      - python3 --version
+      - aws --version
+  build:
+    commands:
+      - echo 'Entered build phase. No AWS changes are made.'
+      - echo "CONFIG_FILE=${CONFIG_FILE:-not-set}"
+      - echo "SERVICE_NAME=${SERVICE_NAME:-not-set}"
+      - mkdir -p artifacts
+      - echo 'CodeBuild echo build completed.' > artifacts/echo-result.txt
+
+artifacts:
+  files:
+    - artifacts/echo-result.txt
+  discard-paths: false

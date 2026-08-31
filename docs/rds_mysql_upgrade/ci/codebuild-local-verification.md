@@ -19,23 +19,78 @@
 - Git
 - 対象 AWS アカウントを読むことができる AWS CLI named profile
 - `codebuild_build.sh`
-- `aws/codebuild/standard:7.0` を pull できるネットワーク
+- 軽量実行 image をローカルで build できるネットワーク
 - VerifyGreen の場合は、追加で `golang:1.25` と Go module を取得できるネットワーク
 
 CodeBuild Local Agent はホストの AWS 設定を `-c` でコンテナへ渡せる。profile を明示する場合は `-p <profile>` を併用する。ローカル credential の IAM 権限は、AWS 上の CodeBuild 実行ロールとは別物である。原則として読み取り専用 profile を使い、Step 3・5 の変更確認は `pending` 設定で行う。
 
+### 1-2. Docker image の事前準備
+
+`codebuild_build.sh` の初回実行時に image の pull・ビルドを行わせる代わりに、以下を事前に実行できる。コマンドは**列挙のみ**であり、この文書作成時点では実行していない。
+
+#### CodeBuild Local Agent と実行 image の役割
+
+Local Agent と実行 image は別のコンテナである。
+
+```text
+ホスト
+  └─ CodeBuild Local Agent: public.ecr.aws/codebuild/local-builds:latest
+       └─ 実行 image: rds-codebuild-runner:local
+            └─ ci/codebuild/*.yml の install / build フェーズを実行
+```
+
+| 種類 | イメージ | 担当する役割 |
+|---|---|---|
+| CodeBuild Local Agent | `public.ecr.aws/codebuild/local-builds:latest`（ARM では `:aarch64`） | `codebuild_build.sh` から受け取ったソース、AWS 設定、環境変数、artifact 出力先、buildspec を実行 image へ受け渡す制御役 |
+| 実行 image | `rds-codebuild-runner:local` | AWS 上と同じ buildspec の `install`／`build` フェーズを、ローカル検証用の軽量 image で実行する環境 |
+
+`codebuild_build.sh` の `-i rds-codebuild-runner:local` は後者の実行 image を指定する。Local Agent 自体は buildspec を直接実行するための汎用制御コンテナであり、Python・AWS CLI・本リポジトリのスクリプトは実行 image 側で動く。VerifyGreen だけは、実行 image の中からさらに `golang:1.25` を一時的に起動し、Go レポート生成バイナリをビルドする。AWS 上の CodeBuild はこの image を使わず、引き続き `aws/codebuild/standard:7.0` を使う。
+
+```bash
+# CodeBuild Local Agent（x86_64 ホスト）
+docker pull public.ecr.aws/codebuild/local-builds:latest
+
+# ARM ホストで Local Agent を使う場合はこちら
+docker pull public.ecr.aws/codebuild/local-builds:aarch64
+
+# Local Agent 専用の軽量実行 image を作成する。
+# Python 3.11、PyYAML、AWS CLI v2、Docker CLI/Buildx を含む。
+docker build \
+  --tag rds-codebuild-runner:local \
+  --file docker/Dockerfile.codebuild-runner \
+  .
+
+# VerifyGreen の Docker マルチステージビルドで使う Go builder image
+docker pull golang:1.25
+```
+
+VerifyGreen の Go レポート生成器も事前にビルドキャッシュへ載せる場合は、Docker Buildx を初期化して `builder` ステージを作成する。実際の Local Agent 実行時は同じ Docker builder のキャッシュを再利用する。
+
+```bash
+docker buildx inspect --bootstrap
+
+docker buildx build \
+  --file docker/Dockerfile.green-verification-report \
+  --target builder \
+  --tag rds-green-verification-report-builder:local \
+  --load \
+  .
+```
+
+`export` ステージは Docker image として保持せず、実行時に `generate_green_verification_report` バイナリを `.tools/green-report/` へ取り出すためのステージである。事前準備では builder image の作成まででよい。
+
+AWS の CodeBuild Local Agent は `-i` で指定した build image と `-a` の artifact 出力先を必須とする。AWS 管理 image のローカルビルド方法は [Local Agent 公式手順](https://docs.aws.amazon.com/codebuild/latest/userguide/use-codebuild-agent.html) を参照する。
+
+### 1-3. Local Agent スクリプトの取得
+
 ```bash
 curl -O https://raw.githubusercontent.com/aws/aws-codebuild-docker-images/master/local_builds/codebuild_build.sh
 chmod +x codebuild_build.sh
-
-# x86_64 の場合。Apple Silicon 等の ARM の場合は aarch64 Local Agent を使う。
-docker pull public.ecr.aws/codebuild/local-builds:latest
-docker pull aws/codebuild/standard:7.0
 ```
 
 ARM の Local Agent は、各コマンドへ `-l public.ecr.aws/codebuild/local-builds:aarch64` を追加する。実際の build image とホストのアーキテクチャ互換性も確認する。
 
-### 1-2. CodeBuild 用の環境変数ファイル
+### 1-4. CodeBuild 用の環境変数ファイル
 
 `codebuild_build.sh -e` に渡すローカル専用ファイルを作る。以下は例であり、Git 管理しない。
 
@@ -51,11 +106,27 @@ COLLECT_MYSQL_RUNTIME_VALUES=false
 
 以降の例ではこのファイルを `/secure/path/codebuild-local.env` と表記する。`codebuild_build.sh` の環境変数ファイルは `VAR=VAL` 形式であり、引用符も値の一部として扱われるため、値を引用符で囲まない。
 
-### 1-3. 共通コマンド形式
+### 1-5. 共通コマンド形式
+
+`-b` は CodeBuild Local Agent の公式ヘルパーでサポートされる buildspec override オプションであり、`ci/codebuild/<flow>.yml` を指定する用途に適している。
+
+ただし現在取得した `codebuild_build.sh` は、`BUILDSPEC` にホスト絶対パスを設定するだけで、そのファイルを Local Agent コンテナに mount しない。この状態では macOS の `/Users/...` のようなパスに対して `YAML_FILE_ERROR: stat ... no such file or directory` が起こる。`-b` を使う場合は、ローカルで取得した `codebuild_build.sh` の該当箇所を次のように修正する。
+
+```bash
+# codebuild_build.sh の 132 行目付近を修正する。
+# 変更前:
+# docker_command+=" -e \"BUILDSPEC=$(allOSRealPath \"$buildspec\")\""
+
+buildspec_path=$(allOSRealPath "$buildspec")
+buildspec_directory=$(dirname "$buildspec_path")
+docker_command+=" -v \"$buildspec_directory:$buildspec_directory:ro\" -e \"BUILDSPEC=$buildspec_path\""
+```
+
+これは environment variable file に対してヘルパーが行っている mount と同じ考え方である。Agent からも同じ絶対パスで buildspec を読めるようになる。`codebuild_build.sh` はローカル検証用にダウンロードしたファイルなので、上流更新時はこの差分を再適用する。
 
 ```bash
 ./codebuild_build.sh \
-  -i aws/codebuild/standard:7.0 \
+  -i rds-codebuild-runner:local \
   -a artifacts/codebuild-local/<flow> \
   -s . \
   -b ci/codebuild/<flow>.yml \
@@ -65,10 +136,10 @@ COLLECT_MYSQL_RUNTIME_VALUES=false
 
 | オプション | 用途 |
 |---|---|
-| `-i` | AWS 上と同じ CodeBuild managed image を指定 |
+| `-i` | Local Agent 用の軽量実行 image を指定。AWS 上は CloudFormation 定義どおり `aws/codebuild/standard:7.0` を使う |
 | `-a` | buildspec の `artifacts` をローカルへ出力するディレクトリ |
-| `-s .` | リポジトリを primary source として指定 |
-| `-b` | 対象 buildspec を指定 |
+| `-s .` | 現在のリポジトリを primary source として指定 |
+| `-b` | 実行する buildspec を指定。上記の local helper 修正後に使用する |
 | `-e` | `CONFIG_FILE`、`SERVICE_NAME` 等のローカル環境変数ファイル |
 | `-c -p` | ホストの `~/.aws` と指定 profile を Local Agent へ渡す |
 | `-m` | ソースをコピーせず、ホストの作業ディレクトリを直接マウント |
@@ -85,7 +156,7 @@ COLLECT_MYSQL_RUNTIME_VALUES=false
 
 ```bash
 ./codebuild_build.sh \
-  -i aws/codebuild/standard:7.0 \
+  -i rds-codebuild-runner:local \
   -a artifacts/codebuild-local/build-green \
   -s . \
   -b ci/codebuild/build-green.yml \
@@ -93,7 +164,7 @@ COLLECT_MYSQL_RUNTIME_VALUES=false
   -c -p your-readonly-profile -m
 ```
 
-この状態では `build_green.sh` が `pending` を検出して終了するため、RDS API の変更操作は行わない。確認対象は Python 3.11 の選択、PyYAML 導入、環境変数の受け渡し、buildspec の構文、成果物出力先である。
+この状態では `build_green.sh` が `pending` を検出して終了するため、RDS API の変更操作は行わない。確認対象は Python と PyYAML の存在、環境変数の受け渡し、buildspec の構文、成果物出力先である。
 
 ### 実 AWS 操作を含む検証
 
@@ -105,7 +176,7 @@ COLLECT_MYSQL_RUNTIME_VALUES=false
 
 ```bash
 ./codebuild_build.sh \
-  -i aws/codebuild/standard:7.0 \
+  -i rds-codebuild-runner:local \
   -a artifacts/codebuild-local/verify-green \
   -s . \
   -b ci/codebuild/verify-green.yml \
@@ -132,7 +203,7 @@ MYSQL_CREDENTIALS_SECRET_ID=your-secret-id-or-arn
 
 ```bash
 ./codebuild_build.sh \
-  -i aws/codebuild/standard:7.0 \
+  -i rds-codebuild-runner:local \
   -a artifacts/codebuild-local/switchover \
   -s . \
   -b ci/codebuild/switchover.yml \

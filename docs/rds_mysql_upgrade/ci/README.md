@@ -23,7 +23,7 @@ CodePipeline は `DetectChanges: false` のため、GitHub への push で自動
 
 `VerifyGreenProject` の MySQL 実効値収集は `CollectMySqlRuntimeValues=false` が既定であり、Green DB へ接続しない。`true` を指定したスタックだけが、実行時に Secrets Manager から JSON の `username`／`password` を読み取り、MySQL 接続を行う。値を CodeBuild の通常環境変数へ保存せず、実行したシェルプロセス内だけで使用する。
 
-Step 4 は最初に [Dockerfile.green-verification-report](../docker/Dockerfile.green-verification-report) をマルチステージビルドする。Go ビルドステージで作成した `generate_green_verification_report` だけを local exporter で `.tools/green-report/` に取り出し、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。したがって CodeBuild の Step 4 プロジェクトだけは `PrivilegedMode: true` で Docker Buildx を使用する。Ruby ランタイムは CodeBuild に不要である。
+Step 4 は最初に [Dockerfile.green-verification-report](Dockerfile.green-verification-report) をマルチステージビルドする。Go ビルドステージで作成した `generate_green_verification_report` だけを local exporter で `.tools/green-report/` に取り出し、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。したがって CodeBuild の Step 4 プロジェクトだけは `PrivilegedMode: true` で Docker Buildx を使用する。Ruby ランタイムは CodeBuild に不要である。
 
 各 buildspec は設定 YAML を読むために `PyYAML==6.0.2` を導入する。ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、事前に `python3 -m pip install 'PyYAML==6.0.2'` を一度実行する。
 

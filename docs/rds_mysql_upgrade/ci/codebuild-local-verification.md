@@ -57,7 +57,7 @@ docker pull public.ecr.aws/codebuild/local-builds:aarch64
 # Python 3.11、PyYAML、AWS CLI v2、Docker CLI/Buildx を含む。
 docker build \
   --tag rds-codebuild-runner:local \
-  --file docker/Dockerfile.codebuild-runner \
+  --file ci/Dockerfile.codebuild-runner \
   .
 
 # VerifyGreen の Docker マルチステージビルドで使う Go builder image
@@ -70,7 +70,7 @@ VerifyGreen の Go レポート生成器も事前にビルドキャッシュへ�
 docker buildx inspect --bootstrap
 
 docker buildx build \
-  --file docker/Dockerfile.green-verification-report \
+  --file ci/Dockerfile.green-verification-report \
   --target builder \
   --tag rds-green-verification-report-builder:local \
   --load \

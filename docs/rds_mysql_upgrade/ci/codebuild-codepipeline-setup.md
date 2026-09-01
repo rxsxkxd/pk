@@ -26,7 +26,7 @@ CodePipeline（サービス・環境ごとに 1 本）
 
 ## 0. CodeBuild の動作環境コンテナと追加導入物
 
-AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS 管理イメージ `aws/codebuild/standard:7.0` を指定する。このイメージは Ubuntu 22.04 の CodeBuild managed image である。AWS CLI を含む CodeBuild の標準ツール群はイメージ側のものを利用し、buildspec から AWS CLI を追加インストールしない。ローカルの CodeBuild Local Agent 用だけは、軽量な [Dockerfile.codebuild-runner](../docker/Dockerfile.codebuild-runner) を使用できる。AWS 上の CodeBuild image はこの代替 image に変更しない。
+AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS 管理イメージ `aws/codebuild/standard:7.0` を指定する。このイメージは Ubuntu 22.04 の CodeBuild managed image である。AWS CLI を含む CodeBuild の標準ツール群はイメージ側のものを利用し、buildspec から AWS CLI を追加インストールしない。ローカルの CodeBuild Local Agent 用だけは、軽量な [Dockerfile.codebuild-runner](Dockerfile.codebuild-runner) を使用できる。AWS 上の CodeBuild image はこの代替 image に変更しない。
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
@@ -46,7 +46,7 @@ python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check '
 
 ### VerifyGreen の Docker マルチステージビルド
 
-VerifyGreen だけは、[Dockerfile.green-verification-report](../docker/Dockerfile.green-verification-report) を Docker Buildx でビルドする。
+VerifyGreen だけは、[Dockerfile.green-verification-report](Dockerfile.green-verification-report) を Docker Buildx でビルドする。
 
 ```text
 aws/codebuild/standard:7.0（実行コンテナ）

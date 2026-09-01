@@ -2,8 +2,8 @@ name: rds-mysql-upgrade-tools
 
 # 使い方:
 #   docker compose create  # 認証情報なしでも作成可能
-#   # 実接続時だけ docker/.env でホスト側の認証情報・証明書ディレクトリを指定
-#   docker compose --env-file docker/.env run --rm awscli sts get-caller-identity
+#   # 実接続時だけ .env でホスト側の認証情報・証明書ディレクトリを指定
+#   docker compose --env-file .env run --rm awscli sts get-caller-identity
 #
 # すべての認証情報・証明書・接続設定は read_only でマウントする。
 services:
@@ -16,7 +16,7 @@ services:
       AWS_PROFILE: ${AWS_PROFILE:-default}
     volumes:
       - type: bind
-        source: ${AWS_CONFIG_DIR:-./docker/aws-config}
+        source: ${AWS_CONFIG_DIR:-./aws-config}
         target: /root/.aws
         read_only: true
       - type: bind
@@ -34,12 +34,12 @@ services:
       HOME: /tmp
     volumes:
       - type: bind
-        source: ${RDS_CA_DIR:-./docker/rds-ca}
-        target: /certs/rds
+        source: ${RDS_CA_FILE:-./global-bundle.pem}
+        target: /certs/rds/global-bundle.pem
         read_only: true
       - type: bind
-        source: ${MYSQL_CLIENT_CONFIG_DIR:-./docker/mysql-client-config}
-        target: /client-config
+        source: ${MYSQL_CLIENT_CONFIG_FILE:-./my.cnf}
+        target: /client-config/my.cnf
         read_only: true
       - type: bind
         source: ${WORKSPACE_DIR:-.}

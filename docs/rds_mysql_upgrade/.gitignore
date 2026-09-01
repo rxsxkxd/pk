@@ -1,11 +1,10 @@
 # Local Docker credentials, certificates, and client connection settings
-docker/.env
-docker/aws-config/*
-!docker/aws-config/.gitkeep
-docker/rds-ca/*
-!docker/rds-ca/.gitkeep
-docker/mysql-client-config/*
-!docker/mysql-client-config/.gitkeep
+.env
+aws-config/*
+!aws-config/.gitkeep
+global-bundle.pem
+# my.cnf は空プレースホルダとして追跡する。実接続情報は書き込まず、
+# 必要な場合は .env の MYSQL_CLIENT_CONFIG_FILE でリポジトリ外の絶対パスを指す。
 .act.env
 .act-assets/
 

@@ -53,7 +53,7 @@ act workflow_dispatch \
   --input collect_mysql_runtime_values=false
 ```
 
-`.act.env.example` を `.act.env` にコピーした場合は、`act --env-file .act.env ...` を使う。`.act.env` と AWS credential は Git 管理しない。Step 3／5 は設定ファイルが `pending` なら変更を行わないが、Step 4 は AWS 読み取り API を実行する。
+[`ci/.act.env.example`](../../ci/.act.env.example) を `ci/.act.env` にコピーした場合は、`act --env-file ci/.act.env ...` を使う。`ci/.act.env` と AWS credential は Git 管理しない。Step 3／5 は設定ファイルが `pending` なら変更を行わないが、Step 4 は AWS 読み取り API を実行する。
 
 act の runner イメージには AWS CLI がない前提で、ワークフローは `ACT=true` の場合だけローカル配置済みの AWS CLI v2 zip をインストールする。`.actrc` でホスト側の `act-assets` を `/act-assets:ro` としてマウントし、`ACT_AWSCLI_PACKAGE_DIR=/act-assets/awscli` を設定する。ローカル側には runner のアーキテクチャに合うファイルを用意する。
 

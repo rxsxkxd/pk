@@ -11,7 +11,7 @@ phases:
       - |
         set -euo pipefail
         docker buildx build \
-          --file docker/Dockerfile.green-verification-report \
+          --file ci/Dockerfile.green-verification-report \
           --target export \
           --output type=local,dest=.tools/green-report \
           .

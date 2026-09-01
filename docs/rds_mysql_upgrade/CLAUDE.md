@@ -49,7 +49,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
 - `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。
 
-Step 4 のレポート生成器は Ruby 版（`generate_green_verification_report.rb`、ローカル既定）と Go 版（`generate_green_verification_report.go`、CI が `docker/Dockerfile.green-verification-report` のマルチステージビルドで作り `GREEN_REPORT_GENERATOR` で渡す）が並存する。**両方を同時に更新すること。**
+Step 4 のレポート生成器は Ruby 版（`generate_green_verification_report.rb`、ローカル既定）と Go 版（`generate_green_verification_report.go`、CI が `ci/Dockerfile.green-verification-report` のマルチステージビルドで作り `GREEN_REPORT_GENERATOR` で渡す）が並存する。**両方を同時に更新すること。**
 
 ## 実行方法
 
@@ -61,11 +61,11 @@ Step 4 のレポート生成器は Ruby 版（`generate_green_verification_repor
 python3 -m pip install 'PyYAML==6.0.2'
 ```
 
-AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`docker/README.md`）。実接続時だけ `docker/.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。すべて `read_only` マウントである。
+AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`local-execution.md`）。実接続時だけ `.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。すべて `read_only` マウントである。
 
 ```bash
-docker compose --env-file docker/.env run --rm awscli sts get-caller-identity
-docker compose --env-file docker/.env run --rm ruby scripts/generate_mysql84_parameter_group.rb --help
+docker compose --env-file .env run --rm awscli sts get-caller-identity
+docker compose --env-file .env run --rm ruby scripts/generate_mysql84_parameter_group.rb --help
 ```
 
 ### 各 Step
@@ -115,6 +115,6 @@ act workflow_dispatch -W .github/workflows/verify-green.yml \
 
 ## 編集時の注意
 
-- `docker/.env`、`.act.env`、`docker/aws-config/*`、`docker/rds-ca/*`、`docker/mysql-client-config/*` は `.gitignore` 済み。ここへ実値を置く手順を書くときは Git 管理しない旨を明記する。
+- `.env`、`ci/.act.env`、`aws-config/*`、`global-bundle.pem` は `.gitignore` 済み。`my.cnf` は空プレースホルダとして例外的に追跡しており、実接続情報を書き込んで commit しないよう手順に明記する（必要なら `.env` の `MYSQL_CLIENT_CONFIG_FILE` でリポジトリ外の絶対パスを指す）。ここへ実値を置く手順を書くときは Git 管理しない旨を明記する。
 - ドキュメント間の相互参照が密である。Step の分割や実行形態を変えたら `upgrade-flow-steps.md`・`ci/README.md`・`examples/*/README.md`・該当 `phase-*.md` を揃えて更新する。
 - コンテナイメージは `latest` を使わない。AWS CLI と MySQL はパッチバージョンまで、Ruby と Go はマイナーまで固定する。

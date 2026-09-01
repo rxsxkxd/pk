@@ -23,7 +23,7 @@ Step の詳細を掘り下げる際に参照する:
 | `scripts/` | 各 Step の収集・判定・実行スクリプト。[scripts/README.md](scripts/README.md) |
 | `config/` | 環境別設定ファイル(`blue-green/{staging,production}.yml`)とパラメータ変換ルール |
 | `ci/` | GitHub Actions / CodeBuild・CodePipeline の実行定義。[ci/README.md](ci/README.md) |
-| `docker/` | ローカル実行用コンテナ定義。[docker/README.md](docker/README.md) |
+| (ルート直下) | ローカル実行用コンテナ定義。`compose.yaml`、`aws-config/`、`global-bundle.pem`、`my.cnf`。[local-execution.md](local-execution.md) |
 | `examples/` | サンプル入出力・CLI 実行例 |
 | `reference/` | 判断に使う技術リファレンス(手順書ではない) |
 | `decisions/` | 結論→理由→代替案評価の意思決定記録(ADR)。未採択の検討中メモも含む |

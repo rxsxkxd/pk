@@ -1,6 +1,6 @@
 # `python3 -c` 削減対応記録
 
-> 位置づけ: **実施済みの変更の記録**である。[structure-review-proposal.md](structure-review-proposal.md) 論点1(実装言語の統一)で指摘した問題のうち、jq/yq を新規導入せずに対応できる範囲を先行して実施した。対象は `scripts/*.sh` に埋め込まれたインライン `python3 -c` のみで、Ruby／Go の実装統一(論点1本体)には未着手。
+> 位置づけ: **実施済みの変更の記録**である。[structure-review-proposal.md](../decisions/structure-review-proposal.md) 論点1(実装言語の統一)で指摘した問題のうち、jq/yq を新規導入せずに対応できる範囲を先行して実施した。対象は `scripts/*.sh` に埋め込まれたインライン `python3 -c` のみで、Ruby／Go の実装統一(論点1本体)には未着手。
 
 ## 背景
 
@@ -129,4 +129,4 @@ printf '{"source_parameter_group":"%s","collected_at":"%s"}\n' "$source_pg" "$(d
 
 ## 関連ドキュメント
 
-- [structure-review-proposal.md](structure-review-proposal.md) — 論点1(実装言語の統一)。今回の対応はその中間ステップであり、Ruby/Go実装の統一自体は未着手。
+- [structure-review-proposal.md](../decisions/structure-review-proposal.md) — 論点1(実装言語の統一)。今回の対応はその中間ステップであり、Ruby/Go実装の統一自体は未着手。

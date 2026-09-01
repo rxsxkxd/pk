@@ -1,7 +1,8 @@
 # 構成・フロー見直しの対案
 
-> 位置づけ: **未採択の検討メモ**である。現行の構成（[upgrade-flow-steps.md](upgrade-flow-steps.md)）を否定するものではなく、Step 6／7 の実装と対象 DB の追加を進める前に決着させておきたい論点と、その対案をまとめる。
+> 位置づけ: **未採択の検討メモ**である。現行の構成（[upgrade-flow-steps.md](../upgrade-flow-steps.md)）を否定するものではなく、Step 6／7 の実装と対象 DB の追加を進める前に決着させておきたい論点と、その対案をまとめる。
 > 対象: リポジトリ全体の構成とフローの形。個々のスクリプトの不具合ではない。
+> 実施状況: 論点9（ドキュメント配置）のうち `reference/`・`decisions/`・`reports/` への分離は実施済み（本ファイルも `decisions/` に移動済み）。`runbook`（`upgrade-flow-steps.md` とその参照先）はレビュー中のため据え置いており、`docs/` 配下への一括ネストも未実施。論点1〜8 は本文のとおり未着手。
 
 ## 0. 現行方針のうち維持すべき点
 
@@ -243,7 +244,7 @@ services:
 | Phase 0〜5 | `rds-mysql-84-migration-guide.md` |
 | Step 1〜7 | `upgrade-flow-steps.md` |
 | 0-1-01〜14 | `phase-0-precheck.md`、`evaluate_blue_green_prereqs.rb` の出力 |
-| 1〜7（＋5.5） | `1.md`（出典記事の要約メモ。独自採番） |
+| 1〜7（＋5.5） | `reference/source-article-notes.md`（旧 `1.md`。出典記事の要約メモ。独自採番） |
 
 ルート直下に .md が 8 本フラットに並んでおり、どれが正典か外から分からない。
 
@@ -251,18 +252,20 @@ services:
 
 **Step 1〜7 を唯一の背骨と宣言する。** Phase 系は「Step N の詳細リファレンス」として従属させ、対応表は `upgrade-flow-steps.md` に 1 つだけ置いて他所では複製しない。`0-1-NN` はスクリプト出力と対応する項目 ID なので維持する。
 
-配置は次のように整理する。
+配置は次のように整理する（`docs/` 配下への一括ネストは見送り、リポジトリ直下に `reference/`・`decisions/`・`reports/` を作る形で実施済み）。
 
 ```
-docs/
-  runbook/        upgrade-flow-steps.md（背骨）、phase-*.md
+(リポジトリ直下)
+  upgrade-flow-steps.md、phase-*.md、rds-mysql-84-migration-guide.md   ← runbook。レビュー中のため据え置き
   reference/      innodb-mysql80-to-84-parameter-mapping.md
-                  source-article-notes.md（現 1.md）
+                  source-article-notes.md（旧 1.md）
   decisions/      cdk-adoption-considerations.md
                   binlog-format-bluegreen-compatibility.md
+                  structure-review-proposal.md（本ファイル）
+  reports/        inline-python-reduction-report.md（完了した作業の実施記録）
 ```
 
-`cdk-adoption-considerations.md` と `binlog-format-bluegreen-compatibility.md` は実質 ADR（結論 → 理由 → 代替案の評価）であり、既に「## 結論」から始まっている。`decisions/` に置いて決定日と採否を明示するだけで、後から読む際の負荷が下がる。本ファイルも決着後は `decisions/` へ移す。
+`cdk-adoption-considerations.md` と `binlog-format-bluegreen-compatibility.md` は実質 ADR（結論 → 理由 → 代替案の評価）であり、既に「## 結論」から始まっている。`decisions/` に置いて決定日と採否を明示するだけで、後から読む際の負荷が下がる。本ファイルも `decisions/` へ移動済み。
 
 ---
 

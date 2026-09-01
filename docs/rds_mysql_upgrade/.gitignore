@@ -8,3 +8,7 @@ docker/mysql-client-config/*
 !docker/mysql-client-config/.gitkeep
 .act.env
 .act-assets/
+
+# Local-only CodeBuild env files and script output directories (see ci/codebuild-local-verification.md)
+.local/
+artifacts/

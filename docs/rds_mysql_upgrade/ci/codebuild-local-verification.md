@@ -84,8 +84,8 @@ AWS の CodeBuild Local Agent は `-i` で指定した build image と `-a` の 
 ### 1-3. Local Agent スクリプトの取得
 
 ```bash
-curl -O https://raw.githubusercontent.com/aws/aws-codebuild-docker-images/master/local_builds/codebuild_build.sh
-chmod +x codebuild_build.sh
+curl -o ci/codebuild_build.sh https://raw.githubusercontent.com/aws/aws-codebuild-docker-images/master/local_builds/codebuild_build.sh
+chmod +x ci/codebuild_build.sh
 ```
 
 ARM の Local Agent は、各コマンドへ `-l public.ecr.aws/codebuild/local-builds:aarch64` を追加する。実際の build image とホストのアーキテクチャ互換性も確認する。
@@ -125,7 +125,7 @@ docker_command+=" -v \"$buildspec_directory:$buildspec_directory:ro\" -e \"BUILD
 これは environment variable file に対してヘルパーが行っている mount と同じ考え方である。Agent からも同じ絶対パスで buildspec を読めるようになる。`codebuild_build.sh` はローカル検証用にダウンロードしたファイルなので、上流更新時はこの差分を再適用する。
 
 ```bash
-./codebuild_build.sh \
+./ci/codebuild_build.sh \
   -i rds-codebuild-runner:local \
   -a artifacts/codebuild-local/<flow> \
   -s . \
@@ -155,7 +155,7 @@ docker_command+=" -v \"$buildspec_directory:$buildspec_directory:ro\" -e \"BUILD
 `config/blue-green/staging.yml` の対象サービスで `actions.build: pending` を確認してから、次を実行する。
 
 ```bash
-./codebuild_build.sh \
+./ci/codebuild_build.sh \
   -i rds-codebuild-runner:local \
   -a artifacts/codebuild-local/build-green \
   -s . \
@@ -175,7 +175,7 @@ docker_command+=" -v \"$buildspec_directory:$buildspec_directory:ro\" -e \"BUILD
 対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.sh` である。VerifyGreen は Go レポート生成器を Docker のマルチステージビルドで生成するため、共通コマンドに `-d` を追加する。
 
 ```bash
-./codebuild_build.sh \
+./ci/codebuild_build.sh \
   -i rds-codebuild-runner:local \
   -a artifacts/codebuild-local/verify-green \
   -s . \
@@ -202,7 +202,7 @@ MYSQL_CREDENTIALS_SECRET_ID=your-secret-id-or-arn
 対象 buildspec は `ci/codebuild/switchover.yml`、実処理は `scripts/switchover.sh` である。buildspec は `--approve` を常に渡すが、`actions.switchover` が `pending` であればスクリプトは変更せず終了する。
 
 ```bash
-./codebuild_build.sh \
+./ci/codebuild_build.sh \
   -i rds-codebuild-runner:local \
   -a artifacts/codebuild-local/switchover \
   -s . \

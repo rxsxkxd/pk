@@ -133,7 +133,7 @@ aws rds describe-db-parameters \
 
 ## 7. 現行変換ルールへの適用
 
-現行の [mysql80-to-84-parameter-rules.yml](config/mysql80-to-84-parameter-rules.yml) では、廃止済みの `innodb_log_file_size` と `innodb_log_files_in_group` を `omit` としており、redo ログ容量への自動変換は行わない。これは本書の「保留」と一致する。
+現行の [mysql80-to-84-parameter-rules.yml](../config/mysql80-to-84-parameter-rules.yml) では、廃止済みの `innodb_log_file_size` と `innodb_log_files_in_group` を `omit` としており、redo ログ容量への自動変換は行わない。これは本書の「保留」と一致する。
 
 生成スクリプトは、`omit` とした項目を除く `Source=user` 値を、8.4 に存在し変更可能であれば YAML へ明示する。本書の表を使って「8.4既定値を採用すべき」と判断した項目は、YAML を生成する前に `omit` ルールへ変更する。値を固定する場合は、Green 環境で性能・メモリ・ストレージ・リカバリ時間を確認する。
 

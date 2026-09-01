@@ -45,8 +45,11 @@ aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$db_ins
 # [0-1-07] 対象 Blue の直接配下レプリカにさらに配下がある、カスケード構成を Ruby で判定するために使う。
 aws "${aws_args[@]}" rds describe-db-instances --output json > "$output_dir/all-db-instances.json"
 
-parameter_group=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["DBInstances"][0]["DBParameterGroups"][0]["DBParameterGroupName"])' "$output_dir/db-instance.json")
-option_group=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["DBInstances"][0]["OptionGroupMemberships"][0]["OptionGroupName"])' "$output_dir/db-instance.json")
+# db-instance.json は Ruby の判定でそのまま読むためアーカイブを残し、値の取得だけ --query/--output text で行う。
+parameter_group=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$db_instance_id" \
+  --query 'DBInstances[0].DBParameterGroups[0].DBParameterGroupName' --output text)
+option_group=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$db_instance_id" \
+  --query 'DBInstances[0].OptionGroupMemberships[0].OptionGroupName' --output text)
 
 # [0-1-02] 対象 Blue に適用中のパラメータグループの全パラメータを取得する。
 # binlog_format の現行値を記録する。RDS for MySQL の Blue/Green 作成では ROW は必須ではないため、運用方針として Ruby で報告する。
@@ -70,14 +73,15 @@ while IFS= read -r proxy_name; do
   [[ -n "$proxy_name" ]] || continue
   aws "${aws_args[@]}" rds describe-db-proxy-targets --db-proxy-name "$proxy_name" --output json > "$output_dir/db-proxy-targets-${proxy_index}.json"
   proxy_index=$((proxy_index + 1))
-done < <(python3 -c 'import json, sys; [print(proxy["DBProxyName"]) for proxy in json.load(open(sys.argv[1])).get("DBProxies", [])]' "$output_dir/db-proxies.json")
+done < <(aws "${aws_args[@]}" rds describe-db-proxies --query 'DBProxies[].DBProxyName' --output text | tr '\t' '\n')
 
 # [0-1-11] リージョン内の RDS Integration（Zero-ETL 統合を含む）を取得する。
 # 対象 DB ARN が source／target に含まれる統合を Ruby で抽出し、制約確認が必要な状態として報告する。
 aws "${aws_args[@]}" rds describe-integrations --output json > "$output_dir/integrations.json"
 
-start_time=$(python3 -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) - timedelta(hours=1)).isoformat().replace("+00:00", "Z"))')
-end_time=$(python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))')
+# GNU date 前提（-d オプション）。本リポジトリの実行はいずれも GNU coreutils を含むコンテナ経由を想定する。
+start_time=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
+end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # [0-1-09] 対象 Blue の CloudWatch メトリクス FreeStorageSpace の直近 1 時間における最小値を取得する。
 # Ruby で 2 GiB を目安に空きストレージ余裕を判定する。値の単位は Byte。
 aws "${aws_args[@]}" cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name FreeStorageSpace --dimensions "Name=DBInstanceIdentifier,Value=$db_instance_id" --statistics Minimum --period 300 --start-time "$start_time" --end-time "$end_time" --output json > "$output_dir/free-storage-space.json"

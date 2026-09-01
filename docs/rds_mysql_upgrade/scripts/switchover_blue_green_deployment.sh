@@ -38,9 +38,17 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-switchover.XXXXXX")
 mkdir -p "$output_dir"
 # config から環境に紐づく AWS CLI のリージョン・プロファイルを取得する。AWS API は呼び出さない。
-config_aws=$(python3 -c 'import json,sys,yaml; d=yaml.safe_load(open(sys.argv[1])); d.get("aws_region") or (_ for _ in ()).throw(SystemExit(f"{sys.argv[1]}: aws_region が未定義です")); print(json.dumps({"region":d["aws_region"], "profile":d.get("aws_profile", "")}))' "$config")
-[[ -n "$region" ]] || region=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["region"])' "$config_aws")
-[[ -n "$profile" ]] || profile=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("profile", ""))' "$config_aws")
+eval "$(python3 -c '
+import shlex, sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+if not d.get("aws_region"):
+    sys.exit(f"{sys.argv[1]}: aws_region が未定義です")
+values = {"config_region": d["aws_region"], "config_profile": d.get("aws_profile", "")}
+for k, v in values.items():
+    print(f"{k}={shlex.quote(str(v))}")
+' "$config")"
+[[ -n "$region" ]] || region=$config_region
+[[ -n "$profile" ]] || profile=$config_profile
 aws_args=(--region "$region")
 [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
@@ -49,7 +57,9 @@ aws_args=(--region "$region")
 aws "${aws_args[@]}" rds describe-blue-green-deployments \
   --blue-green-deployment-identifier "$deployment_identifier" \
   --output json > "$output_dir/before-switchover.json"
-status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["BlueGreenDeployments"][0]["Status"])' "$output_dir/before-switchover.json")
+status=$(aws "${aws_args[@]}" rds describe-blue-green-deployments \
+  --blue-green-deployment-identifier "$deployment_identifier" \
+  --query 'BlueGreenDeployments[0].Status' --output text)
 [[ "$status" == 'AVAILABLE' ]] || { echo "Switchover requires AVAILABLE status; current status: $status" >&2; exit 1; }
 
 # [変更] RDS の Blue/Green Deployment を切り替える。切替後は Green が本番 DB となる。

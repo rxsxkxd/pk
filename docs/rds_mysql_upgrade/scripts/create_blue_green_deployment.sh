@@ -39,18 +39,32 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-create.XXXXXX")
 mkdir -p "$output_dir"
 # config のサービスに対応する作成設定を読み取る。AWS API は呼び出さない。
-python3 -c 'import json,sys,yaml; c,s=sys.argv[1:]; d=yaml.safe_load(open(c)); t=d["services"][s]; [(_ for _ in ()).throw(SystemExit(f"{c}: services.{s}.{k} が未定義です")) for k in ("source_db_instance_identifier", "target_engine_version", "target_db_instance_class", "target_db_parameter_group_name") if not t.get(k)]; [(_ for _ in ()).throw(SystemExit(f"{c}: {k} が未定義です")) for k in ("environment", "aws_region") if not d.get(k)]; print(json.dumps({**t, "environment":d["environment"], "aws_region":d["aws_region"], "aws_profile":d.get("aws_profile", "")}))' "$config" "$service" > "$output_dir/target.json"
-
-read_target() {
-  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$output_dir/target.json" "$1"
+# YAML の読み込みは 1 回だけ行い、以降は python3 -c を呼ばずシェル変数として使う。
+eval "$(python3 -c '
+import shlex, sys, yaml
+c, s = sys.argv[1:]
+d = yaml.safe_load(open(c))
+t = d["services"][s]
+for k in ("source_db_instance_identifier", "target_engine_version", "target_db_instance_class", "target_db_parameter_group_name"):
+    if not t.get(k):
+        sys.exit(f"{c}: services.{s}.{k} が未定義です")
+for k in ("environment", "aws_region"):
+    if not d.get(k):
+        sys.exit(f"{c}: {k} が未定義です")
+values = {
+    "source_db_instance_identifier": t["source_db_instance_identifier"],
+    "target_engine_version": t["target_engine_version"],
+    "target_db_instance_class": t["target_db_instance_class"],
+    "target_db_parameter_group_name": t["target_db_parameter_group_name"],
+    "environment": d["environment"],
+    "config_region": d["aws_region"],
+    "config_profile": d.get("aws_profile", ""),
 }
-source_db_instance_identifier=$(read_target source_db_instance_identifier)
-target_engine_version=$(read_target target_engine_version)
-target_db_instance_class=$(read_target target_db_instance_class)
-target_db_parameter_group_name=$(read_target target_db_parameter_group_name)
-environment=$(read_target environment)
-[[ -n "$region" ]] || region=$(read_target aws_region)
-[[ -n "$profile" ]] || profile=$(read_target aws_profile)
+for k, v in values.items():
+    print(f"{k}={shlex.quote(str(v))}")
+' "$config" "$service")"
+[[ -n "$region" ]] || region=$config_region
+[[ -n "$profile" ]] || profile=$config_profile
 aws_args=(--region "$region")
 [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
@@ -59,14 +73,23 @@ aws_args=(--region "$region")
 aws "${aws_args[@]}" rds describe-db-instances \
   --db-instance-identifier "$source_db_instance_identifier" \
   --output json > "$output_dir/source-db-instance.json"
-source_db_instance_arn=$(python3 -c 'import json,sys; i=json.load(open(sys.argv[1]))["DBInstances"][0]; i["Engine"] == "mysql" or (_ for _ in ()).throw(SystemExit(f"Source DB engine must be mysql: {i[\"Engine\"]}")); i["EngineVersion"].startswith("8.0.") or (_ for _ in ()).throw(SystemExit(f"Source DB engine must be MySQL 8.0: {i[\"EngineVersion\"]}")); print(i["DBInstanceArn"])' "$output_dir/source-db-instance.json")
+read -r source_db_instance_engine source_db_instance_engine_version source_db_instance_arn <<< "$(
+  aws "${aws_args[@]}" rds describe-db-instances \
+    --db-instance-identifier "$source_db_instance_identifier" \
+    --query 'DBInstances[0].[Engine,EngineVersion,DBInstanceArn]' --output text
+)"
+[[ "$source_db_instance_engine" == mysql ]] || { echo "Source DB engine must be mysql: $source_db_instance_engine" >&2; exit 1; }
+[[ "$source_db_instance_engine_version" == 8.0.* ]] || { echo "Source DB engine must be MySQL 8.0: $source_db_instance_engine_version" >&2; exit 1; }
 
 # [作成前・読み取り] CloudFormation で事前作成した DB パラメータグループの family を取得する。
 # Green の MySQL 8.4 に適用可能な mysql8.4 ファミリーであることを確認するための操作。
 aws "${aws_args[@]}" rds describe-db-parameter-groups \
   --db-parameter-group-name "$target_db_parameter_group_name" \
   --output json > "$output_dir/target-db-parameter-group.json"
-python3 -c 'import json,sys; g=json.load(open(sys.argv[1]))["DBParameterGroups"][0]; g["DBParameterGroupFamily"] == "mysql8.4" or (_ for _ in ()).throw(SystemExit(f"Target DB parameter group family must be mysql8.4: {g[\"DBParameterGroupFamily\"]}"))' "$output_dir/target-db-parameter-group.json"
+target_db_parameter_group_family=$(aws "${aws_args[@]}" rds describe-db-parameter-groups \
+  --db-parameter-group-name "$target_db_parameter_group_name" \
+  --query 'DBParameterGroups[0].DBParameterGroupFamily' --output text)
+[[ "$target_db_parameter_group_family" == mysql8.4 ]] || { echo "Target DB parameter group family must be mysql8.4: $target_db_parameter_group_family" >&2; exit 1; }
 
 [[ -n "$deployment_name" ]] || deployment_name="${service}-${environment}-mysql84-bg-$(date -u +%Y%m%d%H%M%S)"
 [[ "$deployment_name" =~ ^[A-Za-z][A-Za-z0-9-]{0,59}$ ]] || { echo "Invalid --deployment-name: $deployment_name" >&2; exit 2; }
@@ -80,6 +103,8 @@ aws "${aws_args[@]}" rds create-blue-green-deployment \
   --target-db-instance-class "$target_db_instance_class" \
   --target-db-parameter-group-name "$target_db_parameter_group_name" \
   --output json > "$output_dir/create-blue-green-deployment.json"
+# create-blue-green-deployment は変更操作であり呼び直せない（呼び直すと二重作成になる）。
+# --query による再取得ができないため、保存済みレスポンス JSON から読み取る。
 deployment_identifier=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["BlueGreenDeployment"]["BlueGreenDeploymentIdentifier"])' "$output_dir/create-blue-green-deployment.json")
 
 echo "Created Blue/Green Deployment: $deployment_identifier"
@@ -91,7 +116,9 @@ while true; do
   aws "${aws_args[@]}" rds describe-blue-green-deployments \
     --blue-green-deployment-identifier "$deployment_identifier" \
     --output json > "$output_dir/describe-blue-green-deployment.json"
-  status=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["BlueGreenDeployments"][0]["Status"])' "$output_dir/describe-blue-green-deployment.json")
+  status=$(aws "${aws_args[@]}" rds describe-blue-green-deployments \
+    --blue-green-deployment-identifier "$deployment_identifier" \
+    --query 'BlueGreenDeployments[0].Status' --output text)
   echo "Blue/Green status: $status"
   [[ "$status" == 'AVAILABLE' ]] && break
   case "$status" in

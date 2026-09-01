@@ -20,19 +20,35 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-switchover-step.XXXXXX")
 mkdir -p "$output_dir"
 
-python3 -c 'import json,sys,yaml; d=yaml.safe_load(open(sys.argv[1])); s=d["services"][sys.argv[2]]; a=s.get("actions", {}); print(json.dumps({"approved":a.get("switchover", "pending"), "timeout":a.get("switchover_timeout", 300), "source":s["source_db_instance_identifier"], "region":d["aws_region"]}))' "$config" "$service" > "$output_dir/config.json"
-read_config() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$output_dir/config.json" "$1"; }
-[[ "$(read_config approved)" == approved ]] || { echo 'switchover: pending; no changes made.'; exit 0; }
-[[ -n "$region" ]] || region=$(read_config region)
+# YAML の読み込みは 1 回だけ行い、以降は python3 -c を呼ばずシェル変数として使う。
+eval "$(python3 -c '
+import shlex, sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+s = d["services"][sys.argv[2]]
+a = s.get("actions", {})
+values = {
+    "approved": a.get("switchover", "pending"),
+    "timeout": a.get("switchover_timeout", 300),
+    "source_id": s["source_db_instance_identifier"],
+    "config_region": d["aws_region"],
+}
+for k, v in values.items():
+    print(f"{k}={shlex.quote(str(v))}")
+' "$config" "$service")"
+[[ "$approved" == approved ]] || { echo 'switchover: pending; no changes made.'; exit 0; }
+[[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
 # [読み取り] Source に紐づく Deployment を検索する。設定値ではなく AWS の実状態から対象 ID を解決する。
-aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$(read_config source)" --output json > "$output_dir/source.json"
-source_arn=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["DBInstances"][0]["DBInstanceArn"])' "$output_dir/source.json")
+aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" --output json > "$output_dir/source.json"
+source_arn=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
+  --query 'DBInstances[0].DBInstanceArn' --output text)
 aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" --output json > "$output_dir/deployment.json"
-deployment_id=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["BlueGreenDeployments"]; d or (_ for _ in ()).throw(SystemExit("Blue/Green Deployment not found")); print(d[0]["BlueGreenDeploymentIdentifier"])' "$output_dir/deployment.json")
+deployment_id=$(aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" \
+  --query 'BlueGreenDeployments[0].BlueGreenDeploymentIdentifier' --output text)
+[[ -n "$deployment_id" && "$deployment_id" != None ]] || { echo "Blue/Green Deployment not found" >&2; exit 1; }
 
-args=(--config "$config" --blue-green-deployment-id "$deployment_id" --approve --switchover-timeout "$(read_config timeout)" --region "$region" --output-dir "$output_dir/result")
+args=(--config "$config" --blue-green-deployment-id "$deployment_id" --approve --switchover-timeout "$timeout" --region "$region" --output-dir "$output_dir/result")
 [[ -n "$profile" ]] && args+=(--profile "$profile")
 "$(dirname "$0")/switchover_blue_green_deployment.sh" "${args[@]}"
 echo "Switchover requested. Artifacts: $output_dir"

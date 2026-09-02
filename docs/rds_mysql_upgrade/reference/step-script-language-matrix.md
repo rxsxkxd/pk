@@ -11,14 +11,29 @@
 | 2 | パラメータ整理とパラメータグループ生成 | `collect_mysql84_parameter_inputs.sh` | — | Bash + AWS CLI |
 | | | `generate_mysql84_parameter_group.rb` | — | Ruby |
 | 3 | スナップショット取得と Blue/Green 作成 | `build_green.sh` | → `create_blue_green_deployment.sh`（内部処理） | Bash + AWS CLI + Python3（PyYAML） |
-| 4 | Green 構成チェック＋レプリカ同期チェック | `verify_green.sh` | → `collect_green_runtime_values.sh`（補助・任意） | Bash + AWS CLI + Python3（PyYAML）、任意で MySQL クライアント |
-| | | `generate_green_verification_report.rb` | ローカル既定 | Ruby |
-| | | `generate_green_verification_report.go` | CI 既定（ビルド済みバイナリ） | Go（ビルド時のみ。実行時はバイナリ単体で完結） |
+| 4 | Green 構成チェック＋レプリカ同期チェック | `verify_green.sh` | → `collect_green_runtime_values.sh`（補助・任意）、→ `generate_green_verification_report.{rb,go}`（レポート生成、内部処理） | Bash + AWS CLI + Python3（PyYAML）、任意で MySQL クライアント |
 | 5 | Blue/Green 切り替え | `switchover.sh` | → `switchover_blue_green_deployment.sh`（内部処理） | Bash + AWS CLI + Python3（PyYAML） |
 | 6 | Green ヘルスチェック | 未実装 | — | — |
 | 7 | 後始末 | `cleanup.sh` | — | Bash + AWS CLI + Python3（PyYAML）、任意で MySQL クライアント |
 
 「内部処理」と注記したスクリプトは、対応する外側のエントリポイントから呼ばれる下位スクリプトであり、設定ファイルの `actions:` 承認宣言を見ない。直接実行すると承認ゲートを迂回できてしまう点は [decisions/structure-review-proposal.md](../decisions/structure-review-proposal.md) 論点7で指摘済みで、未対応のまま残っている。
+
+### Step 4 のレポート生成器: `verify_green.sh` による呼び分け
+
+Step 3・5 の内部処理は「呼ぶ側と呼ばれる側が 1 対 1」だが、Step 4 のレポート生成だけは `verify_green.sh` が実行環境に応じて呼び先を切り替える。
+
+```bash
+# scripts/verify_green.sh
+report_generator=${GREEN_REPORT_GENERATOR:-"$(dirname "$0")/generate_green_verification_report.rb"}
+"$report_generator" "${report_args[@]}"
+```
+
+| 実行環境 | `GREEN_REPORT_GENERATOR` | 実際に呼ばれるもの | 言語環境 |
+|---|---|---|---|
+| ローカル（未指定） | 未設定 | `generate_green_verification_report.rb` | Ruby |
+| CI（GitHub Actions／CodeBuild） | `.tools/green-report/generate_green_verification_report` を指定 | `ci/Dockerfile.green-verification-report` でビルド済みの Go バイナリ | Go（ビルド時のみ。実行時はバイナリ単体で完結） |
+
+CI 側でこの環境変数を設定している箇所は `ci/codebuild/verify-green.yml` と `.github/workflows/verify-green.yml`。どちらも Docker ビルドでバイナリを取り出した直後に `GREEN_REPORT_GENERATOR=... scripts/verify_green.sh ...` の形で渡す。Ruby 版と Go 版は同じ入力（Step 2 の CloudFormation YAML、Step 4 で収集した JSON）から同じ内容のレポートを生成する必要があり、`CLAUDE.md` にも「両方を同時に更新すること」と明記されている。
 
 ## 言語環境ごとの依存関係
 
@@ -27,8 +42,8 @@
 | Bash | 全エントリポイントの実行シェル。`set -euo pipefail` 前提 | 全 `.sh` ファイル（9 本） |
 | AWS CLI | RDS／CloudWatch／CloudFormation の読み取り・変更操作 | Step 1・3・4・5・7 の全 `.sh` |
 | Python3 + PyYAML | 設定 YAML（`config/blue-green/*.yml`）の読み込み。`eval "$(python3 -c ...)"` パターンで 1 回だけ呼ばれる | `build_green.sh`、`create_blue_green_deployment.sh`、`verify_green.sh`、`switchover.sh`、`switchover_blue_green_deployment.sh`、`cleanup.sh` |
-| Ruby | 判定ロジック（Step 1）・生成ロジック（Step 2）・レポート生成（Step 4 ローカル既定） | `evaluate_blue_green_prereqs.rb`、`generate_mysql84_parameter_group.rb`、`generate_green_verification_report.rb` |
-| Go | Step 4 のレポート生成器の CI 版。`ci/Dockerfile.green-verification-report` でマルチステージビルドし、実行時はバイナリ単体（Go ランタイム不要） | `generate_green_verification_report.go`（ビルド時のみ） |
+| Ruby | 判定ロジック（Step 1）・生成ロジック（Step 2）・レポート生成（Step 4 ローカル既定） | `evaluate_blue_green_prereqs.rb`（Step 1 エントリポイント）、`generate_mysql84_parameter_group.rb`（Step 2 エントリポイント）、`generate_green_verification_report.rb`（Step 4 内部処理。単体では実行せず、`verify_green.sh` からのみ呼ばれる） |
+| Go | Step 4 のレポート生成器の CI 版。`ci/Dockerfile.green-verification-report` でマルチステージビルドし、実行時はバイナリ単体（Go ランタイム不要） | `generate_green_verification_report.go`（Step 4 内部処理。ビルド時のみ Go が必要。実行時も単体では叩かず、`verify_green.sh` が `GREEN_REPORT_GENERATOR` 経由で呼ぶ） |
 | MySQL クライアント（mysql／mysqlsh） | DB 接続を伴う実効値収集・逆レプリケーション確認。既定ではスキップされ、明示フラグ指定時のみ使用（CI に本番 DB 認証情報を常設しない方針のため） | `collect_green_runtime_values.sh`（Step 4 補助）、`cleanup.sh` の `--mysql-user` 指定時（Step 7） |
 
 ## 実行形態（ローカル／CI）との対応

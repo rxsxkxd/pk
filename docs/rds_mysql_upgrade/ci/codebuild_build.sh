@@ -131,7 +131,15 @@ fi
 
 if [ -n "$buildspec" ]
 then
-    docker_command+=" -e \"BUILDSPEC=$(allOSRealPath "$buildspec")\""
+    # The Local Agent launches the build container separately. BUILDSPEC must
+    # therefore be a path relative to CODEBUILD_SRC_DIR, not a host path.
+    # The source directory is copied or mounted by the agent itself.
+    if [[ "$buildspec" = /* ]]
+    then
+        echo "Error: -b must be a source-relative path (for example ci/codebuild/echo.yml)." >&2
+        exit 1
+    fi
+    docker_command+=" -e \"BUILDSPEC=$buildspec\""
 fi
 
 if [ -n "$environment_variable_file" ]

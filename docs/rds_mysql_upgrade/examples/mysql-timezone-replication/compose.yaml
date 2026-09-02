@@ -1,0 +1,79 @@
+# タイムゾーン差異のレプリケーション検証用のローカル擬似環境。
+# ソース = MySQL 8.0（Blue 相当）、レプリカ = MySQL 8.4（Green 相当）とし、
+# 本プロジェクトの移行構成をそのまま再現する。
+#
+# リポジトリルートの compose.yaml とは独立しており、プロジェクト名も分けてある。
+#
+# 使い方:
+#   cp .env.example .env
+#   docker compose up -d
+#   ./setup.sh            # レプリケーション構成と time_zone の設定
+#
+# 使い捨ての検証環境である。実データを入れない。ポートは 127.0.0.1 にだけ公開する。
+name: mysql-timezone-replication
+
+services:
+  # ソースは MySQL 8.0。本プロジェクトの移行元（Blue）と同じバージョンにしてある。
+  # --mysql-native-password は 8.4 で追加されたオプションであり、8.0 に渡すと起動に失敗する。
+  source:
+    image: mysql:8.0.46
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: tzcheck
+    ports:
+      # ホストのドライバ検証スクリプト（Go / Ruby / Python）から接続するために公開する。
+      - "127.0.0.1:13306:3306"
+    volumes:
+      - type: bind
+        source: ./conf/source.cnf
+        target: /etc/mysql/conf.d/source.cnf
+        read_only: true
+      - source-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # レプリカは MySQL 8.4。移行先（Green）と同じバージョンにしてある。
+  replica:
+    image: mysql:8.4.8
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:13307:3306"
+    volumes:
+      - type: bind
+        source: ./conf/replica.cnf
+        target: /etc/mysql/conf.d/replica.cnf
+        read_only: true
+      - replica-data:/var/lib/mysql
+    depends_on:
+      source:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # SQL での検証用クライアント。source / replica と同じネットワークに入る。
+  # 例: docker compose run --rm client mysql -h source -uroot -p tzcheck
+  client:
+    image: mysql:8.4.8
+    entrypoint: []
+    command: ["mysql", "--version"]
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    working_dir: /work
+    volumes:
+      - type: bind
+        source: .
+        target: /work
+        read_only: true
+
+volumes:
+  source-data:
+  replica-data:

@@ -1,0 +1,16 @@
+[mysqld]
+# レプリケーションのレプリカ（RDS のリードレプリカ相当）。MySQL 8.4 = 移行先 Green 相当。
+server-id                = 2
+log-bin                  = mysql-bin
+binlog_format            = ROW
+gtid_mode                = ON
+enforce_gtid_consistency = ON
+
+# RDS のリードレプリカは read_only が強制される。それを模倣する。
+# super_read_only は設定しない（setup.sh が root で SET PERSIST を実行するため）。
+read_only                = ON
+
+# 起動時点では UTC にしておく。
+# Asia/Tokyo は mysql.time_zone_* のロード後でなければ設定できないため、
+# setup.sh が tz テーブルをロードしてから SET PERSIST で切り替える。
+time_zone                = '+00:00'

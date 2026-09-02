@@ -1,0 +1,15 @@
+[mysqld]
+# レプリケーションのソース（RDS のマスタ相当）。MySQL 8.0 = 移行元 Blue 相当。
+server-id                = 1
+log-bin                  = mysql-bin
+binlog_format            = ROW
+gtid_mode                = ON
+enforce_gtid_consistency = ON
+
+# RDS の time_zone エンジン既定値（UTC）に合わせる。
+# 素の MySQL の既定は SYSTEM だが、RDS は UTC のため明示する。
+#
+# 名前付きタイムゾーン（'UTC' や 'Asia/Tokyo'）は mysql.time_zone_* テーブルが
+# ロードされていないと起動時に失敗するため、起動時はオフセット指定を使う。
+# '+00:00' は UTC と等価である。
+time_zone                = '+00:00'

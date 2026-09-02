@@ -33,7 +33,9 @@ integrations = read_json(dir, 'integrations.json').fetch('Integrations')
 storage = read_json(dir, 'free-storage-space.json').fetch('Datapoints')
 
 results = []
-def add(results, status, item, detail) = results << [status, item, detail]
+def add(results, status, item, detail)
+  results << [status, item, detail]
+end
 
 backup = instance.fetch('BackupRetentionPeriod', 0)
 add(results, backup >= 1 ? 'PASS' : 'STOP', '0-1-01 自動バックアップ', "BackupRetentionPeriod=#{backup}")

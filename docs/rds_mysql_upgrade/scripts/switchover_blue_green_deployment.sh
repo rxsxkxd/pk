@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 検証済みの RDS Blue/Green Deployment を切り替える。
+# Step 5 内部処理: switchover.sh から呼ばれる。検証済みの RDS Blue/Green Deployment を切り替える。
 # このスクリプトは本番トラフィックに影響する変更操作を実行するため、--approve を必須とする。
 set -euo pipefail
 

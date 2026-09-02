@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MySQL 8.4 用パラメータグループ生成に必要な、AWS の読み取り結果だけを収集する。
+# Step 2: MySQL 8.4 用パラメータグループ生成に必要な、AWS の読み取り結果だけを収集する。
 set -euo pipefail
 
 usage() {

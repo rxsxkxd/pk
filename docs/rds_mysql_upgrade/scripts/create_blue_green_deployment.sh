@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# CloudFormation で事前作成済みの MySQL 8.4 DB パラメータグループを直接指定し、
-# RDS for MySQL 8.0 の Blue から 8.4 の Green を作成する。
+# Step 3 内部処理: build_green.sh から呼ばれる。CloudFormation で事前作成済みの
+# MySQL 8.4 DB パラメータグループを直接指定し、RDS for MySQL 8.0 の Blue から 8.4 の Green を作成する。
 # Green が AVAILABLE になるまで待機して終了する。切替は実施しない。
 set -euo pipefail
 

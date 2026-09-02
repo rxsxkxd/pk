@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
-# AWS API は呼ばず、収集済み JSON と移行ルールから CloudFormation YAML とレビュー報告を生成する。
+# Step 2: AWS API は呼ばず、収集済み JSON と移行ルールから CloudFormation YAML とレビュー報告を生成する。
 require 'json'
 require 'yaml'
 require 'optparse'

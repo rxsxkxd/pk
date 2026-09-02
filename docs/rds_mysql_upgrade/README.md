@@ -33,6 +33,7 @@ Step の詳細を掘り下げる際に参照する:
 
 - [innodb-mysql80-to-84-parameter-mapping.md](reference/innodb-mysql80-to-84-parameter-mapping.md) — InnoDB 関連パラメータの 8.0→8.4 マッピング
 - [mysql-slow-query-log.md](reference/mysql-slow-query-log.md) — スロークエリログ関連パラメータの整理
+- [step-script-language-matrix.md](reference/step-script-language-matrix.md) — Step 別のスクリプト対応表と、実行に必要な言語環境(Bash/Python/Ruby/Go/MySQL クライアント)の一覧
 - [source-article-notes.md](reference/source-article-notes.md) — 出典記事の要約メモ(参考。正典ではない)
 
 ### `decisions/`

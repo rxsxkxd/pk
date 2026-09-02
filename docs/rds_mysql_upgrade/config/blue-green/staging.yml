@@ -21,3 +21,4 @@ services:
       build: pending
       switchover: pending
       switchover_timeout: 300
+      cleanup: pending

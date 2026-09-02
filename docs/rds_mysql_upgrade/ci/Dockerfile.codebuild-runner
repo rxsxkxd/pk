@@ -1,9 +1,11 @@
 # CodeBuild Step 3/4/5 用の軽量な実行 image。
 # Docker CLI/Buildx は VerifyGreen の Go バイナリ用マルチステージビルドに使う。
 FROM docker:27.5-cli AS docker-cli
-FROM public.ecr.aws/aws-cli/aws-cli:2.32.25 AS aws-cli
+FROM public.ecr.aws/aws-cli/aws-cli:2.36.37 AS aws-cli
 
-FROM python:3.11-slim-bookworm
+# aws-cli 2.36.37 がインストーラにバンドルする Python（3.14.6、CLI 内部の実行専用で
+# このイメージの python3 とは別物）のマイナーバージョンに合わせて 3.14 系を使う。
+FROM python:3.14.7-slim-bookworm
 
 # Shell scripts、apt による任意の mysql-client 導入、TLS、Docker CLI 実行に必要な最小パッケージ。
 RUN apt-get update \

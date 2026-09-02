@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
-# Step 4 の収集済み JSON と Step 2 の CloudFormation YAML から、人が確認する
+# Step 4: 収集済み JSON と Step 2 の CloudFormation YAML から、人が確認する
 # Green 構成・パラメータ整合性レポートを生成する。AWS API は呼び出さない。
 require 'json'
 require 'yaml'

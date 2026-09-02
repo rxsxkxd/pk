@@ -1,4 +1,4 @@
-// Step 4 の収集済み JSON と Step 2 の CloudFormation YAML から、Green 構成・
+// Step 4: 収集済み JSON と Step 2 の CloudFormation YAML から、Green 構成・
 // パラメーター整合性レポートを生成する。Ruby 版は後方互換のため維持する。
 //
 // 依存: gopkg.in/yaml.v3（ビルド方法・依存管理の導入は別途実施する）。

@@ -2,9 +2,9 @@
 
 リポジトリルートの `compose.yaml`、`aws-config/`(ディレクトリ)、`global-bundle.pem`・`my.cnf`(ファイル)は、AWS CLI、`mysql`、`mysqlsh` をローカルインストールせずに実行するためのものです。DB インスタンスやパラメータグループを作成・変更する権限を付与するものではありません。実行できる AWS 操作は、マウントした認証情報に付与された IAM 権限に従います。
 
-使用するコンテナは 4 つである。`public.ecr.aws/aws-cli/aws-cli:2.32.25`、MySQL CLI と MySQL Shell を同梱する公式イメージ `mysql:8.4.8`、`ruby:3.4`、`golang:1.25` を使用する。`latest` タグは使用しない。AWS CLI と MySQL はパッチバージョンまで、Ruby と Go はメジャー・マイナーまでを固定する。
+使用するコンテナは 4 つである。`public.ecr.aws/aws-cli/aws-cli:2.32.25`、MySQL CLI と MySQL Shell を同梱する公式イメージ `mysql:8.4.11`、`ruby:3.4.10`、`golang:1.25` を使用する。`latest` タグは使用しない。AWS CLI と MySQL はパッチバージョンまで、Ruby と Go はメジャー・マイナーまでを固定する。
 
-> 現時点では定義ファイルと手順のみを用意しており、イメージの取得・実行検証は未実施である。MySQL 用の Dockerfile は不要であり、初回実行時に `mysql:8.4.8` が取得される。
+> 現時点では定義ファイルと手順のみを用意しており、イメージの取得・実行検証は未実施である。MySQL 用の Dockerfile は不要であり、初回実行時に `mysql:8.4.11` が取得される。
 
 CI（CodeBuild Local Agent、Step 4 の Go レポート生成器ビルド）専用のコンテナ定義は [ci/](ci/) 配下にある。本書が扱うのは、Step 1・2 や DB 接続確認など、ローカルでの通常の作業に使うコンテナだけである。
 
@@ -71,7 +71,7 @@ docker compose --env-file .env run --rm ruby \
 docker compose --env-file .env run --rm go version
 ```
 
-`mysql:8.4.8` は公式のマルチアーキテクチャイメージであり、Docker がホストに対応するイメージを選択する。
+`mysql:8.4.11` は公式のマルチアーキテクチャイメージであり、Docker がホストに対応するイメージを選択する。
 
 ## 3. `docker run` で直接実行する
 
@@ -90,21 +90,21 @@ docker run --rm -it \
 docker run --rm -it \
   -v "$RDS_CA_FILE:/certs/rds/global-bundle.pem:ro" \
   -v "$MYSQL_CLIENT_CONFIG_FILE:/client-config/my.cnf:ro" \
-  mysql:8.4.8 \
+  mysql:8.4.11 \
   mysql --defaults-extra-file=/client-config/my.cnf -p -e "SELECT VERSION();"
 
 # mysqlsh（上記と同じ公式イメージ）
 docker run --rm -it \
   -v "$RDS_CA_FILE:/certs/rds/global-bundle.pem:ro" \
   -v "$MYSQL_CLIENT_CONFIG_FILE:/client-config/my.cnf:ro" \
-  mysql:8.4.8 \
+  mysql:8.4.11 \
   mysqlsh --sql --host=<rds-endpoint> --user=<db-user> --password \
   --ssl-mode=VERIFY_CA --ssl-ca=/certs/rds/global-bundle.pem \
   -e "SELECT VERSION();"
 
 # Ruby。AWS credential・RDS 証明書はマウントしない
 docker run --rm -it -v "$(pwd):/workspace" -w /workspace \
-  ruby:3.4 scripts/generate_mysql84_parameter_group.rb --help
+  ruby:3.4.10 scripts/generate_mysql84_parameter_group.rb --help
 
 # Go。AWS credential・RDS 証明書はマウントしない
 docker run --rm -it -v "$(pwd):/workspace" -w /workspace \

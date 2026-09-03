@@ -11,3 +11,9 @@ global-bundle.pem
 # Local-only CodeBuild env files and script output directories (see ci/codebuild-local-verification.md)
 .local/
 artifacts/
+
+# Generated verification reports (see examples/mysql-timezone-replication/)
+examples/mysql-timezone-replication/probe/reports/
+
+# Python bytecode
+__pycache__/

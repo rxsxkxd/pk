@@ -87,5 +87,33 @@ if [[ "${state:-}" != 'ON / ON' ]]; then
   exit 1
 fi
 
+echo '==> 6. 検証用データを投入する'
+# ドライバ検証（probe/）が前提とするテーブルとデータを作る。
+# 日付境界をまたぐ値を意図的に含める（UTC では 9/2、JST では 9/3 になる行）。
+# 冪等にするため毎回 TRUNCATE してから投入する。
+run_sql source tzcheck -e "
+  CREATE TABLE IF NOT EXISTS t (
+    id   INT PRIMARY KEY,
+    ts   TIMESTAMP NOT NULL,
+    dt   DATETIME  NOT NULL,
+    note VARCHAR(32)
+  );
+  TRUNCATE TABLE t;
+  SET time_zone = '+00:00';
+  INSERT INTO t (id, ts, dt, note) VALUES
+    (1, '2026-09-02 20:00:00', '2026-09-02 20:00:00', 'boundary'),
+    (2, '2026-09-03 05:00:00', '2026-09-03 05:00:00', 'same-day');
+"
+for _ in $(seq 1 20); do
+  replicated=$(run_sql replica tzcheck -e 'SELECT COUNT(*) FROM t' 2>/dev/null || echo 0)
+  [[ "$replicated" == 2 ]] && break
+  sleep 1
+done
+echo "    source=2 件 / replica=${replicated:-0} 件"
+[[ "${replicated:-0}" == 2 ]] || { echo '    レプリカへ反映されなかった' >&2; exit 1; }
+
 echo
-echo 'セットアップ完了。README.md の「検証手順」へ進む。'
+echo 'セットアップ完了。次でドライバ検証を実行する:'
+echo '  docker compose run --rm probe-go'
+echo '  docker compose run --rm probe-ruby'
+echo '  docker compose run --rm probe-python'

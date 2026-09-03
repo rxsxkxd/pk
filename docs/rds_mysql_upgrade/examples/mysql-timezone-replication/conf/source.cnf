@@ -11,5 +11,6 @@ enforce_gtid_consistency = ON
 #
 # 名前付きタイムゾーン（'UTC' や 'Asia/Tokyo'）は mysql.time_zone_* テーブルが
 # ロードされていないと起動時に失敗するため、起動時はオフセット指定を使う。
-# '+00:00' は UTC と等価である。
-time_zone                = '+00:00'
+# '+00:00' は UTC と等価である。設定ファイルの起動オプション名は
+# `time_zone` ではなく `default-time-zone` である。
+default-time-zone        = '+00:00'

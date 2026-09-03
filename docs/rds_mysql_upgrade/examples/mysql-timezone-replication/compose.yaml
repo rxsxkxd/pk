@@ -20,6 +20,11 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
       MYSQL_DATABASE: tzcheck
+      # MySQL 公式 image が初回初期化時に作成する、root 以外の検証用アプリケーションユーザー。
+      # tzcheck データベースにのみ権限を付与する。既存 volume には追加されないため、
+      # 初期化済み環境では README の volume 再作成手順を使う。
+      MYSQL_USER: tzcheck_app
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:-tzcheck-app-local-only}
     ports:
       # ホストのドライバ検証スクリプト（Go / Ruby / Python）から接続するために公開する。
       - "127.0.0.1:13306:3306"
@@ -38,7 +43,7 @@ services:
 
   # レプリカは MySQL 8.4。移行先（Green）と同じバージョンにしてある。
   replica:
-    image: mysql:8.4.8
+    image: mysql:8.4.11
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
     ports:
@@ -62,7 +67,7 @@ services:
   # SQL での検証用クライアント。source / replica と同じネットワークに入る。
   # 例: docker compose run --rm client mysql -h source -uroot -p tzcheck
   client:
-    image: mysql:8.4.8
+    image: mysql:8.4.11
     entrypoint: []
     command: ["mysql", "--version"]
     environment:
@@ -77,6 +82,10 @@ services:
   # --- ドライバ検証（reference/mysql-timezone-replication-verification.md の手順 6）---
   # profiles を付けているため docker compose up -d では起動しない。
   # 実行例: docker compose run --rm probe-go
+  #
+  # 各スクリプトは判定を行い、probe/reports/<言語>-report.md へ Markdown の
+  # レポートを出力する。すべての判定が通れば終了コード 0、通らなければ 1 を返す。
+  # reports/ は probe/ ごとバインドマウントされるため、ホスト側から参照できる。
   #
   # コンテナは compose のネットワーク内にいるため、接続先は source / replica の
   # ホスト名と 3306 番になる（ホストから叩く場合の 127.0.0.1:13306 ではない）。
@@ -114,7 +123,7 @@ services:
       # ライブラリの開発パッケージが必要になる。実行のたびに導入すると遅いので
       # イメージへ焼き込む。
       dockerfile_inline: |
-        FROM ruby:3.4
+        FROM ruby:3.4.10
         RUN apt-get update \
           && apt-get install --no-install-recommends -y build-essential libmariadb-dev \
           && rm -rf /var/lib/apt/lists/*
@@ -164,6 +173,18 @@ services:
         condition: service_healthy
       replica:
         condition: service_healthy
+
+  # 収集済み JSON から Markdown レポートを生成する（判定もここで行う）。
+  # DB へ接続しないため、素の Ruby イメージで足りる（mysql2 のビルドは不要）。
+  probe-report:
+    profiles: ["probe"]
+    image: ruby:3.4
+    working_dir: /probe
+    command: ["ruby", "generate_report.rb"]
+    volumes:
+      - type: bind
+        source: ./probe
+        target: /probe
 
 volumes:
   source-data:

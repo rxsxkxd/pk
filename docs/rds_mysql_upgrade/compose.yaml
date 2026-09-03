@@ -24,8 +24,8 @@ services:
         target: /workspace
 
   mysql:
-    # mysql:8.4.8 には MySQL CLI と MySQL Shell (mysqlsh) の両方が含まれる。
-    image: mysql:8.4.8
+    # mysql:8.4.11 には MySQL CLI と MySQL Shell (mysqlsh) の両方が含まれる。
+    image: mysql:8.4.11
     # `docker compose up` で DB サーバーを起動しない。run 時のコマンドで mysql / mysqlsh を指定する。
     entrypoint: []
     command: ["mysqlsh", "--version"]
@@ -47,7 +47,7 @@ services:
 
   # Ruby スクリプト実行専用。AWS credential や RDS 証明書はマウントしない。
   ruby:
-    image: ruby:3.4
+    image: ruby:3.4.10
     working_dir: /workspace
     entrypoint: ["ruby"]
     volumes:

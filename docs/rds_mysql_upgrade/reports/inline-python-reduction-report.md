@@ -63,7 +63,7 @@ start_time=$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)
 
 対象: `collect_blue_green_prereqs.sh`、`verify_green.sh`(計4箇所)。
 
-⚠️ **GNU date 前提**(`-d` オプション)。本リポジトリの実行系(`mysql:8.4.8` = Debian、`aws-cli` 公式image、`Dockerfile.codebuild-runner` = `python:3.11-slim`)はいずれも GNU coreutils を含むため問題ないが、**macOSホストで直接シェルスクリプトを実行すると BSD date で `-d` が通らず壊れる**。全実行経路をDockerコンテナ経由に限定する運用が前提になる。
+⚠️ **GNU date 前提**(`-d` オプション)。本リポジトリの実行系(`mysql:8.4.11` = Debian、`aws-cli` 公式image、`Dockerfile.codebuild-runner` = `python:3.11-slim`)はいずれも GNU coreutils を含むため問題ないが、**macOSホストで直接シェルスクリプトを実行すると BSD date で `-d` が通らず壊れる**。全実行経路をDockerコンテナ経由に限定する運用が前提になる。
 
 ### C: YAML読み込みの呼び出し回数削減
 

@@ -49,6 +49,23 @@ source  （MySQL 8.0.46 / time_zone = UTC）                        127.0.0.1:13
 cd examples/mysql-timezone-replication
 cp .env.example .env
 docker compose up -d
+./setup.sh     # レプリケーション構成と検証データの投入
+./verify.sh    # ドライバ検証（収集 → 判定 → レポート生成）
+```
+
+source には、初期化時に root 以外の検証用ユーザー `tzcheck_app` も作成される。このユーザーには `tzcheck` データベースの権限だけが付与される。パスワードは `.env` の `MYSQL_APP_PASSWORD`（未指定時はローカル検証用の既定値）である。
+
+```sh
+# source のアプリケーションユーザーで接続する
+MYSQL_PWD="${MYSQL_APP_PASSWORD:-tzcheck-app-local-only}" \
+  docker compose exec -T source mysql -utzcheck_app tzcheck
+```
+
+初回起動が設定エラーなどで DB 初期化の途中に失敗した場合は、修正後に未完了の named volume を作り直す必要がある。この検証環境のデータは使い捨てであることを確認してから、次を実行する。
+
+```sh
+docker compose down -v
+docker compose up -d
 ./setup.sh
 ```
 
@@ -94,23 +111,146 @@ SELECT @@global.time_zone, @@session.time_zone, @@system_time_zone;
 
 ### ドライバでの検証（手順 6）
 
-ホストから `127.0.0.1` の公開ポートへ接続する。RDS 版の手順 6 のコードをそのまま使い、接続先だけ差し替える。
+**検証スクリプトが同梱されている。** `setup.sh` が投入したデータに対して実行する。
+
+構成は本リポジトリの方針（**収集と判定を分離する**）に合わせてある。各言語の probe は DB へ接続して観測した事実を共通スキーマの JSON へ書き出すだけで、判定は行わない。判定とレポート生成は Ruby の `generate_report.rb` に集約しており、DB へ接続しない。
+
+```
+probe-go     ─┐
+probe-ruby   ─┼→ probe/reports/<言語>.json ─→ probe-report ─→ <言語>-report.md
+probe-python ─┘   （共通スキーマ・事実のみ）    （判定・生成）    summary.md
+```
+
+**通常は `verify.sh` を使う。** 収集からレポート生成までをまとめて実行する。
 
 ```sh
-export SOURCE_HOST=127.0.0.1
-export REPLICA_HOST=127.0.0.1
+./verify.sh
+```
+
+```
+Usage: verify.sh [options]
+  --languages LIST   収集する言語をカンマ区切りで指定（default: go,ruby,python）
+  --skip-collect     収集を行わず、既存の JSON からレポートだけを生成する
+  --keep-going       収集が失敗した言語があっても、残りを続行する
+  --clean            実行前に reports/ の生成物をすべて削除する
+```
+
+`verify.sh` は次を行う。
+
+1. `setup.sh` による検証データの投入が済んでいるかを確認する（未投入なら明示的に失敗する）
+2. 各言語の probe を順に実行して JSON を収集する。収集前に古い JSON を削除するため、失敗した言語の結果が残らない
+3. `probe-report` で判定とレポート生成を行う
+4. すべて通れば終了コード 0、通らなければ 1 を返す
+
+個別に実行することもできる。
+
+```sh
+# 収集（3 言語それぞれ）
+docker compose run --rm probe-go
+docker compose run --rm probe-ruby
+docker compose run --rm probe-python
+
+# 判定とレポート生成（Ruby に統一）
+docker compose run --rm probe-report
+```
+
+`probe-report` は言語ごとのレポートに加えて **3 言語を横断した `summary.md`** を生成する。
+
+一部の言語だけ収集した状態でも実行でき、その場合は存在する JSON だけを対象にする。`verify.sh --languages` で一部だけ収集したときに他言語の古い JSON が残っていると、**過去の結果が混ざる**。`verify.sh` はこれを検出して収集時刻とともに警告する。古い結果を除外するには `--clean` を付ける。
+
+#### 収集 JSON の共通スキーマ
+
+`schema_version: 1`。3 言語とも同じ形で出力する。**合否の判定に必要な値（`driver_unix` と `server_unix`）は記録するが、一致したかどうかは記録しない。** 判定はレポート生成側の責務である。
+
+```json
+{
+  "schema_version": 1,
+  "language": "Go",
+  "driver": "go-sql-driver/mysql",
+  "timezone_layer": "DSN の `loc`（既定 `UTC`）。クライアント側パースのみ",
+  "issues_set_time_zone": false,
+  "setting_label": "loc",
+  "collected_at": "2026-09-03T12:51:26Z",
+  "read_results": [
+    { "section": "source / loc=UTC", "detail": "session_time_zone=+00:00",
+      "id": 1, "driver_value": "2026-09-02 20:00:00 +0000",
+      "driver_unix": 1788379200, "server_unix": 1788379200 }
+  ],
+  "contrast": { "title": "...", "results": [ /* read_results と同形 */ ] },
+  "server_side": [
+    { "label": "source", "setting": "loc=UTC", "where_matched": 1, "date_groups": 2 }
+  ]
+}
+```
+
+スキーマの詳細と判定条件は `probe/generate_report.rb` の冒頭コメントに記載してある。
+
+#### 判定基準
+
+3 言語とも同じ基準で判定する。
+
+> ドライバが解釈した時刻の UNIX 時刻が、サーバーの `UNIX_TIMESTAMP(ts)` と一致すること。
+
+`UNIX_TIMESTAMP(ts)` は `TIMESTAMP` 列に対して内部表現をそのまま返すため、セッションのタイムゾーンに依存しない絶対値である。これと一致すれば、ドライバがタイムゾーン差を吸収できている。
+
+各レポートは次の 3 部構成になっている。
+
+| 節 | 内容 | 期待 |
+|---|---|---|
+| 1 | ドライバ設定を接続先に合わせた場合の読み取り値 | すべて `match=true`（**吸収できる**） |
+| 2 | 対比: 設定を誤った場合 | `match=false` になる（誤るとずれることの確認） |
+| 3 | `WHERE` と `GROUP BY DATE()` の結果 | 同じ接続先なら設定を変えても不変、接続先が変わると変化（**吸収できない**） |
+
+#### 実行結果の例
+
+本環境で実際に実行した結果は次のとおりで、3 言語とも `PASS` になる。
+
+```
+$ docker compose run --rm probe-report
+Go       PASS  → /probe/reports/go-report.md
+Python   PASS  → /probe/reports/python-report.md
+Ruby     PASS  → /probe/reports/ruby-report.md
+summary  → /probe/reports/summary.md
+
+総合判定: PASS（3 言語）
+```
+
+読み取り値の実測（`go-report.md` より抜粋）。
+
+| 接続 | id | ドライバの解釈 | driver_unix | server_unix | 一致 |
+|---|---|---|---|---|---|
+| source / loc=UTC | 1 | `2026-09-02 20:00:00 +0000` | 1788379200 | 1788379200 | OK |
+| replica / loc=Asia/Tokyo | 1 | `2026-09-03 05:00:00 +0900` | 1788379200 | 1788379200 | OK |
+
+同じ行が、ソースでは `09-02 20:00 +0000`、レプリカでは `09-03 05:00 +0900` と表示される。しかし **UNIX 時刻はどちらも `1788379200` で一致**する。データは同一で表現だけが違うことが数値で確認できる。
+
+サーバー側で確定する結果（`summary.md` より）。**3 言語が独立に測定して同じ値になる。**
+
+| 接続 | where_matched | date_groups |
+|---|---|---|
+| source | 1 | 2 |
+| replica | **2** | **1** |
+
+`loc` や `database_timezone` を変えても、同じ接続先なら値は変わらない。接続先が変わったときだけ変わる。**サーバー側で確定するためドライバでは吸収できない**ことの裏付けになる。
+
+#### 言語ごとの違い
+
+| 言語 | 合わせる設定 | 備考 |
+|---|---|---|
+| Go | DSN の `loc` | 既定は `UTC`。レプリカには `loc=Asia%2FTokyo` が必要 |
+| Ruby | `database_timezone` | `:utc` か `:local` のみ。レプリカには `:local` ＋ プロセスの `TZ=Asia/Tokyo`（compose で設定済み） |
+| Python | なし | PyMySQL は naive な `datetime` を返す。アプリ側で `tzinfo` を付与して吸収する |
+
+#### ホストから直接実行する場合
+
+コンテナを使わずホストから実行することもできる。その場合はポートが標準と異なる点に注意する。
+
+```sh
+export SOURCE_HOST=127.0.0.1 MYSQL_PORT=13306   # レプリカは 13307
 export MYSQL_PWD=<.env に設定した値>
 ```
 
-ポートが標準と異なるため、各コードの接続先を次のように読み替える。
-
-| 言語 | 読み替え |
-|---|---|
-| Go | `tcp(%s:3306)` → `tcp(127.0.0.1:13306)` / `tcp(127.0.0.1:13307)` |
-| Ruby | `host:` に加えて `port: 13306` / `port: 13307` を渡す |
-| Python | `pymysql.connect(..., port=13306)` / `port=13307` |
-
-ユーザーは `root`、データベースは `tzcheck` である。
+`probe/reports/` は `.gitignore` 済みであり、生成物はコミットされない。
 
 ## `DEFAULT CURRENT_TIMESTAMP` の混在検証
 

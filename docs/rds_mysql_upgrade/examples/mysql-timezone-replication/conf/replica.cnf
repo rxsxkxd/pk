@@ -10,7 +10,8 @@ enforce_gtid_consistency = ON
 # super_read_only は設定しない（setup.sh が root で SET PERSIST を実行するため）。
 read_only                = ON
 
-# 起動時点では UTC にしておく。
+# 起動時点では UTC にしておく。設定ファイルの起動オプション名は
+# `time_zone` ではなく `default-time-zone` である。
 # Asia/Tokyo は mysql.time_zone_* のロード後でなければ設定できないため、
 # setup.sh が tz テーブルをロードしてから SET PERSIST で切り替える。
-time_zone                = '+00:00'
+default-time-zone        = '+00:00'

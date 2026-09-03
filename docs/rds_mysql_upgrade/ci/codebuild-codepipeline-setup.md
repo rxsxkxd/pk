@@ -73,7 +73,7 @@ sudo apt-get update
 sudo apt-get install -y mysql-client
 ```
 
-したがって MySQL 接続をしない通常の Step 4 では、MySQL クライアントの導入も Green DB への接続も発生しない。ここで導入する `mysql-client` は Ubuntu の apt repository が提供するパッケージであり、現時点ではバージョン固定していない。MySQL クライアントの厳密なバージョン固定が必要になった場合は、`mysql:8.4.8` 等の固定イメージで実効値収集を行う方式へ変更してから有効化する。
+したがって MySQL 接続をしない通常の Step 4 では、MySQL クライアントの導入も Green DB への接続も発生しない。ここで導入する `mysql-client` は Ubuntu の apt repository が提供するパッケージであり、現時点ではバージョン固定していない。MySQL クライアントの厳密なバージョン固定が必要になった場合は、`mysql:8.4.11` 等の固定イメージで実効値収集を行う方式へ変更してから有効化する。
 
 ## 1. 事前条件
 

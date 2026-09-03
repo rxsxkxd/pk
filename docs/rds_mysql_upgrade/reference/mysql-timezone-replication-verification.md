@@ -433,7 +433,7 @@ probe('replica', ENV.fetch('REPLICA_HOST'), database_timezone: :local)
 
 レプリカ側は `database_timezone: :local` としているため、**Ruby プロセスの `TZ` が `Asia/Tokyo` である必要がある**（`TZ=Asia/Tokyo ruby probe.rb`）。プロセスのタイムゾーンとサーバーのセッション `time_zone` が食い違うと `match=false` になる。mysql2 は `database_timezone` に `:utc` か `:local` しか受け付けないため、**サーバー側が UTC 以外のときは、プロセスの `TZ` を合わせるか、接続直後に `SET time_zone='+00:00'` してサーバー側を UTC に寄せるのが確実**である。
 
-なお `mysql2` gem はネイティブ拡張のため、`ruby:3.4` コンテナで使うには MySQL クライアントライブラリの開発パッケージが必要になる。
+なお `mysql2` gem はネイティブ拡張のため、`ruby:3.4.10` コンテナで使うには MySQL クライアントライブラリの開発パッケージが必要になる。
 
 ### 6-3. Python（PyMySQL）
 

@@ -4,12 +4,16 @@
 
 ソースとレプリカで `time_zone` が異なる場合に、保存データが一致すること・表現とクエリ解釈だけが変わることを確認する。RDS 版と違い、課金もインスタンス作成待ちも発生しない。
 
+バージョンは本プロジェクトの移行構成に合わせ、**ソースを MySQL 8.0（Blue 相当）、レプリカを MySQL 8.4（Green 相当）**としている。8.0 → 8.4 のレプリケーションは Blue/Green Deployment が内部で行っているものと同じ関係である。
+
 ```
-source  （MySQL 8.4 / time_zone = UTC）      127.0.0.1:13306
+source  （MySQL 8.0.46 / time_zone = UTC）                        127.0.0.1:13306
+   │      ＝ 移行元 Blue 相当
    │
    └─ レプリケーション（GTID / ROW）
           │
-          └─ replica （MySQL 8.4 / time_zone = Asia/Tokyo、read_only）  127.0.0.1:13307
+          └─ replica （MySQL 8.4.8 / time_zone = Asia/Tokyo、read_only）  127.0.0.1:13307
+                 ＝ 移行先 Green 相当
 ```
 
 ## RDS 版との違い
@@ -25,6 +29,19 @@ source  （MySQL 8.4 / time_zone = UTC）      127.0.0.1:13306
 | レプリケーション構成 | 手動で `CHANGE REPLICATION SOURCE TO` | `create-db-instance-read-replica` の 1 コマンド | `setup.sh` が実行 |
 
 > 起動時に `time_zone` へ名前付きタイムゾーン（`Asia/Tokyo` など）を指定すると、`mysql.time_zone_*` が未ロードのため **MySQL が起動に失敗する**。このため両方とも起動時はオフセット指定にし、テーブルをロードしてからレプリカを `Asia/Tokyo` へ切り替えている。
+
+### バージョン差に由来する注意
+
+ソース（8.0）とレプリカ（8.4）でバージョンが違うため、次の点が非対称になる。
+
+| 項目 | ソース（8.0.46） | レプリカ（8.4.8） |
+|---|---|---|
+| `--mysql-native-password` オプション | **存在しない**。渡すと起動に失敗する | 8.4 で追加された。既定で `OFF` |
+| 既定の認証プラグイン | `caching_sha2_password` | `caching_sha2_password`（`mysql_native_password` は既定で無効） |
+| `binlog_format` | 通常のパラメータ | **非推奨**（値は設定できる） |
+| `SHOW SLAVE STATUS` / `CHANGE MASTER TO` | 使える（非推奨） | **削除済み**。`SHOW REPLICA STATUS` / `CHANGE REPLICATION SOURCE TO` を使う |
+
+`setup.sh` はレプリカ（8.4）側で新構文のみを使い、TLS なしで `caching_sha2_password` の認証を通すため `GET_SOURCE_PUBLIC_KEY=1` を指定している。
 
 ## 起動
 

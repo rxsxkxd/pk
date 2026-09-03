@@ -112,6 +112,100 @@ export MYSQL_PWD=<.env に設定した値>
 
 ユーザーは `root`、データベースは `tzcheck` である。
 
+## `DEFAULT CURRENT_TIMESTAMP` の混在検証
+
+[reference/mysql-timezone.md](../../reference/mysql-timezone.md) の「6. スキーマ定義に埋め込まれるもの」で述べた、**`TIMESTAMP` 列は安全で `DATETIME` 列は危険**という違いを実証する。
+
+**この検証に Rails は不要である。** 危険の本体は MySQL サーバー側の挙動であり、素の SQL で完全に再現できる。Rails 側の確認項目（`ActiveRecord::Base.default_timezone` が `:utc` であること等）は既存アプリの `rails console` で別途確認する。
+
+レプリケーションとも無関係なので、**ソース 1 台だけ**で実施できる。
+
+```sh
+docker compose run --rm client mysql -h source -uroot tzcheck
+```
+
+### 1. 両方の型を持つテーブルを作る
+
+```sql
+CREATE TABLE ct (
+  id  INT PRIMARY KEY AUTO_INCREMENT,
+  ts  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,   -- 内部 UTC 保存。安全側
+  dt  DATETIME  DEFAULT CURRENT_TIMESTAMP,   -- 壁時計をそのまま保存。危険側
+  who VARCHAR(16)
+);
+```
+
+### 2. 異なるセッションタイムゾーンから、DB のデフォルト任せで INSERT する
+
+同一接続内でセッションを切り替えれば再現できる（別々の接続でも同じ結果になる）。
+
+```sql
+SET time_zone = '+00:00';
+INSERT INTO ct (who) VALUES ('utc-session');
+
+SET time_zone = 'Asia/Tokyo';
+INSERT INTO ct (who) VALUES ('jst-session');
+```
+
+### 3. 比較する
+
+セッションを UTC に固定して読み出す。**読み出し条件を揃えることで、保存値そのものの差が見える。**
+
+```sql
+SET time_zone = '+00:00';
+SELECT id, who, ts, dt, UNIX_TIMESTAMP(ts) AS ts_epoch FROM ct ORDER BY id;
+```
+
+期待する結果。
+
+| who | `ts`（UTC で読み出し） | `dt` | 判定 |
+|---|---|---|---|
+| `utc-session` | 投入時刻（UTC） | 投入時刻（UTC の壁時計） | — |
+| `jst-session` | **同じ絶対時刻**（`ts_epoch` が連続する） | **9 時間進んだ値**（JST の壁時計がそのまま入っている） | **混在** |
+
+- **`ts`（`TIMESTAMP`）**: 2 行の `ts_epoch` は INSERT した実時刻どおりの差（数秒）になる。セッションのタイムゾーンが違っても、**同じ絶対時刻として保存されている**
+- **`dt`（`DATETIME`）**: 2 行目だけ 9 時間進んだ値が入る。**同じ列に UTC の壁時計と JST の壁時計が混在した**
+
+この状態のまま、アプリケーションが `dt` を一律 UTC とみなして読むと、2 行目は 9 時間ずれた時刻として解釈される。**データ不整合として検知されないため、発見が遅れる。**
+
+### 4. 対処の確認（任意）
+
+`dt` 列を `TIMESTAMP` へ変えると混在しなくなることを確認できる。
+
+```sql
+CREATE TABLE ct2 (
+  id INT PRIMARY KEY AUTO_INCREMENT,
+  dt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  who VARCHAR(16)
+);
+
+SET time_zone = '+00:00';
+INSERT INTO ct2 (who) VALUES ('utc-session');
+SET time_zone = 'Asia/Tokyo';
+INSERT INTO ct2 (who) VALUES ('jst-session');
+
+SET time_zone = '+00:00';
+SELECT id, who, dt, UNIX_TIMESTAMP(dt) AS epoch FROM ct2 ORDER BY id;
+```
+
+2 行の `epoch` が INSERT の実時刻どおりの差になり、9 時間のずれが発生しないことを確認する。
+
+### Rails を使う場合の補足
+
+`t.timestamps` が作るのは **`datetime` 列**であり、上記の危険側に該当する。ただし Rails は既定でセッションの `time_zone` を設定せず、`default_timezone`（既定 `:utc`）に従って Ruby 側で UTC 文字列を組み立てて INSERT するため、**Rails 経由の書き込みだけであれば混在しない**。
+
+混在が起きるのは、同じ列に対して **DB 側のデフォルト（`DEFAULT CURRENT_TIMESTAMP`）で値が入る経路が併存する場合**である。手順 2 の `jst-session` がその経路に相当する。
+
+Rails 側の確認は既存アプリの `rails console` で行う。API 名がバージョンで変わる点に注意する。
+
+```ruby
+# Rails 5.2 / 6.1
+ActiveRecord::Base.default_timezone                            # => :utc
+# Rails 7.0 以降は ActiveRecord.default_timezone
+
+ActiveRecord::Base.connection.select_value("SELECT @@session.time_zone")
+```
+
 ## 停止と後始末
 
 ```sh

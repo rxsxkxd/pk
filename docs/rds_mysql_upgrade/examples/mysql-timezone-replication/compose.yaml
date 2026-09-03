@@ -74,6 +74,98 @@ services:
         target: /work
         read_only: true
 
+  # --- ドライバ検証（reference/mysql-timezone-replication-verification.md の手順 6）---
+  # profiles を付けているため docker compose up -d では起動しない。
+  # 実行例: docker compose run --rm probe-go
+  #
+  # コンテナは compose のネットワーク内にいるため、接続先は source / replica の
+  # ホスト名と 3306 番になる（ホストから叩く場合の 127.0.0.1:13306 ではない）。
+  #
+  # Go は追加インストールが不要なため素のイメージを使い、モジュールキャッシュだけ
+  # ボリュームに保持する。Ruby と Python は依存の導入が必要なため dockerfile_inline
+  # でイメージへ焼き込む（個別の Dockerfile を作らず、定義をこのファイルに集約する）。
+
+  probe-go:
+    profiles: ["probe"]
+    image: golang:1.25
+    working_dir: /probe
+    command: ["go", "run", "."]
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      SOURCE_HOST: source
+      REPLICA_HOST: replica
+    volumes:
+      - type: bind
+        source: ./probe
+        target: /probe
+      # 初回実行時に取得したモジュールを保持し、2 回目以降を高速化する。
+      - go-module-cache:/go/pkg/mod
+    depends_on:
+      source:
+        condition: service_healthy
+      replica:
+        condition: service_healthy
+
+  probe-ruby:
+    profiles: ["probe"]
+    build:
+      context: ./probe
+      # mysql2 はネイティブ拡張のため、ビルドツールと MySQL クライアント
+      # ライブラリの開発パッケージが必要になる。実行のたびに導入すると遅いので
+      # イメージへ焼き込む。
+      dockerfile_inline: |
+        FROM ruby:3.4
+        RUN apt-get update \
+          && apt-get install --no-install-recommends -y build-essential libmariadb-dev \
+          && rm -rf /var/lib/apt/lists/*
+        RUN gem install mysql2 -v 0.5.6
+        WORKDIR /probe
+    command: ["ruby", "probe.rb"]
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      SOURCE_HOST: source
+      REPLICA_HOST: replica
+      # mysql2 の database_timezone は :utc か :local しか受け付けない。
+      # レプリカ（セッション Asia/Tokyo）に :local で合わせるため、
+      # プロセスのタイムゾーンを Asia/Tokyo にしておく。
+      TZ: Asia/Tokyo
+    volumes:
+      - type: bind
+        source: ./probe
+        target: /probe
+    depends_on:
+      source:
+        condition: service_healthy
+      replica:
+        condition: service_healthy
+
+  probe-python:
+    profiles: ["probe"]
+    build:
+      context: ./probe
+      # PyMySQL は純 Python 実装のためビルドツールは不要だが、
+      # 実行のたびの取得を避けるためイメージへ焼き込む。
+      # Python のバージョンは ci/Dockerfile.codebuild-runner に揃えてある。
+      dockerfile_inline: |
+        FROM python:3.14.7-slim-bookworm
+        RUN python3 -m pip install --no-cache-dir --disable-pip-version-check 'PyMySQL==1.1.1'
+        WORKDIR /probe
+    command: ["python3", "probe.py"]
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+      SOURCE_HOST: source
+      REPLICA_HOST: replica
+    volumes:
+      - type: bind
+        source: ./probe
+        target: /probe
+    depends_on:
+      source:
+        condition: service_healthy
+      replica:
+        condition: service_healthy
+
 volumes:
   source-data:
   replica-data:
+  go-module-cache:

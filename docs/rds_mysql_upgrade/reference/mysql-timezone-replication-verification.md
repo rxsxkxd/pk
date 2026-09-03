@@ -537,11 +537,13 @@ func main() {
 
 ### 6-5. 3 言語の比較
 
-| 言語 / ドライバ | タイムゾーン層 | 正しく設定した場合 | 設定を誤った場合の症状 |
+| 言語 / ドライバ | タイムゾーン層 | サーバーへ `SET time_zone` を発行するか | 設定を誤った場合の症状 |
 |---|---|---|---|
-| Go / go-sql-driver | DSN の `loc`（既定 `UTC`） | 読み取り値の差を吸収し、`match=true` になる | サーバーが変換した文字列を別のロケーションとして解釈し、**絶対時刻が silently ずれる** |
-| Ruby / mysql2 | `database_timezone` / `application_timezone`（`:utc` か `:local` のみ） | 読み取り値の差を吸収し、`match=true` になる | プロセスの `TZ` とサーバーのセッションが食い違い、絶対時刻がずれる |
-| Python / PyMySQL | なし（naive `datetime` を返す） | — | アプリケーションがタイムゾーンを付与しないと、`.timestamp()` などでプロセスのローカル時刻として誤解釈される |
+| Go / go-sql-driver | DSN の `loc`（既定 `UTC`） | `loc` は**発行しない**（クライアント側パースのみ）。DSN の `time_zone=%27...%27` は**発行する** | サーバーが変換した文字列を別のロケーションとして解釈し、**絶対時刻が silently ずれる** |
+| Ruby / mysql2 | `database_timezone` / `application_timezone`（`:utc` か `:local` のみ） | **発行しない**（Ruby 側の変換のみ） | プロセスの `TZ` とサーバーのセッションが食い違い、絶対時刻がずれる |
+| Python / PyMySQL | なし（naive `datetime` を返す） | **発行しない** | アプリケーションがタイムゾーンを付与しないと、`.timestamp()` などでプロセスのローカル時刻として誤解釈される |
+
+**多くのドライバのタイムゾーンオプションは、サーバーのセッション状態に触れずクライアント側の変換だけを行う。** 例外は Java の Connector/J（`forceConnectionTimeZoneToSession=true`）と、Go の DSN で `time_zone` をシステム変数として渡した場合である。同じ DB へ複数言語からアクセスしているとここが揃わず、事故の原因になる。詳細は [mysql-timezone.md](mysql-timezone.md) の「クライアントライブラリとセッションタイムゾーン」を参照する。
 
 ### 吸収できる範囲とできない範囲
 

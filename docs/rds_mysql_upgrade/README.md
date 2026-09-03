@@ -33,6 +33,7 @@ Step の詳細を掘り下げる際に参照する:
 
 - [innodb-mysql80-to-84-parameter-mapping.md](reference/innodb-mysql80-to-84-parameter-mapping.md) — InnoDB 関連パラメータの 8.0→8.4 マッピング
 - [mysql-slow-query-log.md](reference/mysql-slow-query-log.md) — スロークエリログ関連パラメータの整理
+- [mysql-timezone-problem-summary.md](reference/mysql-timezone-problem-summary.md) — **判断材料の要約**。`time_zone` を `Asia/Tokyo` へ変更すると `DEFAULT CURRENT_TIMESTAMP` の `datetime` 列で何が起きるか
 - [mysql-timezone.md](reference/mysql-timezone.md) — タイムゾーン関連パラメータ(`time_zone`、`system_time_zone`、`explicit_defaults_for_timestamp`)の整理
 - [mysql-timezone-replication-verification.md](reference/mysql-timezone-replication-verification.md) — ソースとレプリカで `time_zone` が異なる場合の挙動を AWS 上で実証する検証手順(使い捨て構成の作成・検証・後始末)。AWS を使わない場合は [examples/mysql-timezone-replication/](examples/mysql-timezone-replication/) のローカル擬似環境を使う
 - [step-script-language-matrix.md](reference/step-script-language-matrix.md) — Step 別のスクリプト対応表と、実行に必要な言語環境(Bash/Python/Ruby/Go/MySQL クライアント)の一覧

@@ -4,6 +4,8 @@
 
 本書は **RDS for MySQL 8.4** の DB パラメータグループとセッションで設定するタイムゾーン関連パラメータを整理する。Aurora MySQL は対象外とする。
 
+> 「`time_zone` を `Asia/Tokyo` に変更してよいか」という判断だけが必要な場合は、要約版の [mysql-timezone-problem-summary.md](mysql-timezone-problem-summary.md) を先に読む。
+
 パラメータが実際に対象の RDS for MySQL 8.4 ファミリーで変更可能かどうかは、利用リージョン・エンジンファミリーの AWS API 結果を正とする。次の読み取り専用コマンドで `IsModifiable`、既定値、適用方法を確認する。
 
 ```sh
@@ -79,6 +81,8 @@ SELECT COUNT(*) FROM mysql.time_zone_name;  -- 0 より大きければロード�
 
 ## RDS 固有の注意点
 
+- **`SET GLOBAL time_zone` は実行できない。** グローバル値の変更には `SUPER` 権限が必要だが、RDS のマスターユーザーには付与されない。変更経路は DB パラメータグループの `time_zone` パラメータだけである。セッション単位の `SET time_zone` は通常のユーザーで実行できる。
+- **`system_time_zone` は UTC 固定である。** RDS はホスト OS のタイムゾーンを変更する手段を提供しない。
 - **タイムゾーンデータ（IANA）の更新は、エンジンバージョンのアップグレード時にのみ行われる。** RDS は稼働中の DB インスタンスのタイムゾーンデータを更新・リセットしない。マイナーメンテナンスリリースには当時点の最新データが同梱されるため、データを新しく保つにはエンジンバージョンを上げる必要がある。
 - **スナップショットから復元すると `time_zone` は UTC にリセットされる。** 一方、ポイントインタイムリカバリ（PITR）で復元した場合は、復元先インスタンスに関連付けられたパラメータグループの設定が使われる。
 - パラメータグループは複数のインスタンスで共有されるため、**同じパラメータグループを使う DB インスタンスとリードレプリカはすべて同時に変更される。** インスタンスとレプリカで別のタイムゾーンにしたい場合は、別々のパラメータグループを割り当てる。
@@ -185,24 +189,42 @@ SELECT * FROM t WHERE ts >= '2026-09-03 00:00:00';
 
 読み取りをレプリカへ振り分けているアプリケーションでは、経路によって結果が変わる不具合になり、しかもデータ不整合として検知されないため発見が遅れやすい。
 
-#### 6. スキーマ定義に埋め込まれるもの
+#### 6. スキーマ定義に埋め込まれるもの（`DEFAULT CURRENT_TIMESTAMP`）
 
-`DEFAULT CURRENT_TIMESTAMP` と `ON UPDATE CURRENT_TIMESTAMP` は `NOW()` と同じ扱いになる。列の型が `TIMESTAMP` なら UTC で保存されるため保存値は一致するが、`DATETIME` 列に対して指定した場合は、**書き込むセッションのタイムゾーンの値がそのまま保存される**。この場合、接続先によって保存値そのものが変わる。
+`DEFAULT CURRENT_TIMESTAMP` と `ON UPDATE CURRENT_TIMESTAMP` は `NOW()` と同じ評価を受ける。**ただし列の型によって安全性が正反対になる。**
+
+| 列の型 | 挙動 | 安全性 |
+|---|---|---|
+| `TIMESTAMP` | セッションの `time_zone` で `NOW()` を評価し、**UTC へ変換して格納**する | **安全**。どのセッションが INSERT しても同じ絶対時刻になる。読み出し時に各セッションのタイムゾーンへ戻されるだけ |
+| `DATETIME` | `NOW()` の結果を**そのまま壁時計として格納**する。変換は起きない | **危険**。INSERT したセッションのタイムゾーンによって保存値そのものが変わる |
+
+`DATETIME` 列で危険なのは、**同じ列に異なるタイムゾーンの壁時計が混在しうる**点である。
+
+- アプリケーションが UTC で明示的に値を入れた行 → UTC の壁時計
+- `time_zone = Asia/Tokyo` の別セッションが `DEFAULT` 任せで INSERT した行 → JST の壁時計
+
+この 2 つが同じ列に並ぶ。読み出す側は列の値だけからどちらか判別できず、アプリケーションが一律 UTC とみなしていれば後者は 9 時間ずれた時刻として解釈される。**データ不整合として検知されないまま蓄積する**ため、発見が遅れやすい。
 
 RDS のリードレプリカは読み取り専用のため書き込みは発生しないが、Blue/Green の切替後や、レプリカを昇格させた場合には該当する。
 
-#### 7. アプリケーションのドライバ設定で吸収できる範囲
+対処は次のいずれかである。
 
-各言語の MySQL ドライバは、サーバーのセッション `time_zone` とは別に独自のタイムゾーン層を持つ（Go の `loc`、Ruby mysql2 の `database_timezone`、Python PyMySQL は層を持たない）。ただし**吸収できる範囲は限られる**。
+- 列を `TIMESTAMP` にする（内部 UTC 保存になるため混在しない）
+- DB 側の `DEFAULT` に頼らず、アプリケーション側で常に値を入れる
+- パラメータグループで `time_zone` を UTC に固定し、全接続のタイムゾーンを揃える
+
+> この混在は **Rails なしで、素の SQL だけで再現できる**。実機での確認手順は [examples/mysql-timezone-replication/](../examples/mysql-timezone-replication/) の「`DEFAULT CURRENT_TIMESTAMP` の混在検証」にある。
+
+#### 7. アプリケーションのドライバ設定で吸収できる範囲
 
 | 差異の発生箇所 | 例 | ドライバ設定で吸収できるか |
 |---|---|---|
 | 読み取り値の解釈 | `SELECT ts` の結果を時刻型へ変換する | **できる**（設定を接続先のセッション `time_zone` に合わせた場合） |
 | サーバー側での行の確定 | 上記 5 の `WHERE`・`JOIN`、上記 4 の `GROUP BY DATE(ts)` | **できない**。ドライバに渡る時点で既に行数が違う |
 
-「ドライバの設定さえ正しくすれば安全」とは言えない。`WHERE` 句のリテラル解釈と日付集計の差は、**接続直後に `SET time_zone = '+00:00'` でセッションを固定する**か、リテラルを使わずに UNIX 時刻をプレースホルダで渡す形にしない限り解消しない。
+「ドライバの設定さえ正しくすれば安全」とは言えない。`WHERE` 句のリテラル解釈と日付集計の差は、**接続直後に `SET time_zone` でセッションを固定する**か、リテラルを使わずに UNIX 時刻をプレースホルダで渡す形にしない限り解消しない。
 
-実機での確認手順は [mysql-timezone-replication-verification.md](mysql-timezone-replication-verification.md) の手順 6 にある。
+ドライバごとの詳細は後述の「クライアントライブラリとセッションタイムゾーン」を参照する。実機での確認手順は [mysql-timezone-replication-verification.md](mysql-timezone-replication-verification.md) の手順 6 にある。
 
 #### 8. まとめ: 紛らわしい 3 点
 
@@ -232,6 +254,100 @@ MySQL のリファレンスマニュアルは、ソースとレプリカで同�
 ```sh
 grep -rniE "now\(\)|curdate\(\)|current_date|curtime\(\)|current_time|sysdate\(\)|localtime|from_unixtime|unix_timestamp|convert_tz" <アプリケーションのソース>
 ```
+
+## クライアントライブラリとセッションタイムゾーン
+
+前節までは「サーバー側の `time_zone` が何であるか」の話である。ここでは、**アプリケーションが接続したときに、そのセッションの `time_zone` が実際に何になるか**を扱う。レプリケーションの有無に関係なく当てはまる。
+
+### 前提: クライアント OS の `TZ` は MySQL に送られない
+
+クライアント側の `TZ` 環境変数は、MySQL プロトコル上でサーバーへ送られることはない。したがって、**ドライバが明示的に `SET time_zone` を発行しない限り、セッションの `time_zone` はサーバーのグローバル値のままである。**
+
+`mysql` コマンドラインクライアントも `SET time_zone` を発行しない。このため CLI で確認した `NOW()` は「グローバル設定での見え方」と一致する（アプリケーション側のライブラリが上書きしていない限り、アプリから見える値とも一致する）。
+
+### ドライバが `SET time_zone` を発行するかどうか
+
+ここが最も誤解されやすい。**多くのドライバのタイムゾーンオプションは、サーバーのセッション状態に触れず、クライアント側の変換だけを行う。**
+
+| ドライバ | サーバーへ `SET time_zone` を発行するか | 該当する設定 |
+|---|---|---|
+| Connector/J（Java） | **する** | `connectionTimeZone` ＋ `forceConnectionTimeZoneToSession=true` |
+| go-sql-driver/mysql（Go） | **する**（DSN のシステム変数として） | `time_zone=%27Asia%2FTokyo%27`。一方 `loc` はクライアント側パースのみで**発行しない** |
+| mysql2（Ruby） | **しない** | `database_timezone` / `application_timezone` は Ruby 側の変換のみ |
+| PyMySQL / mysqlclient（Python） | **しない** | タイムゾーン層を持たず、naive な `datetime` を返す |
+| mysql2（Node.js） | **しない** | クライアント側変換のみ |
+
+**同一の DB へ複数の言語からアクセスしている場合、ここが揃っていないことが典型的な事故要因になる。** Java からの接続だけセッションが `Asia/Tokyo` になり、Ruby と Python からの接続はサーバーのグローバル値のまま、という状態が容易に発生する。
+
+### Ruby on Rails（mysql2 アダプタ）の場合
+
+`ActiveRecord` は**既定でセッションの `time_zone` を設定しない**。`abstract_mysql_adapter.rb` の `configure_connection` は `sql_mode`・`wait_timeout`・`variables` に指定された値を `SET` するが、`time_zone` は扱わない（Rails 5.2 / 6.1 / 7 系以降のいずれでもファイル内に `time_zone` の記述がないことを確認済み）。代わりに `default_timezone`（既定 `:utc`）に従い、**Ruby 側で UTC 文字列へ変換してから INSERT し、UTC として読み戻す**。
+
+このため、**Rails が読み書きする値についてはセッション `time_zone` が何であっても壊れない**。危険なのは**サーバー側で値が生成される箇所**だけである。
+
+- `NOW()`、`CURRENT_TIMESTAMP` を含む生 SQL
+- `DEFAULT CURRENT_TIMESTAMP` / `ON UPDATE CURRENT_TIMESTAMP`（前掲 6 の `DATETIME` 列の混在に注意）
+- 日次集計などの `DATE()` / `GROUP BY`
+
+セッションを明示的に固定したい場合は `database.yml` の `variables` を使う。アダプタはここに書いた値を `SET @@SESSION.<名前> = <値>` として発行する。
+
+```yaml
+production:
+  adapter: mysql2
+  variables:
+    time_zone: "+00:00"
+```
+
+Rails 固有の注意として、`t.timestamps` が作るのは **`datetime` 列**であり、値は Ruby 側から UTC で入る。ここに後から DB 側のデフォルトを足すと、前掲 6 の混在が発生しうる。
+
+```ruby
+# これを足すと、Ruby 由来の UTC 値と DB 由来のセッション TZ 値が同じ列に混ざりうる
+change_column_default :users, :created_at, -> { "CURRENT_TIMESTAMP" }
+```
+
+DB 側のデフォルトに寄せたいなら、列を `TIMESTAMP` にするか、パラメータグループで `time_zone` を UTC に固定して全接続を揃えるかのいずれかにする。あわせて、**DB 側で生成された値は `reload` するまで ActiveRecord のオブジェクトに反映されない**点も運用上効いてくる。
+
+## 運用方針の推奨
+
+**RDS 側は UTC のまま運用し、表示だけアプリケーション側で JST にするのが安全側である。**
+
+`time_zone = Asia/Tokyo` に変更すると、次の問題が同時に発生しうる。
+
+- `DATETIME` 列に、アプリケーション由来の UTC 値と `NOW()` 由来の JST 値が混在する（前掲 6）
+- `WHERE` 句の日時リテラルの解釈が変わり、クエリ結果が変わる（前掲 5）
+- `GROUP BY DATE()` の日境界がずれ、日次集計が変わる（前掲 4）
+
+一方、表示のためだけであればアプリケーション側で完結する（Rails なら `config.time_zone`）。DB のタイムゾーンを動かす必要はない。
+
+### アプリケーション側の確認項目
+
+移行前後で次を確認する。
+
+```sql
+SELECT @@system_time_zone, @@global.time_zone, @@session.time_zone, NOW(), UTC_TIMESTAMP();
+```
+
+Rails の場合は加えて次を確認する。
+
+```ruby
+# Rails 5.2 / 6.1 の API。7.0 以降は ActiveRecord.default_timezone へ移動している。
+ActiveRecord::Base.default_timezone                          # :utc であること
+Rails.application.config.time_zone                           # 表示用。'Tokyo' など
+ActiveRecord::Base.connection.select_value("SELECT NOW()")   # Time.current と比較する
+
+# セッションに time_zone が設定されていないことの確認（既定では設定されない）
+ActiveRecord::Base.connection.select_value("SELECT @@session.time_zone")
+```
+
+> `default_timezone` の参照先は Rails のバージョンで変わる。**5.2・6.1 は `ActiveRecord::Base.default_timezone`**、7.0 以降は `ActiveRecord.default_timezone` である（既定値はどちらも `:utc`）。
+
+棚卸しの対象。
+
+- `schema.rb` / `structure.sql` を `CURRENT_TIMESTAMP` で grep する
+- 列型が `timestamp` か `datetime` かを棚卸しする（前掲 6 の安全性が正反対になるため）
+- 生 SQL 内の `NOW()` / `CURDATE()` / `DATE()` を洗い出す。とくに日次集計の日境界
+- cron・バッチサーバーの OS のタイムゾーンと、そこから起動するプロセスの `TZ` 環境変数
+- 外部ツール（BI、Redash、ワークフローエンジン、運用スクリプトの直 SQL）が同じタイムゾーンで接続しているか
 
 ## MySQL 8.0 → 8.4 移行での注意点
 

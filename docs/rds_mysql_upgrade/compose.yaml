@@ -2,10 +2,11 @@ name: rds-mysql-upgrade-tools
 
 # 使い方:
 #   docker compose create  # 認証情報なしでも作成可能
-#   # 実接続時だけ .env でホスト側の認証情報・証明書ディレクトリを指定
+#   # 実接続だけ .env でホスト側の認証情報・証明書ディレクトリを指定
 #   docker compose --env-file .env run --rm awscli sts get-caller-identity
 #
-# すべての認証情報・証明書・接続設定は read_only でマウントする。
+# ファイルとしての認証情報・証明書・接続設定は read_only でマウントする。
+# STS の一時認証情報は環境変数として渡す（ファイルを書き換えないため read_only 方針と両立する）。
 services:
   awscli:
     image: public.ecr.aws/aws-cli/aws-cli:2.32.25
@@ -14,6 +15,16 @@ services:
     environment:
       AWS_SDK_LOAD_CONFIG: "1"
       AWS_PROFILE: ${AWS_PROFILE:-default}
+      # STS による一時認証情報（AssumeRole / SSO / MFA など）をホストから引き継ぐ。
+      # 未設定なら空文字が渡るが、AWS CLI は空の認証情報を無視して
+      # ~/.aws の named profile へフォールバックする（実測で確認済み）。
+      # 値は .env に書かず、実行するシェルの環境変数から渡すこと。
+      #
+      # AWS_REGION はここで渡さない。空文字を渡すとプロファイルの region 設定を
+      # 上書きしてしまい、リージョン未指定エラーになるため。
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
     volumes:
       - type: bind
         source: ${AWS_CONFIG_DIR:-./aws-config}

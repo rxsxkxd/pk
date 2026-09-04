@@ -26,6 +26,33 @@ cp .env.example .env
 
 `.env` は実接続時だけ作成し、値を絶対パスに置き換える。`aws-config/` は今回もディレクトリ mount のまま維持しており、`global-bundle.pem`／`my.cnf` のファイル化とは無関係に、AWS 認証の扱い（SSO のキャッシュディレクトリを含む）は変わらない。未作成でも `docker compose create` は可能で、その場合は Git 管理下の空ディレクトリを読み取り専用でマウントする（空ディレクトリでは AWS 認証はできない）。AWS SSO を利用する場合は、ホスト上で先に `aws sso login --profile <profile>` を完了する。
 
+### STS の一時認証情報を使う場合
+
+`AssumeRole`、SSO、MFA などで取得した一時認証情報は、**環境変数としてコンテナへ渡る**。`.env` には書かず、実行するシェルの環境変数から渡す。
+
+```sh
+# 例: ロールを引き受けて一時認証情報を取得し、そのままコンテナで使う
+eval "$(aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/YourRole \
+  --role-session-name local-verification \
+  --query 'Credentials.[
+      `export AWS_ACCESS_KEY_ID=` + AccessKeyId,
+      `export AWS_SECRET_ACCESS_KEY=` + SecretAccessKey,
+      `export AWS_SESSION_TOKEN=` + SessionToken]' \
+  --output text | tr '\t' '\n')"
+
+docker compose --env-file .env run --rm awscli sts get-caller-identity
+```
+
+`compose.yaml` が転送するのは `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`・`AWS_SESSION_TOKEN` の 3 つである。次の挙動を実測で確認している。
+
+| 状態 | 認証情報の解決 | リージョンの解決 |
+|---|---|---|
+| 一時認証情報を設定した | 環境変数が優先される | プロファイルの `region` |
+| 未設定（空文字が渡る） | `~/.aws` の named profile へフォールバックする | プロファイルの `region` |
+
+> **`AWS_REGION` は意図的に転送していない。** 空文字を渡すとプロファイルの `region` 設定を上書きしてしまい、リージョン未指定エラーになるためである。リージョンを環境変数で指定したい場合は、各スクリプトの `--region` オプションを使う。
+
 任意で、DB 接続情報を `my.cnf` に保存できる。ただしリポジトリ直下の `my.cnf` は追跡済みファイルであるため、パスワードなど実接続情報を書き込む場合は `.env` の `MYSQL_CLIENT_CONFIG_FILE` でリポジトリ外の絶対パスを指し、そちらのファイルに `chmod 600` を設定する。
 
 ```ini
@@ -114,7 +141,8 @@ docker run --rm -it -v "$(pwd):/workspace" -w /workspace \
 ## セキュリティ上の注意
 
 - `.env`、AWS credential、CA bundle は Git 管理しない。リポジトリ直下の `my.cnf` は空プレースホルダとして例外的に追跡しているため、実接続情報を書き込んだまま commit しない。
-- AWS 認証情報と接続設定はすべて `:ro` でマウントする。コンテナから認証情報を変更しない。
+- **ファイルとしての** AWS 認証情報と接続設定はすべて `:ro` でマウントする。コンテナから認証情報を変更しない。
+- STS の一時認証情報は環境変数で渡す。ファイルを書き換えないため `:ro` 方針と両立する。**`.env` には書かない**（`.env` は `.gitignore` 済みだが、期限付きの認証情報をファイルへ残す必要がない）。シェルの履歴に残さないよう、`export` を直接打たず `eval "$(aws sts assume-role ...)"` の形で渡す。
 - DB パスワードを Compose ファイル、コマンド履歴、環境変数に書かない。`-p`／`--password` による対話入力、またはアクセス権を制限した Git 管理外の `my.cnf`（`.env` の `MYSQL_CLIENT_CONFIG_FILE` で指す）を使う。
 - 本番接続には `VERIFY_CA` 以上を使い、RDS の CA ローテーション時はホスト側の CA bundle を更新する。
 - AWS CLI と MySQL は公式コンテナを使用する。組織のイメージ許可・脆弱性スキャン方針に従って、固定タグを検証または社内レジストリへ取り込む。

@@ -61,7 +61,9 @@ Step 4 のレポート生成器は Ruby 版（`generate_green_verification_repor
 python3 -m pip install 'PyYAML==6.0.2'
 ```
 
-AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`local-execution.md`）。実接続時だけ `.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。すべて `read_only` マウントである。
+AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`local-execution.md`）。実接続時だけ `.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。**ファイルはすべて `read_only` マウント**である。
+
+STS の一時認証情報（`AWS_ACCESS_KEY_ID`／`AWS_SECRET_ACCESS_KEY`／`AWS_SESSION_TOKEN`）だけは環境変数で転送する。ファイルを書き換えないため `read_only` 方針と両立する。`.env` には書かない。**`AWS_REGION` は転送しない**——空文字がプロファイルの `region` 設定を上書きしてリージョン未指定エラーになるため。リージョンは各スクリプトの `--region` で指定する。
 
 ```bash
 docker compose --env-file .env run --rm awscli sts get-caller-identity

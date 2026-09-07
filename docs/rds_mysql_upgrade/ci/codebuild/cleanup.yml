@@ -1,0 +1,21 @@
+# CodePipeline の ManualApproval 後に実行する、Step 7（後始末）の CodeBuild buildspec。
+#
+# 旧 Blue の削除は不可逆である。config の actions.cleanup が approved でなければ
+# scripts/cleanup.sh は何も変更せずに正常終了する。
+#
+# 逆方向レプリケーションの確認（--mysql-user）は CI では行わない。本番 DB の
+# 認証情報を CI に常設しない方針のため、承認前にローカルから実行して確認する。
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+  build:
+    commands:
+      - scripts/cleanup.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
+
+artifacts:
+  files:
+    - artifacts/**/*
+  discard-paths: false

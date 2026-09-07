@@ -51,6 +51,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 - [mysql-timezone-problem-summary.md](reference/mysql-timezone-problem-summary.md) — **判断材料の要約**。`time_zone` を `Asia/Tokyo` へ変更すると `DEFAULT CURRENT_TIMESTAMP` の `datetime` 列で何が起きるか
 - [mysql-timezone.md](reference/mysql-timezone.md) — タイムゾーン関連パラメータ(`time_zone`、`system_time_zone`、`explicit_defaults_for_timestamp`)の整理
 - [mysql-timezone-replication-verification.md](reference/mysql-timezone-replication-verification.md) — ソースとレプリカで `time_zone` が異なる場合の挙動を AWS 上で実証する検証手順(使い捨て構成の作成・検証・後始末)。AWS を使わない場合は [examples/mysql-timezone-replication/](examples/mysql-timezone-replication/) のローカル擬似環境を使う
+- [shared-instance-upgrade-verification.md](reference/shared-instance-upgrade-verification.md) — **ステージと本番が同一インスタンスに同居している場合**の移行手順。使い捨て検証機の構築・検証・後始末と、同居構成での既存スクリプトの誤動作
 - [step-script-language-matrix.md](reference/step-script-language-matrix.md) — Step 別のスクリプト対応表と、実行に必要な言語環境(Bash/Python/Ruby/Go/MySQL クライアント)の一覧
 - [source-article-notes.md](reference/source-article-notes.md) — 出典記事の要約メモ(参考。正典ではない)
 
@@ -59,6 +60,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 - [cdk-adoption-considerations.md](decisions/cdk-adoption-considerations.md) — CDK 導入の判断資料(結論: 現状は CloudFormation のみで運用)
 - [binlog-format-bluegreen-compatibility.md](decisions/binlog-format-bluegreen-compatibility.md) — Blue `MIXED` → Green `ROW` の Blue/Green レプリケーション互換性
 - [structure-review-proposal.md](decisions/structure-review-proposal.md) — リポジトリ構成・フロー全体の見直し対案(**未採択**。着手順を含む)
+- [idempotency-strategy.md](decisions/idempotency-strategy.md) — 各フェーズの冪等性の現状評価とあるべき姿(**未採択**)。switchover が 2 回目に必ず失敗する点、cleanup が部分完了で成功を返す点など
 
 ### `reports/`
 

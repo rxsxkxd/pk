@@ -13,6 +13,20 @@ CodeConnections (GitHub) → BuildGreen → VerifyGreen → ManualApproval → S
 
 CodePipeline は `DetectChanges: false` のため、GitHub への push で自動開始しない。作業者は CloudFormation でスタックを作成後、`aws codepipeline start-pipeline-execution` または AWS Console から明示的に開始する。各サービス・環境には独立したスタックを作るが、実行するスクリプトと buildspec は共通である。
 
+## Step 3〜5 の三つの実行方式
+
+BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、実行目的に合わせて三つの経路で使用する。実行方式が違っても、各 Step が呼び出すシェルスクリプトと設定 YAML は共通である。
+
+| 実行方式 | 主な用途 | 実行対象 | 起動元 |
+|---|---|---|---|
+| スクリプト直接ローカル実行 | 個別の AWS API 呼び出し・設定解析・判定ロジックの切り分け | `scripts/{build_green,verify_green,switchover}.sh` | シェルスクリプトを直接起動 |
+| CodeBuild Local Agent | CodeBuild 実行前の buildspec・artifact・Docker・環境変数の互換性確認 | `ci/codebuild/{build-green,verify-green,switchover}.yml` | Local Agent 経由で buildspec を起動 |
+| AWS CodeBuild / GitHub Actions | CI 上の継続的な検証 | CodeBuild buildspec / GitHub Actions workflow | リモート CI から起動 |
+
+VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT_GENERATOR` を指定しなければ Ruby を使う。一方、CodeBuild Local Agent、AWS CodeBuild、GitHub Actions は Docker Buildx で Go バイナリを作成して指定する。この違いはレポート生成器の実装・実行環境上の補足であり、検証対象・判定内容を変えるものではない。
+
+スクリプト直接実行の全体フローは [直接実行による Blue/Green 移行フロー](../direct-blue-green-execution.md)、Local Agent の具体的な起動方法は [CodeBuild 各フローの単体ローカル検証](codebuild-local-verification.md) を参照する。
+
 ## 実行内容
 
 | CodeBuild プロジェクト | buildspec | 既存スクリプト | 実行条件 |

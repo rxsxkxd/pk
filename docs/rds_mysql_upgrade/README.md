@@ -17,6 +17,20 @@ Step の詳細を掘り下げる際に参照する:
 
 エージェント向けの作業ガイドは [CLAUDE.md](CLAUDE.md)。
 
+## Step 3〜5 の実行方式
+
+BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、実行目的に応じて次の三つの方式を使い分ける。実行方式が違っても、各 Step が呼び出すシェルスクリプトと設定 YAML は共通である。
+
+| 実行方式 | 主な用途 | 実行対象 | 起動元 |
+|---|---|---|---|
+| スクリプト直接ローカル実行 | 個別スクリプトの切り分け・日常確認 | `scripts/{build_green,verify_green,switchover}.sh` | シェルスクリプトを直接起動 |
+| CodeBuild Local Agent | buildspec・環境変数・artifact・Docker を含む CodeBuild 互換性確認 | `ci/codebuild/{build-green,verify-green,switchover}.yml` | Local Agent 経由で buildspec を起動 |
+| AWS CodeBuild / GitHub Actions | CI 上の継続的な検証 | CodeBuild buildspec / GitHub Actions workflow | リモート CI から起動 |
+
+VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT_GENERATOR` を指定しなければ Ruby を使う。一方、CodeBuild Local Agent、AWS CodeBuild、GitHub Actions は Docker Buildx で Go バイナリを作成して指定する。この違いはレポート生成器の実装・実行環境上の補足であり、検証対象・判定内容を変えるものではない。
+
+直接実行の一連手順は [direct-blue-green-execution.md](direct-blue-green-execution.md)、CodeBuild Local Agent の手順は [ci/codebuild-local-verification.md](ci/codebuild-local-verification.md) を参照する。
+
 ## フォルダ構成
 
 | フォルダ | 内容 |

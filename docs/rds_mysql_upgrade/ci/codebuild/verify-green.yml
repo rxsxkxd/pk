@@ -10,7 +10,13 @@ phases:
     commands:
       - |
         set -euo pipefail
+        case "$(uname -m)" in
+          x86_64) build_platform=linux/amd64 ;;
+          aarch64|arm64) build_platform=linux/arm64 ;;
+          *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 2 ;;
+        esac
         docker buildx build \
+          --platform "$build_platform" \
           --file ci/Dockerfile.green-verification-report \
           --target export \
           --output type=local,dest=.tools/green-report \

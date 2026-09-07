@@ -13,6 +13,7 @@ Step の詳細を掘り下げる際に参照する:
 - [rds-mysql-84-migration-guide.md](rds-mysql-84-migration-guide.md) — Phase 0〜5 の詳細手順書(移行元の親ドキュメント)
 - [phase-0-precheck.md](phase-0-precheck.md) — Step 1 の詳細。Blue/Green 成立条件チェックリスト(0-1-01〜14)
 - [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md) — Step 2 の詳細。CloudFormation による DB パラメータグループ管理
+- [direct-blue-green-execution.md](direct-blue-green-execution.md) — `scripts/*.sh` を直接実行する場合の、パラメータグループ事前確認から後始末までの一連手順
 
 エージェント向けの作業ガイドは [CLAUDE.md](CLAUDE.md)。
 

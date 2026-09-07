@@ -1,0 +1,17 @@
+# BuildGreen の前に実行する、移行先 DB パラメータグループの事前確認専用 buildspec。
+# AWS API は describe-db-parameter-groups（読み取り）だけを使用し、RDS の変更操作は行わない。
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+  build:
+    commands:
+      - scripts/check_target_parameter_group.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
+
+artifacts:
+  files:
+    - artifacts/target-db-parameter-group.json
+    - artifacts/target-parameter-group-check.md
+  discard-paths: false

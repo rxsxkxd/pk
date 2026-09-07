@@ -256,7 +256,7 @@ MYSQL_CREDENTIALS_SECRET_ID=your-secret-id-or-arn
 
 ## 5. スクリプト直接実行との使い分け
 
-CodeBuild Local Agent の不具合とスクリプト本体の不具合を分けるため、同じ設定でシェルスクリプトを直接実行できる。例えば VerifyGreen の通常モードは次のとおりである。
+CodeBuild Local Agent の不具合とスクリプト本体の不具合を分けるため、同じ設定でシェルスクリプトを直接実行できる。パラメータグループ事前確認、BuildGreen、VerifyGreen、Switchover、Cleanup を含む直接実行の一連手順は [direct-blue-green-execution.md](../direct-blue-green-execution.md) を参照する。ここでは切り分け用の VerifyGreen 最小例だけを示す。
 
 ```bash
 scripts/verify_green.sh \

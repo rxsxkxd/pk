@@ -1,9 +1,16 @@
 # CodePipeline の BuildGreen ステージから実行する CodeBuild buildspec。
 version: 0.2
 
+env:
+  # Linux で指定できるのは bash または /bin/sh。既定シェルに依存しないよう明示する。
+  shell: bash
+
 phases:
   install:
     commands:
+      # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
+      # 落ちていれば復元し、落ちていなければ何も変わらない。
+      - chmod +x scripts/*.sh scripts/lib/*.sh
       - python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
   build:
     commands:

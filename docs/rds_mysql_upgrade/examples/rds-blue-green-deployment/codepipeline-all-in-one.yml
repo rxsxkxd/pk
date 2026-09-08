@@ -203,6 +203,19 @@ Resources:
   # --- CodeBuild ロール（Step ごとに変更権限を分ける）-------------------------
   # upgrade-flow-steps.md「CI 実行ロールに必要な権限」の分割に対応する。
 
+  # config の承認宣言を読み出すだけ。AWS API は呼び出さない。
+  ReadApprovalsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-read-approvals'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+
   # Step 2 事前確認: 読み取りのみ。
   PrecheckRole:
     Type: AWS::IAM::Role
@@ -362,6 +375,7 @@ Resources:
                   - 'codebuild:BatchGetBuilds'
                   - 'codebuild:StopBuild'
                 Resource:
+                  - !GetAtt ReadApprovalsProject.Arn
                   - !GetAtt PrecheckProject.Arn
                   - !GetAtt BuildGreenProject.Arn
                   - !GetAtt VerifyGreenProject.Arn
@@ -383,6 +397,26 @@ Resources:
   # SERVICE_NAME はプロジェクト定義に既定値を置き、パイプライン実行時に
   # アクション側の EnvironmentVariables で上書きする。
   # これにより start-build による個別実行でも既定値で動く。
+
+  # config の actions をパイプライン変数として公開する。後続ステージの
+  # BeforeEntry 条件がこれを見て、承認していないフェーズをスキップする。
+  ReadApprovalsProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-read-approvals'
+      Description: config の actions（承認宣言）をパイプライン変数として公開する
+      ServiceRole: !GetAtt ReadApprovalsRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/read-approvals.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        EnvironmentVariables:
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   PrecheckProject:
     Type: AWS::CodeBuild::Project
@@ -512,6 +546,19 @@ Resources:
               OutputArtifacts: [{ Name: SourceOutput }]
               RunOrder: 1
 
+        # config の actions を読み、後続ステージの条件で使う変数として公開する。
+        # Namespace を付けることで #{Approvals.SWITCHOVER_APPROVED} の形で参照できる。
+        - Name: ReadApprovals
+          Actions:
+            - Name: ReadApprovals
+              Namespace: Approvals
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref ReadApprovalsProject
+                EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }]
+              RunOrder: 1
+
         # Step 2 の成果物（8.4 パラメータグループ）が適用済みかを確認する。
         - Name: PrecheckParameterGroup
           Actions:
@@ -546,19 +593,29 @@ Resources:
               OutputArtifacts: [{ Name: VerifyGreenOutput }]
               RunOrder: 1
 
-        - Name: ApproveSwitchover
+        # config の actions.switchover が approved のときだけ入る。
+        # pending ならステージごとスキップされるため、手動承認も表示されない。
+        # これにより「承認しても何も起きない」クリックが発生しない。
+        - Name: Switchover
+          BeforeEntry:
+            Conditions:
+              - Result: SKIP
+                Rules:
+                  - Name: SwitchoverApproved
+                    RuleTypeId: { Category: Rule, Owner: AWS, Provider: VariableCheck, Version: '1' }
+                    Configuration:
+                      Variable: '#{Approvals.SWITCHOVER_APPROVED}'
+                      Value: approved
+                      Operator: EQ
           Actions:
             - Name: ManualApproval
               ActionTypeId: { Category: Approval, Owner: AWS, Provider: Manual, Version: '1' }
               Configuration:
                 NotificationArn: !If [HasApprovalTopic, !Ref ApprovalNotificationTopicArn, !Ref 'AWS::NoValue']
                 CustomData: >-
-                  Step 4 の検証レポートを確認し、config の actions.switchover が approved で
-                  レビュー済みであることを確認してから承認する。本番トラフィックが切り替わる。
+                  Step 4 の検証レポートを確認してから承認する。本番トラフィックが切り替わる。
+                  config の actions.switchover は approved である（このステージに入った時点で確認済み）。
               RunOrder: 1
-
-        - Name: Switchover
-          Actions:
             - Name: Switchover
               ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
               Configuration:
@@ -566,9 +623,20 @@ Resources:
                 EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
               InputArtifacts: [{ Name: SourceOutput }]
               OutputArtifacts: [{ Name: SwitchoverOutput }]
-              RunOrder: 1
+              RunOrder: 2
 
-        - Name: ApproveCleanup
+        # config の actions.cleanup が approved のときだけ入る。
+        - Name: Cleanup
+          BeforeEntry:
+            Conditions:
+              - Result: SKIP
+                Rules:
+                  - Name: CleanupApproved
+                    RuleTypeId: { Category: Rule, Owner: AWS, Provider: VariableCheck, Version: '1' }
+                    Configuration:
+                      Variable: '#{Approvals.CLEANUP_APPROVED}'
+                      Value: approved
+                      Operator: EQ
           Actions:
             - Name: ManualApproval
               ActionTypeId: { Category: Approval, Owner: AWS, Provider: Manual, Version: '1' }
@@ -579,9 +647,6 @@ Resources:
                   逆方向レプリケーションが残っていないことをローカルから確認済みであること。
                   旧 Blue の削除は不可逆である。
               RunOrder: 1
-
-        - Name: Cleanup
-          Actions:
             - Name: Cleanup
               ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
               Configuration:
@@ -589,7 +654,7 @@ Resources:
                 EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
               InputArtifacts: [{ Name: SourceOutput }]
               OutputArtifacts: [{ Name: CleanupOutput }]
-              RunOrder: 1
+              RunOrder: 2
 
 Outputs:
   PipelineName:

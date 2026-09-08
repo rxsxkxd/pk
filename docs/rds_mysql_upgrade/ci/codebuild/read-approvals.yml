@@ -1,0 +1,27 @@
+# 設定ファイルの actions（承認宣言）をパイプライン変数として公開する buildspec。
+#
+# AWS API は呼び出さない。config を読むだけである。
+# ここで公開した変数を、後続ステージの BeforeEntry 条件（VariableCheck）が参照し、
+# 承認していないフェーズのステージをスキップする。
+#
+# これにより手動承認は「config で承認済みのフェーズ」でだけ表示される。
+# 承認ゲートの実体は従来どおり config の actions であり、運用は変わらない。
+version: 0.2
+
+env:
+  exported-variables:
+    - BUILD_APPROVED
+    - SWITCHOVER_APPROVED
+    - CLEANUP_APPROVED
+
+phases:
+  install:
+    commands:
+      - python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+  build:
+    commands:
+      # eval で shell 変数にした後、exported-variables として拾わせるため export する。
+      - eval "$(scripts/read_action_approvals.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME")"
+      - export BUILD_APPROVED SWITCHOVER_APPROVED CLEANUP_APPROVED
+      - |
+        echo "service=${SERVICE_NAME} build=${BUILD_APPROVED} switchover=${SWITCHOVER_APPROVED} cleanup=${CLEANUP_APPROVED}"

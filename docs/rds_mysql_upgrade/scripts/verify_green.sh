@@ -22,16 +22,24 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-verify.XXXXXX")
 mkdir -p "$output_dir"
 
+# shellcheck source=lib/migration_phase.sh
+source "$(dirname "$0")/lib/migration_phase.sh"
+
 # YAML の読み込みは 1 回だけ行い、以降は python3 -c を呼ばずシェル変数として使う。
 eval "$(python3 -c '
 import shlex, sys, yaml
 d = yaml.safe_load(open(sys.argv[1]))
 t = d["services"][sys.argv[2]]
-for k in ("source_db_instance_identifier", "target_engine_version", "target_db_instance_class", "target_db_parameter_group_name", "target_parameter_group_template_path"):
+for k in ("source_db_instance_identifier", "source_engine_version",
+          "source_db_parameter_group_name", "target_engine_version",
+          "target_db_instance_class", "target_db_parameter_group_name",
+          "target_parameter_group_template_path"):
     if not t.get(k):
         sys.exit(f"missing {k}")
 values = {
     "source_id": t["source_db_instance_identifier"],
+    "source_engine_version": t["source_engine_version"],
+    "source_db_parameter_group_name": t["source_db_parameter_group_name"],
     "target_engine_version": t["target_engine_version"],
     "target_db_instance_class": t["target_db_instance_class"],
     "target_db_parameter_group_name": t["target_db_parameter_group_name"],
@@ -44,8 +52,27 @@ for k, v in values.items():
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
-# [読み取り] Source ARN と、その Source に対応する Blue/Green Deployment を取得する。
+# [読み取り] 移行元識別子が指す実体を見て、検証すべきフェーズかを判定する。
+# 切替後は <source_id> が green（新 Blue）を指すため、検証対象の Deployment は
+# 既に SWITCHOVER_COMPLETED であり AVAILABLE ではない。そのままだと後始末フェーズで
+# 再実行したときに必ず失敗するため、ここで「検証対象なし」として正常終了する。
 aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" --output json > "$output_dir/source.json"
+read -r current_version current_group <<< "$(
+  aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
+    --query 'DBInstances[0].[EngineVersion,DBParameterGroups[0].DBParameterGroupName]' --output text
+)"
+phase=$(resolve_migration_phase "$current_version" "$current_group" \
+  "$source_engine_version" "$source_db_parameter_group_name" \
+  "$target_engine_version" "$target_db_parameter_group_name")
+
+if [[ "$phase" == post_switchover ]]; then
+  echo "Already switched over: $source_id is ${current_version} with ${current_group}."
+  echo 'Green の検証は切替前に行うものであり、検証対象はない。'
+  echo "Artifacts: $output_dir"
+  exit 0
+fi
+
+# [読み取り] Source ARN と、その Source に対応する Blue/Green Deployment を取得する。
 source_arn=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
   --query 'DBInstances[0].DBInstanceArn' --output text)
 aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" --output json > "$output_dir/deployment.json"
@@ -53,7 +80,11 @@ read -r deployment_id target_arn status <<< "$(
   aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" \
     --query 'BlueGreenDeployments[0].[BlueGreenDeploymentIdentifier,Target,Status]' --output text
 )"
-[[ -n "$deployment_id" && "$deployment_id" != None ]] || { echo "Blue/Green Deployment not found" >&2; exit 1; }
+if [[ -z "$deployment_id" || "$deployment_id" == None ]]; then
+  echo "Blue/Green Deployment not found for $source_id" >&2
+  echo "Step 3（build_green.sh）が未実行か、config の actions.build が pending の可能性がある。" >&2
+  exit 1
+fi
 [[ "$status" == AVAILABLE ]] || { echo "Deployment is not AVAILABLE: $status" >&2; exit 1; }
 
 # [読み取り] Green DB のエンジン、クラス、パラメータグループ関連付け・適用状態を取得して宣言値と突合する。

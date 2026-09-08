@@ -2,6 +2,8 @@
 
 CloudFormation で CodePipeline と CodeBuild プロジェクトを作成する。テンプレートは 2 種類あり、S3 バケットと IAM ロールを自分で作るかどうかで使い分ける（後述の「2 つのテンプレート」）。
 
+デプロイ前に構成を確認する場合は [パイプライン構成図](codepipeline-structure.md) を参照する。ステージ・IAM 権限・実行シナリオをテンプレートの定義から起こしてある。
+
 AWS 側に用意するリソース、IAM、ネットワーク、Secrets、デプロイ・実行手順は [CodeBuild / CodePipeline セットアップ手順](codebuild-codepipeline-setup.md) を参照する。
 
 AWS 上の CodeBuild 実行時に限った外部接続先、接続条件、認証の解決方法は [CodeBuild 実環境の外部接続先と認証](codebuild-remote-external-access.md) を参照する。
@@ -14,11 +16,25 @@ codepipeline.yml:
                                Step 3       Step 4          人の承認        Step 5
 
 codepipeline-all-in-one.yml:
-  CodeConnections (GitHub) → PrecheckPG → BuildGreen → VerifyGreen
-                              Step 2 確認    Step 3       Step 4
-    → ManualApproval → Switchover → ManualApproval → Cleanup
-         人の承認         Step 5        人の承認       Step 7
+  CodeConnections (GitHub) → ReadApprovals → PrecheckPG → BuildGreen → VerifyGreen
+                             config を読む    Step 2 確認    Step 3       Step 4
+    → [Switchover]  承認 → 切替          ※ actions.switchover が approved のときだけ入る
+    → [Cleanup]     承認 → 削除          ※ actions.cleanup が approved のときだけ入る
 ```
+
+`[ ]` で囲んだステージには**入場条件**が付いている。`ReadApprovals` が config の `actions` をパイプライン変数として公開し、`BeforeEntry` の `VariableCheck` が `approved` でなければ**ステージごとスキップ**する。
+
+このため 1 本のパイプラインを各フェーズで繰り返し実行できる。
+
+| config の状態 | パイプラインの挙動 |
+|---|---|
+| `build: approved`、他は `pending` | 構築と検証まで実行。切替・後始末はスキップ → **成功で終了** |
+| `switchover: approved` を追加 | 再実行。構築は冪等に no-op、検証を通り、**切替の承認が表示される** |
+| `cleanup: approved` を追加 | 再実行。検証は「切替済みのため対象なし」で成功、**後始末の承認が表示される** |
+
+手動承認は**その操作が config で承認されているときだけ表示される**。何も起きない承認をクリックする状況が生じないため、承認の形骸化を防げる。承認ゲートの実体は従来どおり config の `actions` にあり、運用は変わらない。
+
+> ステージ条件（`BeforeEntry` の `Result: SKIP`）は比較的新しい CodePipeline の機能である。利用できない場合は `BeforeEntry` ブロックを削除すればよい。その場合、承認は毎回表示されるが、`pending` のアクションは CodeBuild 側で no-op するため動作自体は変わらない。
 
 CodePipeline は `DetectChanges: false` のため、GitHub への push で自動開始しない。作業者は CloudFormation でスタックを作成後、`aws codepipeline start-pipeline-execution` または AWS Console から明示的に開始する。実行するスクリプトと buildspec は 2 つのテンプレートで共通である。
 
@@ -40,6 +56,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 
 | CodeBuild プロジェクト | buildspec | 既存スクリプト | 実行条件 |
 |---|---|---|---|
+| `ReadApprovalsProject` | `ci/codebuild/read-approvals.yml` | `scripts/read_action_approvals.sh` | AWS API を呼ばない。config を読むだけ |
 | `PrecheckProject` | `ci/codebuild/precheck-target-parameter-group.yml` | `scripts/check_target_parameter_group.sh` | 読み取りのみ。常に実行 |
 | `BuildGreenProject` | `ci/codebuild/build-green.yml` | `scripts/build_green.sh` | `actions.build: approved` の場合だけ作成 |
 | `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.sh` | 常に AWS API 検証を実行 |

@@ -18,7 +18,7 @@ phases:
   install:
     commands:
       # --- 診断: sh / bash 問題の切り分け用。原因が確定したら削除する ---------
-      - ls -l scripts/verify_green.sh scripts/lib/
+      - ls -l scripts/*.sh scripts/lib/*.sh
       - head -1 scripts/verify_green.sh | od -c | head -1
       - 'echo "shell=$0 bash=$(command -v bash)"; bash --version | head -1'
       # --- 診断ここまで -----------------------------------------------------

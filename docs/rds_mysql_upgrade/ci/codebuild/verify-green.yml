@@ -1,48 +1,97 @@
 # CodePipeline の VerifyGreen ステージから実行する CodeBuild buildspec。
 # COLLECT_MYSQL_RUNTIME_VALUES は既定 false。true のときだけ Green DB へ接続する。
+#
+# コマンドは意図的に細かく分けている。CodeBuild は 1 つの `- ` を 1 コマンドとして
+# ログに出すため、まとめて書くとどこで落ちたのか分からなくなる。
+#
+# また、各コマンドは POSIX シェル互換で書いてある（`[[ ]]` / `<<<` / `-o pipefail`
+# を使わない）。CodeBuild の既定シェルが /bin/sh の環境でも同じ動作になる。
+# buildspec 0.2 は同一フェーズのコマンドを同じシェルで実行するため、
+# 変数は次のコマンドへ引き継がれる。
 version: 0.2
+
+env:
+  # Linux で指定できるのは bash または /bin/sh。明示しておく。
+  shell: bash
 
 phases:
   install:
     commands:
+      # --- 診断: sh / bash 問題の切り分け用。原因が確定したら削除する ---------
+      - ls -l scripts/verify_green.sh scripts/lib/
+      - head -1 scripts/verify_green.sh | od -c | head -1
+      - 'echo "shell=$0 bash=$(command -v bash)"; bash --version | head -1'
+      # --- 診断ここまで -----------------------------------------------------
+
+      # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
+      # 落ちていれば復元し、落ちていなければ何も変わらない。
+      - chmod +x scripts/*.sh scripts/lib/*.sh
       - python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
-  build:
+
+  pre_build:
     commands:
+      # 1. ビルドするアーキテクチャを決める
       - |
-        set -euo pipefail
+        set -eu
         case "$(uname -m)" in
-          x86_64) build_platform=linux/amd64 ;;
-          aarch64|arm64) build_platform=linux/arm64 ;;
+          x86_64)        BUILD_PLATFORM=linux/amd64 ;;
+          aarch64|arm64) BUILD_PLATFORM=linux/arm64 ;;
           *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 2 ;;
         esac
-        docker buildx build \
-          --platform "$build_platform" \
-          --file ci/Dockerfile.green-verification-report \
-          --target export \
-          --output type=local,dest=.tools/green-report \
-          .
-        report_generator="$CODEBUILD_SRC_DIR/.tools/green-report/generate_green_verification_report"
-        if [[ "${COLLECT_MYSQL_RUNTIME_VALUES}" == "true" ]]; then
-          test -n "${MYSQL_CREDENTIALS_SECRET_ID}" || {
+        echo "BUILD_PLATFORM=${BUILD_PLATFORM}"
+      # 2. Go レポート生成器をマルチステージビルドで作る（PrivilegedMode: true が必要）
+      - >-
+        docker buildx build
+        --platform "$BUILD_PLATFORM"
+        --file ci/Dockerfile.green-verification-report
+        --target export
+        --output type=local,dest=.tools/green-report
+        .
+      # 3. バイナリが取り出せたことを確認する
+      - GREEN_REPORT_GENERATOR="$CODEBUILD_SRC_DIR/.tools/green-report/generate_green_verification_report"
+      - ls -l "$GREEN_REPORT_GENERATOR"
+      - chmod +x "$GREEN_REPORT_GENERATOR"
+      - export GREEN_REPORT_GENERATOR
+
+  build:
+    commands:
+      # 4. MySQL 実効値収集を行う場合だけ、接続に必要な準備をする
+      - |
+        set -eu
+        if [ "${COLLECT_MYSQL_RUNTIME_VALUES}" = "true" ]; then
+          if [ -z "${MYSQL_CREDENTIALS_SECRET_ID}" ]; then
             echo 'MYSQL_CREDENTIALS_SECRET_ID is required when runtime collection is enabled.' >&2
             exit 2
-          }
-          # Secrets Manager の JSON の username / password を、その build プロセスだけに渡す。
+          fi
+          command -v mysql >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y mysql-client; }
+        else
+          echo 'COLLECT_MYSQL_RUNTIME_VALUES=false のため Green DB へは接続しない。'
+        fi
+      # 5. 認証情報は取得した値をログへ出さず、このシェルの環境変数にだけ置く
+      - |
+        set -eu
+        if [ "${COLLECT_MYSQL_RUNTIME_VALUES}" = "true" ]; then
           secret_json=$(aws secretsmanager get-secret-value \
             --secret-id "$MYSQL_CREDENTIALS_SECRET_ID" \
             --query SecretString --output text)
-          export MYSQL_USER
-          export MYSQL_PASSWORD
-          MYSQL_USER=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["username"])' <<<"$secret_json")
-          MYSQL_PASSWORD=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])' <<<"$secret_json")
-          command -v mysql >/dev/null 2>&1 || {
-            sudo apt-get update
-            sudo apt-get install -y mysql-client
-          }
-          GREEN_REPORT_GENERATOR="$report_generator" scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" \
-            --mysql-user "$MYSQL_USER" --mysql-password-env MYSQL_PASSWORD --output-dir artifacts
+          MYSQL_USER=$(printf '%s' "$secret_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["username"])')
+          MYSQL_PASSWORD=$(printf '%s' "$secret_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')
+          export MYSQL_USER MYSQL_PASSWORD
+          unset secret_json
+          echo "MySQL 接続ユーザーを取得した（値は出力しない）。"
+        fi
+      # 6. 検証本体。Step 4 の判定はこのスクリプトが行う
+      - |
+        set -eu
+        if [ "${COLLECT_MYSQL_RUNTIME_VALUES}" = "true" ]; then
+          scripts/verify_green.sh \
+            --config "$CONFIG_FILE" --service "$SERVICE_NAME" \
+            --mysql-user "$MYSQL_USER" --mysql-password-env MYSQL_PASSWORD \
+            --output-dir artifacts
         else
-          GREEN_REPORT_GENERATOR="$report_generator" scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
+          scripts/verify_green.sh \
+            --config "$CONFIG_FILE" --service "$SERVICE_NAME" \
+            --output-dir artifacts
         fi
 
 artifacts:

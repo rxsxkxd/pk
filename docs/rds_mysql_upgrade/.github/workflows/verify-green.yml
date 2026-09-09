@@ -12,11 +12,6 @@ on:
         description: config 内のサービス名
         required: true
         type: string
-      collect_mysql_runtime_values:
-        description: Green DB に MySQL 接続して実効値を収集する（ネットワーク到達性と Secrets が必要）
-        required: true
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -68,25 +63,18 @@ jobs:
             --target export \
             --output type=local,dest=.tools/green-report \
             .
-      - name: Install MySQL client
-        if: inputs.collect_mysql_runtime_values
-        run: sudo apt-get update && sudo apt-get install -y mysql-client
-      - name: Check database connection secrets
-        if: inputs.collect_mysql_runtime_values
-        env:
-          # GitHub Environment ごとに設定する Secrets。値はログ・成果物へ出力しない。
-          MYSQL_USER: ${{ secrets.RDS_MYSQL_USER }}
-          MYSQL_PASSWORD: ${{ secrets.RDS_MYSQL_PASSWORD }}
-        run: test -n "$MYSQL_USER" && test -n "$MYSQL_PASSWORD"
-      - name: Step 4 — verify Green configuration and replication lag (AWS API only)
-        if: ${{ !inputs.collect_mysql_runtime_values }}
-        run: GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" scripts/verify_green.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --output-dir artifacts
-      - name: Step 4 — verify Green configuration, replication lag, and MySQL runtime values
-        if: inputs.collect_mysql_runtime_values
-        env:
-          MYSQL_USER: ${{ secrets.RDS_MYSQL_USER }}
-          MYSQL_PASSWORD: ${{ secrets.RDS_MYSQL_PASSWORD }}
-        run: GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" scripts/verify_green.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --mysql-user "$MYSQL_USER" --mysql-password-env MYSQL_PASSWORD --output-dir artifacts
+      # MySQL 実効値収集を行うかは config の mysql_verification.enabled が決める。
+      # 接続方式（secrets_manager / parameter_store / plaintext / prompt）も config が持ち、
+      # verify_green.sh が解決する。prompt は対話入力のため CI では成立しない。
+      - name: Install MySQL client when the config requires runtime collection
+        run: |
+          enabled=$(python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); m = d["services"][sys.argv[2]].get("mysql_verification") or {}; print("true" if m.get("enabled") else "false")' 'config/blue-green/${{ inputs.environment }}.yml' '${{ inputs.service }}')
+          echo "mysql_verification.enabled=$enabled"
+          if [ "$enabled" = "true" ]; then
+            sudo apt-get update && sudo apt-get install -y mysql-client
+          fi
+      - name: Step 4 — verify Green configuration and replication lag
+        run: GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" scripts/verify_green.sh --config 'config/blue-green/${{ inputs.environment }}.yml' --service '${{ inputs.service }}' --output-dir artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

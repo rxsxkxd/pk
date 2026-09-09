@@ -24,6 +24,8 @@ mkdir -p "$output_dir"
 
 # shellcheck source=lib/migration_phase.sh
 source "$(dirname "$0")/lib/migration_phase.sh"
+# shellcheck source=lib/mysql_credentials.sh
+source "$(dirname "$0")/lib/mysql_credentials.sh"
 
 # YAML の読み込みは 1 回だけ行い、以降は python3 -c を呼ばずシェル変数として使う。
 eval "$(python3 -c '
@@ -103,15 +105,34 @@ green_pg_apply_status=$(aws "${aws_args[@]}" rds describe-db-instances --db-inst
 
 # [DB 読み取り・任意] GitHub Environment Secret 等で接続情報が提供された場合、Green の
 # MySQL 実効値を収集する。実効値はレポートにのみ掲載し、YAML との比較判定には使わない。
-if [[ -n "$mysql_user" && -z "$runtime_values_file" ]]; then
+# [DB 読み取り・任意] Green の実効値を収集する。
+# 接続方式は設定ファイルの mysql_verification が決める（secrets_manager / parameter_store /
+# plaintext / prompt）。--mysql-user を明示した場合は従来どおり呼び出し側の環境変数を使う。
+read_mysql_verification_config "$config" "$service"
+if [[ -n "$mysql_user" ]]; then
+  # 後方互換: 呼び出し側が利用者とパスワード環境変数を直接指定した場合。
+  MYSQL_VERIFY_USER="$mysql_user"
+  MYSQL_VERIFY_PASSWORD="${!mysql_password_env:-}"
+  MYSQL_VERIFY_ENABLED=true
+elif [[ "$MYSQL_VERIFY_ENABLED" == true ]]; then
+  resolve_mysql_password "$region" "$profile"
+fi
+
+if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then
   green_endpoint=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$target_id" \
     --query 'DBInstances[0].Endpoint.Address' --output text)
-  "$(dirname "$0")/collect_green_runtime_values.sh" \
-    --template "$target_parameter_group_template_path" \
-    --host "$green_endpoint" \
-    --user "$mysql_user" \
-    --password-env "$mysql_password_env" \
+  collect_args=(
+    --template "$target_parameter_group_template_path"
+    --host "$green_endpoint"
+    --user "$MYSQL_VERIFY_USER"
+    --password-env MYSQL_VERIFY_PASSWORD
     --output "$output_dir/green-runtime-values.json"
+  )
+  # CA バンドルを指定した場合だけ TLS を検証する。パスワードを平文で流さないため推奨する。
+  [[ -n "$MYSQL_VERIFY_SSL_CA" ]] && collect_args+=(--ssl-ca "$MYSQL_VERIFY_SSL_CA")
+  export MYSQL_VERIFY_PASSWORD
+  "$(dirname "$0")/collect_green_runtime_values.sh" "${collect_args[@]}"
+  unset MYSQL_VERIFY_PASSWORD
   runtime_values_file="$output_dir/green-runtime-values.json"
 fi
 

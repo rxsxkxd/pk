@@ -79,6 +79,13 @@ Parameters:
       CollectMySqlRuntimeValues=true のときだけ使う Secrets Manager の secret 名または ARN。
       JSON の username / password を読み取る。
 
+  MySqlCredentialsParameterArn:
+    Type: String
+    Default: ''
+    Description: >-
+      config の mysql_verification.auth_method: parameter_store を使う場合の
+      SSM パラメータ ARN。空なら Parameter Store の読み取り権限を付与しない。
+
   ApprovalNotificationTopicArn:
     Type: String
     Default: ''
@@ -95,6 +102,9 @@ Parameters:
 Conditions:
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
   HasMySqlSecret: !Not [!Equals [!Ref MySqlCredentialsSecretId, '']]
+  HasMySqlParameter: !Not [!Equals [!Ref MySqlCredentialsParameterArn, '']]
+  # config の mysql_verification がどちらの方式でも読めるように、いずれか指定があれば権限を付ける。
+  HasMySqlCredentials: !Or [!Condition HasMySqlSecret, !Condition HasMySqlParameter]
 
 Resources:
 
@@ -274,17 +284,31 @@ Resources:
             Principal: { Service: codebuild.amazonaws.com }
             Action: 'sts:AssumeRole'
       ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
-      # secret 未指定なら Policies ごと省く（空リストは IAM に渡さない）。
+      # どちらの認証情報も未指定なら Policies ごと省く（空リストは IAM に渡さない）。
       Policies: !If
-        - HasMySqlSecret
+        - HasMySqlCredentials
         - - PolicyName: read-mysql-credentials
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
-                - Sid: GetMySqlSecret
-                  Effect: Allow
-                  Action: 'secretsmanager:GetSecretValue'
-                  Resource: !Ref MySqlCredentialsSecretId
+                # auth_method: secrets_manager
+                - !If
+                  - HasMySqlSecret
+                  - Sid: GetMySqlSecret
+                    Effect: Allow
+                    Action: 'secretsmanager:GetSecretValue'
+                    Resource: !Ref MySqlCredentialsSecretId
+                  - !Ref 'AWS::NoValue'
+                # auth_method: parameter_store（SecureString の復号に KMS も要る）
+                - !If
+                  - HasMySqlParameter
+                  - Sid: GetMySqlParameter
+                    Effect: Allow
+                    Action:
+                      - 'ssm:GetParameter'
+                      - 'ssm:GetParameters'
+                    Resource: !Ref MySqlCredentialsParameterArn
+                  - !Ref 'AWS::NoValue'
         - !Ref 'AWS::NoValue'
 
   # Step 5: 切替のみ。作成・削除の権限は持たせない。

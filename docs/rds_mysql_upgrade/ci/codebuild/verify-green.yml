@@ -55,44 +55,18 @@ phases:
 
   build:
     commands:
-      # 4. MySQL 実効値収集を行う場合だけ、接続に必要な準備をする
+      # 4. 設定ファイルが MySQL 実効値収集を要求している場合だけクライアントを入れる。
+      #    接続方式（secrets_manager / parameter_store / plaintext / prompt）は
+      #    config の mysql_verification が決め、verify_green.sh が解決する。
       - |
         set -eu
-        if [ "${COLLECT_MYSQL_RUNTIME_VALUES}" = "true" ]; then
-          if [ -z "${MYSQL_CREDENTIALS_SECRET_ID}" ]; then
-            echo 'MYSQL_CREDENTIALS_SECRET_ID is required when runtime collection is enabled.' >&2
-            exit 2
-          fi
+        MYSQL_ENABLED=$(python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); m = d["services"][sys.argv[2]].get("mysql_verification") or {}; print("true" if m.get("enabled") else "false")' "$CONFIG_FILE" "$SERVICE_NAME")
+        echo "mysql_verification.enabled=${MYSQL_ENABLED}"
+        if [ "$MYSQL_ENABLED" = "true" ]; then
           command -v mysql >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y mysql-client; }
-        else
-          echo 'COLLECT_MYSQL_RUNTIME_VALUES=false のため Green DB へは接続しない。'
         fi
-      # 5. 認証情報は取得した値をログへ出さず、このシェルの環境変数にだけ置く
-      - |
-        set -eu
-        if [ "${COLLECT_MYSQL_RUNTIME_VALUES}" = "true" ]; then
-          secret_json=$(aws secretsmanager get-secret-value \
-            --secret-id "$MYSQL_CREDENTIALS_SECRET_ID" \
-            --query SecretString --output text)
-          MYSQL_USER=$(printf '%s' "$secret_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["username"])')
-          MYSQL_PASSWORD=$(printf '%s' "$secret_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')
-          export MYSQL_USER MYSQL_PASSWORD
-          unset secret_json
-          echo "MySQL 接続ユーザーを取得した（値は出力しない）。"
-        fi
-      # 6. 検証本体。Step 4 の判定はこのスクリプトが行う
-      - |
-        set -eu
-        if [ "${COLLECT_MYSQL_RUNTIME_VALUES}" = "true" ]; then
-          scripts/verify_green.sh \
-            --config "$CONFIG_FILE" --service "$SERVICE_NAME" \
-            --mysql-user "$MYSQL_USER" --mysql-password-env MYSQL_PASSWORD \
-            --output-dir artifacts
-        else
-          scripts/verify_green.sh \
-            --config "$CONFIG_FILE" --service "$SERVICE_NAME" \
-            --output-dir artifacts
-        fi
+      # 5. 検証本体。Step 4 の判定はこのスクリプトが行う。
+      - scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
 
 artifacts:
   files:

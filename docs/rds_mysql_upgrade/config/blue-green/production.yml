@@ -27,6 +27,28 @@ services:
     # Step 7 で旧 Blue を削除する際の最終スナップショット名。
     # 固定名にすることで、途中失敗後の再実行でスナップショットが増殖しない。
     final_snapshot_identifier: example-service-production-mysql80-final
+    # Step 4 の MySQL 実効値収集と、Step 7 の逆レプリケーション確認で使う接続設定。
+    # enabled: false のときは DB へ接続せず、AWS API による検証だけを行う。
+    #
+    # auth_method（パスワードの取得方法）:
+    #   secrets_manager  Secrets Manager のシークレット。JSON の password を読む
+    #                    → secret_id を指定する
+    #   parameter_store  SSM Parameter Store の SecureString
+    #                    → parameter_name を指定する
+    #   plaintext        このファイルに直書き。**テスト環境専用**
+    #                    → password を指定する。production では拒否される
+    #   prompt           対話入力。ローカル実行専用（CI では成立しない）
+    #   （iam / IAM データベース認証は未実装。設定すると明示的に失敗する）
+    mysql_verification:
+      enabled: false
+      user: verifier
+      auth_method: prompt
+      # production では plaintext を使用できないため password キーは置かない。
+      secret_id: ''
+      parameter_name: ''
+      # TLS 用の CA バンドル。指定すると ssl-mode=VERIFY_CA で接続する。
+      ssl_ca: ''
+      port: 3306
     actions:
       build: pending
       switchover: pending

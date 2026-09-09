@@ -33,7 +33,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - **宣言と実環境の突き合わせ（reconciliation）。** 設定ファイルは進捗の記録ではなく「このアクションを実行してよい」という人間の宣言（`pending` / `approved`）を持つ。CI は毎回 AWS の実状態を読み、未適用なら適用、適用済みなら何もしない。**CI が設定ファイルへ書き戻すことはしない。** `approved` → `pending` に戻しても適用済みのものは取り消さない。
 - **識別子は AWS から引き当てる。** Deployment ID を設定ファイルに持たず、`describe-blue-green-deployments --filters Name=source,Values=$source_arn` で毎回解決する。これにより再実行・リトライ・同時トリガーで二重作成・二重切替が起こらない。
 - **冪等性は二層で担保する。** ① 移行元インスタンスのエンジンバージョンとパラメータグループで「結果」を観測し（`scripts/lib/migration_phase.sh`）、② Deployment の `Status` を安全弁として併用する。切替時に blue が `-old1` へリネームされるため、`source_db_instance_identifier` が指す実体は切替の前後で変わる。この判定は Deployment が cleanup で削除された後も機能する。**終了コードは「操作を実行したか」ではなく「望ましい終了状態に到達しているか」で決める**（到達 = `0`、未到達かつ自動では到達不能 = `1`）。設計の背景は `decisions/idempotency-strategy.md`。
-- **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。CI 側の MySQL 実効値収集（`verify_green.sh` の `--mysql-user`）は既定 `false` の任意機能であり、パスワードは `MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。
+- **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。MySQL 接続は設定ファイルの `mysql_verification` が制御する（既定 `enabled: false`）。パスワードの取得方法は `auth_method` で選ぶ（`secrets_manager` / `parameter_store` / `plaintext` / `prompt`）。解決は `scripts/lib/mysql_credentials.sh` が担い、値は `MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。**`plaintext` は設定ファイルが Git 追跡対象であるためテスト環境専用で、`environment: production` では拒否される。**`iam`（IAM データベース認証）は未実装で、設定すると明示的に失敗する。
 - **RDS パラメータグループの変更経路は CloudFormation のみ。** Blue/Green Deployment 自体は CFn カスタムリソースを使わず AWS CLI で扱う。
 - 破壊的 RDS 権限（`rds:DeleteDBInstance` 等）は CI 実行ロールにのみ付与する。作業者には CloudFormation スタック操作権限だけを与える。
 
@@ -98,6 +98,9 @@ bash -n scripts/*.sh scripts/lib/*.sh
 
 # 移行フェーズ判定のテーブル駆動テスト（AWS へ接続しない）
 scripts/lib/migration_phase_test.sh
+
+# MySQL 接続方式の解決テスト（AWS へ接続しない）
+scripts/lib/mysql_credentials_test.sh
 
 # Ruby スクリプトの回帰確認（サンプル入力で再生成し、examples/ の出力との差分を見る）
 # このサンプルは「要レビュー」が 1 件残るため終了コード 1 が正常

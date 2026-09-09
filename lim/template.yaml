@@ -1,0 +1,349 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  S3 上の画像の上半分にガウスぼかしを適用してマスキングし、別バケットへ保存する。
+  設計: docs/image-blur-lambda-design.md
+
+Parameters:
+  Env:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, stg, prod]
+  RawRetentionDays:
+    Type: Number
+    Default: 30
+    Description: 原本（未マスク）画像の保持日数。短いほど漏洩リスクが小さい。
+  MaskHeightRatio:
+    Type: String
+    Default: '0.5'
+    Description: 画像上部からマスクする高さの比率。0.5 = 上半分。
+  BlurRatio:
+    Type: String
+    Default: '0.04'
+    Description: ぼかし半径を短辺に対する比率で指定。絶対値では指定させない。
+  MaxAllowedLaplacianVar:
+    Type: String
+    Default: '5.0'
+    Description: マスク強度の自己検証しきい値。超えたら出力せず DLQ へ送る。
+
+Globals:
+  Function:
+    Runtime: provided.al2023
+    Architectures: [arm64]
+    Timeout: 60
+    MemorySize: 2048
+    Tracing: Active
+    LoggingConfig:
+      LogFormat: JSON
+
+Resources:
+  # ---------- KMS: 原本用と出力用でキーを分け、原本を復号できる主体を最小化する ----------
+  RawKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub 'image-mask ${Env} raw (unmasked) originals'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+
+  MaskedKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub 'image-mask ${Env} masked outputs'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root' }
+            Action: 'kms:*'
+            Resource: '*'
+
+  # ---------- 原本バケット: 機密。読めるのは Lambda だけ ----------
+  RawBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'image-mask-raw-${Env}-${AWS::AccountId}'
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref RawKey
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          # 原本を持ち続けることが最大のリスクなので、期限で確実に消す。
+          - Id: expire-originals
+            Status: Enabled
+            Prefix: uploads/
+            ExpirationInDays: !Ref RawRetentionDays
+            NoncurrentVersionExpiration: { NoncurrentDays: 1 }
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+
+  RawBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RawBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt RawBucket.Arn
+              - !Sub '${RawBucket.Arn}/*'
+            Condition:
+              Bool: { 'aws:SecureTransport': false }
+
+  # ---------- マスク済バケット: 出力先。原本と必ず分ける ----------
+  MaskedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'image-mask-out-${Env}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref MaskedKey
+            BucketKeyEnabled: true
+
+  MaskedBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MaskedBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt MaskedBucket.Arn
+              - !Sub '${MaskedBucket.Arn}/*'
+            Condition:
+              Bool: { 'aws:SecureTransport': false }
+          - Sid: OnlyMaskFunctionMayWrite
+            # 原本が誤ってここへコピーされる経路を塞ぐ。
+            Effect: Deny
+            Principal: '*'
+            Action: ['s3:PutObject', 's3:PutObjectAcl']
+            Resource: !Sub '${MaskedBucket.Arn}/*'
+            Condition:
+              StringNotEquals:
+                'aws:PrincipalArn': !GetAtt MaskFunctionRole.Arn
+
+  # ---------- 失敗イベントの退避先 ----------
+  DLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub 'image-mask-dlq-${Env}'
+      MessageRetentionPeriod: 1209600 # 14 日
+      SqsManagedSseEnabled: true
+
+  # ---------- Lambda ----------
+  MaskFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      FunctionName: !Sub 'image-mask-${Env}'
+      CodeUri: ./cmd/mask
+      Handler: bootstrap
+      ReservedConcurrentExecutions: 200
+      Environment:
+        Variables:
+          OUTPUT_BUCKET: !Ref MaskedBucket
+          INPUT_PREFIX: uploads/
+          OUTPUT_PREFIX: masked/
+          MASKING_POLICY_VERSION: v1
+          MASK_HEIGHT_RATIO: !Ref MaskHeightRatio
+          MIN_BLUR_RATIO: !Ref BlurRatio
+          MIN_BLUR_RADIUS_PX: '8'
+          DOWNSCALE_FACTOR: '1'
+          MAX_ALLOWED_LAPLACIAN_VAR: !Ref MaxAllowedLaplacianVar
+          MAX_INPUT_BYTES: '20971520'
+          MAX_INPUT_PIXELS: '64000000'
+          JPEG_QUALITY: '85'
+          LOG_LEVEL: INFO
+      Events:
+        ImageUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawBucket
+            Events: 's3:ObjectCreated:*'
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uploads/
+      EventInvokeConfig:
+        MaximumRetryAttempts: 2
+        MaximumEventAgeInSeconds: 3600
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt DLQ.Arn
+      Policies:
+        # 最小権限。出力バケットへは「書くだけ」で読めない。
+        - Statement:
+            - Sid: ReadOriginals
+              Effect: Allow
+              Action: ['s3:GetObject', 's3:GetObjectVersion']
+              Resource: !Sub '${RawBucket.Arn}/uploads/*'
+            - Sid: WriteMasked
+              Effect: Allow
+              Action: 's3:PutObject'
+              Resource: !Sub '${MaskedBucket.Arn}/masked/*'
+            - Sid: HeadMaskedForIdempotency
+              Effect: Allow
+              Action: 's3:GetObject'
+              Resource: !Sub '${MaskedBucket.Arn}/masked/*'
+            - Sid: DecryptOriginals
+              Effect: Allow
+              Action: ['kms:Decrypt', 'kms:DescribeKey']
+              Resource: !GetAtt RawKey.Arn
+            - Sid: EncryptMasked
+              Effect: Allow
+              Action: ['kms:GenerateDataKey', 'kms:Encrypt', 'kms:DescribeKey']
+              Resource: !GetAtt MaskedKey.Arn
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DLQ.QueueName
+
+  # ---------- 監査: 誰がいつ原本を取得したかを記録する (FR-11) ----------
+  TrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'image-mask-trail-${Env}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+
+  TrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: 's3:GetBucketAcl'
+            Resource: !GetAtt TrailBucket.Arn
+          - Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: 's3:PutObject'
+            Resource: !Sub '${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              StringEquals: { 's3:x-amz-acl': bucket-owner-full-control }
+
+  Trail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: TrailBucketPolicy
+    Properties:
+      TrailName: !Sub 'image-mask-${Env}'
+      S3BucketName: !Ref TrailBucket
+      IsLogging: true
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: false
+          DataResources:
+            - Type: 'AWS::S3::Object'
+              Values: [!Sub '${RawBucket.Arn}/uploads/']
+
+  # ---------- アラーム ----------
+  MaskStrengthCheckFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-strength-check-failed'
+      AlarmDescription: >
+        マスク強度の自己検証に失敗した。出力は行われていないが、
+        半径算出やパラメータに問題がある可能性が高い。即調査。
+      Namespace: ImageMask
+      MetricName: StrengthCheckFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-errors'
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref MaskFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  DLQNotEmptyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-dlq-not-empty'
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions: [{ Name: QueueName, Value: !GetAtt DLQ.QueueName }]
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-throttles'
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions: [{ Name: FunctionName, Value: !Ref MaskFunction }]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+Outputs:
+  RawBucketName:
+    Description: 原本のアップロード先（uploads/ 配下に置く）
+    Value: !Ref RawBucket
+  MaskedBucketName:
+    Description: マスク済画像の出力先
+    Value: !Ref MaskedBucket
+  DLQUrl:
+    Description: 失敗イベントの退避先
+    Value: !Ref DLQ
+  FunctionName:
+    Value: !Ref MaskFunction

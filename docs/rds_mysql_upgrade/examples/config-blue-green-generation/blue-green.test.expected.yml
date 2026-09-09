@@ -1,0 +1,19 @@
+# test 用カタログとダミー RDS インベントリから生成される期待結果。
+environment: test
+aws_region: ap-northeast-1
+services:
+  example-service-test:
+    source_db_instance_identifier: example-service-test-mysql80
+    source_engine_version: "8.0"
+    source_db_parameter_group_name: example-service-test-mysql80-v1
+    target_engine_version: "8.4.10"
+    target_db_instance_class: db.t4g.medium
+    target_db_parameter_group_name: example-service-test-mysql84-v1
+    target_parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-mysql84.yaml
+    protection_snapshot_identifier: example-service-test-mysql80-pre-bg
+    final_snapshot_identifier: example-service-test-mysql80-final
+    actions:
+      build: pending
+      switchover: pending
+      switchover_timeout: 300
+      cleanup: pending

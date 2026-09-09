@@ -1,0 +1,15 @@
+{
+  "DBInstances": [
+    {
+      "DBInstanceIdentifier": "example-service-test-mysql80",
+      "Engine": "mysql",
+      "EngineVersion": "8.0.44",
+      "DBParameterGroups": [
+        {
+          "DBParameterGroupName": "example-service-test-mysql80-v1",
+          "ParameterApplyStatus": "in-sync"
+        }
+      ]
+    }
+  ]
+}

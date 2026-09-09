@@ -1,0 +1,15 @@
+# 自動テスト専用の移行カタログ。実環境の staging / production は使用しない。
+environments:
+  test:
+    aws_region: ap-northeast-1
+    migration_units:
+      example-service-test:
+        source_db_instance_identifier: example-service-test-mysql80
+        databases:
+          - name: example_service_test
+            applications: [example-service-test]
+        target:
+          engine_version: "8.4.10"
+          db_instance_class: db.t4g.medium
+          db_parameter_group_name: example-service-test-mysql84-v1
+          parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-mysql84.yaml

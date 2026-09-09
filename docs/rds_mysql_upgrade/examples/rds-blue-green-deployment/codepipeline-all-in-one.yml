@@ -196,6 +196,8 @@ Resources:
               - 'rds:DescribeDBInstances'
               - 'rds:DescribeDBParameters'
               - 'rds:DescribeDBParameterGroups'
+              # Blue/Green 作成時に引き継がれる移行元 OptionGroup の確認に使う。
+              - 'rds:DescribeOptionGroups'
               - 'rds:DescribeDBSnapshots'
               - 'rds:DescribeBlueGreenDeployments'
               - 'rds:DescribeDBEngineVersions'
@@ -266,11 +268,16 @@ Resources:
                   - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:${DbInstanceIdentifierPrefix}*'
               - Sid: CreateBlueGreenDeployment
                 Effect: Allow
-                # 作成対象の Deployment は事前に ARN が定まらないため * を含む。
-                Action: 'rds:CreateBlueGreenDeployment'
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:${DbInstanceIdentifierPrefix}*'
-                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:deployment:*'
+                # Blue/Green の Green DB、関連する DB parameter group／OptionGroup は RDS が
+                # 内部命名で作成・関連付けする。AWS はこの操作に部分一致 ARN を使えず、
+                # Resource: * を要求している。対象は本アクション群だけに限定する。
+                # CreateBlueGreenDeployment の従属操作として、RDS が Green のレプリカを
+                # 作成し、作成リソースへタグを付与するための権限も含める。
+                Action:
+                  - 'rds:CreateBlueGreenDeployment'
+                  - 'rds:CreateDBInstanceReadReplica'
+                  - 'rds:AddTagsToResource'
+                Resource: '*'
 
   # Step 4: 読み取りのみ。Docker ビルドは IAM ではなく PrivilegedMode で許可する。
   VerifyGreenRole:

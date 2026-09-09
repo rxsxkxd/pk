@@ -24,10 +24,51 @@ end.parse!
   abort "--#{key.to_s.tr('_', '-')} is required." unless options[key]
 end
 
-template = YAML.load_file(options[:template])
+# CloudFormation の短縮記法（!Ref / !Sub など）を長形式へ正規化して読み込む。
+# Psych はタグを黙って捨てて引数の文字列だけを残すため、そのままでは
+# `!Ref Workers` が "Workers" という値に化け、RDS の実値と誤って比較される。
+def cfn_intrinsic_key(tag)
+  return nil unless tag.is_a?(String) && tag.start_with?('!') && !tag.start_with?('!!')
+
+  name = tag[1..]
+  %w[Ref Condition].include?(name) ? name : "Fn::#{name}"
+end
+
+def cfn_node_to_ruby(node)
+  key = cfn_intrinsic_key(node.tag)
+  if key
+    inner = case node
+            when Psych::Nodes::Scalar then node.value
+            when Psych::Nodes::Sequence then node.children.map { |child| cfn_node_to_ruby(child) }
+            else node.children.each_slice(2).to_h { |k, v| [cfn_node_to_ruby(k), cfn_node_to_ruby(v)] }
+            end
+    return { key => inner }
+  end
+
+  case node
+  when Psych::Nodes::Mapping
+    node.children.each_slice(2).to_h { |k, v| [cfn_node_to_ruby(k), cfn_node_to_ruby(v)] }
+  when Psych::Nodes::Sequence
+    node.children.map { |child| cfn_node_to_ruby(child) }
+  else
+    node.to_ruby
+  end
+end
+
+def cfn_load_file(path)
+  document = YAML.parse_file(path)
+  document ? cfn_node_to_ruby(document.root) : {}
+end
+
+template = cfn_load_file(options[:template])
 resource = template.fetch('Resources').values.find { |item| item['Type'] == 'AWS::RDS::DBParameterGroup' }
 abort "#{options[:template]}: AWS::RDS::DBParameterGroup が見つかりません。" unless resource
-expected = resource.fetch('Properties').fetch('Parameters', {}).transform_values(&:to_s)
+declared = resource.fetch('Properties').fetch('Parameters', {})
+# 値が組み込み関数（Ref / Fn::*）の項目は、CloudFormation のパラメータ解決なしには
+# 実値が決まらない。比較すると誤ったドリフトになるため、比較対象から外して明示する。
+unresolved = declared.select { |_, value| value.is_a?(Hash) || value.is_a?(Array) }
+                     .transform_values { |value| value.is_a?(Hash) ? value.keys.first : 'Fn::*' }
+expected = declared.reject { |name, _| unresolved.key?(name) }.transform_values(&:to_s)
 
 read_parameters = lambda do |path|
   JSON.parse(File.read(path)).fetch('Parameters').each_with_object({}) do |parameter, result|
@@ -66,7 +107,7 @@ File.open(options[:output], 'w') do |file|
   file.puts
   file.puts '## 2. パラメーターグループ設定と YAML の一致'
   file.puts
-  parameter_names = (parameter_names + runtime.keys).uniq.sort
+  parameter_names = (parameter_names + runtime.keys + unresolved.keys).uniq.sort
   file.puts '| Parameter | CloudFormation YAML の宣言値 | RDS PG Source=user | 比較バリデーション | RDS PG Source=system | MySQL 実効値 | RDS PG が返す Source |'
   file.puts '|---|---|---|---|---|---|---|'
   parameter_names.each do |name|
@@ -74,13 +115,16 @@ File.open(options[:output], 'w') do |file|
     user_value = user.dig(name, 'ParameterValue')
     system_value = system.dig(name, 'ParameterValue')
     rds_source = all.dig(name, 'Source')
-    result = if yaml_value && user_value
+    result = if unresolved.key?(name)
+               "比較不能（#{unresolved[name]}）"
+             elsif yaml_value && user_value
                yaml_value == user_value.to_s ? '一致' : '不一致'
              elsif yaml_value
                'YAML のみ（RDS PG に未反映）'
              else
                'RDS PG のみ（YAML 外の user 定義）'
              end
+    yaml_value = "#{unresolved[name]}（未解決）" if unresolved.key?(name)
     runtime_value = runtime[name]
     file.puts "| #{escape.call(name)} | #{escape.call(yaml_value)} | #{escape.call(user_value)} | #{result} | #{escape.call(system_value)} | #{escape.call(runtime_value || '未収集')} | #{escape.call(rds_source)} |"
   end
@@ -97,7 +141,9 @@ File.open(options[:output], 'w') do |file|
     file.puts '- ReplicaLag: データポイントなし（判定失敗）'
   else
     max_lag = lag_points.map { |point| point['Maximum'].to_f }.max
-    file.puts "- ReplicaLag（直近 10 分・1 分粒度の最大値）: `#{max_lag}` 秒"
+    # Go 版と同じ書式にする。Ruby の Float#to_s（0.0）と Go の %v（0）は表記が食い違うため、
+    # 桁数を固定して両実装の出力を一致させる。
+    file.puts "- ReplicaLag（直近 10 分・1 分粒度の最大値）: `#{format('%.3f', max_lag)}` 秒"
   end
   file.puts
   file.puts '## レポートの利用方法'
@@ -105,7 +151,8 @@ File.open(options[:output], 'w') do |file|
   file.puts '- YAML と RDS PG Source=user の差分は構成ドリフトとして扱う。MySQL 実効値・算出値の妥当性は、インスタンスサイズと負荷条件を踏まえて人が判断する。'
 end
 
-drift = parameter_names.select do |name|
+# 組み込み関数で宣言された項目は実値が決まらないため、ドリフト判定から外す。
+drift = parameter_names.reject { |name| unresolved.key?(name) }.select do |name|
   yaml_value = expected[name]
   user_value = user.dig(name, 'ParameterValue')
   (yaml_value && user_value && yaml_value != user_value.to_s) || (yaml_value && !user_value) || (!yaml_value && user_value)

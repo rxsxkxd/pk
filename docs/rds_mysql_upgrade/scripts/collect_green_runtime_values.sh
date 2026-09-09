@@ -20,7 +20,43 @@ done
 [[ -n "$template" && -n "$host" && -n "$user" && -n "$output" ]] || { usage >&2; exit 2; }
 
 # CloudFormation YAML で明示したパラメーター名だけを SQL に展開する。値は SQL に含めない。
-sql=$(python3 -c 'import re,sys,yaml; t=yaml.safe_load(open(sys.argv[1])); r=next((v for v in t["Resources"].values() if v.get("Type") == "AWS::RDS::DBParameterGroup"), None); r or (_ for _ in ()).throw(SystemExit("AWS::RDS::DBParameterGroup not found")); n=list(r.get("Properties", {}).get("Parameters", {}).keys()); n or (_ for _ in ()).throw(SystemExit("No declared parameters")); all(re.fullmatch(r"[A-Za-z0-9_]+", x) for x in n) or (_ for _ in ()).throw(SystemExit("Invalid parameter name")); print("SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables WHERE VARIABLE_NAME IN (" + ",".join(repr(x) for x in n) + ") ORDER BY VARIABLE_NAME;")' "$template")
+# CloudFormation の短縮記法（!Ref / !Sub など）は yaml.safe_load が解釈できないため、
+# 長形式（{"Ref": ...} / {"Fn::Sub": ...}）へ正規化して読み込む。
+# ここで必要なのはパラメータ名だけであり、組み込み関数の解決は行わない。
+sql=$(python3 -c '
+import re, sys, yaml
+
+
+class CfnLoader(yaml.SafeLoader):
+    pass
+
+
+def _intrinsic(loader, suffix, node):
+    key = suffix if suffix in ("Ref", "Condition") else "Fn::" + suffix
+    if isinstance(node, yaml.ScalarNode):
+        value = loader.construct_scalar(node)
+    elif isinstance(node, yaml.SequenceNode):
+        value = loader.construct_sequence(node, deep=True)
+    else:
+        value = loader.construct_mapping(node, deep=True)
+    return {key: value}
+
+
+CfnLoader.add_multi_constructor("!", _intrinsic)
+
+template = yaml.load(open(sys.argv[1]), Loader=CfnLoader)
+resource = next((v for v in template["Resources"].values()
+                 if v.get("Type") == "AWS::RDS::DBParameterGroup"), None)
+if resource is None:
+    sys.exit("AWS::RDS::DBParameterGroup not found")
+names = list(resource.get("Properties", {}).get("Parameters", {}).keys())
+if not names:
+    sys.exit("No declared parameters")
+if not all(re.fullmatch(r"[A-Za-z0-9_]+", x) for x in names):
+    sys.exit("Invalid parameter name")
+print("SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables "
+      "WHERE VARIABLE_NAME IN (" + ",".join(repr(x) for x in names) + ") ORDER BY VARIABLE_NAME;")
+' "$template")
 
 tmp_output=$(mktemp "${TMPDIR:-/tmp}/rds-green-runtime.XXXXXX")
 trap 'rm -f "$tmp_output"' EXIT

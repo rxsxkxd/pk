@@ -50,6 +50,8 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
 - `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。
 
+Step 2 の CloudFormation テンプレートを読む 3 実装（`collect_green_runtime_values.sh` の Python、レポート生成器の Ruby と Go）は、**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化して読む**。値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
+
 Step 4 のレポート生成器は Ruby 版（`generate_green_verification_report.rb`、ローカル既定）と Go 版（`generate_green_verification_report.go`、CI が `ci/Dockerfile.green-verification-report` のマルチステージビルドで作り `GREEN_REPORT_GENERATOR` で渡す）が並存する。**両方を同時に更新すること。**
 
 ## 実行方法
@@ -101,6 +103,9 @@ scripts/lib/migration_phase_test.sh
 
 # MySQL 接続方式の解決テスト（AWS へ接続しない）
 scripts/lib/mysql_credentials_test.sh
+
+# CloudFormation 短縮記法（!Ref / !Sub）を 3 実装が同じに解釈するかのテスト
+scripts/lib/cfn_shorthand_test.sh
 
 # Ruby スクリプトの回帰確認（サンプル入力で再生成し、examples/ の出力との差分を見る）
 # このサンプルは「要レビュー」が 1 件残るため終了コード 1 が正常

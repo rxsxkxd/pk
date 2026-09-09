@@ -1,0 +1,42 @@
+# CloudFormation 短縮記法の検証用 fixture
+
+Step 2 が生成する DB パラメータグループのテンプレートは**長形式**（`Ref: Xxx`）で出力されるが、Step 2 のレビューで人が CFn 慣用の**短縮記法**（`!Ref` / `!Sub`）へ書き換えることがある。
+
+このテンプレートを読む実装は 3 つあり、以前はいずれも短縮記法を正しく扱えなかった。
+
+| 実装 | 以前の挙動 |
+|---|---|
+| `scripts/collect_green_runtime_values.sh`（Python / `yaml.safe_load`） | **即座に失敗**（`could not determine a constructor for the tag '!Ref'`） |
+| `scripts/generate_green_verification_report.rb`（Ruby / Psych） | **黙って通るが、タグを捨てて引数の文字列だけを残す** |
+| `scripts/generate_green_verification_report.go`（Go / yaml.v3） | 同上 |
+
+Ruby / Go は `replica_parallel_workers: !Ref Workers` を `"Workers"` という値として読み、RDS の実値と比較して**存在しないドリフトを報告**していた。
+
+## 現在の挙動
+
+3 実装とも**短縮記法を長形式へ正規化**して読む。
+
+| 記法 | 正規化後 |
+|---|---|
+| `!Ref X` | `{"Ref": "X"}` |
+| `!Sub 'y'` | `{"Fn::Sub": "y"}` |
+| `!GetAtt [a, b]` | `{"Fn::GetAtt": ["a", "b"]}` |
+
+値が組み込み関数の項目は、CloudFormation のパラメータ解決なしには実値が決まらない。したがって**比較対象から外し、「比較不能」としてレポートに明示**する。ドリフト判定にも含めない。
+
+パラメータ**名**は取得できるため、MySQL 実効値の収集対象にはなる。
+
+## ファイル
+
+| ファイル | 用途 |
+|---|---|
+| `mysql84-parameter-group-shorthand.yaml` | `!Ref` / `!Sub` を含むテンプレート。解決可能な値と組み込み関数の両方を持つ |
+| `collected/*.json` | レポート生成器へ渡す最小の収集済み JSON（AWS API の応答を模したもの） |
+
+## 実行
+
+```bash
+scripts/lib/cfn_shorthand_test.sh
+```
+
+3 実装が同じ解釈をすることを確認する。AWS へは接続しない。Ruby / Go が未導入の環境では該当実装をスキップする。Go は `ci/Dockerfile.green-verification-report` と同じ手順（一時ディレクトリで `go mod download`）でビルドするため、`go.sum` をリポジトリへ置く必要はない。

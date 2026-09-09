@@ -54,6 +54,57 @@ func escape(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, "|", "\\|"), "\n", "<br>")
 }
 
+// cfnIntrinsicKey は CloudFormation の短縮記法タグ（!Ref / !Sub など）を
+// 長形式のキー（Ref / Fn::Sub）へ変換する。CFn 以外のタグでは空文字を返す。
+func cfnIntrinsicKey(tag string) string {
+	if !strings.HasPrefix(tag, "!") || strings.HasPrefix(tag, "!!") {
+		return ""
+	}
+	name := tag[1:]
+	if name == "Ref" || name == "Condition" {
+		return name
+	}
+	return "Fn::" + name
+}
+
+// cfnNodeToAny は短縮記法を長形式へ正規化しながら YAML を Go の値へ変換する。
+// yaml.Unmarshal へ直接 map を渡すとタグが黙って捨てられ、`!Ref Workers` が
+// "Workers" という文字列に化けて RDS の実値と誤って比較されるため、Node を経由する。
+func cfnNodeToAny(node *yaml.Node) any {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.DocumentNode {
+		if len(node.Content) == 0 {
+			return nil
+		}
+		return cfnNodeToAny(node.Content[0])
+	}
+	if key := cfnIntrinsicKey(node.Tag); key != "" {
+		return map[string]any{key: cfnUntaggedToAny(node)}
+	}
+	return cfnUntaggedToAny(node)
+}
+
+func cfnUntaggedToAny(node *yaml.Node) any {
+	switch node.Kind {
+	case yaml.MappingNode:
+		result := map[string]any{}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			result[node.Content[i].Value] = cfnNodeToAny(node.Content[i+1])
+		}
+		return result
+	case yaml.SequenceNode:
+		result := make([]any, 0, len(node.Content))
+		for _, child := range node.Content {
+			result = append(result, cfnNodeToAny(child))
+		}
+		return result
+	default:
+		return node.Value
+	}
+}
+
 func main() {
 	templatePath := flag.String("template", "", "CloudFormation YAML")
 	greenInstancePath := flag.String("green-instance", "", "Green DB instance JSON")
@@ -78,30 +129,48 @@ func main() {
 	}
 
 	// CloudFormation の Resources から DBParameterGroup を探し、YAML 上の宣言値を取得する。
-	var template map[string]any
 	content, err := os.ReadFile(*templatePath)
 	if err != nil {
 		die("%s: %v", *templatePath, err)
 	}
-	if err := yaml.Unmarshal(content, &template); err != nil {
+	var root yaml.Node
+	if err := yaml.Unmarshal(content, &root); err != nil {
 		die("%s: YAML を解析できません: %v", *templatePath, err)
 	}
-	resources, ok := template["Resources"].(map[string]any)
+	template, ok := cfnNodeToAny(&root).(map[string]any)
 	if !ok {
+		die("%s: テンプレートの最上位がマッピングではありません。", *templatePath)
+	}
+	resources, resourcesFound := template["Resources"].(map[string]any)
+	if !resourcesFound {
 		die("%s: Resources が見つかりません。", *templatePath)
 	}
 	expected := map[string]string{}
+	// 値が組み込み関数（Ref / Fn::*）の項目は、CloudFormation のパラメータ解決なしには
+	// 実値が決まらない。比較すると誤ったドリフトになるため、比較対象から外して明示する。
+	unresolved := map[string]string{}
 	found := false
 	for _, raw := range resources {
-		resource, ok := raw.(map[string]any)
-		if !ok || resource["Type"] != "AWS::RDS::DBParameterGroup" {
+		resource, isMap := raw.(map[string]any)
+		if !isMap || resource["Type"] != "AWS::RDS::DBParameterGroup" {
 			continue
 		}
 		found = true
 		properties, _ := resource["Properties"].(map[string]any)
 		parameters, _ := properties["Parameters"].(map[string]any)
 		for name, value := range parameters {
-			expected[name] = fmt.Sprint(value)
+			switch typed := value.(type) {
+			case map[string]any:
+				unresolved[name] = "Fn::*"
+				for key := range typed {
+					unresolved[name] = key
+					break
+				}
+			case []any:
+				unresolved[name] = "Fn::*"
+			default:
+				expected[name] = fmt.Sprint(value)
+			}
 		}
 		break
 	}
@@ -168,6 +237,9 @@ func main() {
 	for name := range runtime {
 		names[name] = true
 	}
+	for name := range unresolved {
+		names[name] = true
+	}
 	orderedNames := make([]string, 0, len(names))
 	for name := range names {
 		orderedNames = append(orderedNames, name)
@@ -204,7 +276,10 @@ func main() {
 		systemValue := system[name]
 		allValue := all[name]
 		result := "RDS PG のみ（YAML 外の user 定義）"
-		if yamlExists && userExists {
+		if intrinsic, isUnresolved := unresolved[name]; isUnresolved {
+			result = "比較不能（" + intrinsic + "）"
+			yamlValue = intrinsic + "（未解決）"
+		} else if yamlExists && userExists {
 			if yamlValue == userValue.ParameterValue {
 				result = "一致"
 			} else {
@@ -237,7 +312,8 @@ func main() {
 				maximum = point.Maximum
 			}
 		}
-		fprintln("- ReplicaLag（直近 10 分・1 分粒度の最大値）: `%v` 秒", maximum)
+		// Ruby 版と同じ書式にする（%v だと 0、Ruby の Float#to_s だと 0.0 になり食い違う）。
+		fprintln("- ReplicaLag（直近 10 分・1 分粒度の最大値）: `%.3f` 秒", maximum)
 	}
 	fprintln("")
 	fprintln("## レポートの利用方法")
@@ -246,6 +322,10 @@ func main() {
 
 	drift := make([]string, 0)
 	for _, name := range orderedNames {
+		// 組み込み関数で宣言された項目は実値が決まらないため、ドリフト判定から外す。
+		if _, isUnresolved := unresolved[name]; isUnresolved {
+			continue
+		}
 		yamlValue, yamlExists := expected[name]
 		userValue, userExists := user[name]
 		if (yamlExists && userExists && yamlValue != userValue.ParameterValue) || (yamlExists && !userExists) || (!yamlExists && userExists) {

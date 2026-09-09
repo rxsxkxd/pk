@@ -1,0 +1,42 @@
+# CloudFormation の短縮記法（!Ref / !Sub / !GetAtt）を含むテンプレートの検証用 fixture。
+#
+# Step 2 の生成器は長形式（Ref: ...）で出力するが、人が Step 2 のレビューで
+# CFn 慣用の短縮記法へ書き換えることがある。3 つの実装
+# （collect_green_runtime_values.sh / generate_green_verification_report.rb / .go）
+# がいずれも同じ解釈をすることを、このファイルで確認する。
+#
+# 組み込み関数で宣言した値は CloudFormation のパラメータ解決なしには実値が決まらない。
+# 各実装はこれを「比較不能」として扱い、ドリフト判定から除外する。
+AWSTemplateFormatVersion: '2010-09-09'
+Description: MySQL 8.4 DB parameter group with CloudFormation shorthand (fixture)
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: production
+  Workers:
+    Type: String
+    Default: '8'
+
+Resources:
+  Mysql84ParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      # 短縮記法。長形式では {"Fn::Sub": "example-${EnvName}-mysql84-v1"} と等価。
+      DBParameterGroupName: !Sub 'example-${EnvName}-mysql84-v1'
+      Description: !Sub 'MySQL 8.4 parameters for example/${EnvName}'
+      Family: mysql8.4
+      Parameters:
+        # 解決可能な素のスカラー。通常どおり RDS の値と比較する。
+        binlog_format: ROW
+        max_allowed_packet: '67108864'
+        # 組み込み関数。実値が決まらないため比較対象から外れる。
+        replica_parallel_workers: !Ref Workers
+        log_replica_updates: !Sub '${Workers}'
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvName
+
+Outputs:
+  DBParameterGroupName:
+    Value: !Ref Mysql84ParameterGroup

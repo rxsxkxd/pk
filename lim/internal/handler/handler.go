@@ -6,9 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"image"
-	"image/jpeg"
-	"image/png"
 	"io"
 	"log/slog"
 	"net/url"
@@ -22,7 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/rxsxkxd/lim/internal/config"
-	"github.com/rxsxkxd/lim/internal/imaging"
+	"github.com/rxsxkxd/lim/internal/masking"
 	"github.com/rxsxkxd/lim/internal/metrics"
 )
 
@@ -33,25 +30,17 @@ type S3API interface {
 	PutObject(context.Context, *s3.PutObjectInput, ...func(*s3.Options)) (*s3.PutObjectOutput, error)
 }
 
-// ValidationError はリトライしても解消しない恒久的な入力エラー。
-// 取りこぼしを避けるため成功扱いにはせず、そのまま DLQ へ送る（設計書 §10.1）。
-type ValidationError struct{ Reason string }
-
-func (e *ValidationError) Error() string { return "validation: " + e.Reason }
+// エラー型は masking パッケージのものをそのまま使う。
+// 分類（恒久エラーか一時エラーか）が DLQ 送出とメトリクスの判断に直結する。
+type (
+	// ValidationError はリトライしても解消しない恒久的な入力エラー。
+	ValidationError = masking.ValidationError
+	// StrengthError はマスク強度の自己検証に失敗した場合のエラー。出力は行われない。
+	StrengthError = masking.StrengthError
+)
 
 func invalid(format string, a ...any) error {
 	return &ValidationError{Reason: fmt.Sprintf(format, a...)}
-}
-
-// StrengthError はマスク強度の自己検証に失敗した場合のエラー（設計書 §12.4）。
-// この場合、出力は一切書かれない。
-type StrengthError struct {
-	Score float64
-	Limit float64
-}
-
-func (e *StrengthError) Error() string {
-	return fmt.Sprintf("mask strength check failed: laplacian variance %.3f > %.3f", e.Score, e.Limit)
 }
 
 // Handler は S3 イベントハンドラ。
@@ -236,83 +225,32 @@ func (h *Handler) fetch(ctx context.Context, bucket, key, etag string) ([]byte, 
 	return raw, nil
 }
 
-// mask はデコードからエンコードまでを行う。強度検証に落ちた場合はエラーを返し、
-// 呼び出し側は PutObject を行わない（fail-closed、設計書 §10.4）。
+// mask は設定を masking.Options に写して処理を委譲する。
+// 強度検証に落ちた場合はエラーを返し、呼び出し側は PutObject を行わない
+// （fail-closed、設計書 §10.4）。
 func (h *Handler) mask(raw []byte, srcKey, dstKey string) (*result, error) {
-	// 全体をデコードする前に寸法だけ確認し、decompression bomb を弾く。
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	out, err := masking.Apply(raw, masking.Options{
+		MaskHeightRatio: h.Cfg.MaskHeightRatio,
+		BlurRatio:       h.Cfg.BlurRatio,
+		MinBlurRadiusPx: h.Cfg.MinBlurRadiusPx,
+		DownscaleFactor: h.Cfg.DownscaleFactor,
+		MaxLaplacianVar: h.Cfg.MaxLaplacianVar,
+		MaxPixels:       h.Cfg.MaxInputPixels,
+		JPEGQuality:     h.Cfg.JPEGQuality,
+	})
 	if err != nil {
-		return nil, invalid("cannot decode image header: %v", err)
+		return nil, err
 	}
-	if format != "jpeg" && format != "png" {
-		return nil, invalid("unsupported format %q (jpeg/png only)", format)
-	}
-	if int64(cfg.Width)*int64(cfg.Height) > h.Cfg.MaxInputPixels {
-		return nil, invalid("image %dx%d exceeds pixel limit %d", cfg.Width, cfg.Height, h.Cfg.MaxInputPixels)
-	}
-
-	decoded, _, err := image.Decode(bytes.NewReader(raw))
-	if err != nil {
-		return nil, invalid("cannot decode image: %v", err)
-	}
-
-	img := imaging.ToRGBA(decoded)
-	if format == "jpeg" {
-		img = imaging.ApplyOrientation(img, imaging.JPEGOrientation(raw))
-	}
-
-	w, h0 := img.Rect.Dx(), img.Rect.Dy()
-	// 半径は画像全体の短辺から決める。隠したい特徴（文字の線幅など）の大きさは
-	// 領域の高さではなく画像の解像度に比例するため。
-	radius := imaging.BlurRadius(w, h0, h.Cfg.BlurRatio, h.Cfg.MinBlurRadiusPx)
-
-	// 検出処理は使わず、画像上部の固定矩形だけをマスクする。
-	region := imaging.TopRegion(w, h0, h.Cfg.MaskHeightRatio)
-	part := imaging.Crop(img, region)
-
-	// 領域だけを切り出してぼかすことで、マスク対象の情報が
-	// 境界をまたいで非マスク領域へにじみ出すのを防ぐ。
-	// 既定では factor=1 で素通り。強度を上げる必要が出たら環境変数だけで切り替える。
-	if f := h.Cfg.DownscaleFactor; f > 1 {
-		small := imaging.Downscale(part, f)
-		small = imaging.GaussianBlur(small, radius/float64(f))
-		part = imaging.Upscale(small, region.Dx(), region.Dy())
-	} else {
-		part = imaging.GaussianBlur(part, radius)
-	}
-	imaging.Paste(img, part, region.Min)
-
-	// 強度検証は「マスクした領域だけ」を対象にする。
-	// 画像全体で測ると、非マスク領域の鮮明さに引きずられて必ず不合格になる。
-	score := imaging.LaplacianVariance(part)
-	if score > h.Cfg.MaxLaplacianVar {
-		return nil, &StrengthError{Score: score, Limit: h.Cfg.MaxLaplacianVar}
-	}
-
-	// Go の標準エンコーダは EXIF / XMP / 埋め込みサムネイルを一切書き出さない。
-	// これにより FR-9（メタデータ完全除去）が構造的に満たされる。
-	var buf bytes.Buffer
-	switch format {
-	case "jpeg":
-		err = jpeg.Encode(&buf, img, &jpeg.Options{Quality: h.Cfg.JPEGQuality})
-	case "png":
-		enc := png.Encoder{CompressionLevel: png.DefaultCompression}
-		err = enc.Encode(&buf, img)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("encode output: %w", err)
-	}
-
 	return &result{
 		SourceKey:   srcKey,
 		OutputKey:   dstKey,
-		RadiusPx:    radius,
-		Region:      fmt.Sprintf("top %.0f%% (0,0,%d,%d)", h.Cfg.MaskHeightRatio*100, region.Dx(), region.Dy()),
-		Score:       score,
+		RadiusPx:    out.RadiusPx,
+		Region:      out.Region,
+		Score:       out.Score,
 		InputBytes:  len(raw),
-		OutputBytes: buf.Len(),
-		body:        buf.Bytes(),
-		contentType: "image/" + format,
+		OutputBytes: len(out.Body),
+		body:        out.Body,
+		contentType: out.ContentType,
 	}, nil
 }
 

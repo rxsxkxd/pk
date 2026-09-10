@@ -1,4 +1,4 @@
-.PHONY: all test lint build deploy clean fmt
+.PHONY: all test lint build build-cli deploy clean fmt run
 
 all: fmt test build
 
@@ -12,6 +12,14 @@ test:
 # SAM が BuildMethod: go1.x で bootstrap を作るため、通常はこちらを使う。
 build:
 	sam build
+
+# ローカル確認用 CLI。S3 を使わずに手元の画像をマスクできる。
+#   make run IN=photo.jpg OUT=masked.jpg
+run:
+	go run ./cmd/maskfile -out $(OUT) $(IN)
+
+build-cli:
+	go build -o build/maskfile ./cmd/maskfile
 
 # 手元で Lambda 用バイナリだけ作る場合。
 build-local:

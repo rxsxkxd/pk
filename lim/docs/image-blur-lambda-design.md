@@ -3,7 +3,7 @@
 - 版: 0.4 (draft)
 - 更新日: 2026-09-10
 - 確定事項: 用途は**マスキング** / 手段は**ガウスぼかし** / 対象は**画像上半分の固定矩形**（検出処理なし）/ IaC は **AWS SAM** / 実装言語は **Go**
-- ステータス: 実装済み（`cmd/mask`, `internal/`, `template.yaml`）。未決事項 §16
+- ステータス: 実装済み（§15 に実装状況、未実装項目を明記）。未決事項 §17
 
 ---
 
@@ -38,7 +38,7 @@ S3 に置かれた画像に対してぼかし処理を適用し、**元の情報
 - 結果画像の S3 保存、監査ログ、エラー処理・再処理・監視、IaC
 
 ### Out of scope（今回作らない）
-- 同期 API（API Gateway / Function URL 経由のオンデマンド変換）→ §15
+- 同期 API（API Gateway / Function URL 経由のオンデマンド変換）→ §16
 - **検出処理**（Rekognition / OCR による顔・文字領域の自動検出）— 不要と確定。領域は固定矩形
 - リサイズ・切り抜き等の一般的な画像加工
 - 動画・アニメーション（APNG / animated GIF / animated WebP）
@@ -61,6 +61,25 @@ S3 に置かれた画像に対してぼかし処理を適用し、**元の情報
 | リージョン | 単一リージョン（東京 ap-northeast-1） |
 | 遅延許容 | 非同期、投入から結果保存まで p95 10 秒以内 |
 | 原画像の機密性 | **機密扱い**。アクセスは処理系のみ、監査対象 |
+
+### 3.1 本設計が依存している想定
+
+以下は「決めごと」ではなく「そうであるはず」という**想定**。崩れると設計が成立しない、
+あるいは安全性が損なわれるため、実データで確認できていないものは印を付けて追跡する。
+
+| # | 想定していること | 崩れた場合に起きること | 確認状況 |
+|---|---|---|---|
+| A1 | **隠したい情報は常に画像の上半分にある** | **無警告で機密が露出する**（検知手段がない） | **未確認（Q9）** |
+| A2 | 入力は JPEG / PNG のみ | WebP 等は全件 DLQ 行きになる | 未確認（Q11） |
+| A3 | 1 枚 20 MB / 8000×8000 px 以内 | 上限超過は全件 DLQ 行き | 未確認（Q7） |
+| A4 | ラプラシアン分散 5.0 が正常画像と異常画像を分離できる | 厳しすぎれば正常画像が DLQ に落ち、緩すぎれば弱いマスクが素通りする | **暫定値。要キャリブレーション（§14.1）** |
+| A5 | ぼかし半径 4%（短辺比）で内容が判別不能になる | マスクが不十分なまま出力される | 合成画像では確認済み。実データ未確認 |
+| A6 | 原本バケットへの書き込みは信頼できる経路のみ | 悪意ある巨大画像・不正形式で処理系が消耗する | 未確認 |
+| A7 | ピーク 100 req/s、月 10 万枚程度 | 予約同時実行 200 では捌けずスロットリング | 未確認（実測値なし） |
+| A8 | 同一画像の再アップロードは稀 | 冪等スキップが効かず再処理コストが増える | 影響は軽微 |
+
+A1 と A4 が実質的なリスク。**A1 は技術的な緩和策が存在しない**（固定矩形マスクの構造的な
+限界であり、入力側の運用でしか担保できない）。A4 は §14.1 の手順で解消できる。
 
 Lambda 側の物理制約（設計値の根拠）:
 - タイムアウト上限 900 秒 / メモリ上限 10,240 MB / `/tmp` は 512 MB〜10,240 MB
@@ -235,6 +254,22 @@ s3://<OUTPUT_BUCKET>/masked/<policy_version>/<入力キーからプレフィッ�
 | アーキテクチャ | arm64 (Graviton2) | x86_64 比で概ね 20% 安く、画像処理でも性能同等以上 |
 | パッケージング | 単一バイナリ（`bootstrap`）。Layer 不要 | `sam build`（`BuildMethod: go1.x`）でそのままビルドできる |
 | **IaC** | **AWS SAM**（確定） | Lambda + S3 通知 + DLQ + IAM を最短で記述できる。バケットポリシー・IAM の差分がレビュー可能になる点がマスキング用途で重要 |
+
+### 9.0 パッケージ構成
+
+マスキング処理は `internal/masking` に閉じ込め、S3 / Lambda に依存させない。
+Lambda ハンドラとローカル CLI が同じコードを呼ぶため、手元で確認した挙動が
+そのまま本番の挙動になる。しきい値（§12.4）のキャリブレーションも CLI で行う。
+
+```
+cmd/mask          … Lambda エントリポイント
+cmd/maskfile      … ローカル実行 CLI（S3 不要）
+internal/handler  … S3 イベント処理（検証・冪等性・fail-closed）
+internal/masking  … マスキング処理そのもの。上 2 つが共有する
+internal/imaging  … ぼかし・領域切り出し・EXIF 向き補正・強度測定
+internal/config   … 環境変数
+internal/metrics  … EMF によるメトリクス出力
+```
 
 ### 9.1 SAM テンプレートの構成（実装時の骨格）
 
@@ -434,7 +469,7 @@ DOWNSCALE_FACTOR = N>1 … 1/N に縮小 → ぼかし → 元寸法に拡大
 
 補足: 上表の緩和策のうち **FR-9（メタデータ除去）は特に効く**。JPEG の EXIF には未加工の縮小プレビューが埋め込まれていることがあり、これが残ると本体をどれだけぼかしても意味がなくなる。ぼかしの強度以前に必ず落とす。
 
-将来より強い保証が必要になった場合の選択肢は §12.3 のオプション（縮小の有効化）と、部分マスク時の塗りつぶし（§15）。
+将来より強い保証が必要になった場合の選択肢は §12.3 のオプション（縮小の有効化）と、領域指定の柔軟化（§16）。
 
 ## 13. 監視・運用・コスト
 
@@ -459,12 +494,54 @@ DOWNSCALE_FACTOR = N>1 … 1/N に縮小 → ぼかし → 元寸法に拡大
 - X-Ray 有効化
 - ポリシー変更時の運用: `MASKING_POLICY_VERSION` を上げて再デプロイ → 過去分は S3 Batch Operations で一括再処理
 
-### コスト試算（東京、月 10 万枚、arm64 / 2048 MB / 平均 2 秒）
-- Lambda: 100,000 × 2 s × 2 GB = 400,000 GB-s → 約 USD 5.4（リクエスト料は約 USD 0.02）
+### 13.1 DLQ からの再処理手順
+
+処理は冪等なので、DLQ のメッセージをそのまま関数へ再投入して問題ない。
+
+```bash
+# 1. 何が落ちているかを確認する（理由は requestContext / responsePayload に入る）
+aws sqs receive-message --queue-url "$DLQ_URL" --max-number-of-messages 10 \
+  | jq -r '.Messages[].Body | fromjson | {reason: .requestContext.condition, payload: .responsePayload}'
+
+# 2. 原因を直す（パラメータ修正・デプロイなど）
+
+# 3. 元イベントを取り出して再投入する
+aws sqs receive-message --queue-url "$DLQ_URL" --max-number-of-messages 10 \
+  | jq -c '.Messages[].Body | fromjson | .requestPayload' \
+  | while read -r ev; do
+      aws lambda invoke --function-name "$FUNCTION_NAME" \
+        --invocation-type Event --payload "$ev" /dev/null
+    done
+
+# 4. 成功を確認してからメッセージを削除する
+```
+
+> **未実装**: この手順をまとめたスクリプトは用意していない（§15）。件数がまとまって出るように
+> なったら `scripts/reprocess_dlq.sh` として実装する。
+
+### 13.2 性能の実測値
+
+ローカル（Apple Silicon / arm64）でのぼかし処理単体の実測。Lambda（arm64 2048 MB）では
+概ね 1.5〜2 倍かかると見込む。
+
+| 画像サイズ | 半径 | ぼかし | デコード〜エンコードまで含む合計 |
+|---|---|---|---|
+| 1200 × 900 | 36 px | — | 87 ms |
+| 4000 × 3000 | 120 px | 520 ms | 未計測 |
+| 8000 × 6000 | 240 px | 2.4 s | 未計測 |
+
+4000 × 3000 で Lambda 上 1〜1.5 秒程度と見積もる。NFR の「p95 3 秒以内」は満たす見込みだが、
+**実環境での計測は未実施**。
+
+### 13.3 コスト試算（東京、月 10 万枚、arm64 / 2048 MB / 平均 1.5 秒）
+
+上の実測を踏まえ、平均 1.5 秒として再計算した概算。
+
+- Lambda: 100,000 × 1.5 s × 2 GB = 300,000 GB-s → 約 USD 4.0（リクエスト料は約 USD 0.02）
 - S3: PUT 10 万 + GET 10 万 → 約 USD 0.6、ストレージ 50 GB → 約 USD 1.3
 - CloudTrail データイベント: 20 万イベント → 約 USD 0.2
 - KMS: 20 万リクエスト → 約 USD 0.6
-- 合計 **概ね USD 8/月**（NFR のコスト要件を満たす）
+- 合計 **概ね USD 7/月**（NFR のコスト要件を満たす）
 
 ---
 
@@ -477,7 +554,8 @@ DOWNSCALE_FACTOR = N>1 … 1/N に縮小 → ぼかし → 元寸法に拡大
 | **マスク領域** | **上半分がぼけ、下半分が 1 画素も変化しないこと（PNG 入力で完全一致比較）。`MASK_HEIGHT_RATIO` 0.25 / 0.5 / 1.0 で境界が仕様どおりであること。高さが奇数でも破綻しないこと** |
 | **強度検証の対象範囲** | **鮮明な非マスク領域を含む正常画像が検証を通過すること**（領域のみを測っていることの回帰テスト） |
 | **半径算出** | **200px〜8000px の各寸法で半径が仕様どおり算出され、大きい画像でもマスクが成立すること**（絶対値固定による事故の回帰テスト） |
-| **閾値キャリブレーション** | **実画像 1,000 枚程度でラプラシアン分散の分布を取り、`MAX_ALLOWED_LAPLACIAN_VAR` を決定。正常画像が DLQ に落ちない水準であることを確認** |
+| **閾値キャリブレーション** | **実画像 1,000 枚程度でラプラシアン分散の分布を取り、`MAX_ALLOWED_LAPLACIAN_VAR` を決定。正常画像が DLQ に落ちない水準であることを確認**。`cmd/maskfile -report-only -json` で一括収集する |
+| 目視確認 | `cmd/maskfile` で実画像を処理し、マスク領域と境界を目で確認する |
 | **復元耐性** | **逆畳み込み（Wiener filter）を出力に適用し、元情報が読めないことを確認**。半径比 1%/2%/4%/8% で比較し、4% が十分であることの根拠を残す（§12.1 のキャリブレーション） |
 | **メタデータ除去** | **出力を `exiftool` で検査し、EXIF / GPS / 埋め込みサムネイルが 0 件であること** |
 | **fail-closed** | **強度検証を意図的に失敗させ、出力オブジェクトが作成されないことを確認** |
@@ -491,9 +569,144 @@ DOWNSCALE_FACTOR = N>1 … 1/N に縮小 → ぼかし → 元寸法に拡大
 
 強度・復元耐性・メタデータ除去・fail-closed の 4 つは**リリースブロッカー**として扱う。
 
+### 14.1 ローカルでの実行・検証手順
+
+AWS アカウントも Docker も SAM CLI も不要。必要なのは Go 1.24 以降だけ。
+マスキング処理は `internal/masking` に閉じており Lambda ハンドラと共有しているため、
+ここで確認した挙動はそのまま本番の挙動になる。
+
+```bash
+go test ./... -race       # ユニットテスト（画像処理・ハンドラ・冪等性・fail-closed）
+go vet ./...
+```
+
+#### 画像 1 枚を処理して目で確認する
+
+```bash
+go run ./cmd/maskfile -out masked.jpg photo.jpg
+# make run IN=photo.jpg OUT=masked.jpg でも同じ
+```
+
+```
+photo.jpg  jpeg 1200x900  radius=36px  top 50% (0,0,1200,450)
+           score=0.0508 (limit 5.0, ok)  111KB->28KB  87ms
+           -> masked.jpg
+```
+
+確認すべき点は 3 つ。
+
+1. **上半分の内容が判別できないこと**（隠したい情報が読めないか）
+2. **下半分が変化していないこと**（にじみ・色ずれがないか）
+3. **`score` が `limit` に対して十分小さいこと**（余裕がどれだけあるか）
+
+#### しきい値（A4 / `MAX_ALLOWED_LAPLACIAN_VAR`）のキャリブレーション
+
+**リリース前に必ず行う。** 既定値 5.0 は根拠のない暫定値であり、
+厳しすぎれば正常画像が全件 DLQ に落ち、緩すぎれば弱いマスクが素通りする。
+
+```bash
+# 実データ 1,000 枚程度でスコアの分布を取る
+go run ./cmd/maskfile -report-only -json ./samples/*.jpg > scores.jsonl
+
+# 最大値・分位点を見る
+jq -s 'map(.strengthScore) | {max: max, p99: (sort | .[(length*0.99|floor)])}' scores.jsonl
+```
+
+得られた最大値に数倍の余裕を持たせた値を `MAX_ALLOWED_LAPLACIAN_VAR` に設定する。
+分布が広い（画像の性質によってスコアが大きく振れる）場合は、しきい値方式そのものの
+見直しが必要になる可能性がある。
+
+#### マスク領域・強度のパラメータを比較する
+
+Q10（既定 0.5 で足りるか）や A5（半径 4% で十分か）の判断に使う。
+
+```bash
+for r in 0.4 0.5 0.6 0.7; do
+  go run ./cmd/maskfile -mask-height-ratio $r -out "out_h$r.jpg" photo.jpg
+done
+for b in 0.02 0.04 0.06 0.08; do
+  go run ./cmd/maskfile -blur-ratio $b -out "out_b$b.jpg" photo.jpg
+done
+```
+
+#### 異常系の確認
+
+本番で DLQ に入るのと同じ分類が表示され、終了コードが 1 になる。
+
+```
+broken.jpg  FAILED (validation) cannot decode image header: image: unknown format
+photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 10396.924 > 5.000
+```
+
+### 14.2 ローカルでは確認できないこと
+
+`cmd/maskfile` で確認できるのは画像処理の部分だけ。以下は dev 環境へのデプロイが必要。
+
+| 項目 | 確認方法 |
+|---|---|
+| S3 イベントの発火、プレフィックスフィルタ | dev 環境へ PUT して出力を確認 |
+| IAM 最小権限（出力バケットを読めない、原本に書けない） | dev 環境で当該操作が拒否されることを確認 |
+| リトライ回数と DLQ への到達 | 意図的に失敗させて DLQ の中身を確認 |
+| KMS の暗号化・復号 | dev 環境で PUT / GET |
+| CloudTrail データイベントの記録（FR-11） | 原本を GET してログに現れることを確認 |
+| アラームの発火 | メトリクスを手動投入するか、意図的に失敗させる |
+| 実環境での処理時間・スロットリング | 負荷試験（§14 の負荷テスト） |
+| `template.yaml` の妥当性 | `make validate`（`sam validate --lint`） |
+
+冪等性・fail-closed・領域・メタデータ除去はハンドラのユニットテストで代替済み。
+
 ---
 
-## 15. 将来拡張
+## 15. 実装状況
+
+### 15.1 要件のトレーサビリティ
+
+| 要件 | 実装 | テスト |
+|---|---|---|
+| FR-1 S3 起点の自動処理 | `template.yaml` (S3 イベント), `internal/handler` | ローカル不可（§14.2） |
+| FR-2 上半分へのぼかし | `internal/masking.Apply`, `internal/imaging.TopRegion` | `TestHandleMasksOnlyTopHalf`, `TestApplyMasksTopHalfOnly` |
+| FR-2b 領域比率の設定 | `MASK_HEIGHT_RATIO` | `TestHandleMaskHeightRatio` |
+| FR-3 強度はサーバー側決定 | `internal/config`（メタデータから半径を読まない） | `TestBlurRadiusScalesWithImageSize` |
+| FR-4 決定的な出力キー | `handler.outputKey` | `TestOutputKeyIsDeterministic` |
+| FR-5 入力検証 | `masking.Apply`（形式・寸法・サイズ） | `TestHandleRejectsBadInput`, `TestApplyRejectsBadInput` |
+| FR-6 EXIF Orientation | `imaging.JPEGOrientation`, `imaging.ApplyOrientation` | `TestApplyOrientationRotates90` |
+| FR-7 冪等性 | `handler.alreadyProcessed` | `TestHandleIsIdempotent`, `TestHandleReprocessesWhenSourceChanged` |
+| FR-8 DLQ からの再処理 | `template.yaml` (DLQ) | 手順のみ（§13.1）。**スクリプト未実装** |
+| FR-9 メタデータ除去 | Go 標準エンコーダの性質（構造的に保証） | `TestHandleStripsAllMetadata` |
+| FR-10 強度の自己検証 | `masking.Apply`, `imaging.LaplacianVariance` | `TestHandleFailsClosedOnWeakMask` |
+| FR-10b 領域のみを検証 | `masking.Apply`（`part` を測る） | `TestHandleStrengthCheckIgnoresUnmaskedArea` |
+| FR-11 監査ログ | `template.yaml` (CloudTrail) | ローカル不可（§14.2） |
+| FR-12 ポリシー版の記録 | `handler.put` のメタデータ | `TestHandleMasksImageAndWritesMetadata` |
+
+### 15.2 未実装・未検証
+
+| 項目 | 状況 | 対応 |
+|---|---|---|
+| **WebP 対応** | 未実装。検証エラーとして DLQ 行き | Go 標準に WebP エンコーダがないため。必要なら別形式で出力するか cgo 依存を入れる（Q11） |
+| **`MAX_ALLOWED_LAPLACIAN_VAR` の値** | 暫定値 5.0 のまま | §14.1 の手順でリリース前に決定する |
+| **`template.yaml` の検証** | `sam validate` / デプロイとも未実施 | SAM CLI のある環境で `make validate` |
+| **DLQ 再処理スクリプト** | 手順のみ（§13.1）。スクリプト未実装 | 運用開始後、必要になった時点で |
+| CloudTrail ログバケットの Object Lock | 未設定（§11.3 では要求している） | コンプライアンス要件確定後（Q4） |
+| アニメーション画像 | 非対応（静止画のみ） | スコープ外 |
+| 負荷試験 | 未実施 | dev 環境で実施 |
+| 実環境での処理時間 | 未計測（ローカル実測のみ、§13.2） | dev 環境で計測 |
+
+### 15.3 コード構成
+
+```
+cmd/mask          … Lambda エントリポイント
+cmd/maskfile      … ローカル実行 CLI（S3 不要）
+internal/handler  … S3 イベント処理（検証・冪等性・fail-closed）
+internal/masking  … マスキング処理そのもの。上 2 つが共有する
+internal/imaging  … ぼかし・領域切り出し・EXIF 向き補正・強度測定
+internal/config   … 環境変数
+internal/metrics  … EMF によるメトリクス出力
+template.yaml     … バケット・KMS・Lambda・DLQ・CloudTrail・アラーム
+```
+
+外部依存は `aws-lambda-go` と `aws-sdk-go-v2` のみ。画像処理は標準ライブラリだけで実装している。
+
+## 16. 将来拡張
 
 - **領域指定の柔軟化**（オブジェクトメタデータやサイドカー JSON で矩形を渡す）— 上半分固定で足りなくなった場合
 - **検出処理の追加**（Rekognition / OCR）— 現時点では不要と確定。検出漏れのリスクを負ってまで導入する必要が出た場合のみ
@@ -505,7 +718,7 @@ DOWNSCALE_FACTOR = N>1 … 1/N に縮小 → ぼかし → 元寸法に拡大
 
 ---
 
-## 16. 未決事項
+## 17. 未決事項
 
 | # | 論点 | 影響 |
 |---|---|---|
@@ -516,7 +729,8 @@ DOWNSCALE_FACTOR = N>1 … 1/N に縮小 → ぼかし → 元寸法に拡大
 | Q4 | 準拠すべき規程（個人情報保護法 / 業界規程 / 社内規程）と監査ログ保持期間 | 監査要件・暗号化要件・保持期間が変わる |
 | Q5 | S3 キー（ファイル名）に個人情報が含まれ得るか | 含むならログのハッシュ化、出力メタデータへの `source-key` 記録の見直しが必要 |
 | Q6 | マスク済画像の配信先・公開範囲（一般公開 / 社内限定） | 一般公開なら強度要件をさらに上げる |
-| Q7 | 入力サイズ上限 20 MB・8000 px は実データに合っているか | 実測データがあれば提示ください |
+| Q7 | 入力サイズ上限 20 MB・8000 px は実データに合っているか（想定 A3） | 実測データがあれば提示ください |
+| Q11 | WebP の入力はあり得るか | あるなら出力形式の方針決定が必要（現状は DLQ 行き） |
 
 ### 解決済み
 | # | 論点 | 決定 |

@@ -32,7 +32,9 @@ Parameters:
     Description: CodePipeline 用の既存 IAM ロール ARN。S3、CodeBuild、CodeConnections 利用権限が必要。
   CodeBuildServiceRoleArn:
     Type: String
-    Description: CodeBuild 用の既存 IAM ロール ARN。RDS/CloudWatch 読取と Step 3/5 の変更権限が必要。
+    Description: >-
+      CodeBuild 用の既存 IAM ロール ARN。RDS/CloudWatch 読取に加え、Step 5 には
+      rds:SwitchoverBlueGreenDeployment、rds:ModifyDBInstance、rds:PromoteReadReplica が必要。
   CollectMySqlRuntimeValues:
     Type: String
     AllowedValues: ['false', 'true']

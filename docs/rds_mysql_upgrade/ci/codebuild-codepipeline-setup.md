@@ -116,9 +116,9 @@ Step ごとの変更権限は次のとおりである。
 |---|---|---|
 | BuildGreen | `rds:CreateDBSnapshot`、`rds:CreateBlueGreenDeployment` | 保護スナップショットと Green の作成 |
 | VerifyGreen | なし | AWS API と RDS パラメータの読み取りだけ |
-| Switchover | `rds:SwitchoverBlueGreenDeployment` | 承認後の切替 |
+| Switchover | `rds:SwitchoverBlueGreenDeployment`、`rds:ModifyDBInstance`、`rds:PromoteReadReplica` | 承認後の切替。RDS が Green DB を変更し、read replica を昇格するため三つとも必要 |
 
-さらに CodeBuild の標準的な運用権限として、CloudWatch Logs のログ出力、artifact bucket の読み書き、KMS を使う場合の復号・暗号化を対象リソースに限定して許可する。RDS の変更 API は可能な範囲で対象 DB instance・snapshot・Blue/Green deployment の ARN に限定する。`Describe*` 系 API はリソースレベル制御ができない場合があるため、AWS IAM のサービス認可リファレンスで確認する。
+さらに CodeBuild の標準的な運用権限として、CloudWatch Logs のログ出力、artifact bucket の読み書き、KMS を使う場合の復号・暗号化を対象リソースに限定して許可する。RDS の変更 API は可能な範囲で対象 DB instance・snapshot・Blue/Green deployment の ARN に限定する。切替用ロールは `deployment:*`（切替）と `db:*`（RDS が行う DB instance の変更・昇格）に分ける。`Describe*` 系 API はリソースレベル制御ができない場合があるため、AWS IAM のサービス認可リファレンスで確認する。
 
 ## 3. Step 4 の実効値取得を有効にする場合だけ必要な設定
 

@@ -254,7 +254,7 @@ Blue/Green の作成・切替・削除に関わる変更権限は CI 実行ロ�
 |---|---|
 | `build-green` | `rds:CreateDBSnapshot`、`rds:CreateBlueGreenDeployment` |
 | `verify-green` / `healthcheck-green-aws` | なし（`Describe*`／`Get*` のみ） |
-| `switchover` | `rds:SwitchoverBlueGreenDeployment` |
+| `switchover` | `rds:SwitchoverBlueGreenDeployment`、`rds:ModifyDBInstance`、`rds:PromoteReadReplica` |
 | `cleanup` | `rds:DeleteBlueGreenDeployment`、`rds:ModifyDBInstance`、`rds:DeleteDBInstance` |
 
 ローカル実行のうち、Step 1 と Step 6 は読み取り権限のみで足りる。Step 2 の適用だけは例外で、`rds:CreateDBParameterGroup`／`rds:ModifyDBParameterGroup` を CloudFormation 実行ロール経由で行使する。作業者には CloudFormation スタックを操作する権限だけを与え、RDS API を直接叩く権限は与えない。

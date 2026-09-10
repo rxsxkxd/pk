@@ -320,7 +320,7 @@ Resources:
                   - !Ref 'AWS::NoValue'
         - !Ref 'AWS::NoValue'
 
-  # Step 5: 切替のみ。作成・削除の権限は持たせない。
+  # Step 5: 切替に必要な変更だけを許可する。作成・削除の権限は持たせない。
   SwitchoverRole:
     Type: AWS::IAM::Role
     Properties:
@@ -339,8 +339,17 @@ Resources:
             Statement:
               - Sid: SwitchoverBlueGreenDeployment
                 Effect: Allow
+                # Blue/Green deployment 自体を切り替える権限。
                 Action: 'rds:SwitchoverBlueGreenDeployment'
                 Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:deployment:*'
+              - Sid: CompleteSwitchoverOnDbInstances
+                Effect: Allow
+                # 切替に伴い RDS が Green DB instance を ModifyDBInstance し、
+                # read replica を PromoteReadReplica するために必要な権限。
+                Action:
+                  - 'rds:ModifyDBInstance'
+                  - 'rds:PromoteReadReplica'
+                Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:*'
 
   # Step 7: 破壊的権限。旧 Blue の削除を含むため、このロールにだけ付与する。
   CleanupRole:

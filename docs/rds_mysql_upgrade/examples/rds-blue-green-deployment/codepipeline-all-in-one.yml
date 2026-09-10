@@ -21,7 +21,7 @@ Metadata:
       - Label: { default: ソース（GitHub） }
         Parameters: [CodeStarConnectionArn, RepositoryId, BranchName]
       - Label: { default: Step 4 の MySQL 実効値収集（任意） }
-        Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsSecretId]
+        Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterArns]
       - Label: { default: 承認通知（任意） }
         Parameters: [ApprovalNotificationTopicArn]
       - Label: { default: 保護対象の RDS リソース }
@@ -37,7 +37,7 @@ Parameters:
     Type: String
     AllowedValues: [staging, production]
     Description: >-
-      対象環境。config/blue-green/<環境>.yml を CONFIG_FILE として使う。
+      対象環境。config/blue-green/<環境>.deployment.yml を CONFIG_FILE として使う。
 
   DefaultServiceName:
     Type: String
@@ -72,20 +72,13 @@ Parameters:
       true にする場合は VerifyGreen プロジェクトを RDS へ到達できる VPC に配置する必要がある
       （本テンプレートは VpcConfig を含まない）。
 
-  MySqlCredentialsSecretId:
-    Type: String
-    Default: ''
-    Description: >-
-      CollectMySqlRuntimeValues=true のときだけ使う Secrets Manager の secret 名または ARN。
-      JSON の username / password を読み取る。
-
   MySqlCredentialsParameterArns:
     Type: CommaDelimitedList
     Default: ''
     Description: >-
-      config の mysql_verification.auth_method: parameter_store を使う場合の
-      SSM パラメータ ARN。ユーザー名も秘匿する場合（user_parameter_name）は
-      パスワード用とユーザー名用の 2 本をカンマ区切りで指定する。
+      CollectMySqlRuntimeValues=true のときだけ使う SSM パラメータ（SecureString）の ARN。
+      パスワード用（parameter_name）とユーザー名用（user_parameter_name）の
+      2 本をカンマ区切りで指定する。
       空なら Parameter Store の読み取り権限を付与しない。
 
   ApprovalNotificationTopicArn:
@@ -103,10 +96,8 @@ Parameters:
 
 Conditions:
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
-  HasMySqlSecret: !Not [!Equals [!Ref MySqlCredentialsSecretId, '']]
-  HasMySqlParameter: !Not [!Equals [!Join ['', !Ref MySqlCredentialsParameterArns], '']]
-  # config の mysql_verification がどちらの方式でも読めるように、いずれか指定があれば権限を付ける。
-  HasMySqlCredentials: !Or [!Condition HasMySqlSecret, !Condition HasMySqlParameter]
+  # config の mysql_verification.auth_method は parameter_store 固定である。
+  HasMySqlCredentials: !Not [!Equals [!Join ['', !Ref MySqlCredentialsParameterArns], '']]
 
 Resources:
 
@@ -293,31 +284,20 @@ Resources:
             Principal: { Service: codebuild.amazonaws.com }
             Action: 'sts:AssumeRole'
       ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
-      # どちらの認証情報も未指定なら Policies ごと省く（空リストは IAM に渡さない）。
+      # パラメータ ARN が未指定なら Policies ごと省く（空リストは IAM に渡さない）。
       Policies: !If
         - HasMySqlCredentials
         - - PolicyName: read-mysql-credentials
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
-                # auth_method: secrets_manager
-                - !If
-                  - HasMySqlSecret
-                  - Sid: GetMySqlSecret
-                    Effect: Allow
-                    Action: 'secretsmanager:GetSecretValue'
-                    Resource: !Ref MySqlCredentialsSecretId
-                  - !Ref 'AWS::NoValue'
                 # auth_method: parameter_store（SecureString の復号に KMS も要る）
-                - !If
-                  - HasMySqlParameter
-                  - Sid: GetMySqlParameter
-                    Effect: Allow
-                    Action:
-                      - 'ssm:GetParameter'
-                      - 'ssm:GetParameters'
-                    Resource: !Ref MySqlCredentialsParameterArns
-                  - !Ref 'AWS::NoValue'
+                - Sid: GetMySqlParameter
+                  Effect: Allow
+                  Action:
+                    - 'ssm:GetParameter'
+                    - 'ssm:GetParameters'
+                  Resource: !Ref MySqlCredentialsParameterArns
         - !Ref 'AWS::NoValue'
 
   # Step 5: 切替に必要な変更だけを許可する。作成・削除の権限は持たせない。
@@ -457,7 +437,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   PrecheckProject:
@@ -475,7 +455,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   BuildGreenProject:
@@ -495,7 +475,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   VerifyGreenProject:
@@ -515,10 +495,9 @@ Resources:
         # Go レポート生成器を Docker のマルチステージビルドで作るために必要。
         PrivilegedMode: true
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
           - { Name: COLLECT_MYSQL_RUNTIME_VALUES, Type: PLAINTEXT, Value: !Ref CollectMySqlRuntimeValues }
-          - { Name: MYSQL_CREDENTIALS_SECRET_ID, Type: PLAINTEXT, Value: !Ref MySqlCredentialsSecretId }
 
   SwitchoverProject:
     Type: AWS::CodeBuild::Project
@@ -537,7 +516,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   CleanupProject:
@@ -555,7 +534,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   # --- CodePipeline -----------------------------------------------------------

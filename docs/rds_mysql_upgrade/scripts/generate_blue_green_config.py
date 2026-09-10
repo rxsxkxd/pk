@@ -94,60 +94,70 @@ def normalize_major_minor(version, context):
 # RDS で利用可能なバージョンかは describe-db-engine-versions で確認する。
 DEFAULT_TARGET_ENGINE_VERSION = "8.4.11"
 
-MYSQL_AUTH_METHODS = ("secrets_manager", "parameter_store", "plaintext", "prompt")
-MYSQL_AUTH_UNIMPLEMENTED = ("iam",)
+# カタログからの生成は parameter_store 固定である。plaintext / prompt は
+# 生成後の設定ファイルを手で書き換えて使う（実行時ライブラリは引き続き対応する）。
+GENERATED_MYSQL_AUTH_METHOD = "parameter_store"
+# ユーザー名も SSM へ置くため、カタログは user を持たない。
 MYSQL_VERIFICATION_KEYS = {
-    "enabled", "user", "auth_method", "secret_id",
-    "parameter_name", "user_parameter_name", "ssl_ca", "port",
+    "enabled", "parameter_name", "user_parameter_name", "ssl_ca", "port",
 }
 TARGET_KEYS = {"db_parameter_group_name", "engine_version", "db_instance_class"}
-BINDING_KEYS = {"rds_instance", "schema_name", "connect_via", "target", "mysql_verification"}
+BINDING_KEYS = {"rds_instance", "schema_name", "target", "mysql_verification"}
 
 
-def mysql_verification(binding, context, environment_name):
+def check_mysql_verification_keys(given, context):
+    """mysql_verification のキーを検証する。ルート既定値と接続配下で共通に使う。"""
+    if not isinstance(given, dict):
+        raise SystemExit(f"{context} must be a mapping")
+
+    # user / password は MYSQL_VERIFICATION_KEYS に無いため未知キーとしても弾かれるが、
+    # 書きたくなる値なので理由を明示して先に落とす。
+    for secret_key in ("password", "user"):
+        if secret_key in given:
+            raise SystemExit(
+                f"{context}.{secret_key} はカタログへ書かない。"
+                "ユーザー名とパスワードは SSM Parameter Store の SecureString に置く"
+            )
+    unknown = set(given) - MYSQL_VERIFICATION_KEYS
+    if unknown:
+        raise SystemExit(f"{context} has unknown keys: {', '.join(sorted(unknown))}")
+    return given
+
+
+def mysql_verification(binding, context, defaults):
     """接続の mysql_verification を検証して、生成する設定へ渡す。
 
     Step 4 の実効値収集と Step 7 の逆レプリケーション確認で使う接続設定である。
-    カタログには参照（secret_id / parameter_name）だけを置き、パスワードそのものは
-    置かない。auth_method: plaintext を使う場合は、生成後の設定ファイルへ手で書く。
+    カタログには SSM パラメータ名だけを置き、ユーザー名とパスワードそのものは
+    置かない。auth_method は parameter_store 固定で生成する。
+
+    ルートの mysql_verification を既定値とし、接続配下の指定でキー単位に上書きする。
+    環境（development / staging / production）は AWS アカウントが分かれるため、
+    同じパラメータ名を全環境で共通に使える。DB ごとに分ける場合だけ接続配下へ書く。
     """
-    given = binding.get("mysql_verification") or {}
-    if not isinstance(given, dict):
-        raise SystemExit(f"{context}.mysql_verification must be a mapping")
+    given = check_mysql_verification_keys(
+        binding.get("mysql_verification") or {}, f"{context}.mysql_verification"
+    )
+    merged = {**defaults, **given}
 
-    unknown = set(given) - MYSQL_VERIFICATION_KEYS
-    if unknown:
-        raise SystemExit(
-            f"{context}.mysql_verification has unknown keys: {', '.join(sorted(unknown))}"
-        )
-    if "password" in given:
-        raise SystemExit(
-            f"{context}.mysql_verification.password はカタログへ書かない。"
-            "auth_method: plaintext は生成後の設定ファイルへ手で記載する"
-        )
-
-    auth = str(given.get("auth_method") or "prompt")
-    if auth in MYSQL_AUTH_UNIMPLEMENTED:
-        raise SystemExit(f"{context}.mysql_verification.auth_method: {auth} は未実装である")
-    if auth not in MYSQL_AUTH_METHODS:
-        raise SystemExit(
-            f"{context}.mysql_verification.auth_method が不正: {auth}"
-            f"（有効な値: {', '.join(MYSQL_AUTH_METHODS)}）"
-        )
-    if auth == "plaintext" and environment_name == "production":
-        raise SystemExit(
-            f"{context}.mysql_verification.auth_method: plaintext は production では使用できない"
-        )
+    enabled = bool(merged.get("enabled", False))
+    if enabled:
+        for key in ("parameter_name", "user_parameter_name"):
+            if not merged.get(key):
+                raise SystemExit(
+                    f"{context}.mysql_verification.{key} が必要である"
+                    "（接続配下かルートの mysql_verification のいずれかで指定する。"
+                    "生成される auth_method は parameter_store 固定）"
+                )
 
     return {
-        "enabled": bool(given.get("enabled", False)),
-        "user": given.get("user") or "",
-        "auth_method": auth,
-        "secret_id": given.get("secret_id") or "",
-        "parameter_name": given.get("parameter_name") or "",
-        "user_parameter_name": given.get("user_parameter_name") or "",
-        "ssl_ca": given.get("ssl_ca") or "",
-        "port": int(given.get("port") or 3306),
+        "enabled": enabled,
+        "user": "",
+        "auth_method": GENERATED_MYSQL_AUTH_METHOD,
+        "parameter_name": merged.get("parameter_name") or "",
+        "user_parameter_name": merged.get("user_parameter_name") or "",
+        "ssl_ca": merged.get("ssl_ca") or "",
+        "port": int(merged.get("port") or 3306),
     }
 
 
@@ -202,6 +212,11 @@ def generate(catalog, inventory, inventory_region, environment_name):
     parameter_groups = catalog.get("parameter_groups")
     if not isinstance(parameter_groups, dict) or not parameter_groups:
         raise SystemExit("catalog.parameter_groups must be a non-empty mapping")
+
+    # ルートの mysql_verification は全 DB 共通の既定値である。接続配下の指定が優先する。
+    mysql_defaults = check_mysql_verification_keys(
+        catalog.get("mysql_verification") or {}, "mysql_verification"
+    )
 
     services = {}
     for application_name, application in sorted(applications.items()):
@@ -268,8 +283,7 @@ def generate(catalog, inventory, inventory_region, environment_name):
                 "final_snapshot_identifier": f"{source_id}-final",
                 # 影響範囲。切替前のレビューで使う。
                 "schemas": [schema_name],
-                "connected_by": [f"{application_name}.{connection_name}"],
-                "mysql_verification": mysql_verification(binding, context, environment_name),
+                "mysql_verification": mysql_verification(binding, context, mysql_defaults),
                 "actions": {
                     "build": "pending",
                     "switchover": "pending",
@@ -295,10 +309,6 @@ def generate(catalog, inventory, inventory_region, environment_name):
             if schema_name not in existing["schemas"]:
                 existing["schemas"].append(schema_name)
                 existing["schemas"].sort()
-            connected = f"{application_name}.{connection_name}"
-            if connected not in existing["connected_by"]:
-                existing["connected_by"].append(connected)
-                existing["connected_by"].sort()
 
     if not services:
         raise SystemExit(f"no connection is defined for the environment: {environment_name}")
@@ -317,6 +327,11 @@ def write_yaml(path, value):
     ) as handle:
         yaml.safe_dump(value, handle, allow_unicode=True, sort_keys=False, default_flow_style=False)
         temporary_path = Path(handle.name)
+    # NamedTemporaryFile は 0600 で作られる。生成物は読める必要があるため
+    # umask に従った通常のファイル権限へ直してから置き換える。
+    umask = os.umask(0)
+    os.umask(umask)
+    temporary_path.chmod(0o666 & ~umask)
     os.replace(temporary_path, path)
 
 

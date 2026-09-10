@@ -27,7 +27,7 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-target-pg-check.XXXXXX")
 mkdir -p "$output_dir"
 
-# config/blue-green/<environment>.yml から、確認対象のリモート DB
+# config/blue-green/<environment>.deployment.yml から、確認対象のリモート DB
 # パラメータグループ名・リージョン・目標エンジンバージョンを取得する。AWS API は呼ばない。
 eval "$(python3 - "$config" "$service" <<'PY'
 import shlex

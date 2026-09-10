@@ -69,22 +69,21 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 
 | `auth_method` | 取得元 | ユーザー名の秘匿 | 用途 |
 |---|---|---|---|
-| `secrets_manager` | Secrets Manager のシークレット（JSON の `password`） | シークレットの `username` を使う | 既定の推奨。RDS のマネージドパスワードでなくてよい |
-| `parameter_store` | SSM Parameter Store の SecureString | `user_parameter_name` に別パラメータを指定する | Standard パラメータは保管無料 |
+| `parameter_store` | SSM Parameter Store の SecureString | **必須。** `user_parameter_name` に別パラメータを指定する | **CI で使う方式。** カタログからの生成はこれに固定される |
 | `plaintext` | 設定ファイルに直書き | 不可（config の `user` が必要） | **テスト環境専用**。`environment: production` では拒否される |
 | `prompt` | MySQL クライアントの対話入力 | 不可（config の `user` が必要） | ローカル実行専用。CI では成立しない |
 
-解決は `scripts/lib/mysql_credentials.sh` が行い、値はログ・コマンド引数・成果物へ出さず、`MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。IAM データベース認証（`iam`）は未実装で、設定すると明示的に失敗する。
+解決は `scripts/lib/mysql_credentials.sh` が行い、値はログ・コマンド引数・成果物へ出さず、`MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。上表以外の値（`secrets_manager`、`iam` など）は不正な `auth_method` として拒否する。
 
-**ユーザー名を秘匿する構成では config の `user` を空にできる。** `secrets_manager` はシークレット JSON の `username`、`parameter_store` は `user_parameter_name` で指定した別パラメータから取得する。どちらからも取得できず config の `user` も空の場合は、実行時に明示的に失敗する。
+**`parameter_store` ではユーザー名も必ず秘匿側へ置く。** `parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` は秘匿側を持たないため config の `user` が必須である。
 
-`secrets_manager` を使う場合は CFn の `MySqlCredentialsSecretId`、`parameter_store` を使う場合は `MySqlCredentialsParameterArns` を指定する（ユーザー名も秘匿するならパスワード用とユーザー名用の 2 本をカンマ区切りで渡す）。指定した方式に対応する IAM 権限だけが `VerifyGreenRole` に付く。
+CFn の `MySqlCredentialsParameterArns` に、パスワード用とユーザー名用の 2 本の SSM パラメータ ARN をカンマ区切りで渡す。指定したときだけ `ssm:GetParameter` が `VerifyGreenRole` に付く。
 
 Step 4 は最初に [Dockerfile.green-verification-report](Dockerfile.green-verification-report) をマルチステージビルドする。Go ビルドステージで作成した `generate_green_verification_report` だけを local exporter で `.tools/green-report/` に取り出し、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。したがって CodeBuild の Step 4 プロジェクトだけは `PrivilegedMode: true` で Docker Buildx を使用する。Ruby ランタイムは CodeBuild に不要である。
 
 各 buildspec は設定 YAML を読むために `PyYAML==6.0.2` を導入する。ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、事前に `python3 -m pip install 'PyYAML==6.0.2'` を一度実行する。
 
-実効値収集を有効にする場合は、CodeBuild プロジェクトを RDS に到達できるネットワークに配置する必要がある。テンプレートには VPC・サブネット・セキュリティグループを組み込んでいないため、組織の既存ネットワーク方針に従い `VerifyGreenProject` に `VpcConfig` を追加する。あわせて CodeBuild 実行ロールに対象 secret の `secretsmanager:GetSecretValue` と、KMS カスタマー管理キーを使う場合は `kms:Decrypt` を許可する。
+実効値収集を有効にする場合は、CodeBuild プロジェクトを RDS に到達できるネットワークに配置する必要がある。テンプレートには VPC・サブネット・セキュリティグループを組み込んでいないため、組織の既存ネットワーク方針に従い `VerifyGreenProject` に `VpcConfig` を追加する。あわせて CodeBuild 実行ロールに対象 SSM パラメータの `ssm:GetParameter` と、KMS カスタマー管理キーを使う場合は `kms:Decrypt` を許可する。
 
 ## 2 つのテンプレート
 

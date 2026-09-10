@@ -13,7 +13,7 @@ Parameters:
     Description: config/blue-green 配下で参照する対象環境名。
   ServiceName:
     Type: String
-    Description: config/blue-green/{EnvironmentName}.yml の services キー。
+    Description: config/blue-green/{EnvironmentName}.deployment.yml の services キー。
   CodeStarConnectionArn:
     Type: String
     Description: GitHub リポジトリへ接続済みの CodeConnections ARN。
@@ -40,13 +40,6 @@ Parameters:
     AllowedValues: ['false', 'true']
     Default: 'false'
     Description: true の場合だけ Step 4 で Green DB へ MySQL 接続して実効値を収集する。
-  MySqlCredentialsSecretId:
-    Type: String
-    Default: ''
-    NoEcho: true
-    Description: >-
-      任意実行の MySQL 実効値収集で使用する Secrets Manager secret ID。
-      JSON の username と password を持つこと。CollectMySqlRuntimeValues=true の場合に必須。
 
 Resources:
   # Step 3: actions.build が approved の場合だけ、保護スナップショットと Green を作成する。
@@ -68,7 +61,7 @@ Resources:
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT
-            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
+            Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml'
           - Name: SERVICE_NAME
             Type: PLAINTEXT
             Value: !Ref ServiceName
@@ -94,16 +87,13 @@ Resources:
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT
-            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
+            Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml'
           - Name: SERVICE_NAME
             Type: PLAINTEXT
             Value: !Ref ServiceName
           - Name: COLLECT_MYSQL_RUNTIME_VALUES
             Type: PLAINTEXT
             Value: !Ref CollectMySqlRuntimeValues
-          - Name: MYSQL_CREDENTIALS_SECRET_ID
-            Type: PLAINTEXT
-            Value: !Ref MySqlCredentialsSecretId
 
   # Step 5: CodePipeline の手動承認後でも、設定ファイルの actions.switchover が approved でなければ変更しない。
   SwitchoverProject:
@@ -124,7 +114,7 @@ Resources:
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT
-            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
+            Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml'
           - Name: SERVICE_NAME
             Type: PLAINTEXT
             Value: !Ref ServiceName

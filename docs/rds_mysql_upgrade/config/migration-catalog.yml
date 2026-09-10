@@ -6,6 +6,7 @@
 #   applications          … アプリごとの接続名と、各環境での実接続定義
 #   database_environments … DB を配置している環境（＝ AWS アカウント／プロファイル）の一覧
 #   parameter_groups      … 8.4 用パラメータグループと生成元テンプレート
+#   mysql_verification    … Step 4 の MySQL 接続設定。全 DB 共通の既定値
 #
 # 生成単位は RDS DB インスタンスである。同じ rds_instance を指す接続は
 # 1 つの Blue/Green deployment にまとめられる。
@@ -39,8 +40,6 @@ applications:
             # 実定義: 環境変数 EXAMPLE_DB_HOST / EXAMPLE_DB_NAME
             rds_instance: example-service-production-mysql80
             schema_name: example_service
-            # RDS エンドポイント以外の経路で到達する場合に記録する。
-            # connect_via: example-db.internal.example.com
             target:
               db_parameter_group_name: example-service-production-mysql84-v1
               # engine_version: "8.4.11"
@@ -61,3 +60,22 @@ parameter_groups:
     template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
   example-service-production-mysql84-v1:
     template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
+
+# Step 4 の MySQL 実効値収集で使う接続設定の、全 DB 共通の既定値。
+# 個別の DB で変える場合だけ、その接続の environments.<環境> 配下に
+# mysql_verification を書く（キー単位で上書きされる）。
+#
+# ユーザー名とパスワードは SSM Parameter Store の SecureString に置き、
+# ここにはパラメータ名だけを書く。auth_method は parameter_store 固定で生成される。
+# 環境（development / staging / production）は AWS アカウントが分かれるため、
+# 同じパラメータ名を全環境で共通に使える。
+mysql_verification:
+  # true にすると Step 4 が Green DB へ接続して実効値を収集する。
+  enabled: false
+  # パスワード（SecureString）。enabled: true なら必須。
+  parameter_name: ''
+  # 接続ユーザー名（SecureString）。enabled: true なら必須。
+  user_parameter_name: ''
+  # TLS 用の CA バンドル。指定すると ssl-mode=VERIFY_CA で接続する。
+  ssl_ca: ''
+  port: 3306

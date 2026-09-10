@@ -27,7 +27,7 @@ CloudFormation で 8.4 パラメータグループを作成済み
 リポジトリのルートで実行する。直接実行には Bash、AWS CLI v2、Python 3、PyYAML、GNU `date` が必要である。`verify_green.sh` は `date -d` を使うため、macOS の標準 `date` だけでは動作しない。Linux 環境または GNU coreutils を提供するコンテナで実行する。
 
 ```bash
-export CONFIG_FILE=config/blue-green/staging.yml
+export CONFIG_FILE=config/blue-green/staging.deployment.yml
 export SERVICE_NAME=example-service
 export AWS_PROFILE=your-aws-profile
 export ARTIFACT_ROOT="artifacts/direct/${SERVICE_NAME}-$(date -u +%Y%m%dT%H%M%SZ)"

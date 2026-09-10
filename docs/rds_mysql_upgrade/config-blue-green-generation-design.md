@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-既存の `config/blue-green/{staging,production}.yml` を、RDS の実情報と人が管理する対応表から生成する。設定ファイルへの手入力を減らしつつ、移行の最終確認と承認は人が行う。
+既存の `config/blue-green/{staging,production}.deployment.yml` を、RDS の実情報と人が管理する対応表から生成する。設定ファイルへの手入力を減らしつつ、移行の最終確認と承認は人が行う。
 
 このツールは設定を**生成するだけ**であり、RDS、CloudFormation、Blue/Green deployment を変更しない。
 
@@ -23,7 +23,7 @@ config/migration-catalog.yml                 # 人が管理する対応表・移
 scripts/collect_rds_instance_inventory.sh    # AWS CLI の read-only 収集
 scripts/generate_blue_green_config.py        # YAML 生成
 artifacts/rds-instance-inventory.json        # 収集結果（一時・レビュー用）
-config/blue-green/<environment>.yml          # 生成結果
+config/blue-green/<environment>.deployment.yml          # 生成結果
 ```
 
 ## 4. 入力
@@ -61,8 +61,6 @@ applications:
             # 実定義: 環境変数 ORDER_DB_HOST / ORDER_DB_NAME
             rds_instance: order-production-mysql80
             schema_name: order_production
-            # RDS エンドポイント以外の経路で到達する場合に記録する。
-            connect_via: order-db.internal.example.com
             target:
               # db_parameter_group_name だけが必須。
               db_parameter_group_name: production-mysql84-v1
@@ -70,6 +68,11 @@ applications:
               # db_instance_class を省略すると Blue の実値を踏襲する。
               # engine_version: "8.4.11"
               # db_instance_class: db.r6g.large
+            # この DB だけ別のパラメータを使う場合に書く（キー単位で上書き）。
+            # 省略するとルートの mysql_verification を参照する。
+            # mysql_verification:
+            #   parameter_name: /rds-bg/order/mysql-password
+            #   user_parameter_name: /rds-bg/order/mysql-user
 
 # DB を配置している環境の一覧。実体は AWS アカウント（AWS CLI のプロファイルに相当）。
 database_environments:
@@ -80,17 +83,28 @@ database_environments:
 parameter_groups:
   production-mysql84-v1:
     template_path: generated/parameter-groups/production.yaml
+
+# Step 4 の MySQL 接続設定の、全 DB 共通の既定値。
+# ユーザー名とパスワードは SSM Parameter Store の SecureString に置き、
+# ここにはパラメータ名だけを書く。
+mysql_verification:
+  enabled: false
+  parameter_name: /rds-bg/mysql-password
+  user_parameter_name: /rds-bg/mysql-user
+  port: 3306
 ```
 
-**生成単位は RDS DB インスタンスである。** 同じ `rds_instance` を指す接続は 1 つの Blue/Green deployment にまとめられ、生成先 `config/blue-green/<environment>.yml` の `services` キーには **RDS インスタンス識別子**が入る。
+**生成単位は RDS DB インスタンスである。** 同じ `rds_instance` を指す接続は 1 つの Blue/Green deployment にまとめられ、生成先 `config/blue-green/<environment>.deployment.yml` の `services` キーには **RDS インスタンス識別子**が入る。
 
 `--environment development` / `staging` / `production` の指定時は、各接続配下の同名環境を取り出して生成する。環境名は `database_environments` に列挙したものだけを受け付ける。
 
-アプリケーションと接続の関係は、切替の影響範囲を辿るために持つ。実行スクリプトは参照しないが、生成結果の `schemas` と `connected_by` に反映される。
+そのインスタンスに載るスキーマは、切替の影響範囲を辿るために持つ。実行スクリプトは参照しないが、生成結果の `schemas` に反映される。
+
+**MySQL 接続設定はルートの `mysql_verification` を既定値とし、接続配下の指定でキー単位に上書きする。** 環境ごとに AWS アカウントが分かれるため、同じ SSM パラメータ名を全環境で共通に使える。DB ごとに分ける必要があるときだけ、その接続の `environments.<環境>` 配下へ書く。ユーザー名とパスワードそのものはカタログへ書けない（`user` / `password` を書くと生成時に失敗する）。
 
 ## 5. 生成処理
 
-`generate_blue_green_config.py` は、移行カタログと RDS インベントリ JSON を読み込み、指定環境の `config/blue-green/<environment>.yml` を生成する。
+`generate_blue_green_config.py` は、移行カタログと RDS インベントリ JSON を読み込み、指定環境の `config/blue-green/<environment>.deployment.yml` を生成する。
 
 生成する値は次のとおりである。
 
@@ -107,8 +121,7 @@ parameter_groups:
 | `target_db_instance_class` | 移行カタログの `target.db_instance_class`。**省略時は RDS インベントリの `DBInstanceClass` を踏襲** |
 | `target_parameter_group_template_path` | 移行カタログの `parameter_groups.<name>.template_path` |
 | `schemas` | そのインスタンスを指す接続の `schema_name` を集約（影響範囲のレビュー用） |
-| `connected_by` | そのインスタンスを指す接続を `<アプリ>.<接続名>` で集約（同上） |
-| `mysql_verification` | 移行カタログの接続配下（省略時は `enabled: false`） |
+| `mysql_verification` | ルートの `mysql_verification` を既定値とし、接続配下の指定でキー単位に上書き（どちらも無ければ `enabled: false`）。`auth_method` は `parameter_store` 固定で出力する。`enabled: true` なら `parameter_name` と `user_parameter_name` の両方が必須で、`user` と `password` はカタログへ書けない |
 | `protection_snapshot_identifier` | `<source_db_instance_identifier>-pre-bg` を生成 |
 | `final_snapshot_identifier` | `<source_db_instance_identifier>-final` を生成 |
 | `actions` | 常に `build`、`switchover`、`cleanup` を `pending` で生成 |
@@ -142,10 +155,10 @@ python3 scripts/generate_blue_green_config.py \
   --catalog config/migration-catalog.yml \
   --inventory artifacts/rds-instance-inventory.json \
   --environment production \
-  --output config/blue-green/production.yml
+  --output config/blue-green/production.deployment.yml
 
 # 4. 生成結果を人がレビューし、必要な移行承認時だけ actions を pending から変更する。
-git diff -- config/blue-green/production.yml
+git diff -- config/blue-green/production.deployment.yml
 ```
 
 ## 7. コーディング中のテスト

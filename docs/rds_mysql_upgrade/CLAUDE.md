@@ -33,13 +33,13 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - **宣言と実環境の突き合わせ（reconciliation）。** 設定ファイルは進捗の記録ではなく「このアクションを実行してよい」という人間の宣言（`pending` / `approved`）を持つ。CI は毎回 AWS の実状態を読み、未適用なら適用、適用済みなら何もしない。**CI が設定ファイルへ書き戻すことはしない。** `approved` → `pending` に戻しても適用済みのものは取り消さない。
 - **識別子は AWS から引き当てる。** Deployment ID を設定ファイルに持たず、`describe-blue-green-deployments --filters Name=source,Values=$source_arn` で毎回解決する。これにより再実行・リトライ・同時トリガーで二重作成・二重切替が起こらない。
 - **冪等性は二層で担保する。** ① 移行元インスタンスのエンジンバージョンとパラメータグループで「結果」を観測し（`scripts/lib/migration_phase.sh`）、② Deployment の `Status` を安全弁として併用する。切替時に blue が `-old1` へリネームされるため、`source_db_instance_identifier` が指す実体は切替の前後で変わる。この判定は Deployment が cleanup で削除された後も機能する。**終了コードは「操作を実行したか」ではなく「望ましい終了状態に到達しているか」で決める**（到達 = `0`、未到達かつ自動では到達不能 = `1`）。設計の背景は `decisions/idempotency-strategy.md`。
-- **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。MySQL 接続は設定ファイルの `mysql_verification` が制御する（既定 `enabled: false`）。パスワードの取得方法は `auth_method` で選ぶ（`secrets_manager` / `parameter_store` / `plaintext` / `prompt`）。**ユーザー名も秘匿できる**——`secrets_manager` はシークレット JSON の `username`、`parameter_store` は `user_parameter_name` から取得し、いずれの場合も config の `user` は省略できる。解決は `scripts/lib/mysql_credentials.sh` が担い、値は `MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。**`plaintext` は設定ファイルが Git 追跡対象であるためテスト環境専用で、`environment: production` では拒否される。**`iam`（IAM データベース認証）は未実装で、設定すると明示的に失敗する。
+- **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。MySQL 接続は設定ファイルの `mysql_verification` が制御する（既定 `enabled: false`）。パスワードの取得方法は `auth_method` で選ぶ（`parameter_store` / `plaintext` / `prompt`）。**`parameter_store` ではユーザー名も必ず秘匿側へ置く**——`parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` では config の `user` が必須である。解決は `scripts/lib/mysql_credentials.sh` が担い、値は `MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。**`plaintext` は設定ファイルが Git 追跡対象であるためテスト環境専用で、`environment: production` では拒否される。** **カタログからの生成（`generate_blue_green_config.py`）は `auth_method: parameter_store` 固定で出力する。**`secrets_manager` と `iam`（IAM データベース認証）は対応しない——不正な `auth_method` として拒否される。
 - **RDS パラメータグループの変更経路は CloudFormation のみ。** Blue/Green Deployment 自体は CFn カスタムリソースを使わず AWS CLI で扱う。
 - 破壊的 RDS 権限（`rds:DeleteDBInstance` 等）は CI 実行ロールにのみ付与する。作業者には CloudFormation スタック操作権限だけを与える。
 
 ### 設定ファイル
 
-`config/blue-green/{staging,production}.yml` が環境ごとの単一の入力である。全スクリプトが `--config FILE --service NAME` だけを引数に取り、DB 識別子・バージョン・パラメータグループ名・`actions` の承認状態をここから解決する。
+`config/blue-green/{staging,production}.deployment.yml` が環境ごとの単一の入力である。全スクリプトが `--config FILE --service NAME` だけを引数に取り、DB 識別子・バージョン・パラメータグループ名・`actions` の承認状態をここから解決する。
 
 `config/mysql80-to-84-parameter-rules.yml` は 8.0 → 8.4 のパラメータ変換ルール（`copy` / `force` / `omit` / `target_only`）を持ち、`generate_mysql84_parameter_group.rb` の唯一のルールソースである。パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。
 
@@ -85,9 +85,9 @@ scripts/collect_mysql84_parameter_inputs.sh --source-parameter-group <8.0-pg-nam
 ruby scripts/generate_mysql84_parameter_group.rb --input-dir <dir> --output-dir <dir> --system <name> --environment <env>
 
 # Step 3〜5（CI と同じエントリポイント。設定が pending なら 3/5 は何もせず正常終了）
-scripts/build_green.sh   --config config/blue-green/staging.yml --service example-service
-scripts/verify_green.sh  --config config/blue-green/staging.yml --service example-service
-scripts/switchover.sh    --config config/blue-green/staging.yml --service example-service --approve
+scripts/build_green.sh   --config config/blue-green/staging.deployment.yml --service example-service
+scripts/verify_green.sh  --config config/blue-green/staging.deployment.yml --service example-service
+scripts/switchover.sh    --config config/blue-green/staging.deployment.yml --service example-service --approve
 ```
 
 ### 変更の検証

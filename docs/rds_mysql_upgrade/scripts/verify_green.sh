@@ -106,8 +106,8 @@ green_pg_apply_status=$(aws "${aws_args[@]}" rds describe-db-instances --db-inst
 # [DB 読み取り・任意] GitHub Environment Secret 等で接続情報が提供された場合、Green の
 # MySQL 実効値を収集する。実効値はレポートにのみ掲載し、YAML との比較判定には使わない。
 # [DB 読み取り・任意] Green の実効値を収集する。
-# 接続方式は設定ファイルの mysql_verification が決める（secrets_manager / parameter_store /
-# plaintext / prompt）。--mysql-user を明示した場合は従来どおり呼び出し側の環境変数を使う。
+# 接続方式は設定ファイルの mysql_verification が決める（parameter_store / plaintext /
+# prompt）。--mysql-user を明示した場合は従来どおり呼び出し側の環境変数を使う。
 read_mysql_verification_config "$config" "$service"
 if [[ -n "$mysql_user" ]]; then
   # 後方互換: 呼び出し側が利用者とパスワード環境変数を直接指定した場合。

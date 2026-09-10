@@ -138,9 +138,9 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 
 | 変数 | 与え方 |
 |---|---|
-| `CONFIG_FILE` | プロジェクト定義で固定（`config/blue-green/<env>.yml`） |
+| `CONFIG_FILE` | プロジェクト定義で固定（`config/blue-green/<env>.deployment.yml`） |
 | `SERVICE_NAME` | **アクション側で上書き**（`#{variables.ServiceName}`）。プロジェクト定義には既定値を置くため `start-build` 単体でも動く |
-| `COLLECT_MYSQL_RUNTIME_VALUES` / `MYSQL_CREDENTIALS_SECRET_ID` | `VerifyGreenProject` のみ。スタックパラメータから |
+| `COLLECT_MYSQL_RUNTIME_VALUES` | `VerifyGreenProject` のみ。スタックパラメータから |
 
 ## IAM 権限
 
@@ -151,7 +151,7 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 | `ReadApprovalsRole` | なし |
 | `PrecheckRole` | なし |
 | `BuildGreenRole` | `rds:CreateDBSnapshot` / `rds:CreateBlueGreenDeployment` / `rds:AddTagsToResource` |
-| `VerifyGreenRole` | `secretsmanager:GetSecretValue`（`MySqlCredentialsSecretId` 指定時のみ付与） |
+| `VerifyGreenRole` | `ssm:GetParameter` / `ssm:GetParameters`（`MySqlCredentialsParameterArns` 指定時のみ付与） |
 | `SwitchoverRole` | `rds:SwitchoverBlueGreenDeployment` |
 | **`CleanupRole`** | **`rds:DeleteDBInstance` / `rds:DeleteBlueGreenDeployment` / `rds:ModifyDBInstance`** / `rds:CreateDBSnapshot` / `rds:AddTagsToResource` |
 

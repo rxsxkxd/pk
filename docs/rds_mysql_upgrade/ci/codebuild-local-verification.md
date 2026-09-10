@@ -107,13 +107,13 @@ chmod +x ci/codebuild_build.sh
 `codebuild_build.sh -e` に渡すローカル専用ファイルを作る。以下は例であり、Git 管理しない。
 
 ```dotenv
-CONFIG_FILE=config/blue-green/staging.yml
+CONFIG_FILE=config/blue-green/staging.deployment.yml
 SERVICE_NAME=example-service
 
 # VerifyGreen の通常確認では false。Green DB への接続は行わない。
 COLLECT_MYSQL_RUNTIME_VALUES=false
-# true の場合だけ必要。secret の値そのものは書かない。
-# MYSQL_CREDENTIALS_SECRET_ID=your-secret-id-or-arn
+# 接続情報は config の mysql_verification が指す SSM パラメータから取る。
+# このファイルに認証情報そのものは書かない。
 ```
 
 リポジトリ直下に `.local/codebuild-local.env` として保存する。`.local/` は Git 管理対象外であり、`-m` でリポジトリをマウントする場合に Docker Desktop の共有パスとしても扱える。
@@ -190,7 +190,7 @@ mkdir -p .local
 
 ### 変更を行わない検証
 
-`config/blue-green/staging.yml` の対象サービスで `actions.build: pending` を確認してから、次を実行する。
+`config/blue-green/staging.deployment.yml` の対象サービスで `actions.build: pending` を確認してから、次を実行する。
 
 ```bash
 ./ci/codebuild_build.sh \
@@ -232,10 +232,9 @@ mkdir -p .local
 
 ```dotenv
 COLLECT_MYSQL_RUNTIME_VALUES=true
-MYSQL_CREDENTIALS_SECRET_ID=your-secret-id-or-arn
 ```
 
-この場合、Local Agent 内で Secrets Manager から secret を取得し、必要なら apt で MySQL client を導入して Green DB へ接続する。ホスト Docker から Green DB へネットワーク到達できること、local profile に `secretsmanager:GetSecretValue` があること、secret の JSON が `username`／`password` を持つことを事前に確認する。通常のローカル検証では有効化しない。
+あわせて config の `mysql_verification` を `enabled: true`、`auth_method: parameter_store` にし、`parameter_name` と `user_parameter_name` を指定する。この場合、Local Agent 内で SSM Parameter Store からパスワードを取得し、必要なら apt で MySQL client を導入して Green DB へ接続する。ホスト Docker から Green DB へネットワーク到達できること、local profile に `ssm:GetParameter` があることを事前に確認する。通常のローカル検証では有効化しない。
 
 ## 4. Switchover 単体検証
 
@@ -260,7 +259,7 @@ CodeBuild Local Agent の不具合とスクリプト本体の不具合を分け�
 
 ```bash
 scripts/verify_green.sh \
-  --config config/blue-green/staging.yml \
+  --config config/blue-green/staging.deployment.yml \
   --service example-service \
   --profile your-readonly-profile \
   --output-dir artifacts/verify-green-direct

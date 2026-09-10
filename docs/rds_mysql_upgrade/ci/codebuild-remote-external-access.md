@@ -64,10 +64,10 @@ AWS CLI を使う buildspec やシェルスクリプトは、`aws configure`、n
 1. `CodeBuildServiceRoleArn` に指定する IAM role の信頼ポリシーで、`codebuild.amazonaws.com` に `sts:AssumeRole` を許可する。
 2. 各 CodeBuild project に設定済みの `ServiceRole` が、この IAM role を参照する。
 3. CodeBuild サービスが実行開始時に当該ロールを引き受け、短期の AWS 認証情報を実行コンテナへ提供する。
-4. 実行コンテナ内の AWS CLI は標準 credential provider chain により、その一時認証情報を使って RDS、CloudWatch、必要時の Secrets Manager を SigV4 署名付きで呼び出す。
-5. IAM ポリシーは API ごとに認可を判断する。Secret を CMK で暗号化している場合は、Secrets Manager の認可に加えて KMS の `Decrypt` も必要になる。
+4. 実行コンテナ内の AWS CLI は標準 credential provider chain により、その一時認証情報を使って RDS、CloudWatch、必要時の SSM Parameter Store を SigV4 署名付きで呼び出す。
+5. IAM ポリシーは API ごとに認可を判断する。SecureString を CMK で暗号化している場合は、Parameter Store の認可に加えて KMS の `Decrypt` も必要になる。
 
-このため、CodeBuild 実環境用の `CONFIG_FILE`、`SERVICE_NAME`、`MYSQL_CREDENTIALS_SECRET_ID` は認証情報ではない。前二者は通常の環境変数、secret ID は参照先識別子であり、AWS API を呼べるかどうかは CodeBuild サービスロールで決まる。
+このため、CodeBuild 実環境用の `CONFIG_FILE` と `SERVICE_NAME` は認証情報ではない。いずれも通常の環境変数であり、AWS API を呼べるかどうかは CodeBuild サービスロールで決まる。接続情報そのものは config の `mysql_verification` が指す SSM パラメータ側にあり、CodeBuild の環境変数には現れない。
 
 最低限の IAM 権限の詳細は [CodeBuild / CodePipeline セットアップ手順](codebuild-codepipeline-setup.md#2-iam-ロールと最小権限) を参照する。
 
@@ -105,7 +105,7 @@ CodeConnections による GitHub 接続は CodePipeline の Source ステージ�
 
 1. CodePipeline artifact 用の S3 bucket、CodePipeline 実行ロール、CodeBuild サービスロールを組織の方針に従って用意する。CMK を使う場合は、両ロールに対象キーの利用権限を付与する。
 2. GitHub repository と CodeConnections 接続を作成し、GitHub 側の認可を完了して接続を `AVAILABLE` にする。
-3. Step 2 で、対象サービスの MySQL 8.4 DB パラメータグループを CloudFormation で作成し、`config/blue-green/<environment>.yml` の `target_db_parameter_group_name` と一致させる。
+3. Step 2 で、対象サービスの MySQL 8.4 DB パラメータグループを CloudFormation で作成し、`config/blue-green/<environment>.deployment.yml` の `target_db_parameter_group_name` と一致させる。
 4. [codepipeline.yml](../examples/rds-blue-green-deployment/codepipeline.yml) を CloudFormation で deploy する。このテンプレートは BuildGreen、VerifyGreen、Switchover の三つの CodeBuild project と、それらを順に呼び出す CodePipeline を作成する。
 5. テンプレートの `CodeBuildServiceRoleArn` に Step 3〜5 用のサービスロールを渡す。trust policy は `codebuild.amazonaws.com` に `sts:AssumeRole` を許可し、RDS／CloudWatch と必要時の Secrets Manager、artifact／log 出力に必要な最小権限を設定する。
 6. MySQL 実効値を収集する場合だけ、secret ID、CodeBuild の VPC 設定、RDS security group を追加する。既定の `CollectMySqlRuntimeValues=false` ではこの DB 接続設定は不要である。

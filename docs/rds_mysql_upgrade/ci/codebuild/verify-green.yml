@@ -56,7 +56,7 @@ phases:
   build:
     commands:
       # 4. 設定ファイルが MySQL 実効値収集を要求している場合だけクライアントを入れる。
-      #    接続方式（secrets_manager / parameter_store / plaintext / prompt）は
+      #    接続方式（parameter_store / plaintext / prompt）は
       #    config の mysql_verification が決め、verify_green.sh が解決する。
       - |
         set -eu

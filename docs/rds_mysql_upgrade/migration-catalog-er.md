@@ -17,6 +17,7 @@ erDiagram
     ENVIRONMENT ||--o{ CONNECTION_BINDING : "どの環境の接続か"
     PARAMETER_GROUP ||--o{ CONNECTION_BINDING : "Green へ適用する"
     CONNECTION_BINDING }o--|| SCHEMA : "接続先の schema（派生）"
+    MYSQL_VERIFICATION ||--o{ CONNECTION_BINDING : "共通の既定値。接続側の指定が優先する"
     RDS_INSTANCE ||--|{ SCHEMA : "収容する（派生）"
     ENVIRONMENT ||--o{ RDS_INSTANCE : "どのアカウントのインスタンスか（派生）"
 
@@ -33,10 +34,16 @@ erDiagram
         string environment_name PK "同上"
         string source_db_instance_identifier "接続先の RDS インスタンス"
         string schema_name "接続先の MySQL データベース名"
-        string connect_via "RDS エンドポイント以外で到達する場合の経路"
         string target_parameter_group_name FK "必須。PARAMETER_GROUP.name への外部キー"
-        string target_engine_version "任意。省略時は Blue と同じバージョン"
+        string target_engine_version "任意。省略時は共通ターゲット"
         string target_db_instance_class "任意。省略時は Blue と同じクラス"
+        string mysql_parameter_name "任意。省略時は MYSQL_VERIFICATION の共通値"
+        string mysql_user_parameter_name "任意。省略時は MYSQL_VERIFICATION の共通値"
+    }
+    MYSQL_VERIFICATION {
+        string parameter_name "パスワードを置く SSM SecureString のパラメータ名"
+        string user_parameter_name "接続ユーザー名を置く SSM SecureString のパラメータ名"
+        boolean enabled "Step 4 で Green DB へ接続するか"
     }
     ENVIRONMENT {
         string name PK "development | staging | production。実体は AWS アカウント"
@@ -119,8 +126,6 @@ applications:
             # 実定義: 環境変数 ORDER_DB_HOST / ORDER_DB_NAME
             rds_instance: order-production-mysql80
             schema_name: order_production
-            # RDS エンドポイントへ直接ではなく CNAME 経由で到達する場合に記録する。
-            connect_via: order-db.internal.example.com
             target:
               # db_parameter_group_name だけが必須。
               db_parameter_group_name: production-mysql84-v1
@@ -193,9 +198,21 @@ parameter_groups:
   # production の 2 インスタンスで共有する共通ベースライン。
   production-mysql84-v1:
     template_path: generated/parameter-groups/production.yaml
+
+# Step 4 の MySQL 接続設定の、全 DB 共通の既定値。
+# ユーザー名とパスワードは SSM Parameter Store の SecureString に置き、
+# ここにはパラメータ名だけを書く。環境ごとに AWS アカウントが分かれるため、
+# 同じパラメータ名を全環境で共通に使える。
+# 個別の DB で変える場合だけ、その接続の environments.<環境> 配下へ
+# mysql_verification を書く（キー単位で上書きされる）。
+mysql_verification:
+  enabled: false
+  parameter_name: /rds-bg/mysql-password
+  user_parameter_name: /rds-bg/mysql-user
+  port: 3306
 ```
 
-**トップレベルは `applications` / `database_environments` / `parameter_groups` の 3 つだけである。**
+**トップレベルは `applications` / `database_environments` / `parameter_groups` / `mysql_verification` の 4 つである。**
 
 | YAML の階層 | ER の実体 |
 |---|---|
@@ -204,6 +221,8 @@ parameter_groups:
 | `applications.<app>.connections.<conn>.environments.<env>` | `CONNECTION_BINDING` |
 | `database_environments` | `ENVIRONMENT` |
 | `parameter_groups.<name>` | `PARAMETER_GROUP` |
+| `mysql_verification` | `MYSQL_VERIFICATION`（全 DB 共通の既定値） |
+| `applications.<app>.connections.<conn>.environments.<env>.mysql_verification` | `CONNECTION_BINDING` の上書き |
 | （導出） | `SCHEMA` / `RDS_INSTANCE` |
 
 **接続定義はすべて `applications` 配下にある。** アプリを開けば、その接続が各環境で何に繋がっていて、どこへ移行するのかが 1 か所で読める。

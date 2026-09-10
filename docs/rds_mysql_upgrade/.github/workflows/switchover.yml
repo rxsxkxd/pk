@@ -49,7 +49,7 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ap-northeast-1
       - name: Step 5 — approved switchover
-        run: scripts/switchover.sh --config config/blue-green/${{ inputs.environment }}.yml --service '${{ inputs.service }}' --approve --output-dir artifacts
+        run: scripts/switchover.sh --config config/blue-green/${{ inputs.environment }}.deployment.yml --service '${{ inputs.service }}' --approve --output-dir artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

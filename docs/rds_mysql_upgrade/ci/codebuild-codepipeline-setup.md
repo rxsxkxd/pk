@@ -86,7 +86,7 @@ sudo apt-get install -y mysql-client
 | S3 artifact bucket | 同一リージョンの既存バケット、暗号化・ライフサイクルを設定 | ソースと各 Step の成果物を保存する |
 | CodePipeline 実行ロール | 既存 IAM role ARN | Pipeline が CodeConnections、S3、CodeBuild を利用する |
 | CodeBuild 実行ロール | 既存 IAM role ARN | RDS・CloudWatch API と成果物を扱う |
-| 環境設定 | `config/blue-green/<environment>.yml` の対象サービス定義 | Blue DB、8.4 PG、DB クラス、承認状態を決める |
+| 環境設定 | `config/blue-green/<environment>.deployment.yml` の対象サービス定義 | Blue DB、8.4 PG、DB クラス、承認状態を決める |
 | Step 2 完了 | MySQL 8.4 パラメータグループが CloudFormation で作成済み | Step 3 が `target_db_parameter_group_name` を RDS API へ渡す |
 
 CodeConnections は、接続作成後に GitHub 側で認可を完了させる必要がある。Connection ARN は CloudFormation パラメータ `CodeStarConnectionArn` に渡す。[CodeConnections の GitHub 接続手順](https://docs.aws.amazon.com/dtconsole/latest/userguide/connections-create-github.html)を参照する。
@@ -126,9 +126,9 @@ Step ごとの変更権限は次のとおりである。
 
 実効値もレポートへ載せる場合だけ、次を追加する。
 
-1. Secrets Manager に JSON secret を作成する。キーは `username` と `password` とする。
-2. `MySqlCredentialsSecretId` に secret ID または ARN を渡し、`CollectMySqlRuntimeValues=true` でスタックを更新する。
-3. CodeBuild 実行ロールに、その secret だけの `secretsmanager:GetSecretValue` を許可する。CMK で暗号化した secret は `kms:Decrypt` も許可する。
+1. SSM Parameter Store に SecureString パラメータを 2 本作成する。パスワード用（`parameter_name`）とユーザー名用（`user_parameter_name`）で、どちらも必須である。
+2. `MySqlCredentialsParameterArns` にその 2 本の ARN をカンマ区切りで渡し、`CollectMySqlRuntimeValues=true` でスタックを更新する。
+3. CodeBuild 実行ロールに、そのパラメータだけの `ssm:GetParameter` を許可する。CMK で暗号化した SecureString は `kms:Decrypt` も許可する。
 4. `VerifyGreenProject` に、Green DB へ到達できる `VpcConfig`（VPC、private subnet、security group）を追加する。
 5. MySQL ユーザーに `performance_schema.global_variables` を参照できる最小限の権限を与える。
 
@@ -154,11 +154,11 @@ aws cloudformation deploy \
     CodeBuildServiceRoleArn=arn:aws:iam::123456789012:role/CodeBuildRdsBlueGreen
 ```
 
-初回は `CollectMySqlRuntimeValues` と `MySqlCredentialsSecretId` を省略する。実効値取得を必要とするレビュー時だけ、ネットワーク・secret・権限を確認したうえで以下を追加してスタック更新する。
+初回は `CollectMySqlRuntimeValues` と `MySqlCredentialsParameterArns` を省略する。実効値取得を必要とするレビュー時だけ、ネットワーク・パラメータ・権限を確認したうえで以下を追加してスタック更新する。
 
 ```text
 CollectMySqlRuntimeValues=true
-MySqlCredentialsSecretId=<対象の Secrets Manager secret ID または ARN>
+MySqlCredentialsParameterArns=<パスワード用 ARN>,<ユーザー名用 ARN>
 ```
 
 CloudFormation の `CodeStarConnectionArn`、artifact bucket、両実行ロールはスタック外で管理する。テンプレートを削除しても、これら既存リソースは削除されない。
@@ -168,7 +168,7 @@ CloudFormation の `CodeStarConnectionArn`、artifact bucket、両実行ロー�
 ### 5-1. 実行前の確認
 
 1. Step 1 の成立条件チェックと Step 2 のパラメータグループ作成・レビューを完了する。
-2. 対象サービスの `config/blue-green/<environment>.yml` を確認する。
+2. 対象サービスの `config/blue-green/<environment>.deployment.yml` を確認する。
 3. `source_db_instance_identifier`、`target_engine_version`、`target_db_instance_class`、`target_db_parameter_group_name`、`target_parameter_group_template_path` が正しいことを確認する。
 4. Step 3 を許可する場合だけ `actions.build: approved` に変更し、通常の構成変更レビューを完了する。
 

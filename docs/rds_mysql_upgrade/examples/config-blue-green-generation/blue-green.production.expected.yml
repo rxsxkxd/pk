@@ -13,18 +13,14 @@ services:
     final_snapshot_identifier: example-service-test-production-audit-mysql80-final
     schemas:
     - example_service_test_audit
-    connected_by:
-    - example-service-test-batch.primary
-    - example-service-test.audit
     mysql_verification:
-      enabled: false
+      enabled: true
       user: ''
-      auth_method: prompt
-      secret_id: ''
-      parameter_name: ''
-      user_parameter_name: ''
+      auth_method: parameter_store
+      parameter_name: /rds-bg-test/audit/mysql-password
+      user_parameter_name: /rds-bg-test/audit/mysql-user
       ssl_ca: ''
-      port: 3306
+      port: 3307
     actions:
       build: pending
       switchover: pending
@@ -42,15 +38,12 @@ services:
     final_snapshot_identifier: example-service-test-production-mysql80-final
     schemas:
     - example_service_test
-    connected_by:
-    - example-service-test.primary
     mysql_verification:
-      enabled: false
+      enabled: true
       user: ''
-      auth_method: prompt
-      secret_id: ''
-      parameter_name: ''
-      user_parameter_name: ''
+      auth_method: parameter_store
+      parameter_name: /rds-bg-test/mysql-password
+      user_parameter_name: /rds-bg-test/mysql-user
       ssl_ca: ''
       port: 3306
     actions:

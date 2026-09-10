@@ -6,6 +6,7 @@
 #   - 1 アプリに複数接続（マルチ DB）
 #   - development で 2 接続が 1 インスタンスを共有（同居 → 1 deployment へまとめる）
 #   - target の省略（engine_version は共通ターゲットへ、db_instance_class は Blue を踏襲）
+#   - mysql_verification のルート既定値と、接続配下での個別上書き
 applications:
   example-service-test:
     connections:
@@ -30,7 +31,6 @@ applications:
             # 実定義: 環境変数 EXAMPLE_DB_HOST / EXAMPLE_DB_NAME
             rds_instance: example-service-test-production-mysql80
             schema_name: example_service_test
-            connect_via: example-db.internal.test.example.com
             target:
               engine_version: "8.4.10"
               db_instance_class: db.r6g.xlarge
@@ -59,6 +59,11 @@ applications:
             target:
               engine_version: "8.4.10"
               db_parameter_group_name: example-service-test-production-audit-mysql84-v1
+            # この DB だけ別のパラメータと別ポートを使う（ルート既定値をキー単位で上書き）。
+            mysql_verification:
+              parameter_name: /rds-bg-test/audit/mysql-password
+              user_parameter_name: /rds-bg-test/audit/mysql-user
+              port: 3307
 
   # 別アプリが production の audit インスタンスを共有する（切替の影響が 2 アプリに及ぶ）。
   example-service-test-batch:
@@ -72,6 +77,11 @@ applications:
             target:
               engine_version: "8.4.10"
               db_parameter_group_name: example-service-test-production-audit-mysql84-v1
+            # この DB だけ別のパラメータと別ポートを使う（ルート既定値をキー単位で上書き）。
+            mysql_verification:
+              parameter_name: /rds-bg-test/audit/mysql-password
+              user_parameter_name: /rds-bg-test/audit/mysql-user
+              port: 3307
 
 # DB を配置している環境の一覧。実体は AWS アカウントで、
 # AWS CLI のプロファイルに一対一で対応するものとして扱う。
@@ -91,3 +101,10 @@ parameter_groups:
     template_path: examples/mysql84-parameter-generation/output/example-service-test-production-mysql84.yaml
   example-service-test-production-audit-mysql84-v1:
     template_path: examples/mysql84-parameter-generation/output/example-service-test-production-audit-mysql84.yaml
+
+# 全 DB 共通の既定値。接続配下に mysql_verification が無ければこれが使われる。
+mysql_verification:
+  enabled: true
+  parameter_name: /rds-bg-test/mysql-password
+  user_parameter_name: /rds-bg-test/mysql-user
+  port: 3306

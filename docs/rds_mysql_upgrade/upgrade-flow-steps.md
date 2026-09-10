@@ -38,7 +38,7 @@
 作成後は Deployment が `AVAILABLE` になるまで待機して終了し、切替は行わない。
 
 - 実装: [`scripts/build_green.sh`](scripts/build_green.sh) → [`scripts/create_blue_green_deployment.sh`](scripts/create_blue_green_deployment.sh)
-- 設定: [config/blue-green/production.yml](config/blue-green/production.yml) ／ [config/blue-green/staging.yml](config/blue-green/staging.yml)
+- 設定: [config/blue-green/production.deployment.yml](config/blue-green/production.deployment.yml) ／ [config/blue-green/staging.deployment.yml](config/blue-green/staging.deployment.yml)
 - 補足: 現行スクリプトは `--target-engine-version 8.4.x` を作成時に一括指定するワンショット方式。作成に失敗すると Deployment ごと作り直しになるため、同一 8.0 で作成 → Green のみ手動昇格する二段方式を選ぶ場合はスクリプトを分割する。
 
 ## Step 4. Blue/Green 構成の設定チェックとレプリカ同期チェック
@@ -166,7 +166,7 @@ AWS リソースを変更する CI ジョブは Step 3（移行構築）、Step 
 進捗を設定ファイルへ書き戻さないため、CI から人間へ向けた PR が不要になり、リポジトリの状態と実環境がずれる余地もなくなる。「構築済みか」「切替済みか」は常に AWS へ問い合わせて判定する。
 
 ```yaml
-# config/blue-green/production.yml
+# config/blue-green/production.deployment.yml
 environment: production
 aws_region: ap-northeast-1
 

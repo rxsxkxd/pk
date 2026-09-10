@@ -56,71 +56,48 @@ expect_ok '無効時は user 未指定でも通る' MYSQL_VERIFY_ENABLED=false
 make_config staging "      enabled: true
       user: verifier
       auth_method: prompt"
-expect_ok 'D: prompt' MYSQL_VERIFY_ENABLED=true MYSQL_VERIFY_AUTH=prompt MYSQL_VERIFY_PORT=3306
+expect_ok 'prompt' MYSQL_VERIFY_ENABLED=true MYSQL_VERIFY_AUTH=prompt MYSQL_VERIFY_PORT=3306
 
 make_config staging "      enabled: true
-      user: verifier
-      auth_method: secrets_manager
-      secret_id: rds-bg/staging/mysql"
-expect_ok 'A: secrets_manager' MYSQL_VERIFY_AUTH=secrets_manager MYSQL_VERIFY_SECRET_ID=rds-bg/staging/mysql
-
-make_config staging "      enabled: true
-      user: verifier
       auth_method: parameter_store
-      parameter_name: /rds-bg/staging/mysql"
-expect_ok 'B: parameter_store' MYSQL_VERIFY_AUTH=parameter_store MYSQL_VERIFY_PARAMETER_NAME=/rds-bg/staging/mysql
+      parameter_name: /rds-bg/staging/mysql-password
+      user_parameter_name: /rds-bg/staging/mysql-user"
+expect_ok 'parameter_store（user は SSM から取るため config には置かない）' \
+  MYSQL_VERIFY_AUTH=parameter_store \
+  MYSQL_VERIFY_PARAMETER_NAME=/rds-bg/staging/mysql-password \
+  MYSQL_VERIFY_USER_PARAMETER_NAME=/rds-bg/staging/mysql-user
 
 make_config staging "      enabled: true
       user: verifier
       auth_method: plaintext
       password: test-only"
-expect_ok 'C: plaintext（staging では許可）' MYSQL_VERIFY_AUTH=plaintext MYSQL_VERIFY_PLAINTEXT=test-only
+expect_ok 'plaintext（staging では許可）' MYSQL_VERIFY_AUTH=plaintext MYSQL_VERIFY_PLAINTEXT=test-only
 
 # --- 異常系 ---
 make_config production "      enabled: true
       user: verifier
       auth_method: plaintext
       password: leaked"
-expect_ng 'C: plaintext は production で拒否' 'production では使用できません'
+expect_ng 'plaintext は production で拒否' 'production では使用できません'
 
 make_config staging "      enabled: true
-      user: verifier
-      auth_method: secrets_manager"
-expect_ng 'secret_id 欠落' 'secret_id が必要です'
-
-make_config staging "      enabled: true
-      user: verifier
-      auth_method: parameter_store"
+      auth_method: parameter_store
+      user_parameter_name: /rds-bg/staging/mysql-user"
 expect_ng 'parameter_name 欠落' 'parameter_name が必要です'
+
+make_config staging "      enabled: true
+      auth_method: parameter_store
+      parameter_name: /rds-bg/staging/mysql-password"
+expect_ng 'user_parameter_name 欠落' 'user_parameter_name が必要です'
 
 make_config staging "      enabled: true
       auth_method: prompt"
 expect_ng 'prompt で user 欠落は拒否' 'user が必要です'
 
 make_config staging "      enabled: true
-      auth_method: parameter_store
-      parameter_name: /rds-bg/staging/mysql-password"
-expect_ng 'parameter_store で user も user_parameter_name も無いと拒否' 'user が必要です'
-
-# --- ユーザー名も秘匿する構成 ---
-make_config staging "      enabled: true
-      auth_method: secrets_manager
-      secret_id: rds-bg/staging/mysql"
-expect_ok 'A: secrets_manager は user 省略可（シークレットの username を使う）' \
-  MYSQL_VERIFY_AUTH=secrets_manager MYSQL_VERIFY_USER=''
-
-make_config staging "      enabled: true
-      auth_method: parameter_store
-      parameter_name: /rds-bg/staging/mysql-password
-      user_parameter_name: /rds-bg/staging/mysql-user"
-expect_ok 'B: user_parameter_name があれば user 省略可' \
-  MYSQL_VERIFY_AUTH=parameter_store \
-  MYSQL_VERIFY_USER_PARAMETER_NAME=/rds-bg/staging/mysql-user MYSQL_VERIFY_USER=''
-
-make_config staging "      enabled: true
       user: verifier
       auth_method: iam"
-expect_ng 'E: iam は未実装として明示的に失敗' '未実装です'
+expect_ng 'iam は未対応の方式として拒否' 'auth_method が不正です'
 
 make_config staging "      enabled: true
       user: verifier
@@ -135,8 +112,8 @@ make_config staging "      enabled: true
 read_mysql_verification_config "$tmp/c.yml" svc
 resolve_mysql_credentials ap-northeast-1 '' 2>/dev/null
 [[ "$MYSQL_VERIFY_PASSWORD" == 's3cret' ]] \
-  && echo 'ok    C: plaintext のパスワード解決' \
-  || { echo 'FAIL  C: plaintext のパスワード解決'; failed=$((failed+1)); }
+  && echo 'ok    plaintext のパスワード解決' \
+  || { echo 'FAIL  plaintext のパスワード解決'; failed=$((failed+1)); }
 
 make_config staging "      enabled: true
       user: verifier
@@ -144,8 +121,8 @@ make_config staging "      enabled: true
 read_mysql_verification_config "$tmp/c.yml" svc
 resolve_mysql_credentials ap-northeast-1 ''
 [[ -z "$MYSQL_VERIFY_PASSWORD" ]] \
-  && echo 'ok    D: prompt は空（対話入力へ委ねる）' \
-  || { echo 'FAIL  D: prompt が空でない'; failed=$((failed+1)); }
+  && echo 'ok    prompt は空（対話入力へ委ねる）' \
+  || { echo 'FAIL  prompt が空でない'; failed=$((failed+1)); }
 
 # ユーザー名が解決できない場合は失敗させる（秘匿側にも config にも無いケース）。
 make_config staging "      enabled: true

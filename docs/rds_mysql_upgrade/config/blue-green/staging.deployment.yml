@@ -1,57 +1,54 @@
-# production 環境の RDS Blue/Green Deployment 設定。
+# staging 環境の RDS Blue/Green Deployment 設定。
 # 認証情報は AWS CLI の named profile に保持し、このファイルには記載しない。
-environment: production
+environment: staging
 aws_region: ap-northeast-1
 
 services:
   example-service:
     # 移行元となる MySQL 8.0 Blue DB の DB インスタンス識別子。
-    source_db_instance_identifier: example-service-production-mysql80
+    source_db_instance_identifier: example-service-staging-mysql80
     # 移行元の現在のエンジンバージョンとパラメータグループ。
     # Step 3・5 が「切替済みか」を判定する基準として使う（結果の観測）。
     # エンジンバージョンは major.minor に正規化して比較するため、
     # RDS の自動マイナーバージョンアップグレードによるパッチ差分を吸収する
     # （8.0.44 → 8.0.46、切替後の 8.4.10 → 8.4.11 のいずれも判定に影響しない）。
     source_engine_version: "8.0"
-    source_db_parameter_group_name: example-service-production-mysql80-v1
+    source_db_parameter_group_name: example-service-staging-mysql80-v1
     # Green DB の目標 RDS for MySQL バージョン。
     target_engine_version: 8.4.10
     # Green DB の RDS DB インスタンスタイプ。
-    target_db_instance_class: db.r6g.large
+    target_db_instance_class: db.t4g.medium
     # CloudFormation で事前作成済みの MySQL 8.4 DB パラメータグループ名。
     # RDS API の TargetDBParameterGroupName に直接指定する。
-    target_db_parameter_group_name: example-service-production-mysql84-v1
+    target_db_parameter_group_name: example-service-staging-mysql84-v1
     # Step 2 でレビュー・適用した DB パラメータグループの CloudFormation YAML。
     target_parameter_group_template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
-    protection_snapshot_identifier: example-service-production-mysql80-pre-bg-20260828
+    protection_snapshot_identifier: example-service-staging-mysql80-pre-bg-20260828
     # Step 7 で旧 Blue を削除する際の最終スナップショット名。
     # 固定名にすることで、途中失敗後の再実行でスナップショットが増殖しない。
-    final_snapshot_identifier: example-service-production-mysql80-final
+    final_snapshot_identifier: example-service-staging-mysql80-final
     # Step 4 の MySQL 実効値収集と、Step 7 の逆レプリケーション確認で使う接続設定。
     # enabled: false のときは DB へ接続せず、AWS API による検証だけを行う。
     #
     # auth_method（パスワードの取得方法）:
-    #   secrets_manager  Secrets Manager のシークレット。JSON の password を読む
-    #                    → secret_id を指定する
-    #   parameter_store  SSM Parameter Store の SecureString
-    #                    → parameter_name を指定する
+    #   parameter_store  SSM Parameter Store の SecureString。CI で使う方式
+    #                    → parameter_name と user_parameter_name の両方を指定する
+    #                    （ユーザー名も必ず秘匿側へ置く。config の user は使わない）
     #   plaintext        このファイルに直書き。**テスト環境専用**
     #                    → password を指定する。production では拒否される
     #   prompt           対話入力。ローカル実行専用（CI では成立しない）
-    #   （iam / IAM データベース認証は未実装。設定すると明示的に失敗する）
+    # カタログからの生成では parameter_store 固定で出力される。
     mysql_verification:
       enabled: false
-      # 接続ユーザー。ユーザー名も秘匿したい場合は空にできる。
-      #   secrets_manager  シークレット JSON の username を使う
-      #   parameter_store  user_parameter_name を指定するとそこから取る
-      # plaintext / prompt では必須。
+      # 接続ユーザー。plaintext / prompt でのみ使う（必須）。
+      # parameter_store では user_parameter_name から取得するため空でよい。
       user: verifier
       auth_method: prompt
-      # production では plaintext を使用できないため password キーは置かない。
-      # secrets_manager のシークレットは JSON で {"username": ..., "password": ...} を持つ。
-      secret_id: ''
-      # parameter_store はいずれも SecureString。user_parameter_name を指定すると
-      # ユーザー名も秘匿側から取得し、設定ファイルへ書かずに済む。
+      # auth_method: plaintext のときだけ使う。
+      # このファイルは Git 追跡対象である。実運用の認証情報を書かないこと。
+      password: ''
+      # auth_method: parameter_store のときに使う。いずれも SecureString で、
+      # 両方が必須である。ユーザー名も設定ファイルへ書かずに済む。
       parameter_name: ''
       user_parameter_name: ''
       # TLS 用の CA バンドル。指定すると ssl-mode=VERIFY_CA で接続する。

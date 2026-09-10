@@ -64,17 +64,17 @@ jobs:
             --output type=local,dest=.tools/green-report \
             .
       # MySQL 実効値収集を行うかは config の mysql_verification.enabled が決める。
-      # 接続方式（secrets_manager / parameter_store / plaintext / prompt）も config が持ち、
+      # 接続方式（parameter_store / plaintext / prompt）も config が持ち、
       # verify_green.sh が解決する。prompt は対話入力のため CI では成立しない。
       - name: Install MySQL client when the config requires runtime collection
         run: |
-          enabled=$(python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); m = d["services"][sys.argv[2]].get("mysql_verification") or {}; print("true" if m.get("enabled") else "false")' 'config/blue-green/${{ inputs.environment }}.yml' '${{ inputs.service }}')
+          enabled=$(python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); m = d["services"][sys.argv[2]].get("mysql_verification") or {}; print("true" if m.get("enabled") else "false")' 'config/blue-green/${{ inputs.environment }}.deployment.yml' '${{ inputs.service }}')
           echo "mysql_verification.enabled=$enabled"
           if [ "$enabled" = "true" ]; then
             sudo apt-get update && sudo apt-get install -y mysql-client
           fi
       - name: Step 4 — verify Green configuration and replication lag
-        run: GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" scripts/verify_green.sh --config 'config/blue-green/${{ inputs.environment }}.yml' --service '${{ inputs.service }}' --output-dir artifacts
+        run: GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" scripts/verify_green.sh --config 'config/blue-green/${{ inputs.environment }}.deployment.yml' --service '${{ inputs.service }}' --output-dir artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

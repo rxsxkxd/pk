@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Blue/Green 設定生成支援ツールのテスト。
 # 実 AWS には接続せず、examples/ の describe-db-instances ダミー応答を使う。
-# 出力はすべて一時ディレクトリに限定し、config/blue-green/{staging,production}.yml を変更しない。
+# 出力はすべて一時ディレクトリに限定し、config/blue-green/{staging,production}.deployment.yml を変更しない。
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)
@@ -83,20 +83,37 @@ assert bindings, f"test fixture has no connection for {environment}"
 instances = {binding["rds_instance"] for _, _, binding in bindings}
 assert set(actual["services"]) == instances, "services keys must be the RDS instances"
 
-# 同じインスタンスを指す接続は 1 エントリへまとめ、schemas と connected_by を集約する。
+# 同じインスタンスを指す接続は 1 エントリへまとめ、schemas を集約する。
 for instance in instances:
     service = actual["services"][instance]
     expected_schemas = sorted(
         {b["schema_name"] for _, _, b in bindings if b["rds_instance"] == instance}
     )
-    expected_connected = sorted(
-        {f"{a}.{c}" for a, c, b in bindings if b["rds_instance"] == instance}
-    )
     assert service["schemas"] == expected_schemas, instance
-    assert service["connected_by"] == expected_connected, instance
     # target を省略した接続は、共通ターゲットと Blue の実値で補完される。
     assert service["target_engine_version"]
     assert service["target_db_instance_class"]
+
+# mysql_verification は、ルートの既定値を接続配下がキー単位で上書きする。
+# auth_method は parameter_store 固定で、user はカタログに置かない。
+defaults = catalog.get("mysql_verification") or {}
+for instance in instances:
+    verification = actual["services"][instance]["mysql_verification"]
+    assert verification["auth_method"] == "parameter_store", instance
+    assert verification["user"] == "", instance
+    overrides = [
+        b.get("mysql_verification") or {}
+        for _, _, b in bindings if b["rds_instance"] == instance
+    ]
+    merged = dict(defaults)
+    for override in overrides:
+        merged.update(override)
+    for key in ("enabled", "parameter_name", "user_parameter_name", "port"):
+        if key in merged:
+            assert verification[key] == merged[key], f"{instance}.{key}"
+    if merged.get("enabled"):
+        assert verification["parameter_name"], instance
+        assert verification["user_parameter_name"], instance
 
 print(f"Blue/Green config generator {environment}: OK "
       f"({len(bindings)} connections -> {len(instances)} deployments)")

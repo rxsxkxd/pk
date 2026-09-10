@@ -47,87 +47,46 @@ AWS CLI の認証は利用者または実行基盤が提供する通常の AWS �
 
 ### 4-2. 移行カタログ
 
-`config/migration-catalog.yml` は人が管理する正本である。RDS API では得られない対応関係と、8.4 側で人が決める値だけを記載する。
+`config/migration-catalog.yml` は人が管理する正本である。RDS API では得られない接続定義と、8.4 側で人が決める値だけを記載する。**構造は [migration-catalog-er.md](migration-catalog-er.md) を正とする。**
 
 ```yaml
-databases:
-  # ルートキー自体が MySQL schema 名。1 schema を 1 定義として管理する。
+applications:
+  # database.yml を共有するコードベース単位。デプロイ単位ではない。
   order:
-    # schema を利用するアプリケーション（レビュー用メタデータ）。
-    services: [order-api, order-batch]
-    environments:
-      development:
-        # AWS profile とリージョンは収集・実行コマンドで指定する。
-        # primary は一つの RDS ホストと、このルートの一つの schema の組み合わせ。
-        primary:
-          output_service_name: order-primary
-          host:
-            rds_instance_identifier: shared-order-development-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.t4g.small
-            db_parameter_group_name: shared-order-development-mysql84-v1
-            parameter_group_template_path: generated/parameter-groups/shared-order-development-mysql84.yaml
-      staging:
-        primary:
-          output_service_name: order-primary
-          host:
-            rds_instance_identifier: shared-order-staging-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.t4g.medium
-            db_parameter_group_name: shared-order-staging-mysql84-v1
-            parameter_group_template_path: generated/parameter-groups/shared-order-staging-mysql84.yaml
-      production:
-        primary:
-          output_service_name: order-primary
-          host:
-            # RDS の DBInstanceIdentifier。インベントリと照合して情報を補完するキー。
-            rds_instance_identifier: shared-order-production-mysql80
-          # 8.4 側の移行判断。パラメータグループは Phase 1 で別途作成済みであること。
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.r6g.large
-            db_parameter_group_name: shared-order-production-mysql84-v1
-            parameter_group_template_path: generated/parameter-groups/shared-order-production-mysql84.yaml
+    connections:
+      # 接続名は全環境で共通。コードの connects_to が参照する。
+      primary:
+        environments:
+          production:
+            # 実定義: 環境変数 ORDER_DB_HOST / ORDER_DB_NAME
+            rds_instance: order-production-mysql80
+            schema_name: order_production
+            # RDS エンドポイント以外の経路で到達する場合に記録する。
+            connect_via: order-db.internal.example.com
+            target:
+              # db_parameter_group_name だけが必須。
+              db_parameter_group_name: production-mysql84-v1
+              # 任意。engine_version を省略すると共通ターゲットへ上げる。
+              # db_instance_class を省略すると Blue の実値を踏襲する。
+              # engine_version: "8.4.11"
+              # db_instance_class: db.r6g.large
 
-  # 別ホストにある schema は、独立した databases 要素として定義する。
-  payment:
-    services: [payment-api]
-    environments:
-      development:
-        primary:
-          output_service_name: payment-primary
-          host:
-            rds_instance_identifier: shared-payment-development-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.t4g.small
-            db_parameter_group_name: shared-payment-development-mysql84-v1
-            parameter_group_template_path: generated/parameter-groups/shared-payment-development-mysql84.yaml
-      staging:
-        primary:
-          output_service_name: payment-primary
-          host:
-            rds_instance_identifier: shared-payment-staging-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.t4g.medium
-            db_parameter_group_name: shared-payment-staging-mysql84-v1
-            parameter_group_template_path: generated/parameter-groups/shared-payment-staging-mysql84.yaml
-      production:
-        primary:
-          output_service_name: payment-primary
-          host:
-            rds_instance_identifier: shared-payment-production-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.r6g.large
-            db_parameter_group_name: shared-payment-production-mysql84-v1
-            parameter_group_template_path: generated/parameter-groups/shared-payment-production-mysql84.yaml
+# DB を配置している環境の一覧。実体は AWS アカウント（AWS CLI のプロファイルに相当）。
+database_environments:
+  - development
+  - staging
+  - production
+
+parameter_groups:
+  production-mysql84-v1:
+    template_path: generated/parameter-groups/production.yaml
 ```
 
-`databases.<schema>` は一つの MySQL schema を表す。各環境の `primary` は一つの `host` とその schema の組み合わせだけを表し、複数 host や複数 schema は入れない。schema が別の RDS ホストにある場合は、その schema 用の `databases.<schema>` を追加する。`output_service_name` が、生成先 `config/blue-green/<environment>.yml` の `services` キーになる。`--environment development`、`staging`、`production` の指定時は、各 schema 定義配下の同名環境を取り出して生成する。したがって、同じ環境で同一 RDS インスタンスまたは同じ `output_service_name` を複数の schema 定義に重複して書かない。
+**生成単位は RDS DB インスタンスである。** 同じ `rds_instance` を指す接続は 1 つの Blue/Green deployment にまとめられ、生成先 `config/blue-green/<environment>.yml` の `services` キーには **RDS インスタンス識別子**が入る。
+
+`--environment development` / `staging` / `production` の指定時は、各接続配下の同名環境を取り出して生成する。環境名は `database_environments` に列挙したものだけを受け付ける。
+
+アプリケーションと接続の関係は、切替の影響範囲を辿るために持つ。実行スクリプトは参照しないが、生成結果の `schemas` と `connected_by` に反映される。
 
 ## 5. 生成処理
 
@@ -139,10 +98,17 @@ databases:
 |---|---|
 | `environment` | 生成時の `--environment` 引数 |
 | `aws_region` | RDS インベントリ収集時の `--region`（インベントリ最上位の `aws_region`） |
-| `source_db_instance_identifier` | 移行カタログの `databases.<schema>.environments.<environment>.primary.host.rds_instance_identifier` |
+| `services` のキー | 接続の `rds_instance`（RDS インスタンス識別子） |
+| `source_db_instance_identifier` | 同上 |
 | `source_engine_version` | RDS インベントリの `EngineVersion` を `8.0` のような major.minor へ正規化 |
 | `source_db_parameter_group_name` | RDS インベントリ |
-| `target_engine_version`、`target_db_instance_class`、`target_db_parameter_group_name`、`target_parameter_group_template_path` | 移行カタログ |
+| `target_db_parameter_group_name` | 移行カタログの `target.db_parameter_group_name`（**必須**） |
+| `target_engine_version` | 移行カタログの `target.engine_version`。**省略時は共通ターゲット（生成器の `DEFAULT_TARGET_ENGINE_VERSION`）** |
+| `target_db_instance_class` | 移行カタログの `target.db_instance_class`。**省略時は RDS インベントリの `DBInstanceClass` を踏襲** |
+| `target_parameter_group_template_path` | 移行カタログの `parameter_groups.<name>.template_path` |
+| `schemas` | そのインスタンスを指す接続の `schema_name` を集約（影響範囲のレビュー用） |
+| `connected_by` | そのインスタンスを指す接続を `<アプリ>.<接続名>` で集約（同上） |
+| `mysql_verification` | 移行カタログの接続配下（省略時は `enabled: false`） |
 | `protection_snapshot_identifier` | `<source_db_instance_identifier>-pre-bg` を生成 |
 | `final_snapshot_identifier` | `<source_db_instance_identifier>-final` を生成 |
 | `actions` | 常に `build`、`switchover`、`cleanup` を `pending` で生成 |
@@ -152,10 +118,12 @@ databases:
 - カタログで指定した DB インスタンス ID がインベントリにない
 - インベントリに `aws_region` がなく、生成先設定の実行リージョンを決定できない
 - 対象インスタンスの `Engine` が `mysql` ではない
-- 同じ環境内で一つの DB インスタンス ID または `output_service_name` が複数の schema 定義に重複する
-- 生成に必要な `target` の値が欠けている
+- `target.db_parameter_group_name` が指定されていない
+- `target.db_parameter_group_name` が `parameter_groups` に定義されていない
+- 接続の環境が `database_environments` に列挙されていない
+- 同じ `rds_instance` を指す接続のあいだで `target` または `mysql_verification` が食い違う
 
-これ以外の妥当性は自動判定しない。特に、アプリケーションと論理 DB の対応、目標インスタンスクラス、パラメータグループ内容はレビュー対象とする。
+これ以外の妥当性は自動判定しない。特に、アプリケーションと接続先の対応、目標インスタンスクラス、パラメータグループ内容はレビュー対象とする。
 
 ## 6. 操作イメージ
 
@@ -167,7 +135,7 @@ scripts/collect_rds_instance_inventory.sh \
   --output artifacts/rds-instance-inventory.json
 
 # 2. 人が config/migration-catalog.yml をレビュー・更新する。
-#    カタログにはリージョンを書かず、RDS インスタンス ID と移行設定だけを管理する。
+#    カタログにはリージョンを書かず、接続定義と移行設定だけを管理する。
 
 # 3. 指定環境の Blue/Green 設定を生成する。
 python3 scripts/generate_blue_green_config.py \
@@ -185,7 +153,11 @@ git diff -- config/blue-green/production.yml
 実装・変更時は、実環境のカタログ、AWS、既存の `config/blue-green/*.yml` をテスト対象にしない。
 
 - テスト fixture は `development`、`staging`、`production` の三環境を含むが、RDS インスタンス ID はすべて `example-service-test-*` のダミー値である。
-- テスト fixture は二つの `databases.<schema>` を定義し、各環境でそれぞれ異なる RDS ホストを参照する。
+- テスト fixture は二つの `applications` を定義し、次を意図的に含めて生成器の分岐を通す。
+  - 1 アプリに複数接続（マルチ DB）
+  - development で 2 接続が 1 インスタンスを共有し、1 deployment へまとめられること
+  - production で 2 アプリが 1 インスタンスを共有すること
+  - `target` の省略（`engine_version` は共通ターゲットへ、`db_instance_class` は Blue を踏襲）
 - [migration-catalog.test.yml](examples/config-blue-green-generation/migration-catalog.test.yml) と [rds-instance-inventory.test.json](examples/config-blue-green-generation/rds-instance-inventory.test.json) をダミー入力として使う。
 - `blue-green.<environment>.expected.yml` を生成結果の期待値とし、生成 YAML を構文ではなくデータ構造として比較する。
 - 実行済みの結果は [test-result.md](examples/config-blue-green-generation/test-result.md) に残す。

@@ -90,109 +90,36 @@ def normalize_major_minor(version, context):
     return f"{match.group(1)}.{match.group(2)}"
 
 
-def generate(catalog, inventory, inventory_region, environment_name):
-    catalog_databases = catalog.get("databases")
-    if not isinstance(catalog_databases, dict) or not catalog_databases:
-        raise SystemExit("catalog.databases must be a non-empty mapping")
+# 移行先の共通ターゲット。カタログで engine_version を省略した接続はこの値へ上げる。
+# RDS で利用可能なバージョンかは describe-db-engine-versions で確認する。
+DEFAULT_TARGET_ENGINE_VERSION = "8.4.11"
 
-    services = {}
-    source_ids = set()
-    for database_name, database_catalog in catalog_databases.items():
-        database_context = f"databases.{database_name}"
-        if not isinstance(database_catalog, dict):
-            raise SystemExit(f"{database_context} must be a mapping")
-        database_services = required(database_catalog, "services", database_context)
-        if not isinstance(database_services, list) or not database_services:
-            raise SystemExit(f"{database_context}.services must be a non-empty list")
-        environments = required(database_catalog, "environments", database_context)
-        if not isinstance(environments, dict):
-            raise SystemExit(f"{database_context}.environments must be a mapping")
-        environment = environments.get(environment_name)
-        if environment is None:
-            continue
-
-        environment_context = f"{database_context}.environments.{environment_name}"
-        if not isinstance(environment, dict):
-            raise SystemExit(f"{environment_context} must be a mapping")
-        primary = required(environment, "primary", environment_context)
-        context = f"{environment_context}.primary"
-        if not isinstance(primary, dict):
-            raise SystemExit(f"{context} must be a mapping")
-        output_service_name = str(required(primary, "output_service_name", context))
-        if output_service_name in services:
-            raise SystemExit(f"{context}: duplicate output_service_name: {output_service_name}")
-        host = required(primary, "host", context)
-        if not isinstance(host, dict):
-            raise SystemExit(f"{context}.host must be a mapping")
-        source_id = str(required(host, "rds_instance_identifier", f"{context}.host"))
-        if source_id in source_ids:
-            raise SystemExit(f"{context}: duplicate source_db_instance_identifier: {source_id}")
-        source_ids.add(source_id)
-
-        instance = inventory.get(source_id)
-        if instance is None:
-            raise SystemExit(f"{context}: source DB instance is absent from inventory: {source_id}")
-        if instance.get("Engine") != "mysql":
-            raise SystemExit(f"{context}: source DB instance Engine must be mysql, got {instance.get('Engine')!r}")
-
-        target = required(primary, "target", context)
-        if not isinstance(target, dict):
-            raise SystemExit(f"{context}.target must be a mapping")
-        target_context = f"{context}.target"
-        services[output_service_name] = {
-            "source_db_instance_identifier": source_id,
-            "source_engine_version": normalize_major_minor(
-                required(instance, "EngineVersion", context), context
-            ),
-            "source_db_parameter_group_name": source_parameter_group(instance, context),
-            "target_engine_version": required(target, "engine_version", target_context),
-            "target_db_instance_class": required(target, "db_instance_class", target_context),
-            "target_db_parameter_group_name": required(
-                target, "db_parameter_group_name", target_context
-            ),
-            "target_parameter_group_template_path": required(
-                target, "parameter_group_template_path", target_context
-            ),
-            "protection_snapshot_identifier": f"{source_id}-pre-bg",
-            "final_snapshot_identifier": f"{source_id}-final",
-            "mysql_verification": mysql_verification(primary, context, environment_name),
-            "actions": {
-                "build": "pending",
-                "switchover": "pending",
-                "switchover_timeout": 300,
-                "cleanup": "pending",
-            },
-        }
-
-    if not services:
-        raise SystemExit(f"environment is not defined for any catalog database: {environment_name}")
-
-    return {
-        "environment": environment_name,
-        "aws_region": inventory_region,
-        "services": services,
-    }
+MYSQL_AUTH_METHODS = ("secrets_manager", "parameter_store", "plaintext", "prompt")
+MYSQL_AUTH_UNIMPLEMENTED = ("iam",)
+MYSQL_VERIFICATION_KEYS = {
+    "enabled", "user", "auth_method", "secret_id",
+    "parameter_name", "user_parameter_name", "ssl_ca", "port",
+}
+TARGET_KEYS = {"db_parameter_group_name", "engine_version", "db_instance_class"}
+BINDING_KEYS = {"rds_instance", "schema_name", "connect_via", "target", "mysql_verification"}
 
 
-def mysql_verification(unit, context, environment_name):
-    """カタログの mysql_verification を検証して、生成する設定へそのまま渡す。
+def mysql_verification(binding, context, environment_name):
+    """接続の mysql_verification を検証して、生成する設定へ渡す。
 
     Step 4 の実効値収集と Step 7 の逆レプリケーション確認で使う接続設定である。
     カタログには参照（secret_id / parameter_name）だけを置き、パスワードそのものは
-    置かない（カタログ冒頭の方針）。auth_method: plaintext を使う場合は、生成後の
-    設定ファイルへ手で password を書く。
+    置かない。auth_method: plaintext を使う場合は、生成後の設定ファイルへ手で書く。
     """
-    VALID = ("secrets_manager", "parameter_store", "plaintext", "prompt")
-    given = unit.get("mysql_verification") or {}
+    given = binding.get("mysql_verification") or {}
     if not isinstance(given, dict):
         raise SystemExit(f"{context}.mysql_verification must be a mapping")
 
-    unknown = set(given) - {
-        "enabled", "user", "auth_method", "secret_id",
-        "parameter_name", "user_parameter_name", "ssl_ca", "port",
-    }
+    unknown = set(given) - MYSQL_VERIFICATION_KEYS
     if unknown:
-        raise SystemExit(f"{context}.mysql_verification has unknown keys: {', '.join(sorted(unknown))}")
+        raise SystemExit(
+            f"{context}.mysql_verification has unknown keys: {', '.join(sorted(unknown))}"
+        )
     if "password" in given:
         raise SystemExit(
             f"{context}.mysql_verification.password はカタログへ書かない。"
@@ -200,10 +127,12 @@ def mysql_verification(unit, context, environment_name):
         )
 
     auth = str(given.get("auth_method") or "prompt")
-    if auth not in VALID:
+    if auth in MYSQL_AUTH_UNIMPLEMENTED:
+        raise SystemExit(f"{context}.mysql_verification.auth_method: {auth} は未実装である")
+    if auth not in MYSQL_AUTH_METHODS:
         raise SystemExit(
             f"{context}.mysql_verification.auth_method が不正: {auth}"
-            f"（有効な値: {', '.join(VALID)}）"
+            f"（有効な値: {', '.join(MYSQL_AUTH_METHODS)}）"
         )
     if auth == "plaintext" and environment_name == "production":
         raise SystemExit(
@@ -219,6 +148,165 @@ def mysql_verification(unit, context, environment_name):
         "user_parameter_name": given.get("user_parameter_name") or "",
         "ssl_ca": given.get("ssl_ca") or "",
         "port": int(given.get("port") or 3306),
+    }
+
+
+def resolve_target(target, instance, context):
+    """target を解決する。db_parameter_group_name 以外は省略できる。
+
+    engine_version を省略した場合は共通ターゲット（DEFAULT_TARGET_ENGINE_VERSION）へ上げる。
+    db_instance_class を省略した場合は Blue の実値を踏襲する。
+    """
+    if not isinstance(target, dict):
+        raise SystemExit(f"{context}.target must be a mapping")
+    unknown = set(target) - TARGET_KEYS
+    if unknown:
+        raise SystemExit(f"{context}.target has unknown keys: {', '.join(sorted(unknown))}")
+
+    parameter_group = required(target, "db_parameter_group_name", f"{context}.target")
+
+    # 省略時は共通ターゲットへ上げる。Blue の値を踏襲しない（それでは移行にならない）。
+    engine_version = target.get("engine_version") or DEFAULT_TARGET_ENGINE_VERSION
+
+    # インスタンスクラスは省略時に Blue の実値を踏襲する。
+    instance_class = target.get("db_instance_class")
+    if not instance_class:
+        instance_class = required(instance, "DBInstanceClass", context)
+
+    return {
+        "target_engine_version": str(engine_version),
+        "target_db_instance_class": str(instance_class),
+        "target_db_parameter_group_name": str(parameter_group),
+    }
+
+
+def generate(catalog, inventory, inventory_region, environment_name):
+    """カタログの接続定義から、指定環境の Blue/Green 設定を生成する。
+
+    生成単位は RDS DB インスタンスである。同じ rds_instance を指す接続は
+    1 つの Blue/Green deployment にまとめる。
+    """
+    applications = catalog.get("applications")
+    if not isinstance(applications, dict) or not applications:
+        raise SystemExit("catalog.applications must be a non-empty mapping")
+
+    known_environments = catalog.get("database_environments")
+    if not isinstance(known_environments, list) or not known_environments:
+        raise SystemExit("catalog.database_environments must be a non-empty list")
+    if environment_name not in known_environments:
+        raise SystemExit(
+            f"unknown environment: {environment_name}"
+            f"（catalog.database_environments: {', '.join(map(str, known_environments))}）"
+        )
+
+    parameter_groups = catalog.get("parameter_groups")
+    if not isinstance(parameter_groups, dict) or not parameter_groups:
+        raise SystemExit("catalog.parameter_groups must be a non-empty mapping")
+
+    services = {}
+    for application_name, application in sorted(applications.items()):
+        application_context = f"applications.{application_name}"
+        if not isinstance(application, dict):
+            raise SystemExit(f"{application_context} must be a mapping")
+        connections = required(application, "connections", application_context)
+        if not isinstance(connections, dict):
+            raise SystemExit(f"{application_context}.connections must be a mapping")
+
+        for connection_name, connection in sorted(connections.items()):
+            connection_context = f"{application_context}.connections.{connection_name}"
+            if not isinstance(connection, dict):
+                raise SystemExit(f"{connection_context} must be a mapping")
+            environments = connection.get("environments") or {}
+            if not isinstance(environments, dict):
+                raise SystemExit(f"{connection_context}.environments must be a mapping")
+
+            for name in environments:
+                if name not in known_environments:
+                    raise SystemExit(
+                        f"{connection_context}.environments.{name}: "
+                        "catalog.database_environments に無い環境である"
+                    )
+
+            binding = environments.get(environment_name)
+            if binding is None:
+                continue
+            context = f"{connection_context}.environments.{environment_name}"
+            if not isinstance(binding, dict):
+                raise SystemExit(f"{context} must be a mapping")
+            unknown = set(binding) - BINDING_KEYS
+            if unknown:
+                raise SystemExit(f"{context} has unknown keys: {', '.join(sorted(unknown))}")
+
+            source_id = str(required(binding, "rds_instance", context))
+            schema_name = str(required(binding, "schema_name", context))
+
+            instance = inventory.get(source_id)
+            if instance is None:
+                raise SystemExit(f"{context}: source DB instance is absent from inventory: {source_id}")
+            if instance.get("Engine") != "mysql":
+                raise SystemExit(
+                    f"{context}: source DB instance Engine must be mysql,"
+                    f" got {instance.get('Engine')!r}"
+                )
+
+            target = resolve_target(binding.get("target"), instance, context)
+            group_name = target["target_db_parameter_group_name"]
+            group = parameter_groups.get(group_name)
+            if not isinstance(group, dict):
+                raise SystemExit(f"{context}: catalog.parameter_groups に無い: {group_name}")
+            template_path = required(group, "template_path", f"parameter_groups.{group_name}")
+
+            service = {
+                "source_db_instance_identifier": source_id,
+                "source_engine_version": normalize_major_minor(
+                    required(instance, "EngineVersion", context), context
+                ),
+                "source_db_parameter_group_name": source_parameter_group(instance, context),
+                **target,
+                "target_parameter_group_template_path": str(template_path),
+                "protection_snapshot_identifier": f"{source_id}-pre-bg",
+                "final_snapshot_identifier": f"{source_id}-final",
+                # 影響範囲。切替前のレビューで使う。
+                "schemas": [schema_name],
+                "connected_by": [f"{application_name}.{connection_name}"],
+                "mysql_verification": mysql_verification(binding, context, environment_name),
+                "actions": {
+                    "build": "pending",
+                    "switchover": "pending",
+                    "switchover_timeout": 300,
+                    "cleanup": "pending",
+                },
+            }
+
+            existing = services.get(source_id)
+            if existing is None:
+                services[source_id] = service
+                continue
+
+            # 同じインスタンスを指す接続は 1 つの deployment にまとめる。
+            # 重複して書かれた設定は一致していなければならない。
+            for key in ("target_engine_version", "target_db_instance_class",
+                        "target_db_parameter_group_name", "mysql_verification"):
+                if existing[key] != service[key]:
+                    raise SystemExit(
+                        f"{context}: {source_id} を指す他の接続と {key} が食い違う"
+                        f"（{existing[key]!r} と {service[key]!r}）"
+                    )
+            if schema_name not in existing["schemas"]:
+                existing["schemas"].append(schema_name)
+                existing["schemas"].sort()
+            connected = f"{application_name}.{connection_name}"
+            if connected not in existing["connected_by"]:
+                existing["connected_by"].append(connected)
+                existing["connected_by"].sort()
+
+    if not services:
+        raise SystemExit(f"no connection is defined for the environment: {environment_name}")
+
+    return {
+        "environment": environment_name,
+        "aws_region": inventory_region,
+        "services": services,
     }
 
 

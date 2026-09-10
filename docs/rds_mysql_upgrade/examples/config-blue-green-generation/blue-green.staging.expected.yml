@@ -1,27 +1,59 @@
 environment: staging
 aws_region: ap-northeast-1
 services:
-  example-service-test-primary:
-    source_db_instance_identifier: example-service-test-staging-mysql80
-    source_engine_version: "8.0"
-    source_db_parameter_group_name: example-service-test-staging-mysql80-v1
-    target_engine_version: "8.4.10"
-    target_db_instance_class: db.t4g.medium
-    target_db_parameter_group_name: example-service-test-staging-mysql84-v1
-    target_parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-mysql84.yaml
-    protection_snapshot_identifier: example-service-test-staging-mysql80-pre-bg
-    final_snapshot_identifier: example-service-test-staging-mysql80-final
-    mysql_verification: { enabled: false, user: '', auth_method: prompt, secret_id: '', parameter_name: '', user_parameter_name: '', ssl_ca: '', port: 3306 }
-    actions: { build: pending, switchover: pending, switchover_timeout: 300, cleanup: pending }
-  example-service-test-audit:
+  example-service-test-staging-audit-mysql80:
     source_db_instance_identifier: example-service-test-staging-audit-mysql80
-    source_engine_version: "8.0"
+    source_engine_version: '8.0'
     source_db_parameter_group_name: example-service-test-staging-audit-mysql80-v1
-    target_engine_version: "8.4.10"
+    target_engine_version: 8.4.10
     target_db_instance_class: db.t4g.medium
     target_db_parameter_group_name: example-service-test-staging-audit-mysql84-v1
     target_parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-audit-mysql84.yaml
     protection_snapshot_identifier: example-service-test-staging-audit-mysql80-pre-bg
     final_snapshot_identifier: example-service-test-staging-audit-mysql80-final
-    mysql_verification: { enabled: false, user: '', auth_method: prompt, secret_id: '', parameter_name: '', user_parameter_name: '', ssl_ca: '', port: 3306 }
-    actions: { build: pending, switchover: pending, switchover_timeout: 300, cleanup: pending }
+    schemas:
+    - example_service_test_audit
+    connected_by:
+    - example-service-test.audit
+    mysql_verification:
+      enabled: false
+      user: ''
+      auth_method: prompt
+      secret_id: ''
+      parameter_name: ''
+      user_parameter_name: ''
+      ssl_ca: ''
+      port: 3306
+    actions:
+      build: pending
+      switchover: pending
+      switchover_timeout: 300
+      cleanup: pending
+  example-service-test-staging-mysql80:
+    source_db_instance_identifier: example-service-test-staging-mysql80
+    source_engine_version: '8.0'
+    source_db_parameter_group_name: example-service-test-staging-mysql80-v1
+    target_engine_version: 8.4.10
+    target_db_instance_class: db.t4g.medium
+    target_db_parameter_group_name: example-service-test-staging-mysql84-v1
+    target_parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-mysql84.yaml
+    protection_snapshot_identifier: example-service-test-staging-mysql80-pre-bg
+    final_snapshot_identifier: example-service-test-staging-mysql80-final
+    schemas:
+    - example_service_test
+    connected_by:
+    - example-service-test.primary
+    mysql_verification:
+      enabled: false
+      user: ''
+      auth_method: prompt
+      secret_id: ''
+      parameter_name: ''
+      user_parameter_name: ''
+      ssl_ca: ''
+      port: 3306
+    actions:
+      build: pending
+      switchover: pending
+      switchover_timeout: 300
+      cleanup: pending

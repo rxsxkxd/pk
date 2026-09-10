@@ -31,9 +31,10 @@ tmp_response=$(mktemp "${output}.response.XXXXXX")
 trap 'rm -f "$tmp_output" "$tmp_response"' EXIT
 
 # [読み取り / レビュー注記]
-# DBInstanceIdentifier、Engine、EngineVersion、関連付く DBParameterGroups を含む
-# DB インスタンス一覧を取得する。生成スクリプトはこの結果から移行元の
-# エンジン major.minor とパラメータグループ名を補完する。
+# DBInstanceIdentifier、Engine、EngineVersion、DBInstanceClass、関連付く
+# DBParameterGroups を含む DB インスタンス一覧を取得する。生成スクリプトはこの結果から
+# 移行元のエンジン major.minor とパラメータグループ名を補完し、カタログで
+# db_instance_class を省略した場合の踏襲値としても使う。
 aws "${aws_args[@]}" rds describe-db-instances --output json > "$tmp_response"
 
 # 読み取り結果を変更せず、収集に指定したリージョンだけをメタデータとして付与する。

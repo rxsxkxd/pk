@@ -65,10 +65,40 @@ with open(sys.argv[3], encoding="utf-8") as handle:
 environment = sys.argv[4]
 
 assert actual == expected, "generated YAML differs from the expected test result"
-databases = catalog["databases"]
-assert len(databases) == 2, "test fixture must contain multiple database roots"
-primaries = [database["environments"][environment]["primary"] for database in databases.values()]
-assert len({primary["host"]["rds_instance_identifier"] for primary in primaries}) == 2
-print(f"Blue/Green config generator {environment}: OK")
+
+# カタログが新構造であること、および生成の要点を確認する。
+applications = catalog["applications"]
+assert len(applications) >= 2, "test fixture must contain multiple applications"
+assert environment in catalog["database_environments"]
+
+# その環境の接続を集め、生成単位（インスタンス）へ正しくまとめられたかを見る。
+bindings = [
+    (name, connection_name, binding)
+    for name, application in applications.items()
+    for connection_name, connection in application["connections"].items()
+    for env, binding in (connection.get("environments") or {}).items()
+    if env == environment
+]
+assert bindings, f"test fixture has no connection for {environment}"
+instances = {binding["rds_instance"] for _, _, binding in bindings}
+assert set(actual["services"]) == instances, "services keys must be the RDS instances"
+
+# 同じインスタンスを指す接続は 1 エントリへまとめ、schemas と connected_by を集約する。
+for instance in instances:
+    service = actual["services"][instance]
+    expected_schemas = sorted(
+        {b["schema_name"] for _, _, b in bindings if b["rds_instance"] == instance}
+    )
+    expected_connected = sorted(
+        {f"{a}.{c}" for a, c, b in bindings if b["rds_instance"] == instance}
+    )
+    assert service["schemas"] == expected_schemas, instance
+    assert service["connected_by"] == expected_connected, instance
+    # target を省略した接続は、共通ターゲットと Blue の実値で補完される。
+    assert service["target_engine_version"]
+    assert service["target_db_instance_class"]
+
+print(f"Blue/Green config generator {environment}: OK "
+      f"({len(bindings)} connections -> {len(instances)} deployments)")
 PY
 done

@@ -1,71 +1,93 @@
 # 自動テスト専用の移行カタログ。
 # 環境名は実運用と同じ development / staging / production を使うが、RDS ID は全て
 # example-service-test-* のダミーであり、テストは一時ディレクトリ以外へ出力しない。
-databases:
-  example_service_test_primary:
-    services: [example-service-test]
-    environments:
-      development:
-        primary:
-          output_service_name: example-service-test-primary
-          host:
-            rds_instance_identifier: example-service-test-development-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.t4g.small
-            db_parameter_group_name: example-service-test-development-mysql84-v1
-            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-development-mysql84.yaml
-      staging:
-        primary:
-          output_service_name: example-service-test-primary
-          host:
-            rds_instance_identifier: example-service-test-staging-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.t4g.medium
-            db_parameter_group_name: example-service-test-staging-mysql84-v1
-            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-mysql84.yaml
-      production:
-        primary:
-          output_service_name: example-service-test-primary
-          host:
-            rds_instance_identifier: example-service-test-production-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.r6g.large
-            db_parameter_group_name: example-service-test-production-mysql84-v1
-            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-production-mysql84.yaml
+#
+# 次を意図的に含めて生成器の分岐を通す。
+#   - 1 アプリに複数接続（マルチ DB）
+#   - development で 2 接続が 1 インスタンスを共有（同居 → 1 deployment へまとめる）
+#   - target の省略（engine_version は共通ターゲットへ、db_instance_class は Blue を踏襲）
+applications:
+  example-service-test:
+    connections:
+      primary:
+        environments:
+          development:
+            # 実定義: config/database.yml に直書き
+            # audit と同じインスタンスに同居する。
+            rds_instance: example-service-test-development-mysql80
+            schema_name: example_service_test
+            target:
+              # engine_version と db_instance_class を省略した形。
+              db_parameter_group_name: example-service-test-development-mysql84-v1
+          staging:
+            # 実定義: 環境変数 EXAMPLE_DB_HOST / EXAMPLE_DB_NAME
+            rds_instance: example-service-test-staging-mysql80
+            schema_name: example_service_test
+            target:
+              engine_version: "8.4.10"
+              db_parameter_group_name: example-service-test-staging-mysql84-v1
+          production:
+            # 実定義: 環境変数 EXAMPLE_DB_HOST / EXAMPLE_DB_NAME
+            rds_instance: example-service-test-production-mysql80
+            schema_name: example_service_test
+            connect_via: example-db.internal.test.example.com
+            target:
+              engine_version: "8.4.10"
+              db_instance_class: db.r6g.xlarge
+              db_parameter_group_name: example-service-test-production-mysql84-v1
 
-  example_service_test_audit:
-    services: [example-service-test-batch]
-    environments:
-      development:
-        primary:
-          output_service_name: example-service-test-audit
-          host:
-            rds_instance_identifier: example-service-test-development-audit-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.t4g.small
-            db_parameter_group_name: example-service-test-development-audit-mysql84-v1
-            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-development-audit-mysql84.yaml
-      staging:
-        primary:
-          output_service_name: example-service-test-audit
-          host:
-            rds_instance_identifier: example-service-test-staging-audit-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.t4g.medium
-            db_parameter_group_name: example-service-test-staging-audit-mysql84-v1
-            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-audit-mysql84.yaml
-      production:
-        primary:
-          output_service_name: example-service-test-audit
-          host:
-            rds_instance_identifier: example-service-test-production-audit-mysql80
-          target:
-            engine_version: "8.4.10"
-            db_instance_class: db.r6g.large
-            db_parameter_group_name: example-service-test-production-audit-mysql84-v1
-            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-production-audit-mysql84.yaml
+      audit:
+        environments:
+          development:
+            # 実定義: config/database.yml に直書き
+            # primary と同じインスタンスに同居するため、target も同一でなければならない。
+            rds_instance: example-service-test-development-mysql80
+            schema_name: example_service_test_audit
+            target:
+              db_parameter_group_name: example-service-test-development-mysql84-v1
+          staging:
+            # 実定義: 環境変数 EXAMPLE_AUDIT_DATABASE_URL
+            rds_instance: example-service-test-staging-audit-mysql80
+            schema_name: example_service_test_audit
+            target:
+              engine_version: "8.4.10"
+              db_parameter_group_name: example-service-test-staging-audit-mysql84-v1
+          production:
+            # 実定義: 環境変数 EXAMPLE_AUDIT_DATABASE_URL
+            rds_instance: example-service-test-production-audit-mysql80
+            schema_name: example_service_test_audit
+            target:
+              engine_version: "8.4.10"
+              db_parameter_group_name: example-service-test-production-audit-mysql84-v1
+
+  # 別アプリが production の audit インスタンスを共有する（切替の影響が 2 アプリに及ぶ）。
+  example-service-test-batch:
+    connections:
+      primary:
+        environments:
+          production:
+            # 実定義: 環境変数 BATCH_DATABASE_URL
+            rds_instance: example-service-test-production-audit-mysql80
+            schema_name: example_service_test_audit
+            target:
+              engine_version: "8.4.10"
+              db_parameter_group_name: example-service-test-production-audit-mysql84-v1
+
+# DB を配置している環境の一覧。実体は AWS アカウントで、
+# AWS CLI のプロファイルに一対一で対応するものとして扱う。
+database_environments:
+  - development
+  - staging
+  - production
+
+parameter_groups:
+  example-service-test-development-mysql84-v1:
+    template_path: examples/mysql84-parameter-generation/output/example-service-test-development-mysql84.yaml
+  example-service-test-staging-mysql84-v1:
+    template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-mysql84.yaml
+  example-service-test-staging-audit-mysql84-v1:
+    template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-audit-mysql84.yaml
+  example-service-test-production-mysql84-v1:
+    template_path: examples/mysql84-parameter-generation/output/example-service-test-production-mysql84.yaml
+  example-service-test-production-audit-mysql84-v1:
+    template_path: examples/mysql84-parameter-generation/output/example-service-test-production-audit-mysql84.yaml

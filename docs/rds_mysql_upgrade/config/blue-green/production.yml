@@ -41,11 +41,19 @@ services:
     #   （iam / IAM データベース認証は未実装。設定すると明示的に失敗する）
     mysql_verification:
       enabled: false
+      # 接続ユーザー。ユーザー名も秘匿したい場合は空にできる。
+      #   secrets_manager  シークレット JSON の username を使う
+      #   parameter_store  user_parameter_name を指定するとそこから取る
+      # plaintext / prompt では必須。
       user: verifier
       auth_method: prompt
       # production では plaintext を使用できないため password キーは置かない。
+      # secrets_manager のシークレットは JSON で {"username": ..., "password": ...} を持つ。
       secret_id: ''
+      # parameter_store はいずれも SecureString。user_parameter_name を指定すると
+      # ユーザー名も秘匿側から取得し、設定ファイルへ書かずに済む。
       parameter_name: ''
+      user_parameter_name: ''
       # TLS 用の CA バンドル。指定すると ssl-mode=VERIFY_CA で接続する。
       ssl_ca: ''
       port: 3306

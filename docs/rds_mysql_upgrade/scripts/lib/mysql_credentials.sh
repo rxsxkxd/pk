@@ -55,8 +55,13 @@ if enabled:
     if auth not in VALID:
         sys.exit("mysql_verification.auth_method が不正です: " + auth
                  + "（有効な値: " + ", ".join(VALID) + "）")
-    if not m.get("user"):
-        sys.exit("mysql_verification.user が必要です")
+    # ユーザー名は方式によっては秘匿側（シークレット / パラメータ）から取得できる。
+    # その場合 config の user は不要である。取得できない方式では必須とする。
+    supplies_user = (auth == "secrets_manager"
+                     or (auth == "parameter_store" and m.get("user_parameter_name")))
+    if not m.get("user") and not supplies_user:
+        sys.exit("mysql_verification.user が必要です"
+                 "（parameter_store でユーザー名も秘匿する場合は user_parameter_name を指定してください）")
     # plaintext は設定ファイルが Git 追跡対象であるため、本番では使わせない。
     if auth == "plaintext" and environment == "production":
         sys.exit("auth_method: plaintext は production では使用できません。"
@@ -74,6 +79,7 @@ values = {
     "MYSQL_VERIFY_AUTH": auth,
     "MYSQL_VERIFY_SECRET_ID": m.get("secret_id") or "",
     "MYSQL_VERIFY_PARAMETER_NAME": m.get("parameter_name") or "",
+    "MYSQL_VERIFY_USER_PARAMETER_NAME": m.get("user_parameter_name") or "",
     "MYSQL_VERIFY_PLAINTEXT": m.get("password") or "",
     "MYSQL_VERIFY_SSL_CA": m.get("ssl_ca") or "",
     "MYSQL_VERIFY_PORT": str(m.get("port") or 3306),
@@ -84,31 +90,45 @@ for k, v in values.items():
   eval "$resolved"
 }
 
-# 方式に応じてパスワード（または IAM 認証トークン）を解決する。
+# 方式に応じてユーザー名とパスワードを解決する。
 #
-# 使い方: resolve_mysql_password <region> <profile>
+# 使い方: resolve_mysql_credentials <region> <profile>
 # 設定する変数:
-#   MYSQL_VERIFY_PASSWORD  解決した値。prompt のときは空（MySQL クライアントの対話入力に委ねる）
+#   MYSQL_VERIFY_USER      解決したユーザー名。秘匿側が持つ場合はその値で上書きする
+#   MYSQL_VERIFY_PASSWORD  解決したパスワード。prompt のときは空（対話入力に委ねる）
+#
+# ユーザー名も秘匿対象として扱える。
+#   secrets_manager  シークレット JSON の username を使う（無ければ config の user）
+#   parameter_store  user_parameter_name を指定すればそこから取る（無ければ config の user）
 #
 # 解決した値は決して echo しない。
-resolve_mysql_password() {
+resolve_mysql_credentials() {
   local region=$1 profile=$2
   local aws_args=(--region "$region")
   [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
   case "$MYSQL_VERIFY_AUTH" in
     secrets_manager)
-      local secret_json
+      local secret_json secret_user
       secret_json=$(aws "${aws_args[@]}" secretsmanager get-secret-value \
         --secret-id "$MYSQL_VERIFY_SECRET_ID" --query SecretString --output text)
       MYSQL_VERIFY_PASSWORD=$(printf '%s' "$secret_json" \
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["password"])')
-      unset secret_json
+      # username はシークレットにあれば使う。無ければ config の user を残す。
+      secret_user=$(printf '%s' "$secret_json" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("username") or "")')
+      [[ -n "$secret_user" ]] && MYSQL_VERIFY_USER="$secret_user"
+      unset secret_json secret_user
       ;;
     parameter_store)
       MYSQL_VERIFY_PASSWORD=$(aws "${aws_args[@]}" ssm get-parameter \
         --name "$MYSQL_VERIFY_PARAMETER_NAME" --with-decryption \
         --query 'Parameter.Value' --output text)
+      if [[ -n "$MYSQL_VERIFY_USER_PARAMETER_NAME" ]]; then
+        MYSQL_VERIFY_USER=$(aws "${aws_args[@]}" ssm get-parameter \
+          --name "$MYSQL_VERIFY_USER_PARAMETER_NAME" --with-decryption \
+          --query 'Parameter.Value' --output text)
+      fi
       ;;
     plaintext)
       MYSQL_VERIFY_PASSWORD="$MYSQL_VERIFY_PLAINTEXT"
@@ -123,4 +143,11 @@ resolve_mysql_password() {
       return 1
       ;;
   esac
+
+  # 秘匿側から取得する構成では、ここで初めてユーザー名が確定する。
+  if [[ -z "$MYSQL_VERIFY_USER" ]]; then
+    echo "MySQL の接続ユーザー名を解決できなかった（auth_method: ${MYSQL_VERIFY_AUTH}）。" >&2
+    echo "config の mysql_verification.user か、シークレット側のユーザー名を確認する。" >&2
+    return 1
+  fi
 }

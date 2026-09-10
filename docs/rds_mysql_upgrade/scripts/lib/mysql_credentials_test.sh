@@ -95,7 +95,27 @@ expect_ng 'parameter_name 欠落' 'parameter_name が必要です'
 
 make_config staging "      enabled: true
       auth_method: prompt"
-expect_ng 'user 欠落' 'user が必要です'
+expect_ng 'prompt で user 欠落は拒否' 'user が必要です'
+
+make_config staging "      enabled: true
+      auth_method: parameter_store
+      parameter_name: /rds-bg/staging/mysql-password"
+expect_ng 'parameter_store で user も user_parameter_name も無いと拒否' 'user が必要です'
+
+# --- ユーザー名も秘匿する構成 ---
+make_config staging "      enabled: true
+      auth_method: secrets_manager
+      secret_id: rds-bg/staging/mysql"
+expect_ok 'A: secrets_manager は user 省略可（シークレットの username を使う）' \
+  MYSQL_VERIFY_AUTH=secrets_manager MYSQL_VERIFY_USER=''
+
+make_config staging "      enabled: true
+      auth_method: parameter_store
+      parameter_name: /rds-bg/staging/mysql-password
+      user_parameter_name: /rds-bg/staging/mysql-user"
+expect_ok 'B: user_parameter_name があれば user 省略可' \
+  MYSQL_VERIFY_AUTH=parameter_store \
+  MYSQL_VERIFY_USER_PARAMETER_NAME=/rds-bg/staging/mysql-user MYSQL_VERIFY_USER=''
 
 make_config staging "      enabled: true
       user: verifier
@@ -113,7 +133,7 @@ make_config staging "      enabled: true
       auth_method: plaintext
       password: s3cret"
 read_mysql_verification_config "$tmp/c.yml" svc
-resolve_mysql_password ap-northeast-1 '' 2>/dev/null
+resolve_mysql_credentials ap-northeast-1 '' 2>/dev/null
 [[ "$MYSQL_VERIFY_PASSWORD" == 's3cret' ]] \
   && echo 'ok    C: plaintext のパスワード解決' \
   || { echo 'FAIL  C: plaintext のパスワード解決'; failed=$((failed+1)); }
@@ -122,10 +142,23 @@ make_config staging "      enabled: true
       user: verifier
       auth_method: prompt"
 read_mysql_verification_config "$tmp/c.yml" svc
-resolve_mysql_password ap-northeast-1 ''
+resolve_mysql_credentials ap-northeast-1 ''
 [[ -z "$MYSQL_VERIFY_PASSWORD" ]] \
   && echo 'ok    D: prompt は空（対話入力へ委ねる）' \
   || { echo 'FAIL  D: prompt が空でない'; failed=$((failed+1)); }
+
+# ユーザー名が解決できない場合は失敗させる（秘匿側にも config にも無いケース）。
+make_config staging "      enabled: true
+      user: verifier
+      auth_method: plaintext
+      password: s3cret"
+read_mysql_verification_config "$tmp/c.yml" svc
+MYSQL_VERIFY_USER=''
+if resolve_mysql_credentials ap-northeast-1 '' 2>/dev/null; then
+  echo 'FAIL  ユーザー名未解決を検出できていない'; failed=$((failed+1))
+else
+  echo 'ok    ユーザー名を解決できなければ失敗する'
+fi
 
 echo
 if [[ "$failed" -eq 0 ]]; then echo 'すべて期待どおり。'; exit 0; fi

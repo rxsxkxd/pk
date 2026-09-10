@@ -115,7 +115,7 @@ if [[ -n "$mysql_user" ]]; then
   MYSQL_VERIFY_PASSWORD="${!mysql_password_env:-}"
   MYSQL_VERIFY_ENABLED=true
 elif [[ "$MYSQL_VERIFY_ENABLED" == true ]]; then
-  resolve_mysql_password "$region" "$profile"
+  resolve_mysql_credentials "$region" "$profile"
 fi
 
 if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then

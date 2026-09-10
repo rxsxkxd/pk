@@ -48,6 +48,11 @@ def read_inventory(path):
     instances = value.get("DBInstances") if isinstance(value, dict) else None
     if not isinstance(instances, list):
         raise SystemExit(f"RDS inventory has no DBInstances array: {path}")
+    region = value.get("aws_region") if isinstance(value, dict) else None
+    if not isinstance(region, str) or not region.strip():
+        raise SystemExit(
+            f"RDS inventory has no aws_region: {path}; collect it with collect_rds_instance_inventory.sh"
+        )
 
     indexed = {}
     for instance in instances:
@@ -58,7 +63,7 @@ def read_inventory(path):
             if identifier in indexed:
                 raise SystemExit(f"RDS inventory contains duplicate DB instance: {identifier}")
             indexed[identifier] = instance
-    return indexed
+    return indexed, region
 
 
 def required(mapping, key, context):
@@ -85,26 +90,41 @@ def normalize_major_minor(version, context):
     return f"{match.group(1)}.{match.group(2)}"
 
 
-def generate(catalog, inventory, environment_name):
-    environments = catalog.get("environments")
-    if not isinstance(environments, dict) or environment_name not in environments:
-        raise SystemExit(f"environment is not defined in catalog: {environment_name}")
-    environment = environments[environment_name]
-    if not isinstance(environment, dict):
-        raise SystemExit(f"environment must be a mapping: {environment_name}")
-
-    region = required(environment, "aws_region", f"environments.{environment_name}")
-    units = required(environment, "migration_units", f"environments.{environment_name}")
-    if not isinstance(units, dict) or not units:
-        raise SystemExit(f"environments.{environment_name}.migration_units must be a non-empty mapping")
+def generate(catalog, inventory, inventory_region, environment_name):
+    catalog_databases = catalog.get("databases")
+    if not isinstance(catalog_databases, dict) or not catalog_databases:
+        raise SystemExit("catalog.databases must be a non-empty mapping")
 
     services = {}
     source_ids = set()
-    for unit_name, unit in units.items():
-        context = f"environments.{environment_name}.migration_units.{unit_name}"
-        if not isinstance(unit, dict):
+    for database_name, database_catalog in catalog_databases.items():
+        database_context = f"databases.{database_name}"
+        if not isinstance(database_catalog, dict):
+            raise SystemExit(f"{database_context} must be a mapping")
+        database_services = required(database_catalog, "services", database_context)
+        if not isinstance(database_services, list) or not database_services:
+            raise SystemExit(f"{database_context}.services must be a non-empty list")
+        environments = required(database_catalog, "environments", database_context)
+        if not isinstance(environments, dict):
+            raise SystemExit(f"{database_context}.environments must be a mapping")
+        environment = environments.get(environment_name)
+        if environment is None:
+            continue
+
+        environment_context = f"{database_context}.environments.{environment_name}"
+        if not isinstance(environment, dict):
+            raise SystemExit(f"{environment_context} must be a mapping")
+        primary = required(environment, "primary", environment_context)
+        context = f"{environment_context}.primary"
+        if not isinstance(primary, dict):
             raise SystemExit(f"{context} must be a mapping")
-        source_id = str(required(unit, "source_db_instance_identifier", context))
+        output_service_name = str(required(primary, "output_service_name", context))
+        if output_service_name in services:
+            raise SystemExit(f"{context}: duplicate output_service_name: {output_service_name}")
+        host = required(primary, "host", context)
+        if not isinstance(host, dict):
+            raise SystemExit(f"{context}.host must be a mapping")
+        source_id = str(required(host, "rds_instance_identifier", f"{context}.host"))
         if source_id in source_ids:
             raise SystemExit(f"{context}: duplicate source_db_instance_identifier: {source_id}")
         source_ids.add(source_id)
@@ -115,11 +135,11 @@ def generate(catalog, inventory, environment_name):
         if instance.get("Engine") != "mysql":
             raise SystemExit(f"{context}: source DB instance Engine must be mysql, got {instance.get('Engine')!r}")
 
-        target = required(unit, "target", context)
+        target = required(primary, "target", context)
         if not isinstance(target, dict):
             raise SystemExit(f"{context}.target must be a mapping")
         target_context = f"{context}.target"
-        services[unit_name] = {
+        services[output_service_name] = {
             "source_db_instance_identifier": source_id,
             "source_engine_version": normalize_major_minor(
                 required(instance, "EngineVersion", context), context
@@ -135,6 +155,7 @@ def generate(catalog, inventory, environment_name):
             ),
             "protection_snapshot_identifier": f"{source_id}-pre-bg",
             "final_snapshot_identifier": f"{source_id}-final",
+            "mysql_verification": mysql_verification(primary, context, environment_name),
             "actions": {
                 "build": "pending",
                 "switchover": "pending",
@@ -143,10 +164,61 @@ def generate(catalog, inventory, environment_name):
             },
         }
 
+    if not services:
+        raise SystemExit(f"environment is not defined for any catalog database: {environment_name}")
+
     return {
         "environment": environment_name,
-        "aws_region": region,
+        "aws_region": inventory_region,
         "services": services,
+    }
+
+
+def mysql_verification(unit, context, environment_name):
+    """カタログの mysql_verification を検証して、生成する設定へそのまま渡す。
+
+    Step 4 の実効値収集と Step 7 の逆レプリケーション確認で使う接続設定である。
+    カタログには参照（secret_id / parameter_name）だけを置き、パスワードそのものは
+    置かない（カタログ冒頭の方針）。auth_method: plaintext を使う場合は、生成後の
+    設定ファイルへ手で password を書く。
+    """
+    VALID = ("secrets_manager", "parameter_store", "plaintext", "prompt")
+    given = unit.get("mysql_verification") or {}
+    if not isinstance(given, dict):
+        raise SystemExit(f"{context}.mysql_verification must be a mapping")
+
+    unknown = set(given) - {
+        "enabled", "user", "auth_method", "secret_id",
+        "parameter_name", "user_parameter_name", "ssl_ca", "port",
+    }
+    if unknown:
+        raise SystemExit(f"{context}.mysql_verification has unknown keys: {', '.join(sorted(unknown))}")
+    if "password" in given:
+        raise SystemExit(
+            f"{context}.mysql_verification.password はカタログへ書かない。"
+            "auth_method: plaintext は生成後の設定ファイルへ手で記載する"
+        )
+
+    auth = str(given.get("auth_method") or "prompt")
+    if auth not in VALID:
+        raise SystemExit(
+            f"{context}.mysql_verification.auth_method が不正: {auth}"
+            f"（有効な値: {', '.join(VALID)}）"
+        )
+    if auth == "plaintext" and environment_name == "production":
+        raise SystemExit(
+            f"{context}.mysql_verification.auth_method: plaintext は production では使用できない"
+        )
+
+    return {
+        "enabled": bool(given.get("enabled", False)),
+        "user": given.get("user") or "",
+        "auth_method": auth,
+        "secret_id": given.get("secret_id") or "",
+        "parameter_name": given.get("parameter_name") or "",
+        "user_parameter_name": given.get("user_parameter_name") or "",
+        "ssl_ca": given.get("ssl_ca") or "",
+        "port": int(given.get("port") or 3306),
     }
 
 
@@ -163,8 +235,8 @@ def write_yaml(path, value):
 def main():
     args = parse_args()
     catalog = read_yaml(args.catalog)
-    inventory = read_inventory(args.inventory)
-    generated = generate(catalog, inventory, args.environment)
+    inventory, inventory_region = read_inventory(args.inventory)
+    generated = generate(catalog, inventory, inventory_region, args.environment)
     write_yaml(args.output, generated)
     print(f"Generated Blue/Green config: {args.output}")
 

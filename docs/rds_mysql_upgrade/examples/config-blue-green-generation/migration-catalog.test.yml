@@ -1,15 +1,71 @@
-# 自動テスト専用の移行カタログ。実環境の staging / production は使用しない。
-environments:
-  test:
-    aws_region: ap-northeast-1
-    migration_units:
-      example-service-test:
-        source_db_instance_identifier: example-service-test-mysql80
-        databases:
-          - name: example_service_test
-            applications: [example-service-test]
-        target:
-          engine_version: "8.4.10"
-          db_instance_class: db.t4g.medium
-          db_parameter_group_name: example-service-test-mysql84-v1
-          parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-mysql84.yaml
+# 自動テスト専用の移行カタログ。
+# 環境名は実運用と同じ development / staging / production を使うが、RDS ID は全て
+# example-service-test-* のダミーであり、テストは一時ディレクトリ以外へ出力しない。
+databases:
+  example_service_test_primary:
+    services: [example-service-test]
+    environments:
+      development:
+        primary:
+          output_service_name: example-service-test-primary
+          host:
+            rds_instance_identifier: example-service-test-development-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.t4g.small
+            db_parameter_group_name: example-service-test-development-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-development-mysql84.yaml
+      staging:
+        primary:
+          output_service_name: example-service-test-primary
+          host:
+            rds_instance_identifier: example-service-test-staging-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.t4g.medium
+            db_parameter_group_name: example-service-test-staging-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-mysql84.yaml
+      production:
+        primary:
+          output_service_name: example-service-test-primary
+          host:
+            rds_instance_identifier: example-service-test-production-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.r6g.large
+            db_parameter_group_name: example-service-test-production-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-production-mysql84.yaml
+
+  example_service_test_audit:
+    services: [example-service-test-batch]
+    environments:
+      development:
+        primary:
+          output_service_name: example-service-test-audit
+          host:
+            rds_instance_identifier: example-service-test-development-audit-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.t4g.small
+            db_parameter_group_name: example-service-test-development-audit-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-development-audit-mysql84.yaml
+      staging:
+        primary:
+          output_service_name: example-service-test-audit
+          host:
+            rds_instance_identifier: example-service-test-staging-audit-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.t4g.medium
+            db_parameter_group_name: example-service-test-staging-audit-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-audit-mysql84.yaml
+      production:
+        primary:
+          output_service_name: example-service-test-audit
+          host:
+            rds_instance_identifier: example-service-test-production-audit-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.r6g.large
+            db_parameter_group_name: example-service-test-production-audit-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-production-audit-mysql84.yaml

@@ -1,31 +1,41 @@
 # Blue/Green 設定生成の入力正本。
 # RDS API では取得できない「論理 DB と利用アプリの対応」と、8.4 側の移行判断を管理する。
 # 認証情報、パスワード、Secret の値は記載しない。
-environments:
-  staging:
-    aws_region: ap-northeast-1
-    migration_units:
-      example-service:
-        source_db_instance_identifier: example-service-staging-mysql80
-        databases:
-          - name: example_service
-            applications: [example-service]
-        target:
-          engine_version: "8.4.10"
-          db_instance_class: db.t4g.medium
-          db_parameter_group_name: example-service-staging-mysql84-v1
-          parameter_group_template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
-
-  production:
-    aws_region: ap-northeast-1
-    migration_units:
-      example-service:
-        source_db_instance_identifier: example-service-production-mysql80
-        databases:
-          - name: example_service
-            applications: [example-service]
-        target:
-          engine_version: "8.4.10"
-          db_instance_class: db.r6g.large
-          db_parameter_group_name: example-service-production-mysql84-v1
-          parameter_group_template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
+databases:
+  example_service:
+    # この schema を利用するアプリケーション。レビュー用メタデータであり、実行スクリプトは参照しない。
+    services: [example-service]
+    # development は AWS 上のリモート開発環境を表す。
+    # 接続に使う AWS profile はここへ書かず、収集・実行コマンドで指定する。
+    environments:
+      development:
+        primary:
+          # config/blue-green/development.yml の services キー。
+          output_service_name: example-service
+          host:
+            rds_instance_identifier: example-service-development-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.t4g.small
+            db_parameter_group_name: example-service-development-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
+      staging:
+        primary:
+          output_service_name: example-service
+          host:
+            rds_instance_identifier: example-service-staging-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.t4g.medium
+            db_parameter_group_name: example-service-staging-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
+      production:
+        primary:
+          output_service_name: example-service
+          host:
+            rds_instance_identifier: example-service-production-mysql80
+          target:
+            engine_version: "8.4.10"
+            db_instance_class: db.r6g.large
+            db_parameter_group_name: example-service-production-mysql84-v1
+            parameter_group_template_path: examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml

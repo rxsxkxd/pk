@@ -79,12 +79,14 @@ Parameters:
       CollectMySqlRuntimeValues=true のときだけ使う Secrets Manager の secret 名または ARN。
       JSON の username / password を読み取る。
 
-  MySqlCredentialsParameterArn:
-    Type: String
+  MySqlCredentialsParameterArns:
+    Type: CommaDelimitedList
     Default: ''
     Description: >-
       config の mysql_verification.auth_method: parameter_store を使う場合の
-      SSM パラメータ ARN。空なら Parameter Store の読み取り権限を付与しない。
+      SSM パラメータ ARN。ユーザー名も秘匿する場合（user_parameter_name）は
+      パスワード用とユーザー名用の 2 本をカンマ区切りで指定する。
+      空なら Parameter Store の読み取り権限を付与しない。
 
   ApprovalNotificationTopicArn:
     Type: String
@@ -102,7 +104,7 @@ Parameters:
 Conditions:
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
   HasMySqlSecret: !Not [!Equals [!Ref MySqlCredentialsSecretId, '']]
-  HasMySqlParameter: !Not [!Equals [!Ref MySqlCredentialsParameterArn, '']]
+  HasMySqlParameter: !Not [!Equals [!Join ['', !Ref MySqlCredentialsParameterArns], '']]
   # config の mysql_verification がどちらの方式でも読めるように、いずれか指定があれば権限を付ける。
   HasMySqlCredentials: !Or [!Condition HasMySqlSecret, !Condition HasMySqlParameter]
 
@@ -314,7 +316,7 @@ Resources:
                     Action:
                       - 'ssm:GetParameter'
                       - 'ssm:GetParameters'
-                    Resource: !Ref MySqlCredentialsParameterArn
+                    Resource: !Ref MySqlCredentialsParameterArns
                   - !Ref 'AWS::NoValue'
         - !Ref 'AWS::NoValue'
 

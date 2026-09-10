@@ -67,16 +67,18 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 
 `VerifyGreenProject` の MySQL 実効値収集は、**設定ファイルの `mysql_verification` が制御する**（既定 `enabled: false` で Green DB へ接続しない）。パスワードの取得方法は `auth_method` で選ぶ。
 
-| `auth_method` | 取得元 | 用途 |
-|---|---|---|
-| `secrets_manager` | Secrets Manager のシークレット（JSON の `password`） | 既定の推奨。RDS のマネージドパスワードでなくてよい |
-| `parameter_store` | SSM Parameter Store の SecureString | Standard パラメータは保管無料 |
-| `plaintext` | 設定ファイルに直書き | **テスト環境専用**。`environment: production` では拒否される |
-| `prompt` | MySQL クライアントの対話入力 | ローカル実行専用。CI では成立しない |
+| `auth_method` | 取得元 | ユーザー名の秘匿 | 用途 |
+|---|---|---|---|
+| `secrets_manager` | Secrets Manager のシークレット（JSON の `password`） | シークレットの `username` を使う | 既定の推奨。RDS のマネージドパスワードでなくてよい |
+| `parameter_store` | SSM Parameter Store の SecureString | `user_parameter_name` に別パラメータを指定する | Standard パラメータは保管無料 |
+| `plaintext` | 設定ファイルに直書き | 不可（config の `user` が必要） | **テスト環境専用**。`environment: production` では拒否される |
+| `prompt` | MySQL クライアントの対話入力 | 不可（config の `user` が必要） | ローカル実行専用。CI では成立しない |
 
 解決は `scripts/lib/mysql_credentials.sh` が行い、値はログ・コマンド引数・成果物へ出さず、`MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。IAM データベース認証（`iam`）は未実装で、設定すると明示的に失敗する。
 
-`secrets_manager` を使う場合は CFn の `MySqlCredentialsSecretId`、`parameter_store` を使う場合は `MySqlCredentialsParameterArn` を指定する。指定した方式に対応する IAM 権限だけが `VerifyGreenRole` に付く。
+**ユーザー名を秘匿する構成では config の `user` を空にできる。** `secrets_manager` はシークレット JSON の `username`、`parameter_store` は `user_parameter_name` で指定した別パラメータから取得する。どちらからも取得できず config の `user` も空の場合は、実行時に明示的に失敗する。
+
+`secrets_manager` を使う場合は CFn の `MySqlCredentialsSecretId`、`parameter_store` を使う場合は `MySqlCredentialsParameterArns` を指定する（ユーザー名も秘匿するならパスワード用とユーザー名用の 2 本をカンマ区切りで渡す）。指定した方式に対応する IAM 権限だけが `VerifyGreenRole` に付く。
 
 Step 4 は最初に [Dockerfile.green-verification-report](Dockerfile.green-verification-report) をマルチステージビルドする。Go ビルドステージで作成した `generate_green_verification_report` だけを local exporter で `.tools/green-report/` に取り出し、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。したがって CodeBuild の Step 4 プロジェクトだけは `PrivilegedMode: true` で Docker Buildx を使用する。Ruby ランタイムは CodeBuild に不要である。
 

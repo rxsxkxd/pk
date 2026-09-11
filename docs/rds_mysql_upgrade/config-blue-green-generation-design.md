@@ -20,7 +20,7 @@
 
 ```text
 config/migration-catalog.yml                 # 人が管理する対応表・移行方針
-scripts/collect_rds_instance_inventory.sh    # AWS CLI の read-only 収集
+scripts/collect_rds_instance_inventory/      # AWS CLI の read-only 収集（Go）
 scripts/generate_blue_green_config.py        # YAML 生成
 artifacts/rds-instance-inventory.json        # 収集結果（一時・レビュー用）
 config/blue-green/<environment>.deployment.yml          # 生成結果
@@ -30,20 +30,38 @@ config/blue-green/<environment>.deployment.yml          # 生成結果
 
 ### 4-1. RDS インベントリ
 
-`collect_rds_instance_inventory.sh` が、対象リージョンに対して次だけを実行する。
+`collect_rds_instance_inventory`（Go）が、対象リージョンに対して次の読み取り API だけを実行する。
 
 ```bash
 aws rds describe-db-instances --region <region> --output json
+# 上で見つかったパラメータグループごとに 1 回
+aws rds describe-db-parameters --db-parameter-group-name <name> --region <region> --output json
 ```
 
-結果は `artifacts/rds-instance-inventory.json` に保存する。収集スクリプトは `describe-db-instances` の応答をそのまま `DBInstances` に保持し、実行時に指定した `--region` を最上位の `aws_region` として付与する。`aws_region` はカタログに個別記載しない。生成時に利用するのは、各 DB インスタンスの次の値である。
+結果は `artifacts/rds-instance-inventory.json` に保存する。収集器は `describe-db-instances` の応答をそのまま `DBInstances` に保持し、実行時に指定した `--region` を最上位の `aws_region` として付与する。`aws_region` はカタログに個別記載しない。生成時に利用するのは、各 DB インスタンスの次の値である。
 
 - `DBInstanceIdentifier`
 - `Engine`
 - `EngineVersion`
+- `DBInstanceClass`
 - `DBParameterGroups[].DBParameterGroupName`
 
-AWS CLI の認証は利用者または実行基盤が提供する通常の AWS 認証情報を使う。スクリプトは `--profile` と `--region` を受け取れるようにするが、認証情報をファイルへ出力しない。
+さらに、確認用として各パラメータグループの `time_zone` 実値を `ParameterGroups.<グループ名>` に採取する。`describe-db-parameters` の応答から `time_zone` の `ParameterValue` と `Source` だけを取り出し、他のパラメータは保存しない。**収集器は判定を行わない。**同じパラメータグループを複数インスタンスが共有していても API 呼び出しは 1 回である。
+
+```json
+{
+  "aws_region": "ap-northeast-1",
+  "DBInstances": [ ... ],
+  "ParameterGroups": {
+    "order-production-mysql80-v1": { "TimeZone": "Asia/Tokyo", "TimeZoneSource": "user" },
+    "shared-development-mysql80-v1": { "TimeZone": "UTC", "TimeZoneSource": "engine-default" }
+  }
+}
+```
+
+`TimeZoneSource` が `engine-default` なら、パラメータグループでは `time_zone` を設定しておらず、エンジン既定値（`UTC`）である。
+
+AWS CLI の認証は利用者または実行基盤が提供する通常の AWS 認証情報を使う。収集器は `--profile` と `--region` を受け取れるようにするが、認証情報をファイルへ出力しない。**AWS SDK ではなく AWS CLI を exec する**——認証経路をリポジトリ全体で 1 本に保ち、`go.mod` へ依存を追加せず、PATH 上の `aws` を差し替えるだけでテストからモックできるようにするためである。
 
 ### 4-2. 移行カタログ
 
@@ -100,6 +118,8 @@ mysql_verification:
 
 そのインスタンスに載るスキーマは、切替の影響範囲を辿るために持つ。実行スクリプトは参照しないが、生成結果の `schemas` に反映される。
 
+**`source_time_zone` は切替前の確認専用である。** 8.0 → 8.4 では `time_zone` の扱いが論点になる（`DEFAULT CURRENT_TIMESTAMP` の `datetime` 列への影響。詳細は [reference/mysql-timezone-problem-summary.md](reference/mysql-timezone-problem-summary.md)）。Blue のパラメータグループの実値を生成結果へ載せておき、Step 2 で作る 8.4 パラメータグループが同じ値になっているかを人がレビューする。実行スクリプトはこの項目を読まず、判定にも使わない。
+
 **MySQL 接続設定はルートの `mysql_verification` を既定値とし、接続配下の指定でキー単位に上書きする。** 環境ごとに AWS アカウントが分かれるため、同じ SSM パラメータ名を全環境で共通に使える。DB ごとに分ける必要があるときだけ、その接続の `environments.<環境>` 配下へ書く。ユーザー名とパスワードそのものはカタログへ書けない（`user` / `password` を書くと生成時に失敗する）。
 
 ## 5. 生成処理
@@ -121,6 +141,7 @@ mysql_verification:
 | `target_db_instance_class` | 移行カタログの `target.db_instance_class`。**省略時は RDS インベントリの `DBInstanceClass` を踏襲** |
 | `target_parameter_group_template_path` | 移行カタログの `parameter_groups.<name>.template_path` |
 | `schemas` | そのインスタンスを指す接続の `schema_name` を集約（影響範囲のレビュー用） |
+| `source_time_zone` | RDS インベントリの `ParameterGroups.<Blue のグループ名>` から `value`（`TimeZone`）と `source`（`TimeZoneSource`）を載せる。**確認用**で実行スクリプトは参照しない |
 | `mysql_verification` | ルートの `mysql_verification` を既定値とし、接続配下の指定でキー単位に上書き（どちらも無ければ `enabled: false`）。`auth_method` は `parameter_store` 固定で出力する。`enabled: true` なら `parameter_name` と `user_parameter_name` の両方が必須で、`user` と `password` はカタログへ書けない |
 | `protection_snapshot_identifier` | `<source_db_instance_identifier>-pre-bg` を生成 |
 | `final_snapshot_identifier` | `<source_db_instance_identifier>-final` を生成 |
@@ -142,10 +163,10 @@ mysql_verification:
 
 ```bash
 # 1. AWS から現状の RDS インスタンス情報を読み取り保存する。
-scripts/collect_rds_instance_inventory.sh \
+go -C scripts run ./collect_rds_instance_inventory \
   --region ap-northeast-1 \
   --profile readonly \
-  --output artifacts/rds-instance-inventory.json
+  --output "$PWD/artifacts/rds-instance-inventory.json"
 
 # 2. 人が config/migration-catalog.yml をレビュー・更新する。
 #    カタログにはリージョンを書かず、接続定義と移行設定だけを管理する。

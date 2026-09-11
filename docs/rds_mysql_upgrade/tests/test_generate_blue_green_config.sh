@@ -11,28 +11,62 @@ trap 'rm -rf "$work_dir"' EXIT
 
 mkdir -p "$work_dir/bin" "$work_dir/output"
 
-# AWS CLI のダミー。収集スクリプトが組み立てる引数を記録し、固定の RDS 応答を返す。
-printf '%s\n' \
-  '#!/usr/bin/env bash' \
-  'set -euo pipefail' \
-  'printf "%s\n" "$*" > "$AWS_MOCK_ARGUMENTS"' \
-  'cat "$AWS_MOCK_RESPONSE"' \
-  > "$work_dir/bin/aws"
+# AWS CLI のダミー。収集器が組み立てる引数を 1 行ずつ記録し、
+# describe-db-instances と describe-db-parameters を fixture から返し分ける。
+# 読み取り API 以外を呼んだ場合は失敗させる。
+cat > "$work_dir/bin/aws" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$AWS_MOCK_ARGUMENTS"
+group=''
+for ((i = 1; i <= $#; i++)); do
+  if [[ "${!i}" == --db-parameter-group-name ]]; then
+    next=$((i + 1)); group=${!next}
+  fi
+done
+case " $* " in
+  *' describe-db-instances '*)
+    cat "$AWS_MOCK_INSTANCES" ;;
+  *' describe-db-parameters '*)
+    cat "$AWS_MOCK_PARAMETERS_DIR/${group}.json" ;;
+  *)
+    echo "unexpected AWS CLI call: $*" >&2; exit 64 ;;
+esac
+MOCK
 chmod +x "$work_dir/bin/aws"
 
 AWS_MOCK_ARGUMENTS="$work_dir/aws-arguments.txt" \
-AWS_MOCK_RESPONSE="$fixture_dir/rds-instance-inventory.test.json" \
+AWS_MOCK_INSTANCES="$fixture_dir/rds-instance-inventory.test.json" \
+AWS_MOCK_PARAMETERS_DIR="$fixture_dir/describe-db-parameters" \
 PATH="$work_dir/bin:$PATH" \
-"$repo_root/scripts/collect_rds_instance_inventory.sh" \
+go -C "$repo_root/scripts" run ./collect_rds_instance_inventory \
   --region ap-northeast-1 \
   --profile test-readonly \
   --output "$work_dir/rds-instance-inventory.json"
 
-expected_arguments='--region ap-northeast-1 --profile test-readonly rds describe-db-instances --output json'
-[[ "$(<"$work_dir/aws-arguments.txt")" == "$expected_arguments" ]] || {
-  echo 'collector did not call the expected read-only AWS CLI command' >&2
-  exit 1
-}
+# 読み取り API だけを、パラメータグループごとに 1 回ずつ呼んでいること。
+python3 - "$work_dir/aws-arguments.txt" "$fixture_dir/rds-instance-inventory.test.json" <<'PY'
+import json
+import sys
+
+calls = [line.strip() for line in open(sys.argv[0 + 1], encoding="utf-8") if line.strip()]
+response = json.load(open(sys.argv[2], encoding="utf-8"))
+prefix = "--region ap-northeast-1 --profile test-readonly rds "
+
+assert calls[0] == prefix + "describe-db-instances --output json", calls[0]
+
+groups = sorted({
+    group["DBParameterGroupName"]
+    for instance in response["DBInstances"]
+    for group in instance["DBParameterGroups"]
+})
+expected = sorted(
+    prefix + f"describe-db-parameters --db-parameter-group-name {name} --output json"
+    for name in groups
+)
+assert sorted(calls[1:]) == expected, calls[1:]
+assert len(calls[1:]) == len(groups), "each parameter group must be read exactly once"
+PY
 python3 - "$fixture_dir/rds-instance-inventory.test.json" "$work_dir/rds-instance-inventory.json" <<'PY'
 import json
 import sys
@@ -43,6 +77,16 @@ with open(sys.argv[2], encoding="utf-8") as handle:
     inventory = json.load(handle)
 assert inventory["aws_region"] == "ap-northeast-1"
 assert inventory["DBInstances"] == expected_response["DBInstances"]
+# パラメータグループごとに time_zone の実値が採取されていること。
+groups = {
+    group["DBParameterGroupName"]
+    for instance in expected_response["DBInstances"]
+    for group in instance["DBParameterGroups"]
+}
+assert set(inventory["ParameterGroups"]) == groups, inventory["ParameterGroups"]
+for name, facts in inventory["ParameterGroups"].items():
+    assert set(facts) == {"TimeZone", "TimeZoneSource"}, name
+    assert facts["TimeZone"], name
 PY
 
 for environment in development staging production; do
@@ -52,7 +96,7 @@ for environment in development staging production; do
     --environment "$environment" \
     --output "$work_dir/output/$environment.yml"
 
-  python3 - "$work_dir/output/$environment.yml" "$fixture_dir/blue-green.$environment.expected.yml" "$fixture_dir/migration-catalog.test.yml" "$environment" <<'PY'
+  python3 - "$work_dir/output/$environment.yml" "$fixture_dir/blue-green.$environment.expected.yml" "$fixture_dir/migration-catalog.test.yml" "$environment" "$work_dir/rds-instance-inventory.json" <<'PY'
 import sys
 import yaml
 
@@ -63,6 +107,9 @@ with open(sys.argv[2], encoding="utf-8") as handle:
 with open(sys.argv[3], encoding="utf-8") as handle:
     catalog = yaml.safe_load(handle)
 environment = sys.argv[4]
+with open(sys.argv[5], encoding="utf-8") as handle:
+    import json
+    inventory_facts = json.load(handle)["ParameterGroups"]
 
 assert actual == expected, "generated YAML differs from the expected test result"
 
@@ -93,6 +140,12 @@ for instance in instances:
     # target を省略した接続は、共通ターゲットと Blue の実値で補完される。
     assert service["target_engine_version"]
     assert service["target_db_instance_class"]
+    # 確認用の time_zone は、Blue のパラメータグループの収集値をそのまま載せる。
+    facts = inventory_facts[service["source_db_parameter_group_name"]]
+    assert service["source_time_zone"] == {
+        "value": facts["TimeZone"],
+        "source": facts["TimeZoneSource"],
+    }, instance
 
 # mysql_verification は、ルートの既定値を接続配下がキー単位で上書きする。
 # auth_method は parameter_store 固定で、user はカタログに置かない。
@@ -100,7 +153,8 @@ defaults = catalog.get("mysql_verification") or {}
 for instance in instances:
     verification = actual["services"][instance]["mysql_verification"]
     assert verification["auth_method"] == "parameter_store", instance
-    assert verification["user"] == "", instance
+    # user はカタログに書けないため、生成結果にもキー自体が現れない。
+    assert "user" not in verification, instance
     overrides = [
         b.get("mysql_verification") or {}
         for _, _, b in bindings if b["rds_instance"] == instance

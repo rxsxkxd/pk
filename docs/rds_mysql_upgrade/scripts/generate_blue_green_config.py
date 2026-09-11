@@ -51,7 +51,15 @@ def read_inventory(path):
     region = value.get("aws_region") if isinstance(value, dict) else None
     if not isinstance(region, str) or not region.strip():
         raise SystemExit(
-            f"RDS inventory has no aws_region: {path}; collect it with collect_rds_instance_inventory.sh"
+            f"RDS inventory has no aws_region: {path};"
+            " collect it with go -C scripts run ./collect_rds_instance_inventory"
+        )
+    # パラメータグループの実値（確認用の time_zone）。収集器が付ける。
+    parameter_group_facts = value.get("ParameterGroups")
+    if not isinstance(parameter_group_facts, dict):
+        raise SystemExit(
+            f"RDS inventory has no ParameterGroups object: {path};"
+            " collect it again with go -C scripts run ./collect_rds_instance_inventory"
         )
 
     indexed = {}
@@ -63,7 +71,7 @@ def read_inventory(path):
             if identifier in indexed:
                 raise SystemExit(f"RDS inventory contains duplicate DB instance: {identifier}")
             indexed[identifier] = instance
-    return indexed, region
+    return indexed, region, parameter_group_facts
 
 
 def required(mapping, key, context):
@@ -81,6 +89,27 @@ def source_parameter_group(instance, context):
     if not name:
         raise SystemExit(f"{context}: DBParameterGroups[0].DBParameterGroupName is required")
     return name
+
+
+def source_time_zone(parameter_group_facts, parameter_group_name, context):
+    """Blue のパラメータグループの time_zone 実値を、確認用の項目として返す。
+
+    実行スクリプトは参照しない。8.0 → 8.4 では time_zone の扱いが論点になるため
+    （reference/mysql-timezone-problem-summary.md）、切替の前後で変わらないことを
+    人がレビューできるように生成結果へ載せる。
+
+    source が engine-default ならパラメータグループでは未設定である。
+    """
+    facts = parameter_group_facts.get(parameter_group_name)
+    if not isinstance(facts, dict):
+        raise SystemExit(
+            f"{context}: RDS inventory has no ParameterGroups entry for {parameter_group_name};"
+            " collect it again with go -C scripts run ./collect_rds_instance_inventory"
+        )
+    return {
+        "value": facts.get("TimeZone") or "",
+        "source": facts.get("TimeZoneSource") or "",
+    }
 
 
 def normalize_major_minor(version, context):
@@ -150,9 +179,9 @@ def mysql_verification(binding, context, defaults):
                     "生成される auth_method は parameter_store 固定）"
                 )
 
+    # user はカタログに書けない（SSM から取得する）ため、生成結果へも出さない。
     return {
         "enabled": enabled,
-        "user": "",
         "auth_method": GENERATED_MYSQL_AUTH_METHOD,
         "parameter_name": merged.get("parameter_name") or "",
         "user_parameter_name": merged.get("user_parameter_name") or "",
@@ -190,7 +219,7 @@ def resolve_target(target, instance, context):
     }
 
 
-def generate(catalog, inventory, inventory_region, environment_name):
+def generate(catalog, inventory, inventory_region, parameter_group_facts, environment_name):
     """カタログの接続定義から、指定環境の Blue/Green 設定を生成する。
 
     生成単位は RDS DB インスタンスである。同じ rds_instance を指す接続は
@@ -271,18 +300,23 @@ def generate(catalog, inventory, inventory_region, environment_name):
                 raise SystemExit(f"{context}: catalog.parameter_groups に無い: {group_name}")
             template_path = required(group, "template_path", f"parameter_groups.{group_name}")
 
+            source_parameter_group_name = source_parameter_group(instance, context)
             service = {
                 "source_db_instance_identifier": source_id,
                 "source_engine_version": normalize_major_minor(
                     required(instance, "EngineVersion", context), context
                 ),
-                "source_db_parameter_group_name": source_parameter_group(instance, context),
+                "source_db_parameter_group_name": source_parameter_group_name,
                 **target,
                 "target_parameter_group_template_path": str(template_path),
                 "protection_snapshot_identifier": f"{source_id}-pre-bg",
                 "final_snapshot_identifier": f"{source_id}-final",
                 # 影響範囲。切替前のレビューで使う。
                 "schemas": [schema_name],
+                # 確認用。Blue のパラメータグループの time_zone 実値。
+                "source_time_zone": source_time_zone(
+                    parameter_group_facts, source_parameter_group_name, context
+                ),
                 "mysql_verification": mysql_verification(binding, context, mysql_defaults),
                 "actions": {
                     "build": "pending",
@@ -300,7 +334,8 @@ def generate(catalog, inventory, inventory_region, environment_name):
             # 同じインスタンスを指す接続は 1 つの deployment にまとめる。
             # 重複して書かれた設定は一致していなければならない。
             for key in ("target_engine_version", "target_db_instance_class",
-                        "target_db_parameter_group_name", "mysql_verification"):
+                        "target_db_parameter_group_name", "mysql_verification",
+                        "source_time_zone"):
                 if existing[key] != service[key]:
                     raise SystemExit(
                         f"{context}: {source_id} を指す他の接続と {key} が食い違う"
@@ -338,8 +373,10 @@ def write_yaml(path, value):
 def main():
     args = parse_args()
     catalog = read_yaml(args.catalog)
-    inventory, inventory_region = read_inventory(args.inventory)
-    generated = generate(catalog, inventory, inventory_region, args.environment)
+    inventory, inventory_region, parameter_group_facts = read_inventory(args.inventory)
+    generated = generate(
+        catalog, inventory, inventory_region, parameter_group_facts, args.environment
+    )
     write_yaml(args.output, generated)
     print(f"Generated Blue/Green config: {args.output}")
 

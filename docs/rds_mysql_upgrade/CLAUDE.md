@@ -41,6 +41,8 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 
 `config/blue-green/{staging,production}.deployment.yml` が環境ごとの単一の入力である。全スクリプトが `--config FILE --service NAME` だけを引数に取り、DB 識別子・バージョン・パラメータグループ名・`actions` の承認状態をここから解決する。
 
+Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する接続定義）と RDS インベントリから生成できる。収集は `scripts/collect_rds_instance_inventory/`（Go。AWS CLI を exec し、`describe-db-instances` とパラメータグループごとの `describe-db-parameters` だけを呼ぶ）、生成は `scripts/generate_blue_green_config.py`（AWS を呼ばない）である。生成結果の `source_time_zone` は Blue のパラメータグループの `time_zone` 実値で、**切替前の人のレビュー専用**——実行スクリプトは読まない。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。
+
 `config/mysql80-to-84-parameter-rules.yml` は 8.0 → 8.4 のパラメータ変換ルール（`copy` / `force` / `omit` / `target_only`）を持ち、`generate_mysql84_parameter_group.rb` の唯一のルールソースである。パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。
 
 ### CI の二系統
@@ -118,8 +120,11 @@ ruby scripts/generate_mysql84_parameter_group.rb \
   --output-dir examples/mysql84-parameter-generation/output \
   --system sample --environment production
 
-# Go レポート生成器
-cd scripts && go build ./...
+# Go レポート生成器と RDS インベントリ収集器
+# （go.sum を追跡していないため、yaml.v3 を使うレポート生成器は
+#  ci/Dockerfile.green-verification-report と同じ手順でビルドする）
+go -C scripts vet ./collect_rds_instance_inventory
+go -C scripts build -o /dev/null ./collect_rds_instance_inventory
 
 # GitHub Actions をローカル実行（.actrc に AWS profile と絶対パスマウントを設定してから）
 act workflow_dispatch -W .github/workflows/verify-green.yml \

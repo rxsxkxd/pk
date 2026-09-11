@@ -13,9 +13,11 @@ services:
     final_snapshot_identifier: example-service-test-staging-audit-mysql80-final
     schemas:
     - example_service_test_audit
+    source_time_zone:
+      value: Asia/Tokyo
+      source: user
     mysql_verification:
       enabled: true
-      user: ''
       auth_method: parameter_store
       parameter_name: /rds-bg-test/mysql-password
       user_parameter_name: /rds-bg-test/mysql-user
@@ -38,9 +40,11 @@ services:
     final_snapshot_identifier: example-service-test-staging-mysql80-final
     schemas:
     - example_service_test
+    source_time_zone:
+      value: UTC
+      source: engine-default
     mysql_verification:
       enabled: true
-      user: ''
       auth_method: parameter_store
       parameter_name: /rds-bg-test/mysql-password
       user_parameter_name: /rds-bg-test/mysql-user

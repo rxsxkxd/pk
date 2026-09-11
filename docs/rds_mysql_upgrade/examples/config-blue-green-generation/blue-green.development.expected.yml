@@ -14,9 +14,11 @@ services:
     schemas:
     - example_service_test
     - example_service_test_audit
+    source_time_zone:
+      value: UTC
+      source: engine-default
     mysql_verification:
       enabled: true
-      user: ''
       auth_method: parameter_store
       parameter_name: /rds-bg-test/mysql-password
       user_parameter_name: /rds-bg-test/mysql-user

@@ -22,6 +22,7 @@ s3://…-out/masked/v1/2026/09/doc.jpg   ← 上半分だけぼけた画像
 |---|---|
 | `cmd/mask` | Lambda エントリポイント |
 | `cmd/maskfile` | ローカル実行用 CLI（S3 不要） |
+| `cmd/gensample` | 動作確認・性能計測用のサンプル画像を生成 |
 | `internal/handler` | S3 イベント処理（検証・冪等性・fail-closed） |
 | `internal/masking` | マスキング処理そのもの。Lambda と CLI が共有する |
 | `internal/imaging` | ぼかし、領域切り出し、EXIF 向き補正、強度測定 |
@@ -46,29 +47,54 @@ s3://…-out/masked/v1/2026/09/doc.jpg   ← 上半分だけぼけた画像
 AWS アカウントも Docker も不要。`cmd/maskfile` が Lambda と同じ
 `internal/masking` を呼ぶため、ここで得られる結果は本番と一致する。
 
+手元に試せる画像がなければ、サンプルを生成できる（実写真は置かない）。
+
 ```bash
-go run ./cmd/maskfile -out masked.jpg photo.jpg
-# または
-make run IN=photo.jpg OUT=masked.jpg
+make sample     # testdata/ に生成
 ```
 
+| ファイル | 用途 |
+|---|---|
+| `person.jpg` / `.png` | 全身の人物を引きで捉えた構図。頭部が上半分に収まる |
+| `idcard.jpg` | 身分証のレイアウト。**実際の用途に最も近い** |
+| `big.jpg` (4000×3000) | 性能計測用 |
+| `small.png` (120×90) | 半径が下限 8px に張り付くケース |
+| `broken.jpg` | 画像でないファイル（検証エラー確認用） |
+
+実写真は置かない。標準ライブラリだけで描いた合成画像だが、抽象的な模様ではなく
+人物・身分証の形にしてあるのは、マスクの効き方が被写体の性質に左右されるため。
+撮影ノイズも加えてあり、これがないとスコアが現実より低く出て調整に使えない。
+
+```bash
+go run ./cmd/maskfile -out tmp/masked.jpg testdata/idcard.jpg
+# または（出力先は既定で tmp/masked.jpg）
+make run IN=testdata/idcard.jpg
 ```
-photo.jpg  jpeg 1200x900  radius=36px  top 50% (0,0,1200,450)
-           score=0.0508 (limit 5.0, ok)  111KB->28KB  87ms
-           -> masked.jpg
+
+`-out` に `tmp/masked.jpg` のようなパスを渡すと、途中のディレクトリは自動で作られる。
+`tmp/` は `.gitignore` 済みなので、確認用の出力はここへ置けばよい。
+
 ```
+testdata/idcard.jpg  jpeg 1200x900  radius=36px  top 50% (0,0,1200,450)
+                     score=0.9515 (limit 5.0, ok)  153KB->95KB  50ms
+                     -> tmp/masked.jpg
+```
+
+`idcard.jpg` の結果は、顔写真と氏名・番号が判別不能になる一方、署名とバーコードは
+鮮明なまま残る。**境界のすぐ下の行が読めるまま残る**のも見て取れるので、
+`MASK_HEIGHT_RATIO` の既定 0.5 で足りるかの判断材料になる。
 
 まとめて処理する場合と、しきい値を調整する場合:
 
 ```bash
 # 複数ファイルを出力ディレクトリへ
-go run ./cmd/maskfile -out-dir ./out ./samples/*.jpg
+go run ./cmd/maskfile -out-dir tmp/out ./samples/*.jpg
 
 # 出力は書かずスコアだけ集める（MAX_ALLOWED_LAPLACIAN_VAR の決定用）
 go run ./cmd/maskfile -report-only -json ./samples/*.jpg | jq -s 'map(.strengthScore) | max'
 
 # 領域やぼかしの強さを変えて確認
-go run ./cmd/maskfile -mask-height-ratio 0.6 -blur-ratio 0.06 -out out.jpg photo.jpg
+go run ./cmd/maskfile -mask-height-ratio 0.6 -blur-ratio 0.06 -out tmp/out.jpg photo.jpg
 ```
 
 強度検証に落ちた場合とデコードに失敗した場合は、本番で DLQ に入るのと同じ分類が
@@ -91,8 +117,8 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 103
 全件 DLQ に落ち、緩すぎれば弱いマスクが素通りする。実データで分布を取ってから決める。
 
 ```bash
-go run ./cmd/maskfile -report-only -json ./samples/*.jpg > scores.jsonl
-jq -s 'map(.strengthScore) | {max: max, p99: (sort | .[(length*0.99|floor)])}' scores.jsonl
+go run ./cmd/maskfile -report-only -json ./samples/*.jpg > tmp/scores.jsonl
+jq -s 'map(.strengthScore) | {max: max, p99: (sort | .[(length*0.99|floor)])}' tmp/scores.jsonl
 ```
 
 詳細は[設計書 §14.1](docs/image-blur-lambda-design.md)。
@@ -144,8 +170,25 @@ aws s3 cp s3://$MASKED_BUCKET/masked/v1/photo.jpg ./masked.jpg
 | 800 × 600 | 24 px |
 | 200 × 150 | 8 px（下限） |
 
-大きな半径でも速度が落ちないよう、ぼかしはボックスぼかし 3 回の重ね掛けで
-ガウス分布を近似している（半径によらず O(pixels)）。
+大きな半径でも速度が落ちないよう、ぼかしはボックスぼかしの重ね掛けで
+ガウス分布を近似している（半径によらず O(pixels)）。8bit のまま窓を 1 画素ずつ
+滑らせて加減算するため、float への展開もメモリ帯域も要らない。
+
+4000×3000 の処理は end-to-end で **268ms**（うちぼかし 86ms）。残りの 179ms は
+JPEG のデコードとエンコードで、これは JPEG を扱う以上削れない。
+最適化の内訳と、測ったうえで棄却した案は[設計書 §13.4](docs/image-blur-lambda-design.md)。
+
+重ねる回数は `BLUR_PASSES` で決まる。マスキングに必要なのは「情報を落とすこと」で
+あって滑らかさではないため、**既定は 2 回**（3 回から end-to-end 約 12% 短縮）。
+4000×3000 の JPEG で 303ms → 268ms、マスク強度は変わらない（スコア 0.049 で一致）。
+
+1 回は許可していない。矩形窓の周波数応答は sinc 状で副ローブを持つため、
+特定の空間周波数の成分が残る。2 回重ねれば副ローブが二乗されて十分小さくなる。
+
+### マスク領域の外には一切手を加えない
+
+縮小・拡大を含むすべての処理は切り出した矩形の中だけで行い、画像全体の縮小はしない。
+非マスク領域は再エンコードを除いて画素単位で不変で、テストで固定している。
 
 ### 出力前に強度を自己検証する（fail-closed）
 
@@ -184,6 +227,7 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 | `MASK_HEIGHT_RATIO` | `0.5` | 上部からマスクする高さの比率 |
 | `MIN_BLUR_RATIO` | `0.04` | 短辺に対するぼかし半径の比率 |
 | `MIN_BLUR_RADIUS_PX` | `8` | 半径の絶対下限 |
+| `BLUR_PASSES` | `2` | ボックスぼかしの重ね回数。2 未満は不可 |
 | `DOWNSCALE_FACTOR` | `1` | 追加ハードニング用の縮小率（1 で無効） |
 | `MAX_ALLOWED_LAPLACIAN_VAR` | `5.0` | 強度検証のしきい値 |
 | `MAX_INPUT_BYTES` | `20971520` | 入力サイズ上限 |
@@ -197,9 +241,9 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 
 ### 未実装 / 既知の制限
 
-- **対応形式は JPEG / PNG のみ。** Go 標準ライブラリに WebP エンコーダがないため、
-  WebP は検証エラーとして DLQ に送られる。対応するなら `golang.org/x/image/webp`
-  （デコードのみ）+ 別形式での出力か、cgo を伴うエンコーダの導入が必要。
+- **対応形式は JPEG / PNG のみ。** WebP は今回考慮外で、検証エラーとして DLQ に送られる
+  （Go 標準ライブラリに WebP エンコーダがないため、対応するなら別形式での出力か
+  cgo を伴うエンコーダの導入が要る）。
 - **`MAX_ALLOWED_LAPLACIAN_VAR` は暫定値（5.0）。** 実データ 1,000 枚程度で
   分布を取ってから決めること。厳しすぎると正常画像が DLQ に落ちる。
 - **アニメーション画像**（GIF / APNG / animated WebP）は非対応。

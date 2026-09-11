@@ -233,6 +233,7 @@ func (h *Handler) mask(raw []byte, srcKey, dstKey string) (*result, error) {
 		MaskHeightRatio: h.Cfg.MaskHeightRatio,
 		BlurRatio:       h.Cfg.BlurRatio,
 		MinBlurRadiusPx: h.Cfg.MinBlurRadiusPx,
+		BlurPasses:      h.Cfg.BlurPasses,
 		DownscaleFactor: h.Cfg.DownscaleFactor,
 		MaxLaplacianVar: h.Cfg.MaxLaplacianVar,
 		MaxPixels:       h.Cfg.MaxInputPixels,

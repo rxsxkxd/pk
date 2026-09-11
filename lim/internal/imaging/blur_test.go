@@ -182,3 +182,48 @@ func TestCropAndPasteRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestLaplacianVarianceMatchesNaiveImplementation(t *testing.T) {
+	// 整数化した実装が素朴な浮動小数版と一致すること。
+	// ずれるとしきい値の意味が変わってしまう。
+	for _, size := range []int{200, 1200} {
+		img := textLikeImage(size, size, 3)
+		blurred := GaussianBlur(img, BlurRadius(size, size, 0.04, 8))
+
+		for _, target := range []*image.RGBA{img, blurred} {
+			got := LaplacianVariance(target)
+			want := laplacianVarianceFull(target)
+			if want == 0 {
+				if got != 0 {
+					t.Errorf("size %d: got %v, want 0", size, got)
+				}
+				continue
+			}
+			if d := math.Abs(got-want) / want; d > 0.02 {
+				t.Errorf("size %d: optimized %v vs naive %v (%.2f%% off)", size, got, want, d*100)
+			}
+		}
+	}
+}
+
+// laplacianVarianceFull は比較用の素朴な全画素版。
+func laplacianVarianceFull(img *image.RGBA) float64 {
+	w, h := img.Rect.Dx(), img.Rect.Dy()
+	gray := make([]float64, w*h)
+	for i := 0; i < w*h; i++ {
+		o := i * 4
+		gray[i] = 0.299*float64(img.Pix[o]) + 0.587*float64(img.Pix[o+1]) + 0.114*float64(img.Pix[o+2])
+	}
+	var sum, sumSq, n float64
+	for y := 1; y < h-1; y++ {
+		for x := 1; x < w-1; x++ {
+			i := y*w + x
+			v := gray[i-w] + gray[i+w] + gray[i-1] + gray[i+1] - 4*gray[i]
+			sum += v
+			sumSq += v * v
+			n++
+		}
+	}
+	mean := sum / n
+	return sumSq/n - mean*mean
+}

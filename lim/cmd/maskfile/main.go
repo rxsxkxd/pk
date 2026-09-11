@@ -19,19 +19,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rxsxkxd/lim/internal/imaging"
 	"github.com/rxsxkxd/lim/internal/masking"
 )
 
 func main() {
 	var (
-		out        = flag.String("out", "", "出力ファイル。入力が 1 つのときのみ有効")
-		outDir     = flag.String("out-dir", "", "出力ディレクトリ。入力が複数のとき使う")
+		out        = flag.String("out", "", "出力ファイル（例: tmp/masked.jpg）。入力が 1 つのときのみ有効。途中のディレクトリは自動で作る")
+		outDir     = flag.String("out-dir", "", "出力ディレクトリ。入力が複数のとき使う。なければ作る")
 		reportOnly = flag.Bool("report-only", false, "出力を書かず、スコアだけ表示する（しきい値調整用）")
 		asJSON     = flag.Bool("json", false, "1 行 1 件の JSON で出力する")
 
 		heightRatio = flag.Float64("mask-height-ratio", 0.5, "上部からマスクする高さの比率。1.0 で全面")
 		blurRatio   = flag.Float64("blur-ratio", 0.04, "短辺に対するぼかし半径の比率")
 		minRadius   = flag.Float64("min-blur-radius-px", 8, "ぼかし半径の絶対下限")
+		passes      = flag.Int("blur-passes", imaging.DefaultBlurPasses, "ボックスぼかしの重ね回数。多いほど滑らかだが遅い")
 		downscale   = flag.Int("downscale-factor", 1, "追加ハードニング用の縮小率。1 で無効")
 		maxVar      = flag.Float64("max-laplacian-var", 5.0, "強度検証のしきい値")
 		maxPixels   = flag.Int64("max-pixels", 64_000_000, "総ピクセル数の上限")
@@ -67,6 +69,7 @@ func main() {
 		MaskHeightRatio: *heightRatio,
 		BlurRatio:       *blurRatio,
 		MinBlurRadiusPx: *minRadius,
+		BlurPasses:      *passes,
 		DownscaleFactor: *downscale,
 		MaxLaplacianVar: *maxVar,
 		MaxPixels:       *maxPixels,
@@ -138,6 +141,12 @@ func process(in, out, outDir string, reportOnly, asJSON bool, opts masking.Optio
 		if abs, err := filepath.Abs(dst); err == nil {
 			if inAbs, err := filepath.Abs(in); err == nil && abs == inAbs {
 				return fmt.Errorf("出力先が入力と同じです: %s", dst)
+			}
+		}
+		// tmp/masked.jpg のように掘った先を指定できるよう、途中のディレクトリを作る。
+		if dir := filepath.Dir(dst); dir != "." {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return err
 			}
 		}
 		if err := os.WriteFile(dst, res.Body, 0o644); err != nil {

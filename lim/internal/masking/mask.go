@@ -21,6 +21,7 @@ type Options struct {
 	MaskHeightRatio float64 // 上部からマスクする高さの比率（0.5 = 上半分）
 	BlurRatio       float64 // 短辺に対するぼかし半径の比率
 	MinBlurRadiusPx float64 // 半径の絶対下限
+	BlurPasses      int     // ボックスぼかしの重ね回数。0 なら既定値
 	DownscaleFactor int     // 追加ハードニング。1 で無効
 	MaxLaplacianVar float64 // 強度検証の上限
 	MaxPixels       int64   // decompression bomb 対策
@@ -100,12 +101,16 @@ func Apply(raw []byte, o Options) (*Result, error) {
 	// 領域だけを切り出してぼかすことで、マスク対象の情報が
 	// 境界をまたいで非マスク領域へにじみ出すのを防ぐ。
 	// 既定では factor=1 で素通り。強度を上げる必要が出たら設定だけで切り替える。
+	passes := o.BlurPasses
+	if passes == 0 {
+		passes = imaging.DefaultBlurPasses
+	}
 	if f := o.DownscaleFactor; f > 1 {
 		small := imaging.Downscale(part, f)
-		small = imaging.GaussianBlur(small, radius/float64(f))
+		small = imaging.GaussianBlurPasses(small, radius/float64(f), passes)
 		part = imaging.Upscale(small, region.Dx(), region.Dy())
 	} else {
-		part = imaging.GaussianBlur(part, radius)
+		part = imaging.GaussianBlurPasses(part, radius, passes)
 	}
 	imaging.Paste(img, part, region.Min)
 

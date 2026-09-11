@@ -36,31 +36,64 @@ func BlurRadius(w, h int, ratio, minPx float64) float64 {
 	return r
 }
 
-// GaussianBlur はガウスぼかしを適用する。
+// DefaultBlurPasses はガウス近似に使うボックスぼかしの回数の既定値。
+//
+// 1 回 = 単純な移動平均、2 回 = 三角窓、3 回でほぼガウス分布。
+// マスキングに必要なのは「情報を落とすこと」であって滑らかさではないため、
+// 回数を減らして処理時間を削れる。ただし 1 回は避ける（下の注記）。
+const DefaultBlurPasses = 2
+
+// GaussianBlur はガウスぼかしを適用する（既定のパス数）。
+func GaussianBlur(src *image.RGBA, sigma float64) *image.RGBA {
+	return GaussianBlurPasses(src, sigma, DefaultBlurPasses)
+}
+
+// GaussianBlurPasses はパス数を指定してぼかしを適用する。
 //
 // sigma が大きい（本用途では 100px 超もあり得る）ため、素朴な畳み込みでは
 // 計算量が半径に比例して破綻する。ここでは半径によらず O(pixels) で済む
-// ボックスぼかし 3 回の重ね掛けでガウス分布を近似する。視覚的には
-// 真のガウスぼかしと区別がつかない。
+// ボックスぼかしの重ね掛けでガウス分布を近似する。
+//
+// passes を減らすと処理時間はほぼ比例して減る。仕上がりの滑らかさは落ちるが、
+// マスキングの目的（情報を落とすこと）には影響しない。
+//
+// ただし passes=1（単純な移動平均）は避けたほうがよい。ボックス窓の
+// 周波数応答は sinc 状でゼロ点と副ローブを持つため、特定の空間周波数の
+// 成分が減衰しきらずに残る。2 回重ねると副ローブが二乗されて十分小さくなる。
 //
 // 入力はアルファ乗算済みの RGBA を前提とする。乗算済みのまま畳み込むことで、
 // 透明画素の色が不透明部分へにじみ出すのを防ぐ。
-func GaussianBlur(src *image.RGBA, sigma float64) *image.RGBA {
+func GaussianBlurPasses(src *image.RGBA, sigma float64, passes int) *image.RGBA {
 	w, h := src.Rect.Dx(), src.Rect.Dy()
 	if w == 0 || h == 0 || sigma <= 0 {
 		return src
 	}
+	if passes < 1 {
+		passes = 1
+	}
 
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	boxes := boxesForGauss(sigma, 3)
+	boxes := boxesForGauss(sigma, passes)
 
-	plane := make([]float32, w*h)
-	tmp := make([]float32, w*h)
+	// 不透明な画像ではアルファを畳み込む必要がない。JPEG は常にこちらで、
+	// 処理するチャンネルが 4 → 3 になる。
+	channels := 4
+	opaque := src.Opaque()
+	if opaque {
+		channels = 3
+	}
 
-	// メモリを抑えるためチャンネルごとに処理する。
-	for c := 0; c < 4; c++ {
-		for i := 0; i < w*h; i++ {
-			plane[i] = float32(src.Pix[i*4+c])
+	// 8bit のまま扱う。float に展開すると変換の手間とメモリ帯域が 4 倍になる。
+	plane := make([]uint8, w*h)
+	tmp := make([]uint8, w*h)
+	colSum := make([]int32, w)
+
+	for c := 0; c < channels; c++ {
+		for y := 0; y < h; y++ {
+			so, ro := y*src.Stride, y*w
+			for x := 0; x < w; x++ {
+				plane[ro+x] = src.Pix[so+x*4+c]
+			}
 		}
 		for _, size := range boxes {
 			r := (size - 1) / 2
@@ -68,16 +101,19 @@ func GaussianBlur(src *image.RGBA, sigma float64) *image.RGBA {
 				continue
 			}
 			boxBlurH(plane, tmp, w, h, r)
-			boxBlurV(tmp, plane, w, h, r)
+			boxBlurV(tmp, plane, w, h, r, colSum)
 		}
-		for i := 0; i < w*h; i++ {
-			v := plane[i] + 0.5
-			if v < 0 {
-				v = 0
-			} else if v > 255 {
-				v = 255
+		for y := 0; y < h; y++ {
+			do, ro := y*dst.Stride, y*w
+			for x := 0; x < w; x++ {
+				dst.Pix[do+x*4+c] = plane[ro+x]
 			}
-			dst.Pix[i*4+c] = uint8(v)
+		}
+	}
+
+	if opaque {
+		for i := 3; i < len(dst.Pix); i += 4 {
+			dst.Pix[i] = 0xff
 		}
 	}
 	return dst
@@ -111,48 +147,72 @@ func boxesForGauss(sigma float64, n int) []int {
 	return sizes
 }
 
-// boxBlurH は水平方向の移動平均。行ごとの累積和を使い、半径によらず O(w) で処理する。
-// 端は「窓に入っている画素だけで平均する」方式（実在画素のみを数える）。
-func boxBlurH(src, dst []float32, w, h, r int) {
-	pre := make([]float64, w+1)
+// boxBlurH は水平方向の移動平均。
+//
+// 窓を 1 画素ずつずらしながら、入ってきた画素を足して出ていった画素を引く。
+// 累積和の配列を作らずに済み、半径によらず 1 画素あたり定数時間で処理できる。
+// 端は窓に入っている実在画素だけで平均する。
+func boxBlurH(src, dst []uint8, w, h, r int) {
 	for y := 0; y < h; y++ {
 		row := y * w
-		pre[0] = 0
-		for x := 0; x < w; x++ {
-			pre[x+1] = pre[x] + float64(src[row+x])
+
+		hi := min(r, w-1)
+		var sum int32
+		for x := 0; x <= hi; x++ {
+			sum += int32(src[row+x])
 		}
+		cnt := int32(hi + 1)
+
 		for x := 0; x < w; x++ {
-			lo := x - r
-			if lo < 0 {
-				lo = 0
+			dst[row+x] = uint8((sum + cnt/2) / cnt)
+			if add := x + r + 1; add < w {
+				sum += int32(src[row+add])
+				cnt++
 			}
-			hi := x + r
-			if hi > w-1 {
-				hi = w - 1
+			if del := x - r; del >= 0 {
+				sum -= int32(src[row+del])
+				cnt--
 			}
-			dst[row+x] = float32((pre[hi+1] - pre[lo]) / float64(hi-lo+1))
 		}
 	}
 }
 
 // boxBlurV は垂直方向の移動平均。
-func boxBlurV(src, dst []float32, w, h, r int) {
-	pre := make([]float64, h+1)
-	for x := 0; x < w; x++ {
-		pre[0] = 0
-		for y := 0; y < h; y++ {
-			pre[y+1] = pre[y] + float64(src[y*w+x])
+//
+// 列ごとに走査するとキャッシュミスだらけになるため、列の合計を保持したまま
+// 行を上から下へ舐める。読み出しが常に連続アドレスになる。
+// colSum は呼び出し側から渡す作業領域（長さ w）。
+func boxBlurV(src, dst []uint8, w, h, r int, colSum []int32) {
+	clear(colSum)
+
+	hi := min(r, h-1)
+	for y := 0; y <= hi; y++ {
+		row := y * w
+		for x := 0; x < w; x++ {
+			colSum[x] += int32(src[row+x])
 		}
-		for y := 0; y < h; y++ {
-			lo := y - r
-			if lo < 0 {
-				lo = 0
+	}
+	cnt := int32(hi + 1)
+
+	for y := 0; y < h; y++ {
+		row := y * w
+		half := cnt / 2
+		for x := 0; x < w; x++ {
+			dst[row+x] = uint8((colSum[x] + half) / cnt)
+		}
+		if add := y + r + 1; add < h {
+			ro := add * w
+			for x := 0; x < w; x++ {
+				colSum[x] += int32(src[ro+x])
 			}
-			hi := y + r
-			if hi > h-1 {
-				hi = h - 1
+			cnt++
+		}
+		if del := y - r; del >= 0 {
+			ro := del * w
+			for x := 0; x < w; x++ {
+				colSum[x] -= int32(src[ro+x])
 			}
-			dst[y*w+x] = float32((pre[hi+1] - pre[lo]) / float64(hi-lo+1))
+			cnt--
 		}
 	}
 }

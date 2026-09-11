@@ -180,6 +180,7 @@ Resources:
           MASK_HEIGHT_RATIO: !Ref MaskHeightRatio
           MIN_BLUR_RATIO: !Ref BlurRatio
           MIN_BLUR_RADIUS_PX: '8'
+          BLUR_PASSES: '2'
           DOWNSCALE_FACTOR: '1'
           MAX_ALLOWED_LAPLACIAN_VAR: !Ref MaxAllowedLaplacianVar
           MAX_INPUT_BYTES: '20971520'

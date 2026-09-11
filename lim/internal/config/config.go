@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/rxsxkxd/lim/internal/imaging"
 )
 
 // Config は設計書 §8.4 の環境変数に対応する。
@@ -17,6 +19,7 @@ type Config struct {
 	MaskHeightRatio float64 // 画像上部からマスクする高さの比率（0.5 = 上半分）
 	BlurRatio       float64 // 短辺に対するぼかし半径の比率
 	MinBlurRadiusPx float64 // 小さい画像向けの半径の絶対下限
+	BlurPasses      int     // ボックスぼかしの重ね回数。多いほど滑らかだが遅い
 	DownscaleFactor int     // 追加ハードニング。1 で無効
 	MaxLaplacianVar float64 // 強度検証の上限。超えたら出力しない
 	MaxInputBytes   int64
@@ -34,6 +37,7 @@ func Load() (Config, error) {
 		MaskHeightRatio: envFloat("MASK_HEIGHT_RATIO", 0.5),
 		BlurRatio:       envFloat("MIN_BLUR_RATIO", 0.04),
 		MinBlurRadiusPx: envFloat("MIN_BLUR_RADIUS_PX", 8),
+		BlurPasses:      envInt("BLUR_PASSES", imaging.DefaultBlurPasses),
 		DownscaleFactor: envInt("DOWNSCALE_FACTOR", 1),
 		MaxLaplacianVar: envFloat("MAX_ALLOWED_LAPLACIAN_VAR", 5.0),
 		MaxInputBytes:   int64(envInt("MAX_INPUT_BYTES", 20*1024*1024)),
@@ -49,6 +53,10 @@ func Load() (Config, error) {
 	}
 	if c.BlurRatio <= 0 {
 		return c, fmt.Errorf("MIN_BLUR_RATIO must be > 0, got %v", c.BlurRatio)
+	}
+	// 1 回だけの移動平均はボックス窓の副ローブが残るため許可しない（imaging.GaussianBlurPasses 参照）。
+	if c.BlurPasses < 2 || c.BlurPasses > 5 {
+		return c, fmt.Errorf("BLUR_PASSES must be between 2 and 5, got %d", c.BlurPasses)
 	}
 	if c.DownscaleFactor < 1 {
 		return c, fmt.Errorf("DOWNSCALE_FACTOR must be >= 1, got %d", c.DownscaleFactor)

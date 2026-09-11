@@ -1,3 +1,8 @@
 /build/
+/tmp/
 /.aws-sam/
 samconfig.toml
+
+# testdata の画像は cmd/gensample で再生成できるので追跡しない
+/testdata/*.jpg
+/testdata/*.png

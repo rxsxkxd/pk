@@ -77,6 +77,7 @@ func testConfig() config.Config {
 		OutputPrefix:    "masked/",
 		PolicyVersion:   "v1",
 		MaskHeightRatio: 0.5,
+		BlurPasses:      2,
 		BlurRatio:       0.04,
 		MinBlurRadiusPx: 8,
 		DownscaleFactor: 1,
@@ -546,6 +547,59 @@ func TestHandleWithDownscaleHardening(t *testing.T) {
 	}
 	if w, h := out.Bounds().Dx(), out.Bounds().Dy(); w != 400 || h != 300 {
 		t.Errorf("output size = %dx%d, want 400x300", w, h)
+	}
+}
+
+func TestDownscaleNeverTouchesAreaOutsideMask(t *testing.T) {
+	// 縮小は切り出したマスク領域の中だけに掛かり、画像全体には掛からない。
+	// 領域外が 1 画素でも変われば、マスク以外に影響が出ているということ。
+	// PNG は可逆なので画素の完全一致で検証できる。
+	for _, factor := range []int{1, 4, 8, 16} {
+		f := newFakeS3()
+		body := detailedPNG(t, 240, 240)
+		f.put("raw", "uploads/a.png", body, nil)
+
+		h := newHandler(f, func(c *config.Config) { c.DownscaleFactor = factor })
+		if err := h.Handle(context.Background(), s3Event("raw", "uploads/a.png", int64(len(body)), "e1")); err != nil {
+			t.Fatalf("factor %d: %v", factor, err)
+		}
+
+		src := imaging.ToRGBA(mustDecode(t, body))
+		out := imaging.ToRGBA(mustDecode(t, f.objects["masked/masked/v1/a.png"]))
+		for y := 120; y < 240; y++ {
+			for x := 0; x < 240; x++ {
+				if src.RGBAAt(x, y) != out.RGBAAt(x, y) {
+					t.Fatalf("factor %d: pixel outside the mask changed at (%d,%d)", factor, x, y)
+				}
+			}
+		}
+	}
+}
+
+func TestBlurPassesDoNotAffectAreaOutsideMask(t *testing.T) {
+	// パス数を変えても領域外には影響しない。
+	for _, passes := range []int{2, 3, 5} {
+		f := newFakeS3()
+		body := detailedPNG(t, 240, 240)
+		f.put("raw", "uploads/a.png", body, nil)
+
+		h := newHandler(f, func(c *config.Config) { c.BlurPasses = passes })
+		if err := h.Handle(context.Background(), s3Event("raw", "uploads/a.png", int64(len(body)), "e1")); err != nil {
+			t.Fatalf("passes %d: %v", passes, err)
+		}
+
+		src := imaging.ToRGBA(mustDecode(t, body))
+		out := imaging.ToRGBA(mustDecode(t, f.objects["masked/masked/v1/a.png"]))
+		for y := 120; y < 240; y++ {
+			for x := 0; x < 240; x++ {
+				if src.RGBAAt(x, y) != out.RGBAAt(x, y) {
+					t.Fatalf("passes %d: pixel outside the mask changed at (%d,%d)", passes, x, y)
+				}
+			}
+		}
+		if v := imaging.LaplacianVariance(imaging.Crop(out, image.Rect(0, 0, 240, 120))); v >= 5.0 {
+			t.Errorf("passes %d: mask region not blurred enough (variance %v)", passes, v)
+		}
 	}
 }
 

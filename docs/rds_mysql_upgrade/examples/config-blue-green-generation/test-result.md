@@ -5,16 +5,18 @@
 | 項目 | 結果 |
 |---|---|
 | 実 AWS API 呼び出し | 実施なし。ダミー `aws` コマンドが [rds-instance-inventory.test.json](rds-instance-inventory.test.json) を返却 |
-| AWS CLI の組立確認 | PASS。`rds describe-db-instances` と `--region ap-northeast-1 --profile test-readonly` だけが渡されることを確認 |
+| AWS CLI の組立確認 | PASS。`rds describe-db-instances` と、パラメータグループごとの `rds describe-db-parameters` だけが `--region ap-northeast-1 --profile test-readonly` 付きで渡されることを確認（各グループちょうど 1 回） |
 | 収集リージョン | PASS。収集時の `--region ap-northeast-1` をインベントリ最上位の `aws_region` に保存し、生成設定へ引継ぎ |
 | 生成環境 | `development`、`staging`、`production`（すべてダミー RDS ID） |
-| 出力先 | `mktemp` で作成した一時ディレクトリ。既存の `config/blue-green/staging.deployment.yml`／`production.yml` は未変更 |
+| 出力先 | `mktemp` で作成した一時ディレクトリ。既存の `config/blue-green/{staging,production}.deployment.yml` は未変更 |
 | 生成結果 | PASS。各 `blue-green.<environment>.expected.yml` と YAML データ構造として一致 |
 | 承認状態 | PASS。`build`、`switchover`、`cleanup` はすべて `pending` |
-| `mysql_verification` 既定値 | PASS。未指定時に `enabled: false` と `auth_method: parameter_store` を出力 |
-| schema 定義 | PASS。二つの `databases.<schema>` が、各環境でそれぞれ異なる RDS ホストを参照 |
+| `mysql_verification` の継承 | PASS。ルート既定値を接続配下がキー単位で上書き（production の audit だけ別パラメータ・別ポート） |
+| `source_time_zone` | PASS。Blue のパラメータグループの `time_zone` 実値（`user` / `engine-default` の両ケース）を確認用に出力 |
+| 生成単位 | PASS。同じ `rds_instance` を指す接続を 1 deployment へまとめ、`schemas` を集約（development は 2 接続 → 1 deployment） |
+| レビュー用レポート | PASS。別コマンド `generate_blue_green_config_report` の出力が各 `blue-green.<environment>.report.expected.md` と一致。設定ファイルは書き換えない |
 
-実行したテストは [test_generate_blue_green_config.sh](../../tests/test_generate_blue_green_config.sh) である。通常の実行環境では、事前に `python3 -m pip install 'PyYAML==6.0.2'` を行ってから次を実行する。
+ロジックの単体テストは `scripts/internal/{common,collect,generate}` にあり、`cd scripts && go test ./...` で実行する。下の結果はコマンドを通した E2E テスト [test_generate_blue_green_config.sh](../../tests/test_generate_blue_green_config.sh) のものである。収集・生成はどちらも Go なので、Go があれば次だけで実行できる。
 
 ```bash
 tests/test_generate_blue_green_config.sh

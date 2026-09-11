@@ -33,7 +33,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - **宣言と実環境の突き合わせ（reconciliation）。** 設定ファイルは進捗の記録ではなく「このアクションを実行してよい」という人間の宣言（`pending` / `approved`）を持つ。CI は毎回 AWS の実状態を読み、未適用なら適用、適用済みなら何もしない。**CI が設定ファイルへ書き戻すことはしない。** `approved` → `pending` に戻しても適用済みのものは取り消さない。
 - **識別子は AWS から引き当てる。** Deployment ID を設定ファイルに持たず、`describe-blue-green-deployments --filters Name=source,Values=$source_arn` で毎回解決する。これにより再実行・リトライ・同時トリガーで二重作成・二重切替が起こらない。
 - **冪等性は二層で担保する。** ① 移行元インスタンスのエンジンバージョンとパラメータグループで「結果」を観測し（`scripts/lib/migration_phase.sh`）、② Deployment の `Status` を安全弁として併用する。切替時に blue が `-old1` へリネームされるため、`source_db_instance_identifier` が指す実体は切替の前後で変わる。この判定は Deployment が cleanup で削除された後も機能する。**終了コードは「操作を実行したか」ではなく「望ましい終了状態に到達しているか」で決める**（到達 = `0`、未到達かつ自動では到達不能 = `1`）。設計の背景は `decisions/idempotency-strategy.md`。
-- **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。MySQL 接続は設定ファイルの `mysql_verification` が制御する（既定 `enabled: false`）。パスワードの取得方法は `auth_method` で選ぶ（`parameter_store` / `plaintext` / `prompt`）。**`parameter_store` ではユーザー名も必ず秘匿側へ置く**——`parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` では config の `user` が必須である。解決は `scripts/lib/mysql_credentials.sh` が担い、値は `MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。**`plaintext` は設定ファイルが Git 追跡対象であるためテスト環境専用で、`environment: production` では拒否される。** **カタログからの生成（`generate_blue_green_config.py`）は `auth_method: parameter_store` 固定で出力する。**`secrets_manager` と `iam`（IAM データベース認証）は対応しない——不正な `auth_method` として拒否される。
+- **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。MySQL 接続は設定ファイルの `mysql_verification` が制御する（既定 `enabled: false`）。パスワードの取得方法は `auth_method` で選ぶ（`parameter_store` / `plaintext` / `prompt`）。**`parameter_store` ではユーザー名も必ず秘匿側へ置く**——`parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` では config の `user` が必須である。解決は `scripts/lib/mysql_credentials.sh` が担い、値は `MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。**`plaintext` は設定ファイルが Git 追跡対象であるためテスト環境専用で、`environment: production` では拒否される。** **カタログからの生成（`generate_blue_green_config`）は `auth_method: parameter_store` 固定で出力する。**`secrets_manager` と `iam`（IAM データベース認証）は対応しない——不正な `auth_method` として拒否される。
 - **RDS パラメータグループの変更経路は CloudFormation のみ。** Blue/Green Deployment 自体は CFn カスタムリソースを使わず AWS CLI で扱う。
 - 破壊的 RDS 権限（`rds:DeleteDBInstance` 等）は CI 実行ロールにのみ付与する。作業者には CloudFormation スタック操作権限だけを与える。
 
@@ -41,7 +41,16 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 
 `config/blue-green/{staging,production}.deployment.yml` が環境ごとの単一の入力である。全スクリプトが `--config FILE --service NAME` だけを引数に取り、DB 識別子・バージョン・パラメータグループ名・`actions` の承認状態をここから解決する。
 
-Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する接続定義）と RDS インベントリから生成できる。収集は `scripts/collect_rds_instance_inventory/`（Go。AWS CLI を exec し、`describe-db-instances` とパラメータグループごとの `describe-db-parameters` だけを呼ぶ）、生成は `scripts/generate_blue_green_config.py`（AWS を呼ばない）である。生成結果の `source_time_zone` は Blue のパラメータグループの `time_zone` 実値で、**切替前の人のレビュー専用**——実行スクリプトは読まない。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。
+Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する接続定義）と RDS インベントリから生成できる。**収集と生成は別コマンドで、ロジックは `scripts/internal/` のライブラリにある。**
+
+| パッケージ | 役割 |
+|---|---|
+| `internal/common` | 収集器が書き生成器が読む**インベントリ JSON の型（契約）**、原子的ファイル書き込み |
+| `internal/collect` | AWS CLI を exec し `describe-db-instances` とパラメータグループごとの `describe-db-parameters` だけを呼ぶ |
+| `internal/generate` | カタログの検証・解決と、deployment YAML の組み立て。**AWS を呼ばない** |
+| `internal/report` | 切替前レビュー用の Markdown 組み立て。判定は行わず、`internal/generate` を再利用して材料を並べる |
+
+コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `internal/` 側とその単体テストを直す。**`go -C scripts run` はカレントディレクトリを `scripts/` へ移すため、引数のパスは絶対パスで渡す。生成結果の `source_time_zone` は Blue のパラメータグループの `time_zone` 実値で、**切替前の人のレビュー専用**——実行スクリプトは読まない。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。
 
 `config/mysql80-to-84-parameter-rules.yml` は 8.0 → 8.4 のパラメータ変換ルール（`copy` / `force` / `omit` / `target_only`）を持ち、`generate_mysql84_parameter_group.rb` の唯一のルールソースである。パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。
 
@@ -65,6 +74,8 @@ Step 4 のレポート生成器は Ruby 版（`generate_green_verification_repor
 ```bash
 python3 -m pip install 'PyYAML==6.0.2'
 ```
+
+Blue/Green 設定の収集・生成コマンド（`scripts/{collect_rds_instance_inventory,generate_blue_green_config}/`）は Go である。依存は `scripts/go.mod` と `scripts/go.sum` に固定しており、`go -C scripts run ./<コマンド名>` で実行する。**`go -C` はカレントディレクトリを `scripts/` へ移すため、引数のパスは絶対パスで渡す。**
 
 AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`local-execution.md`）。実接続時だけ `.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。**ファイルはすべて `read_only` マウント**である。
 
@@ -120,11 +131,9 @@ ruby scripts/generate_mysql84_parameter_group.rb \
   --output-dir examples/mysql84-parameter-generation/output \
   --system sample --environment production
 
-# Go レポート生成器と RDS インベントリ収集器
-# （go.sum を追跡していないため、yaml.v3 を使うレポート生成器は
-#  ci/Dockerfile.green-verification-report と同じ手順でビルドする）
-go -C scripts vet ./collect_rds_instance_inventory
-go -C scripts build -o /dev/null ./collect_rds_instance_inventory
+# Go（レポート生成器、RDS インベントリ収集器、Blue/Green 設定生成器）
+# ロジックは internal/{common,collect,generate} にあり、単体テストを持つ。
+cd scripts && go vet ./... && go build ./... && go test ./...
 
 # GitHub Actions をローカル実行（.actrc に AWS profile と絶対パスマウントを設定してから）
 act workflow_dispatch -W .github/workflows/verify-green.yml \

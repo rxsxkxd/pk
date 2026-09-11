@@ -16,15 +16,23 @@
 
 ## 3. 構成
 
-構成は、入力 YAML 一つ、AWS CLI 収集スクリプト一つ、生成スクリプト一つだけとする。
+構成は、入力 YAML 一つ、収集コマンド一つ、生成コマンド一つだけとする。収集と生成はどちらも Go で、**別コマンドとして分ける**（収集は AWS を呼び、生成は呼ばない）。
 
 ```text
-config/migration-catalog.yml                 # 人が管理する対応表・移行方針
-scripts/collect_rds_instance_inventory/      # AWS CLI の read-only 収集（Go）
-scripts/generate_blue_green_config.py        # YAML 生成
-artifacts/rds-instance-inventory.json        # 収集結果（一時・レビュー用）
-config/blue-green/<environment>.deployment.yml          # 生成結果
+config/migration-catalog.yml                     # 人が管理する対応表・移行方針
+scripts/collect_rds_instance_inventory/          # 収集コマンド（CLI の配線だけ）
+scripts/generate_blue_green_config/              # YAML 生成コマンド（CLI の配線だけ）
+scripts/generate_blue_green_config_report/       # レポート生成コマンド（CLI の配線だけ）
+scripts/internal/common/                         # インベントリ JSON の型（契約）、原子的書き込み
+scripts/internal/collect/                        # AWS CLI の read-only 収集
+scripts/internal/generate/                       # カタログの検証・解決と YAML 組み立て
+scripts/internal/report/                         # 切替前レビュー用 Markdown の組み立て
+artifacts/rds-instance-inventory.json            # 収集結果（一時・レビュー用）
+config/blue-green/<environment>.deployment.yml   # 生成結果（CI が読む正のデータ）
+artifacts/blue-green-<environment>-review.md     # 生成結果（人が読むレビュー資料）
 ```
+
+処理単位でライブラリを分けている。**インベントリ JSON の型は収集器が書き生成器が読む「契約」なので `internal/common` に一本化し、片側だけ変えて黙って壊れないようにする。**コマンド側は引数の受け取りと呼び出しだけで、判定ロジックを持たない。
 
 ## 4. 入力
 
@@ -124,7 +132,9 @@ mysql_verification:
 
 ## 5. 生成処理
 
-`generate_blue_green_config.py` は、移行カタログと RDS インベントリ JSON を読み込み、指定環境の `config/blue-green/<environment>.deployment.yml` を生成する。
+`generate_blue_green_config`（Go）は、移行カタログと RDS インベントリ JSON を読み込み、指定環境の `config/blue-green/<environment>.deployment.yml` を生成する。**AWS を一切呼ばない。**
+
+カタログの未知キーは黙って無視せず、誤字として落とす（`yaml:",inline"` で拾って報告する）。
 
 生成する値は次のとおりである。
 
@@ -159,6 +169,23 @@ mysql_verification:
 
 これ以外の妥当性は自動判定しない。特に、アプリケーションと接続先の対応、目標インスタンスクラス、パラメータグループ内容はレビュー対象とする。
 
+### 5-1. レビュー用レポート
+
+`generate_blue_green_config_report`（Go）は、**YAML 生成とは別コマンド**として同じ入力から Markdown を組み立てる。設定ファイルには一切触らず、`.md` を 1 本出すだけである。判定の重複を避けるため、deployment の組み立ては `internal/generate` を再利用する。
+
+**このレポートも可否を判定しない。** 上で「自動判定しない」と決めた事項を、人がレビューしやすい形に並べるためのものである。
+
+| 節 | 内容 |
+|---|---|
+| 概要 | 環境、リージョン、実行単位数、接続定義数、アプリ数 |
+| 移行元と移行先 | インスタンスごとのバージョン・パラメータグループ・インスタンスクラスと、移行先パラメータグループの元テンプレート |
+| 影響範囲 | インスタンスごとのスキーマと**接続元（アプリ.接続名）**。生成結果にはアプリ名が残らないため、ここで補う |
+| time_zone の実値 | Blue のパラメータグループから採取した値と由来 |
+| Step 4 の MySQL 接続検証 | 有効・無効と SSM パラメータ名、ポート、TLS。**認証情報そのものは出さない** |
+| 要確認事項 | チェックボックス形式。同居インスタンス、明示設定された `time_zone`、共有された移行先パラメータグループ、無効な接続検証、`actions` の承認状態 |
+
+出力先は Git 管理しない `artifacts/` を想定する（`.gitignore` 済み）。生成結果の YAML と違い、レポートは CI の入力ではない。
+
 ## 6. 操作イメージ
 
 ```bash
@@ -172,13 +199,20 @@ go -C scripts run ./collect_rds_instance_inventory \
 #    カタログにはリージョンを書かず、接続定義と移行設定だけを管理する。
 
 # 3. 指定環境の Blue/Green 設定を生成する。
-python3 scripts/generate_blue_green_config.py \
-  --catalog config/migration-catalog.yml \
-  --inventory artifacts/rds-instance-inventory.json \
+go -C scripts run ./generate_blue_green_config \
+  --catalog "$PWD/config/migration-catalog.yml" \
+  --inventory "$PWD/artifacts/rds-instance-inventory.json" \
   --environment production \
-  --output config/blue-green/production.deployment.yml
+  --output "$PWD/config/blue-green/production.deployment.yml"
 
-# 4. 生成結果を人がレビューし、必要な移行承認時だけ actions を pending から変更する。
+# 4. レビュー用の Markdown を出す（設定ファイルは書き換えない）。
+go -C scripts run ./generate_blue_green_config_report \
+  --catalog "$PWD/config/migration-catalog.yml" \
+  --inventory "$PWD/artifacts/rds-instance-inventory.json" \
+  --environment production \
+  --output "$PWD/artifacts/blue-green-production-review.md"
+
+# 5. 生成結果とレポートを人がレビューし、必要な移行承認時だけ actions を pending から変更する。
 git diff -- config/blue-green/production.deployment.yml
 ```
 
@@ -195,7 +229,9 @@ git diff -- config/blue-green/production.deployment.yml
 - [migration-catalog.test.yml](examples/config-blue-green-generation/migration-catalog.test.yml) と [rds-instance-inventory.test.json](examples/config-blue-green-generation/rds-instance-inventory.test.json) をダミー入力として使う。
 - `blue-green.<environment>.expected.yml` を生成結果の期待値とし、生成 YAML を構文ではなくデータ構造として比較する。
 - 実行済みの結果は [test-result.md](examples/config-blue-green-generation/test-result.md) に残す。
-- `tests/test_generate_blue_green_config.sh` は AWS CLI をダミーコマンドに差し替える。実 AWS API は呼び出さない。
+- ロジックの単体テストは `scripts/internal/*/[a-z]*_test.go` にある。`cd scripts && go test ./...` で実行し、AWS へは接続しない（`internal/collect` は PATH 上の `aws` をダミーへ差し替えて引数の組み立てを検証する）。
+- `tests/test_generate_blue_green_config.sh` はコマンドを通した E2E である。AWS CLI をダミーコマンドに差し替え、実 AWS API は呼び出さない。ダミーは `describe-db-instances` と `describe-db-parameters` を fixture から返し分け、それ以外を呼んだら失敗する。
+- **`go -C scripts run` はカレントディレクトリを `scripts/` へ移すため、`--catalog` などのパスは絶対パスで渡す。**
 - 収集 JSON と生成先 YAML はすべて `mktemp` で作成する一時ディレクトリに出力し、テスト終了時に削除する。
 
 ```bash

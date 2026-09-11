@@ -90,11 +90,24 @@ for name, facts in inventory["ParameterGroups"].items():
 PY
 
 for environment in development staging production; do
-  python3 "$repo_root/scripts/generate_blue_green_config.py" \
+  # go -C はカレントディレクトリを scripts/ へ移すため、パスは絶対で渡す。
+  go -C "$repo_root/scripts" run ./generate_blue_green_config \
     --catalog "$fixture_dir/migration-catalog.test.yml" \
     --inventory "$work_dir/rds-instance-inventory.json" \
     --environment "$environment" \
     --output "$work_dir/output/$environment.yml"
+
+  # レポートは YAML 生成とは別コマンドである。同じ入力から Markdown を組み立てる。
+  go -C "$repo_root/scripts" run ./generate_blue_green_config_report \
+    --catalog "$fixture_dir/migration-catalog.test.yml" \
+    --inventory "$work_dir/rds-instance-inventory.json" \
+    --environment "$environment" \
+    --output "$work_dir/output/$environment.report.md"
+  diff -u "$fixture_dir/blue-green.$environment.report.expected.md" \
+    "$work_dir/output/$environment.report.md" || {
+    echo "generated report differs from the expected test result: $environment" >&2
+    exit 1
+  }
 
   python3 - "$work_dir/output/$environment.yml" "$fixture_dir/blue-green.$environment.expected.yml" "$fixture_dir/migration-catalog.test.yml" "$environment" "$work_dir/rds-instance-inventory.json" <<'PY'
 import sys

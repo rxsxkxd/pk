@@ -66,12 +66,13 @@ else
   echo 'skip  Ruby（未導入）'
 fi
 
-# go.sum はリポジトリに置かない方針である（ci/Dockerfile.green-verification-report が
-# コンテナ内で go mod download して生成する）。テストでも同じ手順を一時ディレクトリで行う。
+# レポート生成器は scripts/ 直下の package main である（同ディレクトリの他コマンドは
+# サブパッケージ）。単体ビルドするため一時ディレクトリへ写して組む。
+# 依存は scripts/go.sum に固定済みで、モジュールキャッシュがあればオフラインで通る。
 build_go() {
   mkdir -p "$work/go"
-  cp scripts/go.mod scripts/generate_green_verification_report.go "$work/go/" || return 1
-  ( cd "$work/go" && go mod download gopkg.in/yaml.v3 && go build -o "$work/gen" . ) >"$work/go.err" 2>&1
+  cp scripts/go.mod scripts/go.sum scripts/generate_green_verification_report.go "$work/go/" || return 1
+  ( cd "$work/go" && go build -o "$work/gen" . ) >"$work/go.err" 2>&1
 }
 
 if command -v go >/dev/null 2>&1 && build_go; then
@@ -90,7 +91,7 @@ if command -v go >/dev/null 2>&1 && build_go; then
     printf 'FAIL  %-52s %s\n' 'Go: 短縮記法で失敗した' "$(cat "$work/go.err")"; failed=$((failed + 1))
   fi
 else
-  echo 'skip  Go（未導入、または go.sum 未整備でビルドできない）'
+  echo 'skip  Go（未導入、または依存を取得できずビルドできない）'
 fi
 
 echo

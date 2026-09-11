@@ -39,4 +39,4 @@ Ruby / Go は `replica_parallel_workers: !Ref Workers` を `"Workers"` という
 scripts/lib/cfn_shorthand_test.sh
 ```
 
-3 実装が同じ解釈をすることを確認する。AWS へは接続しない。Ruby / Go が未導入の環境では該当実装をスキップする。Go は `ci/Dockerfile.green-verification-report` と同じ手順（一時ディレクトリで `go mod download`）でビルドするため、`go.sum` をリポジトリへ置く必要はない。
+3 実装が同じ解釈をすることを確認する。AWS へは接続しない。Ruby / Go が未導入の環境では該当実装をスキップする。Go のレポート生成器は `scripts/` 直下の `package main` なので、一時ディレクトリへ `go.mod`・`go.sum` とソースを写して単体ビルドする。

@@ -3,7 +3,7 @@ aws_region: ap-northeast-1
 services:
   example-service-test-staging-audit-mysql80:
     source_db_instance_identifier: example-service-test-staging-audit-mysql80
-    source_engine_version: '8.0'
+    source_engine_version: "8.0"
     source_db_parameter_group_name: example-service-test-staging-audit-mysql80-v1
     target_engine_version: 8.4.10
     target_db_instance_class: db.t4g.medium
@@ -12,7 +12,7 @@ services:
     protection_snapshot_identifier: example-service-test-staging-audit-mysql80-pre-bg
     final_snapshot_identifier: example-service-test-staging-audit-mysql80-final
     schemas:
-    - example_service_test_audit
+      - example_service_test_audit
     source_time_zone:
       value: Asia/Tokyo
       source: user
@@ -21,7 +21,7 @@ services:
       auth_method: parameter_store
       parameter_name: /rds-bg-test/mysql-password
       user_parameter_name: /rds-bg-test/mysql-user
-      ssl_ca: ''
+      ssl_ca: ""
       port: 3306
     actions:
       build: pending
@@ -30,7 +30,7 @@ services:
       cleanup: pending
   example-service-test-staging-mysql80:
     source_db_instance_identifier: example-service-test-staging-mysql80
-    source_engine_version: '8.0'
+    source_engine_version: "8.0"
     source_db_parameter_group_name: example-service-test-staging-mysql80-v1
     target_engine_version: 8.4.10
     target_db_instance_class: db.t4g.medium
@@ -39,7 +39,7 @@ services:
     protection_snapshot_identifier: example-service-test-staging-mysql80-pre-bg
     final_snapshot_identifier: example-service-test-staging-mysql80-final
     schemas:
-    - example_service_test
+      - example_service_test
     source_time_zone:
       value: UTC
       source: engine-default
@@ -48,7 +48,7 @@ services:
       auth_method: parameter_store
       parameter_name: /rds-bg-test/mysql-password
       user_parameter_name: /rds-bg-test/mysql-user
-      ssl_ca: ''
+      ssl_ca: ""
       port: 3306
     actions:
       build: pending

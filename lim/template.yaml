@@ -21,6 +21,12 @@ Parameters:
     Type: String
     Default: '0.04'
     Description: ぼかし半径を短辺に対する比率で指定。絶対値では指定させない。
+  DownscaleFactor:
+    Type: Number
+    Default: 4
+    Description: >
+      マスク領域を 1/N に縮小してからぼかす。処理量が減り、縮小で情報が物理的に
+      失われるため復元耐性も上がる。1 で無効。縮小は領域内だけで、領域外には影響しない。
   MaxAllowedLaplacianVar:
     Type: String
     Default: '5.0'
@@ -181,7 +187,8 @@ Resources:
           MIN_BLUR_RATIO: !Ref BlurRatio
           MIN_BLUR_RADIUS_PX: '8'
           BLUR_PASSES: '2'
-          DOWNSCALE_FACTOR: '1'
+          DOWNSCALE_FACTOR: !Ref DownscaleFactor
+          STRENGTH_BLOCK_PX: '64'
           MAX_ALLOWED_LAPLACIAN_VAR: !Ref MaxAllowedLaplacianVar
           MAX_INPUT_BYTES: '20971520'
           MAX_INPUT_PIXELS: '64000000'

@@ -78,6 +78,7 @@ func testConfig() config.Config {
 		PolicyVersion:   "v1",
 		MaskHeightRatio: 0.5,
 		BlurPasses:      2,
+		StrengthBlockPx: 64,
 		BlurRatio:       0.04,
 		MinBlurRadiusPx: 8,
 		DownscaleFactor: 1,
@@ -547,6 +548,64 @@ func TestHandleWithDownscaleHardening(t *testing.T) {
 	}
 	if w, h := out.Bounds().Dx(), out.Bounds().Dy(); w != 400 || h != 300 {
 		t.Errorf("output size = %dx%d, want 400x300", w, h)
+	}
+}
+
+func TestStrengthCheckCatchesLocalUnmaskedArea(t *testing.T) {
+	// 領域全体の平均で判定すると、小さな素通し部分が広い平坦な背景に薄められて
+	// 検知できない。区画ごとの最悪値で見ていることの回帰テスト。
+	//
+	// 模様のコントラストは、平均では旧方式のしきい値を下回るが区画単位では
+	// 大きく超える水準に調整してある（引きの写真で顔だけが残る状況に相当）。
+	f := newFakeS3()
+
+	const (
+		size  = 480
+		amp   = 4  // 素通し部分のコントラスト
+		patch = 64 // 区画 1 つ分
+	)
+	img := image.NewRGBA(image.Rect(0, 0, size, size))
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			img.Set(x, y, color.RGBA{128, 128, 128, 255})
+		}
+	}
+	for y := 60; y < 60+patch; y++ {
+		for x := 60; x < 60+patch; x++ {
+			c := color.RGBA{128 + amp, 128 + amp, 128 + amp, 255}
+			if (x/2)%2 == 0 {
+				c = color.RGBA{128 - amp, 128 - amp, 128 - amp, 255}
+			}
+			img.Set(x, y, c)
+		}
+	}
+
+	// 前提の確認: 領域全体の平均ではしきい値を下回る＝旧方式なら見逃していた。
+	region := imaging.Crop(img, imaging.TopRegion(size, size, 0.5))
+	if mean := imaging.LaplacianVariance(region); mean >= 5.0 {
+		t.Fatalf("fixture の平均 %v がしきい値を超えている。これでは旧方式でも検知できてしまい回帰テストにならない", mean)
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	f.put("raw", "uploads/a.png", buf.Bytes(), nil)
+
+	// ぼかしも縮小も実質無効にして、素通しの一角を残す。
+	h := newHandler(f, func(c *config.Config) {
+		c.BlurRatio = 0.0001
+		c.MinBlurRadiusPx = 0.1
+		c.DownscaleFactor = 1
+	})
+	err := h.Handle(context.Background(), s3Event("raw", "uploads/a.png", int64(buf.Len()), "e1"))
+
+	var se *StrengthError
+	if !errors.As(err, &se) {
+		t.Fatalf("error = %v, want StrengthError（素通しの一角が平均に埋もれて見逃されている）", err)
+	}
+	if f.puts != 0 {
+		t.Errorf("PutObject called %d times, want 0", f.puts)
 	}
 }
 

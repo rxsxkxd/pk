@@ -20,7 +20,8 @@ type Config struct {
 	BlurRatio       float64 // 短辺に対するぼかし半径の比率
 	MinBlurRadiusPx float64 // 小さい画像向けの半径の絶対下限
 	BlurPasses      int     // ボックスぼかしの重ね回数。多いほど滑らかだが遅い
-	DownscaleFactor int     // 追加ハードニング。1 で無効
+	DownscaleFactor int     // マスク領域の縮小率。1 で無効
+	StrengthBlockPx int     // 強度検証の区画サイズ
 	MaxLaplacianVar float64 // 強度検証の上限。超えたら出力しない
 	MaxInputBytes   int64
 	MaxInputPixels  int64
@@ -38,7 +39,8 @@ func Load() (Config, error) {
 		BlurRatio:       envFloat("MIN_BLUR_RATIO", 0.04),
 		MinBlurRadiusPx: envFloat("MIN_BLUR_RADIUS_PX", 8),
 		BlurPasses:      envInt("BLUR_PASSES", imaging.DefaultBlurPasses),
-		DownscaleFactor: envInt("DOWNSCALE_FACTOR", 1),
+		DownscaleFactor: envInt("DOWNSCALE_FACTOR", 4),
+		StrengthBlockPx: envInt("STRENGTH_BLOCK_PX", imaging.DefaultStrengthBlockPx),
 		MaxLaplacianVar: envFloat("MAX_ALLOWED_LAPLACIAN_VAR", 5.0),
 		MaxInputBytes:   int64(envInt("MAX_INPUT_BYTES", 20*1024*1024)),
 		MaxInputPixels:  int64(envInt("MAX_INPUT_PIXELS", 64_000_000)),
@@ -57,6 +59,11 @@ func Load() (Config, error) {
 	// 1 回だけの移動平均はボックス窓の副ローブが残るため許可しない（imaging.GaussianBlurPasses 参照）。
 	if c.BlurPasses < 2 || c.BlurPasses > 5 {
 		return c, fmt.Errorf("BLUR_PASSES must be between 2 and 5, got %d", c.BlurPasses)
+	}
+	if c.StrengthBlockPx < 16 {
+		// 区画が小さすぎると標本数が足りず、量子化ノイズを拾った区画が
+		// 最悪値に選ばれて誤検知になる。
+		return c, fmt.Errorf("STRENGTH_BLOCK_PX must be >= 16, got %d", c.StrengthBlockPx)
 	}
 	if c.DownscaleFactor < 1 {
 		return c, fmt.Errorf("DOWNSCALE_FACTOR must be >= 1, got %d", c.DownscaleFactor)

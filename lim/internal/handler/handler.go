@@ -235,6 +235,7 @@ func (h *Handler) mask(raw []byte, srcKey, dstKey string) (*result, error) {
 		MinBlurRadiusPx: h.Cfg.MinBlurRadiusPx,
 		BlurPasses:      h.Cfg.BlurPasses,
 		DownscaleFactor: h.Cfg.DownscaleFactor,
+		StrengthBlockPx: h.Cfg.StrengthBlockPx,
 		MaxLaplacianVar: h.Cfg.MaxLaplacianVar,
 		MaxPixels:       h.Cfg.MaxInputPixels,
 		JPEGQuality:     h.Cfg.JPEGQuality,

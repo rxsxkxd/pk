@@ -248,21 +248,80 @@ func Downscale(src *image.RGBA, factor int) *image.RGBA {
 	return dst
 }
 
-// Upscale は最近傍で元の寸法へ戻す。情報は縮小時に失われているため補間方式は問わない。
+// Upscale は線形補間で元の寸法へ戻す。
+//
+// 最近傍で戻すと factor 画素ごとに階段状の段差が立つ。情報は縮小時に失われて
+// いるので安全性は変わらないが、この段差を強度検査がエッジとして拾ってしまい、
+// 十分にマスクされた画像が不合格になる（設計書 §12.4 の誤検知）。
+// 補間して段差を作らないことで、検査が実態を測るようになる。
 func Upscale(src *image.RGBA, w, h int) *image.RGBA {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	if sw == w && sh == h {
 		return src
 	}
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	if sw == 0 || sh == 0 {
+		return dst
+	}
+
+	// 横方向の写像は行ごとに同じなので、先に一度だけ求めておく。
+	// 画素ごとに浮動小数で計算し直すと補間のコストが跳ね上がる。
+	const fixed = 1 << 12
+	sxIdx := make([]int, w)
+	sxW := make([]int, w)
+	for x := 0; x < w; x++ {
+		fx := (float64(x)+0.5)*float64(sw)/float64(w) - 0.5
+		sxIdx[x], sxW[x] = interpolationWeights(fx, sw, fixed)
+	}
+
+	// 不透明ならアルファは補間せず埋めるだけでよい。
+	channels := 4
+	opaque := src.Opaque()
+	if opaque {
+		channels = 3
+	}
+
 	for y := 0; y < h; y++ {
-		sy := min(y*sh/h, sh-1)
+		fy := (float64(y)+0.5)*float64(sh)/float64(h) - 0.5
+		sy0, wy := interpolationWeights(fy, sh, fixed)
+		sy1 := min(sy0+1, sh-1)
+		rowTop, rowBot := sy0*src.Stride, sy1*src.Stride
+		do := y * dst.Stride
+
 		for x := 0; x < w; x++ {
-			sx := min(x*sw/w, sw-1)
-			copy(dst.Pix[y*dst.Stride+x*4:][:4], src.Pix[sy*src.Stride+sx*4:][:4])
+			sx0 := sxIdx[x]
+			wx := sxW[x]
+			sx1 := min(sx0+1, sw-1)
+			o00, o01 := rowTop+sx0*4, rowTop+sx1*4
+			o10, o11 := rowBot+sx0*4, rowBot+sx1*4
+
+			for c := 0; c < channels; c++ {
+				top := int(src.Pix[o00+c])*(fixed-wx) + int(src.Pix[o01+c])*wx
+				bot := int(src.Pix[o10+c])*(fixed-wx) + int(src.Pix[o11+c])*wx
+				dst.Pix[do+c] = uint8((top*(fixed-wy) + bot*wy + fixed*fixed/2) / (fixed * fixed))
+			}
+			do += 4
+		}
+	}
+
+	if opaque {
+		for i := 3; i < len(dst.Pix); i += 4 {
+			dst.Pix[i] = 0xff
 		}
 	}
 	return dst
+}
+
+// interpolationWeights は補間元の画素位置と、その隣との混合比（固定小数）を返す。
+func interpolationWeights(f float64, size, fixed int) (idx, weight int) {
+	if f < 0 {
+		return 0, 0
+	}
+	i := int(f)
+	if i >= size-1 {
+		return size - 1, 0
+	}
+	return i, int((f - float64(i)) * float64(fixed))
 }
 
 // TopRegion は画像上部の固定マスク領域を返す（ratio=0.5 で上半分）。

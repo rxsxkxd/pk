@@ -34,8 +34,9 @@ func main() {
 		blurRatio   = flag.Float64("blur-ratio", 0.04, "短辺に対するぼかし半径の比率")
 		minRadius   = flag.Float64("min-blur-radius-px", 8, "ぼかし半径の絶対下限")
 		passes      = flag.Int("blur-passes", imaging.DefaultBlurPasses, "ボックスぼかしの重ね回数。多いほど滑らかだが遅い")
-		downscale   = flag.Int("downscale-factor", 1, "追加ハードニング用の縮小率。1 で無効")
-		maxVar      = flag.Float64("max-laplacian-var", 5.0, "強度検証のしきい値")
+		downscale   = flag.Int("downscale-factor", 4, "マスク領域の縮小率。1 で無効")
+		block       = flag.Int("strength-block", imaging.DefaultStrengthBlockPx, "強度検証の区画サイズ（px）")
+		maxVar      = flag.Float64("max-laplacian-var", 5.0, "強度検証のしきい値（区画ごとの最悪値に対して）")
 		maxPixels   = flag.Int64("max-pixels", 64_000_000, "総ピクセル数の上限")
 		quality     = flag.Int("jpeg-quality", 85, "JPEG 出力品質")
 	)
@@ -71,6 +72,7 @@ func main() {
 		MinBlurRadiusPx: *minRadius,
 		BlurPasses:      *passes,
 		DownscaleFactor: *downscale,
+		StrengthBlockPx: *block,
 		MaxLaplacianVar: *maxVar,
 		MaxPixels:       *maxPixels,
 		JPEGQuality:     *quality,

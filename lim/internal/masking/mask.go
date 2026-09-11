@@ -22,8 +22,9 @@ type Options struct {
 	BlurRatio       float64 // 短辺に対するぼかし半径の比率
 	MinBlurRadiusPx float64 // 半径の絶対下限
 	BlurPasses      int     // ボックスぼかしの重ね回数。0 なら既定値
-	DownscaleFactor int     // 追加ハードニング。1 で無効
-	MaxLaplacianVar float64 // 強度検証の上限
+	DownscaleFactor int     // マスク領域の縮小率。1 で無効
+	StrengthBlockPx int     // 強度検証の区画サイズ。0 なら既定値
+	MaxLaplacianVar float64 // 強度検証の上限（区画ごとの最悪値に対するしきい値）
 	MaxPixels       int64   // decompression bomb 対策
 	JPEGQuality     int
 }
@@ -35,7 +36,7 @@ type Result struct {
 	Format      string
 	Region      string  // 監査用の領域表記
 	RadiusPx    float64 // 実際に適用した半径
-	Score       float64 // マスク領域のラプラシアン分散
+	Score       float64 // マスク領域で最もエッジが残った区画のスコア
 	Width       int
 	Height      int
 }
@@ -116,7 +117,14 @@ func Apply(raw []byte, o Options) (*Result, error) {
 
 	// 強度検証は「マスクした領域だけ」を対象にする。
 	// 画像全体で測ると、非マスク領域の鮮明さに引きずられて必ず不合格になる。
-	score := imaging.LaplacianVariance(part)
+	//
+	// さらに領域を区画に割って最悪値を見る。領域全体の平均では、小さな素通し部分が
+	// 広い平坦な背景に薄められて検知できない（設計書 §12.4）。
+	block := o.StrengthBlockPx
+	if block == 0 {
+		block = imaging.DefaultStrengthBlockPx
+	}
+	score := imaging.LaplacianVarianceBlockMax(part, block)
 	if score > o.MaxLaplacianVar {
 		return nil, &StrengthError{Score: score, Limit: o.MaxLaplacianVar}
 	}

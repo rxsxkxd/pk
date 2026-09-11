@@ -17,6 +17,7 @@ func defaults() Options {
 		BlurRatio:       0.04,
 		MinBlurRadiusPx: 8,
 		DownscaleFactor: 1,
+		StrengthBlockPx: 64,
 		MaxLaplacianVar: 5.0,
 		MaxPixels:       64_000_000,
 		JPEGQuality:     85,

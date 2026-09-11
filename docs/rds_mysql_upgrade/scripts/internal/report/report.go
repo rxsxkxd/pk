@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"rds-mysql-upgrade/scripts/internal/cfn"
 	"rds-mysql-upgrade/scripts/internal/common"
 	"rds-mysql-upgrade/scripts/internal/generate"
 )
@@ -31,6 +32,66 @@ type Report struct {
 type Deployment struct {
 	Service     *generate.Service
 	Connections []generate.ConnectionRef
+	// TargetParameterGroup は Step 2 のテンプレートが宣言している 8.4 側の値である。
+	// 読めなかった場合は nil で、理由が TargetParameterGroupError に入る。
+	TargetParameterGroup      *cfn.ParameterGroup
+	TargetParameterGroupError string
+}
+
+// 比較の判定。レポートの表と要確認事項で同じ語を使う。
+const (
+	VerdictSame        = "一致"
+	VerdictDifferent   = "差異"
+	VerdictIntrinsic   = "比較不能"
+	VerdictNotDeclared = "テンプレート未宣言"
+	VerdictNoTemplate  = "テンプレート未確認"
+)
+
+// ParameterComparison は、Blue の実値と 8.4 テンプレートの適用予定値の突き合わせである。
+type ParameterComparison struct {
+	Name          string
+	Current       string
+	CurrentSource string
+	// Planned は表示用の文字列である（組み込み関数や未確認の場合は理由が入る）。
+	Planned string
+	Verdict string
+}
+
+// Comparisons は採取したパラメータごとに、現状と適用予定値を突き合わせる。
+// パラメータ名の昇順で返す。
+func (deployment *Deployment) Comparisons() []ParameterComparison {
+	var comparisons []ParameterComparison
+	for _, name := range common.SortedKeys(deployment.Service.SourceDBParameters) {
+		current := deployment.Service.SourceDBParameters[name]
+		comparison := ParameterComparison{
+			Name:          name,
+			Current:       current.Value,
+			CurrentSource: current.Source,
+		}
+		switch {
+		case deployment.TargetParameterGroup == nil:
+			comparison.Planned = "—"
+			comparison.Verdict = VerdictNoTemplate
+		default:
+			planned, resolved, intrinsic := deployment.TargetParameterGroup.Parameter(name)
+			switch {
+			case resolved && planned == current.Value:
+				comparison.Planned = planned
+				comparison.Verdict = VerdictSame
+			case resolved:
+				comparison.Planned = planned
+				comparison.Verdict = VerdictDifferent
+			case intrinsic != "":
+				comparison.Planned = intrinsic
+				comparison.Verdict = VerdictIntrinsic
+			default:
+				comparison.Planned = "—"
+				comparison.Verdict = VerdictNotDeclared
+			}
+		}
+		comparisons = append(comparisons, comparison)
+	}
+	return comparisons
 }
 
 // Build はカタログとインベントリからレポートを組み立てる。
@@ -46,10 +107,29 @@ func Build(catalog *generate.Catalog, inventory *common.Inventory, environmentNa
 	}
 
 	report := &Report{Environment: document.Environment, AwsRegion: document.AwsRegion}
+	// 同じテンプレートを複数インスタンスが指しうるため、読み込みは 1 回で済ませる。
+	templates := map[string]*cfn.ParameterGroup{}
+	failures := map[string]string{}
 	for _, instance := range common.SortedKeys(document.Services) {
+		service := document.Services[instance]
+		path := service.TargetParameterGroupTemplatePath
+		if _, done := templates[path]; !done {
+			if _, failed := failures[path]; !failed {
+				group, err := cfn.ReadDBParameterGroup(path)
+				if err != nil {
+					// テンプレートは Step 2 の成果物である。まだ無い段階でも
+					// レポートは出す。読めなかった事実をそのまま載せる。
+					failures[path] = err.Error()
+				} else {
+					templates[path] = group
+				}
+			}
+		}
 		report.Deployments = append(report.Deployments, &Deployment{
-			Service:     document.Services[instance],
-			Connections: byInstance[instance],
+			Service:                   service,
+			Connections:               byInstance[instance],
+			TargetParameterGroup:      templates[path],
+			TargetParameterGroupError: failures[path],
 		})
 	}
 	return report, nil
@@ -69,7 +149,7 @@ func (report *Report) Markdown() string {
 	report.writeSummary(&out)
 	report.writeDeployments(&out)
 	report.writeConnections(&out)
-	report.writeTimeZones(&out)
+	report.writeParameters(&out)
 	report.writeVerification(&out)
 	report.writeReviewPoints(&out)
 	return out.String()
@@ -146,23 +226,45 @@ func (report *Report) writeConnections(out *strings.Builder) {
 	out.WriteString("\n")
 }
 
-func (report *Report) writeTimeZones(out *strings.Builder) {
-	out.WriteString("## time_zone の実値\n\n")
-	out.WriteString("Blue のパラメータグループから採取した実値である。" +
-		"`engine-default` はパラメータグループでは未設定（エンジン既定値）を意味する。\n\n")
-	out.WriteString("| RDS インスタンス | パラメータグループ | time_zone | 由来 |\n|---|---|---|---|\n")
+// writeParameters は、現在のパラメータグループの実値と、Step 2 のテンプレートが
+// 適用しようとしている値を直接突き合わせて並べる。
+func (report *Report) writeParameters(out *strings.Builder) {
+	out.WriteString("## パラメータの現状と適用予定値\n\n")
+	out.WriteString("「現在」は Blue のパラメータグループから採取した実値（`engine-default` は" +
+		"パラメータグループでは未設定＝エンジン既定値）。「適用予定」は移行先パラメータグループの " +
+		"CloudFormation テンプレート（Step 2 の成果物）が宣言している値である。\n\n")
+	out.WriteString("| RDS インスタンス | パラメータ | 現在 | 由来 | 適用予定 | 判定 |\n")
+	out.WriteString("|---|---|---|---|---|---|\n")
 	for _, deployment := range report.Deployments {
-		service := deployment.Service
-		value := service.SourceTimeZone.Value
-		if value == "" {
-			value = "（未取得）"
+		for _, comparison := range deployment.Comparisons() {
+			current := comparison.Current
+			if current == "" {
+				current = "（未取得）"
+			}
+			source := comparison.CurrentSource
+			if source == "" {
+				source = "（未取得）"
+			}
+			verdict := comparison.Verdict
+			if verdict == VerdictDifferent {
+				verdict = "**" + verdict + "**"
+			}
+			fmt.Fprintf(out, "| `%s` | `%s` | %s | %s | %s | %s |\n",
+				deployment.Service.SourceDBInstanceIdentifier, comparison.Name,
+				current, source, comparison.Planned, verdict)
 		}
-		source := service.SourceTimeZone.Source
-		if source == "" {
-			source = "（未取得）"
+	}
+	out.WriteString("\n")
+	out.WriteString("突き合わせたテンプレート:\n\n")
+	for _, deployment := range report.Deployments {
+		if deployment.TargetParameterGroupError != "" {
+			fmt.Fprintf(out, "- `%s` ← **読み込めなかった**: %s\n",
+				deployment.Service.TargetDBParameterGroupName, deployment.TargetParameterGroupError)
+			continue
 		}
-		fmt.Fprintf(out, "| `%s` | `%s` | %s | %s |\n",
-			service.SourceDBInstanceIdentifier, service.SourceDBParameterGroupName, value, source)
+		fmt.Fprintf(out, "- `%s` ← `%s`\n",
+			deployment.Service.TargetDBParameterGroupName,
+			deployment.Service.TargetParameterGroupTemplatePath)
 	}
 	out.WriteString("\n")
 }
@@ -217,21 +319,40 @@ func (report *Report) writeReviewPoints(out *strings.Builder) {
 		}
 	}
 
-	// time_zone を明示設定している場合、8.4 側で同値になっているかが論点になる。
+	// 現状と適用予定値の突き合わせ結果のうち、人の確認が必要なものを挙げる。
 	for _, deployment := range report.Deployments {
-		timeZone := deployment.Service.SourceTimeZone
-		switch {
-		case timeZone.Value == "" || timeZone.Source == "":
+		identifier := deployment.Service.SourceDBInstanceIdentifier
+		if deployment.TargetParameterGroupError != "" {
 			points = append(points, fmt.Sprintf(
-				"`%s` の time_zone を採取できていない。インベントリを再収集する。",
-				deployment.Service.SourceDBInstanceIdentifier))
-		case timeZone.Source != "engine-default":
-			points = append(points, fmt.Sprintf(
-				"`%s` は time_zone を `%s` に明示設定している（由来: %s）。"+
-					"移行先 `%s` のテンプレートが同じ値になっているかを確認する"+
-					"（DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: reference/mysql-timezone-problem-summary.md）。",
-				deployment.Service.SourceDBInstanceIdentifier, timeZone.Value, timeZone.Source,
-				deployment.Service.TargetDBParameterGroupName))
+				"`%s` の移行先テンプレート `%s` を読み込めなかった（%s）。"+
+					"Step 2 を実施済みか、パスが正しいかを確認する。",
+				identifier, deployment.Service.TargetParameterGroupTemplatePath,
+				deployment.TargetParameterGroupError))
+		}
+		for _, comparison := range deployment.Comparisons() {
+			switch comparison.Verdict {
+			case VerdictDifferent:
+				points = append(points, fmt.Sprintf(
+					"`%s` の `%s` が切替で `%s` から `%s` へ変わる。意図した変更かを確認する%s。",
+					identifier, comparison.Name, comparison.Current, comparison.Planned,
+					timeZoneNote(comparison.Name)))
+			case VerdictIntrinsic:
+				points = append(points, fmt.Sprintf(
+					"`%s` の `%s` は移行先テンプレートで組み込み関数（%s）になっており、実値が決まらない。"+
+						"スタックのパラメータ値で確認する。",
+					identifier, comparison.Name, comparison.Planned))
+			case VerdictNotDeclared:
+				points = append(points, fmt.Sprintf(
+					"`%s` の `%s` は移行先テンプレートで宣言されていない。"+
+						"現在の値 `%s`（由来: %s）を引き継がず 8.4 のエンジン既定値になる。意図した変更かを確認する%s。",
+					identifier, comparison.Name, comparison.Current, comparison.CurrentSource,
+					timeZoneNote(comparison.Name)))
+			}
+			if comparison.Current == "" || comparison.CurrentSource == "" {
+				points = append(points, fmt.Sprintf(
+					"`%s` の `%s` を採取できていない。インベントリを再収集する。",
+					identifier, comparison.Name))
+			}
 		}
 	}
 
@@ -269,6 +390,15 @@ func (report *Report) writeReviewPoints(out *strings.Builder) {
 	for _, point := range points {
 		fmt.Fprintf(out, "- [ ] %s\n", point)
 	}
+}
+
+// timeZoneNote は time_zone だけに付く参照先である。datetime 列への影響が論点になる。
+func timeZoneNote(parameterName string) string {
+	if parameterName != "time_zone" {
+		return ""
+	}
+	return "（DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: " +
+		"reference/mysql-timezone-problem-summary.md）"
 }
 
 func sortedNames(values map[string]bool) []string {

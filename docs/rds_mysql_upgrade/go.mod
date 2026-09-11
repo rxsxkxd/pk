@@ -1,4 +1,4 @@
-module rds-mysql-upgrade/scripts
+module rds-mysql-upgrade
 
 go 1.25
 

@@ -92,15 +92,15 @@ database_environments:
 
 parameter_groups:
   example-service-test-development-mysql84-v1:
-    template_path: examples/mysql84-parameter-generation/output/example-service-test-development-mysql84.yaml
+    template_path: examples/config-blue-green-generation/target-parameter-groups/example-service-test-development-mysql84.yaml
   example-service-test-staging-mysql84-v1:
-    template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-mysql84.yaml
+    template_path: examples/config-blue-green-generation/target-parameter-groups/example-service-test-staging-mysql84.yaml
   example-service-test-staging-audit-mysql84-v1:
-    template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-audit-mysql84.yaml
+    template_path: examples/config-blue-green-generation/target-parameter-groups/example-service-test-staging-audit-mysql84.yaml
   example-service-test-production-mysql84-v1:
-    template_path: examples/mysql84-parameter-generation/output/example-service-test-production-mysql84.yaml
+    template_path: examples/config-blue-green-generation/target-parameter-groups/example-service-test-production-mysql84.yaml
   example-service-test-production-audit-mysql84-v1:
-    template_path: examples/mysql84-parameter-generation/output/example-service-test-production-audit-mysql84.yaml
+    template_path: examples/config-blue-green-generation/target-parameter-groups/example-service-test-production-audit-mysql84.yaml
 
 # 全 DB 共通の既定値。接続配下に mysql_verification が無ければこれが使われる。
 mysql_verification:

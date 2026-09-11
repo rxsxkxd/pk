@@ -8,14 +8,15 @@ services:
     target_engine_version: 8.4.10
     target_db_instance_class: db.t4g.medium
     target_db_parameter_group_name: example-service-test-staging-audit-mysql84-v1
-    target_parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-audit-mysql84.yaml
+    target_parameter_group_template_path: examples/config-blue-green-generation/target-parameter-groups/example-service-test-staging-audit-mysql84.yaml
     protection_snapshot_identifier: example-service-test-staging-audit-mysql80-pre-bg
     final_snapshot_identifier: example-service-test-staging-audit-mysql80-final
     schemas:
       - example_service_test_audit
-    source_time_zone:
-      value: Asia/Tokyo
-      source: user
+    source_db_parameters:
+      time_zone:
+        value: Asia/Tokyo
+        source: user
     mysql_verification:
       enabled: true
       auth_method: parameter_store
@@ -35,14 +36,15 @@ services:
     target_engine_version: 8.4.10
     target_db_instance_class: db.t4g.medium
     target_db_parameter_group_name: example-service-test-staging-mysql84-v1
-    target_parameter_group_template_path: examples/mysql84-parameter-generation/output/example-service-test-staging-mysql84.yaml
+    target_parameter_group_template_path: examples/config-blue-green-generation/target-parameter-groups/example-service-test-staging-mysql84.yaml
     protection_snapshot_identifier: example-service-test-staging-mysql80-pre-bg
     final_snapshot_identifier: example-service-test-staging-mysql80-final
     schemas:
       - example_service_test
-    source_time_zone:
-      value: UTC
-      source: engine-default
+    source_db_parameters:
+      time_zone:
+        value: UTC
+        source: engine-default
     mysql_verification:
       enabled: true
       auth_method: parameter_store

@@ -2,6 +2,7 @@ package report
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,8 +27,8 @@ func testInventory(t *testing.T) *common.Inventory {
      "DBParameterGroups": [{"DBParameterGroupName": "solo-v1"}]}
   ],
   "ParameterGroups": {
-    "shared-v1": {"TimeZone": "Asia/Tokyo", "TimeZoneSource": "user"},
-    "solo-v1": {"TimeZone": "UTC", "TimeZoneSource": "engine-default"}
+    "shared-v1": {"Parameters": {"time_zone": {"Value": "Asia/Tokyo", "Source": "user"}}},
+    "solo-v1": {"Parameters": {"time_zone": {"Value": "UTC", "Source": "engine-default"}}}
   }
 }`
 	var inventory common.Inventory
@@ -87,9 +88,39 @@ applications:
               db_parameter_group_name: shared-mysql84-v1
 `
 
+// writeTemplate は Step 2 の生成物を模した CloudFormation テンプレートを置き、パスを返す。
+// parameters には Parameters 配下の行をそのまま渡す。
+func writeTemplate(t *testing.T, name, parameters string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), name+".yaml")
+	content := fmt.Sprintf(`Resources:
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: mysql8.4
+      Parameters:
+%s`, parameters)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	return path
+}
+
+// withTemplates はカタログ中の template_path を、実際に置いたテンプレートへ差し替える。
+func withTemplates(t *testing.T, catalog, sharedParameters, soloParameters string) string {
+	t.Helper()
+	catalog = strings.Replace(catalog, "generated/shared.yaml",
+		writeTemplate(t, "shared", sharedParameters), 1)
+	return strings.Replace(catalog, "generated/solo.yaml",
+		writeTemplate(t, "solo", soloParameters), 1)
+}
+
 func buildReport(t *testing.T, catalog string) *Report {
 	t.Helper()
-	document, err := Build(catalogFrom(t, catalog), testInventory(t), "staging")
+	// 既定では、shared は現状（Asia/Tokyo）と食い違う UTC を、solo は一致する UTC を宣言する。
+	document, err := Build(
+		catalogFrom(t, withTemplates(t, catalog, "        time_zone: UTC", "        time_zone: UTC")),
+		testInventory(t), "staging")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -126,7 +157,7 @@ func TestMarkdownContainsEverySection(t *testing.T) {
 		"# Blue/Green 移行設定レビュー: staging",
 		"## 移行元と移行先",
 		"## 影響範囲（スキーマと接続元）",
-		"## time_zone の実値",
+		"## パラメータの現状と適用予定値",
 		"## Step 4 の MySQL 接続検証",
 		"## 要確認事項",
 	} {
@@ -150,8 +181,10 @@ func TestMarkdownRaisesReviewPoints(t *testing.T) {
 		"は 2 アプリが同居している（batch, order）",
 		// インスタンス単位でしか切り替えられない。
 		"は 2 スキーマを収容している",
-		// time_zone を明示設定していれば 8.4 側との一致が論点になる。
-		"time_zone を `Asia/Tokyo` に明示設定している（由来: user）",
+		// 現状と適用予定値が食い違えば、意図した変更かを問う。
+		"`time_zone` が切替で `Asia/Tokyo` から `UTC` へ変わる。意図した変更かを確認する",
+		// time_zone には datetime 列への影響の参照先を添える。
+		"reference/mysql-timezone-problem-summary.md",
 		// 承認は人が書く。
 		"`actions` は生成時点ですべて `pending` である",
 		// 判定しない範囲を明示する。
@@ -161,9 +194,100 @@ func TestMarkdownRaisesReviewPoints(t *testing.T) {
 			t.Errorf("review points do not contain %q\n%s", want, markdown)
 		}
 	}
-	// engine-default のインスタンスは time_zone の確認事項を出さない。
-	if strings.Contains(markdown, "`solo` は time_zone を") {
-		t.Errorf("engine-default must not raise a time_zone point\n%s", markdown)
+	// 一致しているインスタンスは確認事項を出さない。
+	if strings.Contains(markdown, "`solo` の `time_zone` が切替で") {
+		t.Errorf("a matching parameter must not raise a point\n%s", markdown)
+	}
+}
+
+// 現状と適用予定値の突き合わせが、判定ごとに正しく出ることを確かめる。
+func TestComparisonVerdicts(t *testing.T) {
+	cases := []struct {
+		name        string
+		declared    string
+		wantVerdict string
+		wantPlanned string
+		wantPoint   string
+	}{
+		{
+			name:        "一致",
+			declared:    "        time_zone: Asia/Tokyo",
+			wantVerdict: VerdictSame,
+			wantPlanned: "Asia/Tokyo",
+		},
+		{
+			name:        "差異",
+			declared:    "        time_zone: UTC",
+			wantVerdict: VerdictDifferent,
+			wantPlanned: "UTC",
+			wantPoint:   "`time_zone` が切替で `Asia/Tokyo` から `UTC` へ変わる",
+		},
+		{
+			// 組み込み関数は CloudFormation のパラメータ解決なしには実値が決まらない。
+			name:        "組み込み関数",
+			declared:    "        time_zone: !Ref TimeZone",
+			wantVerdict: VerdictIntrinsic,
+			wantPlanned: "Ref",
+			wantPoint:   "組み込み関数（Ref）になっており、実値が決まらない",
+		},
+		{
+			// テンプレートが宣言していなければ 8.4 のエンジン既定値になる。
+			name:        "テンプレート未宣言",
+			declared:    "        character_set_server: utf8mb4",
+			wantVerdict: VerdictNotDeclared,
+			wantPlanned: "—",
+			wantPoint:   "移行先テンプレートで宣言されていない",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			catalog := withTemplates(t, sharedCatalog, testCase.declared, "        time_zone: UTC")
+			document, err := Build(catalogFrom(t, catalog), testInventory(t), "staging")
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			comparisons := document.Deployments[0].Comparisons()
+			if len(comparisons) != 1 {
+				t.Fatalf("comparisons = %+v, want one per collected parameter", comparisons)
+			}
+			got := comparisons[0]
+			if got.Name != "time_zone" || got.Current != "Asia/Tokyo" || got.CurrentSource != "user" {
+				t.Errorf("comparison = %+v", got)
+			}
+			if got.Verdict != testCase.wantVerdict || got.Planned != testCase.wantPlanned {
+				t.Errorf("verdict = %q planned = %q, want %q / %q",
+					got.Verdict, got.Planned, testCase.wantVerdict, testCase.wantPlanned)
+			}
+			if testCase.wantPoint != "" && !strings.Contains(document.Markdown(), testCase.wantPoint) {
+				t.Errorf("review points do not contain %q\n%s", testCase.wantPoint, document.Markdown())
+			}
+		})
+	}
+}
+
+// テンプレートは Step 2 の成果物である。まだ無い段階でもレポートは出す。
+func TestBuildToleratesMissingTemplate(t *testing.T) {
+	document, err := Build(catalogFrom(t, sharedCatalog), testInventory(t), "staging")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	deployment := document.Deployments[0]
+	if deployment.TargetParameterGroup != nil {
+		t.Error("TargetParameterGroup must be nil when the template cannot be read")
+	}
+	if deployment.TargetParameterGroupError == "" {
+		t.Error("TargetParameterGroupError must carry the reason")
+	}
+	comparisons := deployment.Comparisons()
+	if len(comparisons) != 1 || comparisons[0].Verdict != VerdictNoTemplate {
+		t.Errorf("comparisons = %+v", comparisons)
+	}
+	markdown := document.Markdown()
+	if !strings.Contains(markdown, "**読み込めなかった**") {
+		t.Errorf("markdown does not report the unreadable template\n%s", markdown)
+	}
+	if !strings.Contains(markdown, "Step 2 を実施済みか、パスが正しいかを確認する") {
+		t.Errorf("review points do not mention the unreadable template\n%s", markdown)
 	}
 }
 

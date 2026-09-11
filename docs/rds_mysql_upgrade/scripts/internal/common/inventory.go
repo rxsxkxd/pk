@@ -79,13 +79,24 @@ func (instance *DBInstance) MarshalJSON() ([]byte, error) {
 }
 
 // ParameterGroupFacts は確認用に採取するパラメータグループの実値である。
-// time_zone は 8.0 → 8.4 で挙動差の論点になるため（reference/mysql-timezone*.md）、
-// 切替の前後で変わらないことを人が確認できるよう収集しておく。
-// TimeZoneSource は値の由来（user / system / engine-default）で、
-// engine-default ならパラメータグループでは未設定である。
+// 採取する対象は collect 側で決める（現在は time_zone のみ）。
+// パラメータ名をキーにしておき、後から対象を増やしても構造を変えずに済むようにする。
 type ParameterGroupFacts struct {
-	TimeZone       string `json:"TimeZone"`
-	TimeZoneSource string `json:"TimeZoneSource"`
+	Parameters map[string]ParameterValue `json:"Parameters"`
+}
+
+// ParameterValue は 1 つのパラメータの実値と、その由来である。
+// Source は user / system / engine-default のいずれかで、
+// engine-default ならパラメータグループでは未設定（エンジン既定値）を意味する。
+type ParameterValue struct {
+	Value  string `json:"Value"`
+	Source string `json:"Source"`
+}
+
+// Parameter は採取済みのパラメータを 1 件引く。採取していなければ false を返す。
+func (facts *ParameterGroupFacts) Parameter(name string) (ParameterValue, bool) {
+	value, found := facts.Parameters[name]
+	return value, found
 }
 
 // ReadInventory はインベントリ JSON を読み、生成に必要な項目が揃っているかを確かめる。
@@ -147,8 +158,8 @@ func (instance *DBInstance) SourceParameterGroupName(context string) (string, er
 	return name, nil
 }
 
-// TimeZoneOf は、指定したパラメータグループの time_zone 実値を返す。
-func (inventory *Inventory) TimeZoneOf(parameterGroupName, context string) (*ParameterGroupFacts, error) {
+// ParameterGroupOf は、指定したパラメータグループの採取済み実値を返す。
+func (inventory *Inventory) ParameterGroupOf(parameterGroupName, context string) (*ParameterGroupFacts, error) {
 	found := inventory.ParameterGroups[parameterGroupName]
 	if found == nil {
 		return nil, fmt.Errorf("%s: RDS inventory has no ParameterGroups entry for %s; %s",

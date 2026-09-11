@@ -26,6 +26,7 @@ scripts/generate_blue_green_config_report/       # レポート生成コマン�
 scripts/internal/common/                         # インベントリ JSON の型（契約）、原子的書き込み
 scripts/internal/collect/                        # AWS CLI の read-only 収集
 scripts/internal/generate/                       # カタログの検証・解決と YAML 組み立て
+scripts/internal/cfn/                            # CloudFormation テンプレートの読み取り（短縮記法対応）
 scripts/internal/report/                         # 切替前レビュー用 Markdown の組み立て
 artifacts/rds-instance-inventory.json            # 収集結果（一時・レビュー用）
 config/blue-green/<environment>.deployment.yml   # 生成結果（CI が読む正のデータ）
@@ -54,20 +55,26 @@ aws rds describe-db-parameters --db-parameter-group-name <name> --region <region
 - `DBInstanceClass`
 - `DBParameterGroups[].DBParameterGroupName`
 
-さらに、確認用として各パラメータグループの `time_zone` 実値を `ParameterGroups.<グループ名>` に採取する。`describe-db-parameters` の応答から `time_zone` の `ParameterValue` と `Source` だけを取り出し、他のパラメータは保存しない。**収集器は判定を行わない。**同じパラメータグループを複数インスタンスが共有していても API 呼び出しは 1 回である。
+さらに、確認用として各パラメータグループのパラメータ実値を `ParameterGroups.<グループ名>.Parameters` に採取する。**収集器は判定を行わない。**同じパラメータグループを複数インスタンスが共有していても API 呼び出しは 1 回である。
+
+採取対象は収集器の `CollectedParameters` で決める。**現在は `time_zone` だけ**である（8.0 → 8.4 の論点であるため）。対象を増やすときはここへパラメータ名を足す。パラメータ名をキーにしてあるので、**インベントリと生成結果の構造は変わらない。**
 
 ```json
 {
   "aws_region": "ap-northeast-1",
   "DBInstances": [ ... ],
   "ParameterGroups": {
-    "order-production-mysql80-v1": { "TimeZone": "Asia/Tokyo", "TimeZoneSource": "user" },
-    "shared-development-mysql80-v1": { "TimeZone": "UTC", "TimeZoneSource": "engine-default" }
+    "order-production-mysql80-v1": {
+      "Parameters": { "time_zone": { "Value": "Asia/Tokyo", "Source": "user" } }
+    },
+    "shared-development-mysql80-v1": {
+      "Parameters": { "time_zone": { "Value": "UTC", "Source": "engine-default" } }
+    }
   }
 }
 ```
 
-`TimeZoneSource` が `engine-default` なら、パラメータグループでは `time_zone` を設定しておらず、エンジン既定値（`UTC`）である。
+`Source` が `engine-default` なら、パラメータグループでは設定しておらずエンジン既定値である。応答に現れないパラメータは採取しない（存在しないことを収集器が判定しない）。
 
 AWS CLI の認証は利用者または実行基盤が提供する通常の AWS 認証情報を使う。収集器は `--profile` と `--region` を受け取れるようにするが、認証情報をファイルへ出力しない。**AWS SDK ではなく AWS CLI を exec する**——認証経路をリポジトリ全体で 1 本に保ち、`go.mod` へ依存を追加せず、PATH 上の `aws` を差し替えるだけでテストからモックできるようにするためである。
 
@@ -126,7 +133,14 @@ mysql_verification:
 
 そのインスタンスに載るスキーマは、切替の影響範囲を辿るために持つ。実行スクリプトは参照しないが、生成結果の `schemas` に反映される。
 
-**`source_time_zone` は切替前の確認専用である。** 8.0 → 8.4 では `time_zone` の扱いが論点になる（`DEFAULT CURRENT_TIMESTAMP` の `datetime` 列への影響。詳細は [reference/mysql-timezone-problem-summary.md](reference/mysql-timezone-problem-summary.md)）。Blue のパラメータグループの実値を生成結果へ載せておき、Step 2 で作る 8.4 パラメータグループが同じ値になっているかを人がレビューする。実行スクリプトはこの項目を読まず、判定にも使わない。
+**`source_db_parameters` は切替前の確認専用である。** 8.0 → 8.4 では `time_zone` の扱いが論点になる（`DEFAULT CURRENT_TIMESTAMP` の `datetime` 列への影響。詳細は [reference/mysql-timezone-problem-summary.md](reference/mysql-timezone-problem-summary.md)）。Blue のパラメータグループの実値を生成結果へ載せておき、Step 2 で作る 8.4 パラメータグループが同じ値になっているかを人がレビューする。実行スクリプトはこの項目を読まず、判定にも使わない。
+
+```yaml
+    source_db_parameters:
+      time_zone:
+        value: Asia/Tokyo
+        source: user
+```
 
 **MySQL 接続設定はルートの `mysql_verification` を既定値とし、接続配下の指定でキー単位に上書きする。** 環境ごとに AWS アカウントが分かれるため、同じ SSM パラメータ名を全環境で共通に使える。DB ごとに分ける必要があるときだけ、その接続の `environments.<環境>` 配下へ書く。ユーザー名とパスワードそのものはカタログへ書けない（`user` / `password` を書くと生成時に失敗する）。
 
@@ -151,7 +165,7 @@ mysql_verification:
 | `target_db_instance_class` | 移行カタログの `target.db_instance_class`。**省略時は RDS インベントリの `DBInstanceClass` を踏襲** |
 | `target_parameter_group_template_path` | 移行カタログの `parameter_groups.<name>.template_path` |
 | `schemas` | そのインスタンスを指す接続の `schema_name` を集約（影響範囲のレビュー用） |
-| `source_time_zone` | RDS インベントリの `ParameterGroups.<Blue のグループ名>` から `value`（`TimeZone`）と `source`（`TimeZoneSource`）を載せる。**確認用**で実行スクリプトは参照しない |
+| `source_db_parameters` | RDS インベントリの `ParameterGroups.<Blue のグループ名>.Parameters` を、パラメータ名をキーに `value` / `source` で載せる。**確認用**で実行スクリプトは参照しない |
 | `mysql_verification` | ルートの `mysql_verification` を既定値とし、接続配下の指定でキー単位に上書き（どちらも無ければ `enabled: false`）。`auth_method` は `parameter_store` 固定で出力する。`enabled: true` なら `parameter_name` と `user_parameter_name` の両方が必須で、`user` と `password` はカタログへ書けない |
 | `protection_snapshot_identifier` | `<source_db_instance_identifier>-pre-bg` を生成 |
 | `final_snapshot_identifier` | `<source_db_instance_identifier>-final` を生成 |
@@ -180,9 +194,11 @@ mysql_verification:
 | 概要 | 環境、リージョン、実行単位数、接続定義数、アプリ数 |
 | 移行元と移行先 | インスタンスごとのバージョン・パラメータグループ・インスタンスクラスと、移行先パラメータグループの元テンプレート |
 | 影響範囲 | インスタンスごとのスキーマと**接続元（アプリ.接続名）**。生成結果にはアプリ名が残らないため、ここで補う |
-| time_zone の実値 | Blue のパラメータグループから採取した値と由来 |
+| パラメータの現状と適用予定値 | **Blue のパラメータグループの実値と、移行先テンプレートが宣言している値を直接突き合わせる。**判定は `一致` / `差異` / `比較不能`（組み込み関数）/ `テンプレート未宣言` / `テンプレート未確認` |
 | Step 4 の MySQL 接続検証 | 有効・無効と SSM パラメータ名、ポート、TLS。**認証情報そのものは出さない** |
-| 要確認事項 | チェックボックス形式。同居インスタンス、明示設定された `time_zone`、共有された移行先パラメータグループ、無効な接続検証、`actions` の承認状態 |
+| 要確認事項 | チェックボックス形式。同居インスタンス、**パラメータの差異・比較不能・未宣言**、共有された移行先パラメータグループ、無効な接続検証、`actions` の承認状態 |
+
+適用予定値は、カタログの `parameter_groups.<name>.template_path` が指す CloudFormation テンプレートから読む。**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化して読み、値が組み込み関数の項目は「比較不能」として比較対象から外す**（`internal/cfn`）。テンプレートは Step 2 の成果物なので、**まだ無い段階でもレポートは失敗させず**「テンプレート未確認」として出し、要確認事項に理由を載せる。`template_path` は実行時のカレントディレクトリ基準で解決する。
 
 出力先は Git 管理しない `artifacts/` を想定する（`.gitignore` 済み）。生成結果の YAML と違い、レポートは CI の入力ではない。
 
@@ -190,7 +206,7 @@ mysql_verification:
 
 ```bash
 # 1. AWS から現状の RDS インスタンス情報を読み取り保存する。
-go -C scripts run ./collect_rds_instance_inventory \
+go run ./scripts/collect_rds_instance_inventory \
   --region ap-northeast-1 \
   --profile readonly \
   --output "$PWD/artifacts/rds-instance-inventory.json"
@@ -199,14 +215,14 @@ go -C scripts run ./collect_rds_instance_inventory \
 #    カタログにはリージョンを書かず、接続定義と移行設定だけを管理する。
 
 # 3. 指定環境の Blue/Green 設定を生成する。
-go -C scripts run ./generate_blue_green_config \
+go run ./scripts/generate_blue_green_config \
   --catalog "$PWD/config/migration-catalog.yml" \
   --inventory "$PWD/artifacts/rds-instance-inventory.json" \
   --environment production \
   --output "$PWD/config/blue-green/production.deployment.yml"
 
 # 4. レビュー用の Markdown を出す（設定ファイルは書き換えない）。
-go -C scripts run ./generate_blue_green_config_report \
+go run ./scripts/generate_blue_green_config_report \
   --catalog "$PWD/config/migration-catalog.yml" \
   --inventory "$PWD/artifacts/rds-instance-inventory.json" \
   --environment production \
@@ -229,9 +245,9 @@ git diff -- config/blue-green/production.deployment.yml
 - [migration-catalog.test.yml](examples/config-blue-green-generation/migration-catalog.test.yml) と [rds-instance-inventory.test.json](examples/config-blue-green-generation/rds-instance-inventory.test.json) をダミー入力として使う。
 - `blue-green.<environment>.expected.yml` を生成結果の期待値とし、生成 YAML を構文ではなくデータ構造として比較する。
 - 実行済みの結果は [test-result.md](examples/config-blue-green-generation/test-result.md) に残す。
-- ロジックの単体テストは `scripts/internal/*/[a-z]*_test.go` にある。`cd scripts && go test ./...` で実行し、AWS へは接続しない（`internal/collect` は PATH 上の `aws` をダミーへ差し替えて引数の組み立てを検証する）。
+- ロジックの単体テストは `scripts/internal/*/[a-z]*_test.go` にある。リポジトリ直下で `go test ./...` を実行し、AWS へは接続しない（`internal/collect` は PATH 上の `aws` をダミーへ差し替えて引数の組み立てを検証する）。
 - `tests/test_generate_blue_green_config.sh` はコマンドを通した E2E である。AWS CLI をダミーコマンドに差し替え、実 AWS API は呼び出さない。ダミーは `describe-db-instances` と `describe-db-parameters` を fixture から返し分け、それ以外を呼んだら失敗する。
-- **`go -C scripts run` はカレントディレクトリを `scripts/` へ移すため、`--catalog` などのパスは絶対パスで渡す。**
+- **`go.mod` はリポジトリ直下にある。**`go run ./scripts/<コマンド名>` の形で呼べば go コマンドが作業ディレクトリを変えないため、`--output` などの相対パスは実行時のカレントディレクトリ基準で解決される。
 - 収集 JSON と生成先 YAML はすべて `mktemp` で作成する一時ディレクトリに出力し、テスト終了時に削除する。
 
 ```bash

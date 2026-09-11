@@ -21,8 +21,8 @@
 
 移行先パラメータグループの元テンプレート（Step 2 の成果物）:
 
-- `example-service-test-production-audit-mysql84-v1` ← `examples/mysql84-parameter-generation/output/example-service-test-production-audit-mysql84.yaml`
-- `example-service-test-production-mysql84-v1` ← `examples/mysql84-parameter-generation/output/example-service-test-production-mysql84.yaml`
+- `example-service-test-production-audit-mysql84-v1` ← `examples/config-blue-green-generation/target-parameter-groups/example-service-test-production-audit-mysql84.yaml`
+- `example-service-test-production-mysql84-v1` ← `examples/config-blue-green-generation/target-parameter-groups/example-service-test-production-mysql84.yaml`
 
 ## 影響範囲（スキーマと接続元）
 
@@ -31,14 +31,19 @@
 | `example-service-test-production-audit-mysql80` | `example_service_test_audit` | `example-service-test.audit`, `example-service-test-batch.primary` |
 | `example-service-test-production-mysql80` | `example_service_test` | `example-service-test.primary` |
 
-## time_zone の実値
+## パラメータの現状と適用予定値
 
-Blue のパラメータグループから採取した実値である。`engine-default` はパラメータグループでは未設定（エンジン既定値）を意味する。
+「現在」は Blue のパラメータグループから採取した実値（`engine-default` はパラメータグループでは未設定＝エンジン既定値）。「適用予定」は移行先パラメータグループの CloudFormation テンプレート（Step 2 の成果物）が宣言している値である。
 
-| RDS インスタンス | パラメータグループ | time_zone | 由来 |
-|---|---|---|---|
-| `example-service-test-production-audit-mysql80` | `example-service-test-production-audit-mysql80-v1` | Asia/Tokyo | user |
-| `example-service-test-production-mysql80` | `example-service-test-production-mysql80-v1` | UTC | engine-default |
+| RDS インスタンス | パラメータ | 現在 | 由来 | 適用予定 | 判定 |
+|---|---|---|---|---|---|
+| `example-service-test-production-audit-mysql80` | `time_zone` | Asia/Tokyo | user | Asia/Tokyo | 一致 |
+| `example-service-test-production-mysql80` | `time_zone` | UTC | engine-default | Ref | 比較不能 |
+
+突き合わせたテンプレート:
+
+- `example-service-test-production-audit-mysql84-v1` ← `examples/config-blue-green-generation/target-parameter-groups/example-service-test-production-audit-mysql84.yaml`
+- `example-service-test-production-mysql84-v1` ← `examples/config-blue-green-generation/target-parameter-groups/example-service-test-production-mysql84.yaml`
 
 ## Step 4 の MySQL 接続検証
 
@@ -52,6 +57,6 @@ Blue のパラメータグループから採取した実値である。`engine-d
 ## 要確認事項
 
 - [ ] `example-service-test-production-audit-mysql80` は 2 アプリが同居している（example-service-test, example-service-test-batch）。切替の停止影響が全アプリへ及ぶ。関係者への周知範囲を確認する。
-- [ ] `example-service-test-production-audit-mysql80` は time_zone を `Asia/Tokyo` に明示設定している（由来: user）。移行先 `example-service-test-production-audit-mysql84-v1` のテンプレートが同じ値になっているかを確認する（DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: reference/mysql-timezone-problem-summary.md）。
+- [ ] `example-service-test-production-mysql80` の `time_zone` は移行先テンプレートで組み込み関数（Ref）になっており、実値が決まらない。スタックのパラメータ値で確認する。
 - [ ] `actions` は生成時点ですべて `pending` である。実行を許可する操作だけを `approved` へ書き換える（CI は設定ファイルへ書き戻さない）。
 - [ ] アプリケーションと接続先の対応、目標インスタンスクラス、パラメータグループの内容は自動判定していない。人がレビューする。

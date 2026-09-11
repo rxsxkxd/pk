@@ -21,6 +21,13 @@ import (
 	"rds-mysql-upgrade/scripts/internal/common"
 )
 
+// CollectedParameters は、確認用に採取するパラメータグループのパラメータ名である。
+//
+// time_zone は 8.0 → 8.4 で挙動差の論点になるため採取する
+// （DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: reference/mysql-timezone*.md）。
+// 対象を増やすときはここへ足す。インベントリの構造は変わらない。
+var CollectedParameters = []string{"time_zone"}
+
 // Options は収集対象の指定である。Profile は空なら AWS CLI の既定解決に任せる。
 type Options struct {
 	Region  string
@@ -41,7 +48,7 @@ func Inventory(options Options) (*common.Inventory, error) {
 	}
 
 	// [読み取り / レビュー注記]
-	// 各パラメータグループの time_zone 実値を採取する。判定はせず、
+	// 各パラメータグループについて CollectedParameters の実値を採取する。判定はせず、
 	// 生成結果へ確認用の項目として載せるだけである。
 	parameterGroups, err := describeParameterGroups(options, instances)
 	if err != nil {
@@ -73,9 +80,8 @@ func describeDBInstances(options Options) ([]*common.DBInstance, error) {
 	return response.DBInstances, nil
 }
 
-// describeParameterGroups は、インスタンスに関連付く全パラメータグループについて
-// time_zone の実値を 1 回ずつ読む。同じグループを複数インスタンスが共有していても
-// API 呼び出しは 1 回で済ませる。
+// describeParameterGroups は、インスタンスに関連付く全パラメータグループを 1 回ずつ読む。
+// 同じグループを複数インスタンスが共有していても API 呼び出しは 1 回で済ませる。
 func describeParameterGroups(options Options, instances []*common.DBInstance) (map[string]*common.ParameterGroupFacts, error) {
 	facts := map[string]*common.ParameterGroupFacts{}
 	for _, instance := range instances {
@@ -90,7 +96,7 @@ func describeParameterGroups(options Options, instances []*common.DBInstance) (m
 			if _, done := facts[name]; done {
 				continue
 			}
-			found, err := describeTimeZone(options, name)
+			found, err := describeParameters(options, name)
 			if err != nil {
 				return nil, err
 			}
@@ -100,9 +106,9 @@ func describeParameterGroups(options Options, instances []*common.DBInstance) (m
 	return facts, nil
 }
 
-// describeTimeZone は 1 つのパラメータグループの time_zone を読む。
-// 応答に現れない場合は空の値を返す（ここでも判定はしない）。
-func describeTimeZone(options Options, parameterGroupName string) (*common.ParameterGroupFacts, error) {
+// describeParameters は 1 つのパラメータグループから CollectedParameters を読む。
+// 応答に現れないパラメータは採取しない（ここでも判定はしない）。
+func describeParameters(options Options, parameterGroupName string) (*common.ParameterGroupFacts, error) {
 	output, err := awsJSON(options,
 		"rds", "describe-db-parameters", "--db-parameter-group-name", parameterGroupName)
 	if err != nil {
@@ -119,15 +125,20 @@ func describeTimeZone(options Options, parameterGroupName string) (*common.Param
 		return nil, fmt.Errorf(
 			"describe-db-parameters response for %s is not valid JSON: %w", parameterGroupName, err)
 	}
+	wanted := map[string]bool{}
+	for _, name := range CollectedParameters {
+		wanted[name] = true
+	}
+	facts := &common.ParameterGroupFacts{Parameters: map[string]common.ParameterValue{}}
 	for _, parameter := range response.Parameters {
-		if parameter.ParameterName == "time_zone" {
-			return &common.ParameterGroupFacts{
-				TimeZone:       parameter.ParameterValue,
-				TimeZoneSource: parameter.Source,
-			}, nil
+		if wanted[parameter.ParameterName] {
+			facts.Parameters[parameter.ParameterName] = common.ParameterValue{
+				Value:  parameter.ParameterValue,
+				Source: parameter.Source,
+			}
 		}
 	}
-	return &common.ParameterGroupFacts{}, nil
+	return facts, nil
 }
 
 // awsJSON は AWS CLI の読み取り API を 1 回呼び、標準出力の JSON を返す。

@@ -21,27 +21,28 @@ type Deployment struct {
 
 // Service は 1 つの Blue/Green deployment、すなわち 1 つの RDS DB インスタンスである。
 type Service struct {
-	SourceDBInstanceIdentifier       string            `yaml:"source_db_instance_identifier"`
-	SourceEngineVersion              string            `yaml:"source_engine_version"`
-	SourceDBParameterGroupName       string            `yaml:"source_db_parameter_group_name"`
-	TargetEngineVersion              string            `yaml:"target_engine_version"`
-	TargetDBInstanceClass            string            `yaml:"target_db_instance_class"`
-	TargetDBParameterGroupName       string            `yaml:"target_db_parameter_group_name"`
-	TargetParameterGroupTemplatePath string            `yaml:"target_parameter_group_template_path"`
-	ProtectionSnapshotIdentifier     string            `yaml:"protection_snapshot_identifier"`
-	FinalSnapshotIdentifier          string            `yaml:"final_snapshot_identifier"`
-	Schemas                          []string          `yaml:"schemas"`
-	SourceTimeZone                   SourceTimeZone    `yaml:"source_time_zone"`
-	MySQLVerification                MySQLVerification `yaml:"mysql_verification"`
-	Actions                          Actions           `yaml:"actions"`
+	SourceDBInstanceIdentifier       string                     `yaml:"source_db_instance_identifier"`
+	SourceEngineVersion              string                     `yaml:"source_engine_version"`
+	SourceDBParameterGroupName       string                     `yaml:"source_db_parameter_group_name"`
+	TargetEngineVersion              string                     `yaml:"target_engine_version"`
+	TargetDBInstanceClass            string                     `yaml:"target_db_instance_class"`
+	TargetDBParameterGroupName       string                     `yaml:"target_db_parameter_group_name"`
+	TargetParameterGroupTemplatePath string                     `yaml:"target_parameter_group_template_path"`
+	ProtectionSnapshotIdentifier     string                     `yaml:"protection_snapshot_identifier"`
+	FinalSnapshotIdentifier          string                     `yaml:"final_snapshot_identifier"`
+	Schemas                          []string                   `yaml:"schemas"`
+	SourceDBParameters               map[string]SourceParameter `yaml:"source_db_parameters"`
+	MySQLVerification                MySQLVerification          `yaml:"mysql_verification"`
+	Actions                          Actions                    `yaml:"actions"`
 }
 
-// SourceTimeZone は確認用である。実行スクリプトは参照せず、判定にも使わない。
-// 8.0 → 8.4 では time_zone の扱いが論点になるため
-// （reference/mysql-timezone-problem-summary.md）、切替の前後で変わらないことを
-// 人がレビューできるように生成結果へ載せる。
+// SourceParameter は Blue のパラメータグループから採取した実値である。
+//
+// **確認用である。実行スクリプトは参照せず、判定にも使わない。**
+// 切替の前後で値が変わらないことを人がレビューするために載せる
+// （time_zone の論点は reference/mysql-timezone-problem-summary.md）。
 // Source が engine-default ならパラメータグループでは未設定である。
-type SourceTimeZone struct {
+type SourceParameter struct {
 	Value  string `yaml:"value"`
 	Source string `yaml:"source"`
 }
@@ -252,9 +253,13 @@ func buildService(
 	if err != nil {
 		return nil, "", err
 	}
-	timeZone, err := inventory.TimeZoneOf(sourceGroupName, context)
+	sourceGroup, err := inventory.ParameterGroupOf(sourceGroupName, context)
 	if err != nil {
 		return nil, "", err
+	}
+	sourceParameters := map[string]SourceParameter{}
+	for name, parameter := range sourceGroup.Parameters {
+		sourceParameters[name] = SourceParameter{Value: parameter.Value, Source: parameter.Source}
 	}
 	verification, err := resolveMySQLVerification(catalog.MySQLVerification, binding.MySQLVerification, context)
 	if err != nil {
@@ -273,9 +278,9 @@ func buildService(
 		FinalSnapshotIdentifier:          sourceID + "-final",
 		// 影響範囲。切替前のレビューで使う。
 		Schemas: []string{schemaName},
-		// 確認用。Blue のパラメータグループの time_zone 実値。
-		SourceTimeZone:    SourceTimeZone{Value: timeZone.TimeZone, Source: timeZone.TimeZoneSource},
-		MySQLVerification: verification,
+		// 確認用。Blue のパラメータグループから採取した実値。
+		SourceDBParameters: sourceParameters,
+		MySQLVerification:  verification,
 		Actions: Actions{
 			Build:             "pending",
 			Switchover:        "pending",
@@ -295,7 +300,9 @@ func requireSameDeployment(existing, candidate *Service, context string) error {
 		{"target_db_instance_class", existing.TargetDBInstanceClass, candidate.TargetDBInstanceClass},
 		{"target_db_parameter_group_name", existing.TargetDBParameterGroupName, candidate.TargetDBParameterGroupName},
 		{"mysql_verification", existing.MySQLVerification, candidate.MySQLVerification},
-		{"source_time_zone", existing.SourceTimeZone, candidate.SourceTimeZone},
+		{"source_db_parameters",
+			fmt.Sprint(common.SortedKeys(existing.SourceDBParameters), existing.SourceDBParameters),
+			fmt.Sprint(common.SortedKeys(candidate.SourceDBParameters), candidate.SourceDBParameters)},
 	}
 	for _, mismatch := range mismatches {
 		if mismatch.before != mismatch.after {

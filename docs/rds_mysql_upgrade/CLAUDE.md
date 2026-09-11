@@ -48,9 +48,10 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 | `internal/common` | 収集器が書き生成器が読む**インベントリ JSON の型（契約）**、原子的ファイル書き込み |
 | `internal/collect` | AWS CLI を exec し `describe-db-instances` とパラメータグループごとの `describe-db-parameters` だけを呼ぶ |
 | `internal/generate` | カタログの検証・解決と、deployment YAML の組み立て。**AWS を呼ばない** |
+| `internal/cfn` | Step 2 の CloudFormation テンプレートから DB パラメータグループの宣言値を読む。**短縮記法を長形式へ正規化**し、組み込み関数の項目は「比較不能」として扱う |
 | `internal/report` | 切替前レビュー用の Markdown 組み立て。判定は行わず、`internal/generate` を再利用して材料を並べる |
 
-コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `internal/` 側とその単体テストを直す。**`go -C scripts run` はカレントディレクトリを `scripts/` へ移すため、引数のパスは絶対パスで渡す。生成結果の `source_time_zone` は Blue のパラメータグループの `time_zone` 実値で、**切替前の人のレビュー専用**——実行スクリプトは読まない。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。
+コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `internal/` 側とその単体テストを直す。**生成結果の `source_db_parameters` は Blue のパラメータグループから採取した実値（パラメータ名をキーにした `value` / `source`。採取対象は `internal/collect` の `CollectedParameters` で決め、現在は `time_zone` のみ）で、**切替前の人のレビュー専用**——実行スクリプトは読まない。レポートはこれと移行先テンプレートの宣言値を突き合わせて `一致` / `差異` / `比較不能` を示す。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。
 
 `config/mysql80-to-84-parameter-rules.yml` は 8.0 → 8.4 のパラメータ変換ルール（`copy` / `force` / `omit` / `target_only`）を持ち、`generate_mysql84_parameter_group.rb` の唯一のルールソースである。パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。
 
@@ -61,7 +62,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
 - `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。
 
-Step 2 の CloudFormation テンプレートを読む 3 実装（`collect_green_runtime_values.sh` の Python、レポート生成器の Ruby と Go）は、**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化して読む**。値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
+Step 2 の CloudFormation テンプレートを読む実装（`collect_green_runtime_values.sh` の Python、Step 4 レポート生成器の Ruby と Go、`scripts/internal/cfn`）は、**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化して読む**。`scripts/generate_green_verification_report.go` は Docker で単体ビルドする制約から `internal/cfn` を使わず自前の実装を持っている——**短縮記法の扱いを変えるときは 4 箇所すべてを直す。**値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
 
 Step 4 のレポート生成器は Ruby 版（`generate_green_verification_report.rb`、ローカル既定）と Go 版（`generate_green_verification_report.go`、CI が `ci/Dockerfile.green-verification-report` のマルチステージビルドで作り `GREEN_REPORT_GENERATOR` で渡す）が並存する。**両方を同時に更新すること。**
 
@@ -75,7 +76,13 @@ Step 4 のレポート生成器は Ruby 版（`generate_green_verification_repor
 python3 -m pip install 'PyYAML==6.0.2'
 ```
 
-Blue/Green 設定の収集・生成コマンド（`scripts/{collect_rds_instance_inventory,generate_blue_green_config}/`）は Go である。依存は `scripts/go.mod` と `scripts/go.sum` に固定しており、`go -C scripts run ./<コマンド名>` で実行する。**`go -C` はカレントディレクトリを `scripts/` へ移すため、引数のパスは絶対パスで渡す。**
+Blue/Green 設定の収集・生成コマンドは Go である。**`go.mod` と `go.sum` はリポジトリ直下**に置き（`scripts/` 配下ではない）、`go run ./scripts/<コマンド名>` で実行する。こうしておくと go コマンドが作業ディレクトリを変えないため、**引数の相対パスが実行時のカレントディレクトリ基準で解決される**。`go -C scripts run ./<コマンド名>` と書くと cwd が `scripts/` へ移り、相対パスが `scripts/` 配下へ出てしまう。
+
+`go run` は cwd がモジュール内にあることを要求する。リポジトリ外から実行する場合はバイナリを作って渡す:
+
+```bash
+go build -o /tmp/collect-rds-inventory ./scripts/collect_rds_instance_inventory
+```
 
 AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`local-execution.md`）。実接続時だけ `.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。**ファイルはすべて `read_only` マウント**である。
 
@@ -133,7 +140,7 @@ ruby scripts/generate_mysql84_parameter_group.rb \
 
 # Go（レポート生成器、RDS インベントリ収集器、Blue/Green 設定生成器）
 # ロジックは internal/{common,collect,generate} にあり、単体テストを持つ。
-cd scripts && go vet ./... && go build ./... && go test ./...
+go vet ./... && go build ./... && go test ./...
 
 # GitHub Actions をローカル実行（.actrc に AWS profile と絶対パスマウントを設定してから）
 act workflow_dispatch -W .github/workflows/verify-green.yml \

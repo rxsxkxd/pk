@@ -29,9 +29,9 @@ func testInventory(t *testing.T) *common.Inventory {
      "DBParameterGroups": [{"DBParameterGroupName": "pg-v1"}]}
   ],
   "ParameterGroups": {
-    "blue-v1": {"TimeZone": "UTC", "TimeZoneSource": "engine-default"},
-    "audit-v1": {"TimeZone": "Asia/Tokyo", "TimeZoneSource": "user"},
-    "pg-v1": {"TimeZone": "", "TimeZoneSource": ""}
+    "blue-v1": {"Parameters": {"time_zone": {"Value": "UTC", "Source": "engine-default"}}},
+    "audit-v1": {"Parameters": {"time_zone": {"Value": "Asia/Tokyo", "Source": "user"}}},
+    "pg-v1": {"Parameters": {}}
   }
 }`
 	var inventory common.Inventory
@@ -92,10 +92,14 @@ func TestGenerateFillsOmittedTarget(t *testing.T) {
 	if service.SourceEngineVersion != "8.0" {
 		t.Errorf("source_engine_version = %q, want 8.0", service.SourceEngineVersion)
 	}
-	// 確認用の time_zone は収集値をそのまま載せる。
-	want := SourceTimeZone{Value: "UTC", Source: "engine-default"}
-	if service.SourceTimeZone != want {
-		t.Errorf("source_time_zone = %+v, want %+v", service.SourceTimeZone, want)
+	// 確認用のパラメータ実値は収集値をそのまま載せる。パラメータ名がキーになる。
+	want := SourceParameter{Value: "UTC", Source: "engine-default"}
+	if got := service.SourceDBParameters["time_zone"]; got != want {
+		t.Errorf("source_db_parameters[time_zone] = %+v, want %+v", got, want)
+	}
+	if len(service.SourceDBParameters) != 1 {
+		t.Errorf("source_db_parameters = %+v, want only the collected parameters",
+			service.SourceDBParameters)
 	}
 	// 承認は常に pending で生成する。
 	if service.Actions.Build != "pending" || service.Actions.Switchover != "pending" ||
@@ -276,7 +280,7 @@ func TestWriteProducesTwoSpaceIndentedYAML(t *testing.T) {
 		"aws_region: ap-northeast-1\n",
 		"services:\n  blue:\n    source_db_instance_identifier: blue\n",
 		"    source_engine_version: \"8.0\"\n",
-		"    source_time_zone:\n      value: UTC\n      source: engine-default\n",
+		"    source_db_parameters:\n      time_zone:\n        value: UTC\n        source: engine-default\n",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("output does not contain %q\n---\n%s", want, text)

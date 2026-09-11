@@ -39,7 +39,7 @@ AWS_MOCK_ARGUMENTS="$work_dir/aws-arguments.txt" \
 AWS_MOCK_INSTANCES="$fixture_dir/rds-instance-inventory.test.json" \
 AWS_MOCK_PARAMETERS_DIR="$fixture_dir/describe-db-parameters" \
 PATH="$work_dir/bin:$PATH" \
-go -C "$repo_root/scripts" run ./collect_rds_instance_inventory \
+go -C "$repo_root" run ./scripts/collect_rds_instance_inventory \
   --region ap-northeast-1 \
   --profile test-readonly \
   --output "$work_dir/rds-instance-inventory.json"
@@ -77,7 +77,7 @@ with open(sys.argv[2], encoding="utf-8") as handle:
     inventory = json.load(handle)
 assert inventory["aws_region"] == "ap-northeast-1"
 assert inventory["DBInstances"] == expected_response["DBInstances"]
-# パラメータグループごとに time_zone の実値が採取されていること。
+# パラメータグループごとに、採取対象パラメータの実値が入っていること。
 groups = {
     group["DBParameterGroupName"]
     for instance in expected_response["DBInstances"]
@@ -85,20 +85,24 @@ groups = {
 }
 assert set(inventory["ParameterGroups"]) == groups, inventory["ParameterGroups"]
 for name, facts in inventory["ParameterGroups"].items():
-    assert set(facts) == {"TimeZone", "TimeZoneSource"}, name
-    assert facts["TimeZone"], name
+    assert set(facts) == {"Parameters"}, name
+    assert "time_zone" in facts["Parameters"], name
+    for parameter, value in facts["Parameters"].items():
+        assert set(value) == {"Value", "Source"}, f"{name}.{parameter}"
+        assert value["Value"] and value["Source"], f"{name}.{parameter}"
 PY
 
 for environment in development staging production; do
-  # go -C はカレントディレクトリを scripts/ へ移すため、パスは絶対で渡す。
-  go -C "$repo_root/scripts" run ./generate_blue_green_config \
+  # go.mod はリポジトリ直下にある。ここでは呼び出し元の cwd に依存しないよう
+  # -C でリポジトリ直下を指定し、入出力は絶対パスで渡す。
+  go -C "$repo_root" run ./scripts/generate_blue_green_config \
     --catalog "$fixture_dir/migration-catalog.test.yml" \
     --inventory "$work_dir/rds-instance-inventory.json" \
     --environment "$environment" \
     --output "$work_dir/output/$environment.yml"
 
   # レポートは YAML 生成とは別コマンドである。同じ入力から Markdown を組み立てる。
-  go -C "$repo_root/scripts" run ./generate_blue_green_config_report \
+  go -C "$repo_root" run ./scripts/generate_blue_green_config_report \
     --catalog "$fixture_dir/migration-catalog.test.yml" \
     --inventory "$work_dir/rds-instance-inventory.json" \
     --environment "$environment" \
@@ -153,11 +157,11 @@ for instance in instances:
     # target を省略した接続は、共通ターゲットと Blue の実値で補完される。
     assert service["target_engine_version"]
     assert service["target_db_instance_class"]
-    # 確認用の time_zone は、Blue のパラメータグループの収集値をそのまま載せる。
-    facts = inventory_facts[service["source_db_parameter_group_name"]]
-    assert service["source_time_zone"] == {
-        "value": facts["TimeZone"],
-        "source": facts["TimeZoneSource"],
+    # 確認用のパラメータ実値は、Blue のパラメータグループの収集値をそのまま載せる。
+    facts = inventory_facts[service["source_db_parameter_group_name"]]["Parameters"]
+    assert service["source_db_parameters"] == {
+        name: {"value": value["Value"], "source": value["Source"]}
+        for name, value in facts.items()
     }, instance
 
 # mysql_verification は、ルートの既定値を接続配下がキー単位で上書きする。

@@ -68,10 +68,10 @@ fi
 
 # レポート生成器は scripts/ 直下の package main である（同ディレクトリの他コマンドは
 # サブパッケージ）。単体ビルドするため一時ディレクトリへ写して組む。
-# 依存は scripts/go.sum に固定済みで、モジュールキャッシュがあればオフラインで通る。
+# 依存は go.sum に固定済みで、モジュールキャッシュがあればオフラインで通る。
 build_go() {
   mkdir -p "$work/go"
-  cp scripts/go.mod scripts/go.sum scripts/generate_green_verification_report.go "$work/go/" || return 1
+  cp go.mod go.sum scripts/generate_green_verification_report.go "$work/go/" || return 1
   ( cd "$work/go" && go build -o "$work/gen" . ) >"$work/go.err" 2>&1
 }
 

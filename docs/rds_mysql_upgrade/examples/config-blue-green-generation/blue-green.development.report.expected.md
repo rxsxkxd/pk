@@ -20,7 +20,7 @@
 
 移行先パラメータグループの元テンプレート（Step 2 の成果物）:
 
-- `example-service-test-development-mysql84-v1` ← `examples/mysql84-parameter-generation/output/example-service-test-development-mysql84.yaml`
+- `example-service-test-development-mysql84-v1` ← `examples/config-blue-green-generation/target-parameter-groups/example-service-test-development-mysql84.yaml`
 
 ## 影響範囲（スキーマと接続元）
 
@@ -28,13 +28,17 @@
 |---|---|---|
 | `example-service-test-development-mysql80` | `example_service_test`, `example_service_test_audit` | `example-service-test.audit`, `example-service-test.primary` |
 
-## time_zone の実値
+## パラメータの現状と適用予定値
 
-Blue のパラメータグループから採取した実値である。`engine-default` はパラメータグループでは未設定（エンジン既定値）を意味する。
+「現在」は Blue のパラメータグループから採取した実値（`engine-default` はパラメータグループでは未設定＝エンジン既定値）。「適用予定」は移行先パラメータグループの CloudFormation テンプレート（Step 2 の成果物）が宣言している値である。
 
-| RDS インスタンス | パラメータグループ | time_zone | 由来 |
-|---|---|---|---|
-| `example-service-test-development-mysql80` | `example-service-test-development-mysql80-v1` | UTC | engine-default |
+| RDS インスタンス | パラメータ | 現在 | 由来 | 適用予定 | 判定 |
+|---|---|---|---|---|---|
+| `example-service-test-development-mysql80` | `time_zone` | UTC | engine-default | UTC | 一致 |
+
+突き合わせたテンプレート:
+
+- `example-service-test-development-mysql84-v1` ← `examples/config-blue-green-generation/target-parameter-groups/example-service-test-development-mysql84.yaml`
 
 ## Step 4 の MySQL 接続検証
 

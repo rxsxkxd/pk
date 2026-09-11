@@ -20,7 +20,7 @@ const completeInventory = `{
       "DBParameterGroups": [{"DBParameterGroupName": "blue-v1", "ParameterApplyStatus": "in-sync"}]
     }
   ],
-  "ParameterGroups": {"blue-v1": {"TimeZone": "UTC", "TimeZoneSource": "engine-default"}}
+  "ParameterGroups": {"blue-v1": {"Parameters": {"time_zone": {"Value": "UTC", "Source": "engine-default"}}}}
 }`
 
 func writeInventoryFile(t *testing.T, content string) string {
@@ -140,18 +140,25 @@ func TestSourceParameterGroupName(t *testing.T) {
 	}
 }
 
-func TestTimeZoneOfRequiresCollectedFacts(t *testing.T) {
+func TestParameterGroupOfRequiresCollectedFacts(t *testing.T) {
 	inventory := &Inventory{ParameterGroups: map[string]*ParameterGroupFacts{
-		"blue-v1": {TimeZone: "Asia/Tokyo", TimeZoneSource: "user"},
+		"blue-v1": {Parameters: map[string]ParameterValue{
+			"time_zone": {Value: "Asia/Tokyo", Source: "user"},
+		}},
 	}}
-	facts, err := inventory.TimeZoneOf("blue-v1", "ctx")
+	facts, err := inventory.ParameterGroupOf("blue-v1", "ctx")
 	if err != nil {
-		t.Fatalf("TimeZoneOf: %v", err)
+		t.Fatalf("ParameterGroupOf: %v", err)
 	}
-	if facts.TimeZone != "Asia/Tokyo" || facts.TimeZoneSource != "user" {
-		t.Errorf("facts = %+v", facts)
+	timeZone, found := facts.Parameter("time_zone")
+	if !found || timeZone.Value != "Asia/Tokyo" || timeZone.Source != "user" {
+		t.Errorf("time_zone = %+v found=%v", timeZone, found)
 	}
-	if _, err := inventory.TimeZoneOf("absent-v1", "ctx"); err == nil {
+	// 採取していないパラメータは found=false で返す。
+	if _, found := facts.Parameter("max_connections"); found {
+		t.Error("uncollected parameter reported as found")
+	}
+	if _, err := inventory.ParameterGroupOf("absent-v1", "ctx"); err == nil {
 		t.Error("absent group accepted, want failure")
 	}
 }

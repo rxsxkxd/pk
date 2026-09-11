@@ -101,8 +101,16 @@ func TestInventoryCallsOnlyReadOnlyAPIs(t *testing.T) {
 		t.Errorf("DBInstances = %d, want 2", len(inventory.DBInstances))
 	}
 	facts := inventory.ParameterGroups["shared-v1"]
-	if facts == nil || facts.TimeZone != "Asia/Tokyo" || facts.TimeZoneSource != "user" {
-		t.Errorf("ParameterGroups = %+v", inventory.ParameterGroups)
+	if facts == nil {
+		t.Fatalf("ParameterGroups = %+v", inventory.ParameterGroups)
+	}
+	timeZone, found := facts.Parameter("time_zone")
+	if !found || timeZone.Value != "Asia/Tokyo" || timeZone.Source != "user" {
+		t.Errorf("time_zone = %+v found=%v", timeZone, found)
+	}
+	// CollectedParameters に無いパラメータは保存しない（応答は数百件ある）。
+	if _, found := facts.Parameter("binlog_format"); found {
+		t.Error("binlog_format must not be stored; only CollectedParameters are kept")
 	}
 }
 
@@ -118,8 +126,8 @@ func TestInventoryOmitsProfileWhenEmpty(t *testing.T) {
 	}
 }
 
-func TestInventoryTreatsMissingTimeZoneAsEmpty(t *testing.T) {
-	// time_zone が応答に無い場合も収集側では判定しない。空で通し、必要なら生成側が落とす。
+func TestInventoryTreatsMissingParameterAsUncollected(t *testing.T) {
+	// 対象パラメータが応答に無い場合も収集側では判定しない。採取せずに通す。
 	fakeAWS(t, strings.Replace(twoInstancesSharingOneGroup,
 		`  {"ParameterName": "time_zone", "ParameterValue": "Asia/Tokyo", "Source": "user"}`,
 		`  {"ParameterName": "max_connections", "ParameterValue": "100", "Source": "system"}`, 1))
@@ -129,8 +137,24 @@ func TestInventoryTreatsMissingTimeZoneAsEmpty(t *testing.T) {
 		t.Fatalf("Inventory: %v", err)
 	}
 	facts := inventory.ParameterGroups["shared-v1"]
-	if facts == nil || facts.TimeZone != "" || facts.TimeZoneSource != "" {
-		t.Errorf("ParameterGroups[shared-v1] = %+v, want empty facts", facts)
+	if facts == nil {
+		t.Fatal("ParameterGroups[shared-v1] is missing")
+	}
+	if len(facts.Parameters) != 0 {
+		t.Errorf("Parameters = %+v, want none collected", facts.Parameters)
+	}
+}
+
+func TestCollectedParametersCoversTimeZone(t *testing.T) {
+	// time_zone は 8.0 → 8.4 の論点であり、必ず採取対象に含める。
+	found := false
+	for _, name := range CollectedParameters {
+		if name == "time_zone" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("CollectedParameters = %v, want it to include time_zone", CollectedParameters)
 	}
 }
 

@@ -82,7 +82,7 @@ func testConfig() config.Config {
 		BlurRatio:       0.04,
 		MinBlurRadiusPx: 8,
 		DownscaleFactor: 1,
-		MaxLaplacianVar: 5.0,
+		MaxLaplacianVar: 15.0,
 		MaxInputBytes:   20 * 1024 * 1024,
 		MaxInputPixels:  64_000_000,
 		JPEGQuality:     85,
@@ -582,7 +582,7 @@ func TestStrengthCheckCatchesLocalUnmaskedArea(t *testing.T) {
 
 	// 前提の確認: 領域全体の平均ではしきい値を下回る＝旧方式なら見逃していた。
 	region := imaging.Crop(img, imaging.TopRegion(size, size, 0.5))
-	if mean := imaging.LaplacianVariance(region); mean >= 5.0 {
+	if mean := imaging.LaplacianVariance(region); mean >= testConfig().MaxLaplacianVar {
 		t.Fatalf("fixture の平均 %v がしきい値を超えている。これでは旧方式でも検知できてしまい回帰テストにならない", mean)
 	}
 

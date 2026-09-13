@@ -9,6 +9,13 @@ import (
 	"github.com/rxsxkxd/lim/internal/imaging"
 )
 
+// MinAllowedBlurRatio はぼかし半径の比率として許容する下限。
+//
+// 「この強さ以上なら隠れている」と判断したライン（設計書 §12.6）。
+// 既定の 0.04 はこの 10 倍にあたる。これを下回る設定は起動時に拒否する。
+// マスクの強さはこの値で担保するのであって、出力後の強度検査で担保するのではない。
+const MinAllowedBlurRatio = 0.004
+
 // Config は設計書 §8.4 の環境変数に対応する。
 // マスク強度に関わる値はサーバー側でのみ決まり、アップローダ側からは弱められない。
 type Config struct {
@@ -41,7 +48,7 @@ func Load() (Config, error) {
 		BlurPasses:      envInt("BLUR_PASSES", imaging.DefaultBlurPasses),
 		DownscaleFactor: envInt("DOWNSCALE_FACTOR", 4),
 		StrengthBlockPx: envInt("STRENGTH_BLOCK_PX", imaging.DefaultStrengthBlockPx),
-		MaxLaplacianVar: envFloat("MAX_ALLOWED_LAPLACIAN_VAR", 5.0),
+		MaxLaplacianVar: envFloat("MAX_ALLOWED_LAPLACIAN_VAR", 15.0),
 		MaxInputBytes:   int64(envInt("MAX_INPUT_BYTES", 20*1024*1024)),
 		MaxInputPixels:  int64(envInt("MAX_INPUT_PIXELS", 64_000_000)),
 		JPEGQuality:     envInt("JPEG_QUALITY", 85),
@@ -53,8 +60,10 @@ func Load() (Config, error) {
 	if c.MaskHeightRatio <= 0 || c.MaskHeightRatio > 1 {
 		return c, fmt.Errorf("MASK_HEIGHT_RATIO must be in (0, 1], got %v", c.MaskHeightRatio)
 	}
-	if c.BlurRatio <= 0 {
-		return c, fmt.Errorf("MIN_BLUR_RATIO must be > 0, got %v", c.BlurRatio)
+	if c.BlurRatio < MinAllowedBlurRatio {
+		// 弱すぎる設定で起動してしまうと、マスクが不十分な画像を出し続ける。
+		// 出力してから検査で拾うのではなく、起動時に止める。
+		return c, fmt.Errorf("MIN_BLUR_RATIO must be >= %v, got %v", MinAllowedBlurRatio, c.BlurRatio)
 	}
 	// 1 回だけの移動平均はボックス窓の副ローブが残るため許可しない（imaging.GaussianBlurPasses 参照）。
 	if c.BlurPasses < 2 || c.BlurPasses > 5 {

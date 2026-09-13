@@ -29,8 +29,11 @@ Parameters:
       失われるため復元耐性も上がる。1 で無効。縮小は領域内だけで、領域外には影響しない。
   MaxAllowedLaplacianVar:
     Type: String
-    Default: '5.0'
-    Description: マスク強度の自己検証しきい値。超えたら出力せず DLQ へ送る。
+    Default: '15.0'
+    Description: >
+      マスク強度の自己検証しきい値。超えたら出力せず DLQ へ送る。
+      マスクの強さ自体は BlurRatio で担保しており、これは設定を桁で取り違えた
+      事故を拾うための粗い網。厳しくしすぎると正常な画像が DLQ に落ちる。
 
 Globals:
   Function:

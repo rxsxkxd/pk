@@ -76,7 +76,7 @@ make run IN=testdata/idcard.jpg
 
 ```
 testdata/idcard.jpg  jpeg 1200x900  radius=36px  top 50% (0,0,1200,450)
-                     score=0.9515 (limit 5.0, ok)  153KB->95KB  50ms
+                     score=2.6749 (limit 15.0, ok)  153KB->95KB  43ms
                      -> tmp/masked.jpg
 ```
 
@@ -102,7 +102,7 @@ go run ./cmd/maskfile -mask-height-ratio 0.6 -blur-ratio 0.06 -out tmp/out.jpg p
 
 ```
 broken.jpg  FAILED (validation) cannot decode image header: image: unknown format
-photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 10396.924 > 5.000
+photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.734 > 15.000
 ```
 
 ### 確認すべき 3 点
@@ -113,8 +113,9 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 103
 
 ### リリース前に必ずやること
 
-`MAX_ALLOWED_LAPLACIAN_VAR = 5.0` は**根拠のない暫定値**。厳しすぎれば正常画像が
-全件 DLQ に落ち、緩すぎれば弱いマスクが素通りする。実データで分布を取ってから決める。
+`MAX_ALLOWED_LAPLACIAN_VAR = 15.0` は合成画像から置いた暫定値。厳しすぎれば正常画像が
+DLQ に落ちる。実データで分布を取ってから決める。なおマスクの強さ自体は
+`MIN_BLUR_RATIO` で担保しており、このしきい値はあくまで事故検知用。
 
 ```bash
 go run ./cmd/maskfile -report-only -json ./samples/*.jpg > tmp/scores.jsonl
@@ -149,7 +150,7 @@ aws s3 cp s3://$MASKED_BUCKET/masked/v1/photo.jpg ./masked.jpg
   **何も検知されずに露出する**。技術的な緩和策はなく、入力側の運用で担保するしかない。
 - 入力は JPEG / PNG のみ（WebP は現状 DLQ 行き）。
 - 1 枚あたり 20 MB / 8000 × 8000 px 以内。
-- ラプラシアン分散 5.0 というしきい値が正常・異常を分離できる（**未検証**）。
+- ラプラシアン分散 15.0 というしきい値で「設定を桁で外した事故」を拾える（**未検証**）。
 - EXIF Orientation の有無は**未確認**。付いている場合、向きの判定を誤ると
   「違う半分をマスクする」事故になりうる。実データを確認するまで保留としている
   （[設計書 §3.1](docs/image-blur-lambda-design.md) の A9）。
@@ -207,8 +208,8 @@ JPEG のデコードとエンコードで、これは JPEG を扱う以上削れ
   平均は 1.43（合格）だった。区画判定なら 30.7 で不合格になる
 
 ただしこの検査で捕まえられるのは**大きく外した事故**で、軽度のぼかし不足は検知できない。
-`MAX_ALLOWED_LAPLACIAN_VAR = 5.0` は暫定値で、正常系の最大 2.68 に対して 1.9 倍の
-余裕しかない。リリース前に実データで取り直すこと。
+`MAX_ALLOWED_LAPLACIAN_VAR = 15.0` はそのばらつきの上に置いた値。リリース前に
+実データで取り直すこと。
 
 ### ローカルと本番で同じコードが動く
 
@@ -241,7 +242,7 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 | `BLUR_PASSES` | `2` | ボックスぼかしの重ね回数。2 未満は不可 |
 | `DOWNSCALE_FACTOR` | `4` | マスク領域の縮小率（1 で無効） |
 | `STRENGTH_BLOCK_PX` | `64` | 強度検証の区画サイズ |
-| `MAX_ALLOWED_LAPLACIAN_VAR` | `5.0` | 強度検証のしきい値 |
+| `MAX_ALLOWED_LAPLACIAN_VAR` | `15.0` | 強度検証のしきい値 |
 | `MAX_INPUT_BYTES` | `20971520` | 入力サイズ上限 |
 | `MAX_INPUT_PIXELS` | `64000000` | 総ピクセル数上限 |
 | `JPEG_QUALITY` | `85` | JPEG 出力品質 |
@@ -256,8 +257,10 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 - **対応形式は JPEG / PNG のみ。** WebP は今回考慮外で、検証エラーとして DLQ に送られる
   （Go 標準ライブラリに WebP エンコーダがないため、対応するなら別形式での出力か
   cgo を伴うエンコーダの導入が要る）。
-- **`MAX_ALLOWED_LAPLACIAN_VAR` は暫定値（5.0）。** 実データ 1,000 枚程度で
+- **`MAX_ALLOWED_LAPLACIAN_VAR` は暫定値（15.0）。** 実データ 1,000 枚程度で
   分布を取ってから決めること。厳しすぎると正常画像が DLQ に落ちる。
+- **許容ライン `MIN_BLUR_RATIO >= 0.004` は合成画像 1 枚に対する目視判断。**
+  被写体がさらに小さい写真では不十分な可能性がある（既定はその 10 倍の 0.04）。
 - **アニメーション画像**（GIF / APNG / animated WebP）は非対応。
 - CloudTrail のログバケットに Object Lock を設定していない（設計書 §11.3）。
 - **`sam validate` / `sam deploy` は未実行。** `template.yaml` はデプロイ検証をしていない。

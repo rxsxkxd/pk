@@ -45,7 +45,7 @@ command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読�
 mkdir -p "$output_dir"
 # config のサービスに対応する作成設定を読み取る。AWS API は呼び出さない。
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
-# 必要な項目とその必須・任意だけをここに宣言する（取り出しは lib/config.jq）。
+# 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
 eval "$(deployment_config_vars "$config" "$service" '
   service($service) as $svc | {
     source_db_instance_identifier:  required("source_db_instance_identifier"; $svc.source_db_instance_identifier),

@@ -64,6 +64,6 @@ Step 3・4・5・7 の `.sh` はいずれも設定 YAML を 1 回読むが、**�
 python3 -c 'import json, sys, yaml; json.dump(yaml.safe_load(open(sys.argv[1])), sys.stdout)' "$1"
 ```
 
-取り出しと検証は jq が行い、各スクリプトは必要な項目だけを宣言する（共通関数は `scripts/lib/config.jq`）。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込んでいたものを、2026-09-14 に 1 箇所へ統合した。
+取り出しと検証は jq が行い、各スクリプトは必要な項目だけを宣言する（共通関数 `required` / `optional` / `service` / `shellvars` も同ファイルにある）。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込んでいたものを、2026-09-14 に 1 箇所へ統合した。
 
 **「AWS CLI さえあれば Bash だけで動く」わけではない。**python3 + PyYAML と jq が実質的に必須の依存である点は変わらない。yq は引き続き導入していない。

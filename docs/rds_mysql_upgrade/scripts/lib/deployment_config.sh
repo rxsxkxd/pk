@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# 実行設定 YAML の読み取り。
+# 実行設定 YAML（config/blue-green/<環境>.deployment.yml）の読み取り。
 #
 # python3 は YAML を JSON へ変換するためだけに使う（jq は YAML を読めない）。
 # 取り出しと検証は jq が行い、各スクリプトは必要な項目だけを宣言する。
-# 共通の jq 関数は同じディレクトリの config.jq にある。
 #
 # 使い方:
 #   source "$(dirname "$0")/lib/deployment_config.sh"
@@ -13,12 +12,31 @@
 #       source_id:     required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
 #     } | shellvars')"
 #
-# フィルタ内では config.jq の関数（required / optional / service / shellvars）と、
+# フィルタ内では下の共通関数（required / optional / service / shellvars）と、
 # 引数 ${service}（サービス名）が使える。
 
-# jq のライブラリ位置は source 時に確定させる。関数の中では BASH_SOURCE が
-# 呼び出し元を指すことがあるため、トップレベルで解決しておく。
-DEPLOYMENT_CONFIG_LIB_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# 各スクリプトのフィルタへ前置する共通関数。
+# 利用者が 1 箇所しかないため、別ファイル（.jq）へは分けずここに置く。
+# jq のモジュール機構を使わないので、ライブラリパスの解決も要らない。
+DEPLOYMENT_CONFIG_FUNCTIONS='
+  # 必須項目。空・未定義なら文脈付きで落とす。
+  # jq の error は終了コード 5 を返すため、set -e 配下でそのまま停止する。
+  def required($path; $value):
+    if ($value // "") == "" then error("\($path) が未定義である") else $value end;
+
+  # 任意項目。未定義なら既定値を使う。
+  def optional($value; $fallback):
+    if ($value // "") == "" then $fallback else $value end;
+
+  # 対象サービスの定義を取り出す。
+  def service($name):
+    .services[$name] // error("services.\($name) が未定義である");
+
+  # オブジェクトを `key='"'"'value'"'"'` の代入行へ変換する。
+  # @sh がシェル用のクォートを行う（Python の shlex.quote と同じ役割）。
+  def shellvars:
+    to_entries[] | "\(.key)=\(.value | tostring | @sh)";
+'
 
 # YAML を JSON にするためだけの変換。ここ以外で python3 を使わない。
 deployment_config_json() {
@@ -40,5 +58,5 @@ deployment_config_vars() {
   }
   rm -f "$reason"
   printf '%s' "$document" \
-    | jq -L "$DEPLOYMENT_CONFIG_LIB_DIR" -r --arg service "$service" "include \"config\"; $filter"
+    | jq -r --arg service "$service" "${DEPLOYMENT_CONFIG_FUNCTIONS} ${filter}"
 }

@@ -74,7 +74,7 @@ Step 4 のレポート生成器は Ruby 版（`generate_green_verification_repor
 
 シェルスクリプトのデータ読み取りは **jq に一本化**している。`python3` + PyYAML は **YAML を JSON にする 1 行**だけに使い、その 1 行は `scripts/lib/deployment_config.sh` にしかない（jq は YAML を読めないため）。
 
-- 設定 YAML → `deployment_config_vars <config> <service> '<jq フィルタ>'` で読む。フィルタは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを宣言する。共通関数（`required` / `optional` / `service` / `shellvars`）は `scripts/lib/config.jq` にある
+- 設定 YAML → `deployment_config_vars <config> <service> '<jq フィルタ>'` で読む。フィルタは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを宣言する。共通関数（`required` / `optional` / `service` / `shellvars`）も同じファイルにある
 - AWS 応答などの JSON → jq で直接読む
 - **スクリプトに新しくインライン `python3` を書かない。**設定の読み取りは上の 1 経路だけである
 

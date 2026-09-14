@@ -31,7 +31,7 @@ source "$(dirname "$0")/lib/migration_phase.sh"
 source "$(dirname "$0")/lib/mysql_credentials.sh"
 
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
-# 必要な項目とその必須・任意だけをここに宣言する（取り出しは lib/config.jq）。
+# 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
 eval "$(deployment_config_vars "$config" "$service" '
   service($service) as $svc | {
     source_id:                            required("source_db_instance_identifier"; $svc.source_db_instance_identifier),

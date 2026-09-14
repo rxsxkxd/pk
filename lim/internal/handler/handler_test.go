@@ -77,7 +77,8 @@ func testConfig() config.Config {
 		InputBucket:     "shared",
 		OutputBucket:    "shared",
 		KeyPrefix:       "masking",
-		OriginalInfix:   "original",
+		OriginalInfix:   "no-masked",
+		MaskedInfix:     "masked",
 		PolicyVersion:   "v1",
 		MaskHeightRatio: 0.5,
 		BlurPasses:      2,
@@ -144,13 +145,13 @@ func detailedPNG(t *testing.T, w, h int) []byte {
 }
 
 // origKey は原本のキーを組み立てる。testConfig のレイアウトに合わせている。
-func origKey(x, y, z, n string) string {
-	return "masking/" + x + "/" + y + "/original/" + z + "/" + n
+func origKey(tid, date, lid, eid string) string {
+	return "masking/" + tid + "/no-masked/" + date + "/" + lid + "/" + eid
 }
 
 // maskedKey はマスク済みのキー。infix だけが異なる。
-func maskedKey(x, y, z, n string) string {
-	return "masking/" + x + "/" + y + "/v1/" + z + "/" + n
+func maskedKey(tid, date, lid, eid string) string {
+	return "masking/" + tid + "/masked/" + date + "/" + lid + "/" + eid
 }
 
 func s3Event(bucket, key string, size int64, etag string) json.RawMessage {
@@ -172,21 +173,23 @@ func payload(v any) json.RawMessage {
 }
 
 // request はリクエスト起動のペイロード。
-func request(x, y, z, n string) json.RawMessage {
-	return payload(map[string]string{"x": x, "y": y, "z": z, "n": n})
+func request(tid, date, lid, eid string) json.RawMessage {
+	return payload(map[string]string{
+		"tenant_id": tid, "date": date, "location_id": lid, "entry_id": eid,
+	})
 }
 
 func TestHandleMasksImageAndWritesMetadata(t *testing.T) {
 	f := newFakeS3()
 	body := detailedJPEG(t, 400, 300)
-	f.put("shared", origKey("tenant-a", "2026-09", "front", "doc.jpg"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "doc.jpg"), body, nil)
 
 	h := newHandler(f)
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("tenant-a", "2026-09", "front", "doc.jpg"), int64(len(body)), `"abc123"`)); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "doc.jpg"), int64(len(body)), `"abc123"`)); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
-	out, ok := f.objects["shared/"+maskedKey("tenant-a", "2026-09", "front", "doc.jpg")]
+	out, ok := f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "doc.jpg")]
 	if !ok {
 		t.Fatalf("output object not written; objects = %v", keys(f.objects))
 	}
@@ -194,7 +197,7 @@ func TestHandleMasksImageAndWritesMetadata(t *testing.T) {
 		t.Fatal("output body is empty")
 	}
 
-	meta := f.meta["shared/"+maskedKey("tenant-a", "2026-09", "front", "doc.jpg")]
+	meta := f.meta["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "doc.jpg")]
 	for _, k := range []string{"source-bucket", "source-key", "source-etag", "masking-policy-version", "blur-radius-px", "strength-score"} {
 		if meta[k] == "" {
 			t.Errorf("metadata %q is missing", k)
@@ -217,13 +220,13 @@ func TestHandleStripsAllMetadata(t *testing.T) {
 	if !bytes.Contains(body, []byte("Exif\x00\x00")) {
 		t.Fatal("fixture does not contain an EXIF segment")
 	}
-	f.put("shared", origKey("x", "y", "z", "a.jpg"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body, nil)
 
 	h := newHandler(f)
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.jpg"), int64(len(body)), "e1")); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), int64(len(body)), "e1")); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	out := f.objects["shared/"+maskedKey("x", "y", "z", "a.jpg")]
+	out := f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.jpg")]
 	if bytes.Contains(out, []byte("Exif")) {
 		t.Error("output still contains an EXIF segment")
 	}
@@ -232,13 +235,13 @@ func TestHandleStripsAllMetadata(t *testing.T) {
 func TestHandlePNG(t *testing.T) {
 	f := newFakeS3()
 	body := detailedPNG(t, 300, 300)
-	f.put("shared", origKey("x", "y", "z", "a.png"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), body, nil)
 
 	h := newHandler(f)
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.png"), int64(len(body)), "e1")); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), int64(len(body)), "e1")); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	out, ok := f.objects["shared/"+maskedKey("x", "y", "z", "a.png")]
+	out, ok := f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")]
 	if !ok {
 		t.Fatal("output not written")
 	}
@@ -251,14 +254,14 @@ func TestHandleFailsClosedOnWeakMask(t *testing.T) {
 	// 強度検証に落ちたら PutObject を一切行わないこと（設計書 §10.4）。
 	f := newFakeS3()
 	body := detailedJPEG(t, 400, 300)
-	f.put("shared", origKey("x", "y", "z", "a.jpg"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body, nil)
 
 	h := newHandler(f, func(c *config.Config) {
 		c.BlurRatio = 0.0001 // 実質ぼかさない
 		c.MinBlurRadiusPx = 0.1
 		c.MaxLaplacianVar = 0.01
 	})
-	_, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.jpg"), int64(len(body)), "e1"))
+	_, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), int64(len(body)), "e1"))
 	if err == nil {
 		t.Fatal("expected an error so the event goes to the DLQ")
 	}
@@ -275,7 +278,7 @@ func TestHandleSkipsObjectsUnderOutputPrefix(t *testing.T) {
 	// 再帰ループ防止。出力を再度処理しにいかないこと。
 	f := newFakeS3()
 	h := newHandler(f)
-	_, err := h.Handle(context.Background(), s3Event("shared", maskedKey("x", "y", "z", "a.jpg"), 100, "e1"))
+	_, err := h.Handle(context.Background(), s3Event("shared", maskedKey("t-001", "2026-09-14", "loc-12", "a.jpg"), 100, "e1"))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -299,10 +302,10 @@ func TestHandleIsIdempotent(t *testing.T) {
 	// S3 通知は at-least-once。同じイベントを 2 回投げても 1 回しか書かない。
 	f := newFakeS3()
 	body := detailedJPEG(t, 200, 200)
-	f.put("shared", origKey("x", "y", "z", "a.jpg"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body, nil)
 
 	h := newHandler(f)
-	ev := s3Event("shared", origKey("x", "y", "z", "a.jpg"), int64(len(body)), "e1")
+	ev := s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), int64(len(body)), "e1")
 	for i := 0; i < 2; i++ {
 		if _, err := h.Handle(context.Background(), ev); err != nil {
 			t.Fatalf("Handle #%d: %v", i+1, err)
@@ -317,17 +320,59 @@ func TestHandleReprocessesWhenSourceChanged(t *testing.T) {
 	// ETag が変わっていれば、同じキーでも作り直す。
 	f := newFakeS3()
 	body := detailedJPEG(t, 200, 200)
-	f.put("shared", origKey("x", "y", "z", "a.jpg"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body, nil)
 
 	h := newHandler(f)
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.jpg"), int64(len(body)), "e1")); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), int64(len(body)), "e1")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.jpg"), int64(len(body)), "e2")); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), int64(len(body)), "e2")); err != nil {
 		t.Fatal(err)
 	}
 	if f.puts != 2 {
 		t.Errorf("PutObject called %d times, want 2", f.puts)
+	}
+}
+
+func TestHandleReprocessesWhenPolicyVersionChanged(t *testing.T) {
+	// マスク済みの階層名は固定（masked）なので、強度に関わる設定を変えても
+	// 出力キーは変わらない。作り直すかどうかはメタデータのポリシー版で判断し、
+	// 変わっていれば同じキーを上書きする。
+	f := newFakeS3()
+	body := detailedJPEG(t, 200, 200)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body, nil)
+	ev := s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), int64(len(body)), "e1")
+
+	h := newHandler(f)
+	if _, err := h.Handle(context.Background(), ev); err != nil {
+		t.Fatal(err)
+	}
+	dst := "shared/" + maskedKey("t-001", "2026-09-14", "loc-12", "a.jpg")
+	if f.meta[dst]["masking-policy-version"] != "v1" {
+		t.Fatalf("policy version = %q, want v1", f.meta[dst]["masking-policy-version"])
+	}
+
+	// 同じ設定なら作り直さない。
+	if _, err := h.Handle(context.Background(), ev); err != nil {
+		t.Fatal(err)
+	}
+	if f.puts != 1 {
+		t.Errorf("PutObject called %d times, want 1", f.puts)
+	}
+
+	// ポリシー版を上げると作り直す（同じキーを上書き）。
+	h2 := newHandler(f, func(c *config.Config) { c.PolicyVersion = "v2" })
+	if _, err := h2.Handle(context.Background(), ev); err != nil {
+		t.Fatal(err)
+	}
+	if f.puts != 2 {
+		t.Errorf("PutObject called %d times, want 2", f.puts)
+	}
+	if got := f.meta[dst]["masking-policy-version"]; got != "v2" {
+		t.Errorf("policy version = %q, want v2", got)
+	}
+	if len(f.objects) != 2 {
+		t.Errorf("objects = %d, want 2（原本と、上書きされたマスク済み 1 つ）", len(f.objects))
 	}
 }
 
@@ -339,12 +384,12 @@ func TestHandleRejectsBadInput(t *testing.T) {
 		size int64
 		cfg  func(*config.Config)
 	}{
-		{name: "oversized declared size", key: origKey("x", "y", "z", "big.jpg"), body: []byte("x"), size: 999 << 20},
-		{name: "not an image", key: origKey("x", "y", "z", "a.jpg"), body: []byte("%PDF-1.7 not an image at all")},
-		{name: "empty body", key: origKey("x", "y", "z", "a.jpg"), body: []byte{}},
+		{name: "oversized declared size", key: origKey("t-001", "2026-09-14", "loc-12", "big.jpg"), body: []byte("x"), size: 999 << 20},
+		{name: "not an image", key: origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body: []byte("%PDF-1.7 not an image at all")},
+		{name: "empty body", key: origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body: []byte{}},
 		{
 			name: "exceeds pixel limit",
-			key:  origKey("x", "y", "z", "a.jpg"),
+			key:  origKey("t-001", "2026-09-14", "loc-12", "a.jpg"),
 			body: detailedJPEG(t, 300, 300),
 			cfg:  func(c *config.Config) { c.MaxInputPixels = 1000 },
 		},
@@ -383,10 +428,10 @@ func TestHandleMasksOnlyTopHalf(t *testing.T) {
 	// PNG は可逆なので画素の完全一致で検証できる。
 	f := newFakeS3()
 	body := detailedPNG(t, 200, 200)
-	f.put("shared", origKey("x", "y", "z", "a.png"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), body, nil)
 
 	h := newHandler(f)
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.png"), int64(len(body)), "e1")); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), int64(len(body)), "e1")); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
@@ -394,7 +439,7 @@ func TestHandleMasksOnlyTopHalf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	outImg, _, err := image.Decode(bytes.NewReader(f.objects["shared/"+maskedKey("x", "y", "z", "a.png")]))
+	outImg, _, err := image.Decode(bytes.NewReader(f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +464,7 @@ func TestHandleMasksOnlyTopHalf(t *testing.T) {
 		t.Error("top half appears untouched")
 	}
 
-	if got := f.meta["shared/"+maskedKey("x", "y", "z", "a.png")]["mask-region"]; got != "top 50% (0,0,200,100)" {
+	if got := f.meta["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")]["mask-region"]; got != "top 50% (0,0,200,100)" {
 		t.Errorf("mask-region = %q", got)
 	}
 }
@@ -429,16 +474,16 @@ func TestHandleStrengthCheckIgnoresUnmaskedArea(t *testing.T) {
 	// 鮮明な下半分に引きずられ、正常な入力がすべて DLQ に落ちてしまう。
 	f := newFakeS3()
 	body := detailedPNG(t, 300, 300)
-	f.put("shared", origKey("x", "y", "z", "a.png"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), body, nil)
 
 	h := newHandler(f)
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.png"), int64(len(body)), "e1")); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), int64(len(body)), "e1")); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if f.puts != 1 {
 		t.Fatalf("PutObject called %d times, want 1", f.puts)
 	}
-	whole := imaging.ToRGBA(mustDecode(t, f.objects["shared/"+maskedKey("x", "y", "z", "a.png")]))
+	whole := imaging.ToRGBA(mustDecode(t, f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")]))
 	if v := imaging.LaplacianVariance(whole); v <= 5.0 {
 		t.Skip("fixture's unmasked half is not detailed enough to exercise this")
 	}
@@ -457,18 +502,18 @@ func TestHandleMaskHeightRatio(t *testing.T) {
 	for _, tt := range tests {
 		f := newFakeS3()
 		body := detailedPNG(t, 200, 200)
-		f.put("shared", origKey("x", "y", "z", "a.png"), body, nil)
+		f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), body, nil)
 
 		h := newHandler(f, func(c *config.Config) { c.MaskHeightRatio = tt.ratio })
-		if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.png"), int64(len(body)), "e1")); err != nil {
+		if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), int64(len(body)), "e1")); err != nil {
 			t.Fatalf("ratio %v: %v", tt.ratio, err)
 		}
-		if got := f.meta["shared/"+maskedKey("x", "y", "z", "a.png")]["mask-region"]; got != tt.wantRegion {
+		if got := f.meta["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")]["mask-region"]; got != tt.wantRegion {
 			t.Errorf("ratio %v: mask-region = %q, want %q", tt.ratio, got, tt.wantRegion)
 		}
 
 		src := imaging.ToRGBA(mustDecode(t, body))
-		out := imaging.ToRGBA(mustDecode(t, f.objects["shared/"+maskedKey("x", "y", "z", "a.png")]))
+		out := imaging.ToRGBA(mustDecode(t, f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")]))
 		// マスク境界の直下は無変更のまま。
 		if tt.maskedRows < 200 {
 			for x := 0; x < 200; x++ {
@@ -484,13 +529,13 @@ func TestHandleOddHeightRegion(t *testing.T) {
 	// 高さが奇数でも領域計算が破綻しないこと。
 	f := newFakeS3()
 	body := detailedPNG(t, 101, 101)
-	f.put("shared", origKey("x", "y", "z", "a.png"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), body, nil)
 
 	h := newHandler(f)
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.png"), int64(len(body)), "e1")); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), int64(len(body)), "e1")); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	out := mustDecode(t, f.objects["shared/"+maskedKey("x", "y", "z", "a.png")])
+	out := mustDecode(t, f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")])
 	if w, hh := out.Bounds().Dx(), out.Bounds().Dy(); w != 101 || hh != 101 {
 		t.Errorf("output size = %dx%d, want 101x101", w, hh)
 	}
@@ -508,7 +553,7 @@ func mustDecode(t *testing.T, b []byte) image.Image {
 func TestOutputKeyDiffersOnlyByInfix(t *testing.T) {
 	// 原本とマスク済みは infix だけが違う。それ以外の変数は共通。
 	l := testConfig().Layout()
-	p := s3key.Parts{X: "tenant-a", Y: "2026-09", Z: "front", N: "日本語 ファイル.jpg"}
+	p := s3key.Parts{TenantID: "t-001", Date: "2026-09-14", LocationID: "loc-12", EntryID: "日本語 ファイル.jpg"}
 
 	orig, err := l.Original(p)
 	if err != nil {
@@ -518,10 +563,10 @@ func TestOutputKeyDiffersOnlyByInfix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "masking/tenant-a/2026-09/original/front/日本語 ファイル.jpg"; orig != want {
+	if want := "masking/t-001/no-masked/2026-09-14/loc-12/日本語 ファイル.jpg"; orig != want {
 		t.Errorf("Original = %q, want %q", orig, want)
 	}
-	if want := "masking/tenant-a/2026-09/v1/front/日本語 ファイル.jpg"; masked != want {
+	if want := "masking/t-001/masked/2026-09-14/loc-12/日本語 ファイル.jpg"; masked != want {
 		t.Errorf("Masked = %q, want %q", masked, want)
 	}
 }
@@ -530,30 +575,30 @@ func TestHandleDecodesEncodedKeys(t *testing.T) {
 	// S3 通知のキーはフォームエンコード。"+" はスペースを表す。
 	f := newFakeS3()
 	body := detailedJPEG(t, 200, 200)
-	f.put("shared", origKey("x", "y", "z", "my photo.jpg"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "my photo.jpg"), body, nil)
 
 	h := newHandler(f)
 	ev := payload(events.S3Event{Records: []events.S3EventRecord{{
 		S3: events.S3Entity{
 			Bucket: events.S3Bucket{Name: "shared"},
-			Object: events.S3Object{Key: "masking/x/y/original/z/my+photo.jpg", Size: int64(len(body)), ETag: "e1"},
+			Object: events.S3Object{Key: "masking/t-001/no-masked/2026-09-14/loc-12/my+photo.jpg", Size: int64(len(body)), ETag: "e1"},
 		},
 	}}})
 	if _, err := h.Handle(context.Background(), ev); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if _, ok := f.objects["shared/"+maskedKey("x", "y", "z", "my photo.jpg")]; !ok {
+	if _, ok := f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "my photo.jpg")]; !ok {
 		t.Errorf("output not written; objects = %v", keys(f.objects))
 	}
 }
 
 func TestHandlePropagatesTransientErrorsForRetry(t *testing.T) {
 	f := newFakeS3()
-	f.put("shared", origKey("x", "y", "z", "a.jpg"), detailedJPEG(t, 100, 100), nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), detailedJPEG(t, 100, 100), nil)
 	f.getErr = errors.New("SlowDown: please reduce your request rate")
 
 	h := newHandler(f)
-	_, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.jpg"), 100, "e1"))
+	_, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), 100, "e1"))
 	if err == nil {
 		t.Fatal("expected an error so Lambda retries")
 	}
@@ -566,17 +611,17 @@ func TestHandlePropagatesTransientErrorsForRetry(t *testing.T) {
 func TestHandleWithDownscaleHardening(t *testing.T) {
 	f := newFakeS3()
 	body := detailedJPEG(t, 400, 300)
-	f.put("shared", origKey("x", "y", "z", "a.jpg"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body, nil)
 
 	h := newHandler(f, func(c *config.Config) { c.DownscaleFactor = 8 })
-	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.jpg"), int64(len(body)), "e1")); err != nil {
+	if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), int64(len(body)), "e1")); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	meta := f.meta["shared/"+maskedKey("x", "y", "z", "a.jpg")]
+	meta := f.meta["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.jpg")]
 	if meta["downscale-factor"] != "8" {
 		t.Errorf("downscale-factor = %q, want 8", meta["downscale-factor"])
 	}
-	out, _, err := image.Decode(bytes.NewReader(f.objects["shared/"+maskedKey("x", "y", "z", "a.jpg")]))
+	out, _, err := image.Decode(bytes.NewReader(f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.jpg")]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -624,7 +669,7 @@ func TestStrengthCheckCatchesLocalUnmaskedArea(t *testing.T) {
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatal(err)
 	}
-	f.put("shared", origKey("x", "y", "z", "a.png"), buf.Bytes(), nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), buf.Bytes(), nil)
 
 	// ぼかしも縮小も実質無効にして、素通しの一角を残す。
 	h := newHandler(f, func(c *config.Config) {
@@ -632,7 +677,7 @@ func TestStrengthCheckCatchesLocalUnmaskedArea(t *testing.T) {
 		c.MinBlurRadiusPx = 0.1
 		c.DownscaleFactor = 1
 	})
-	_, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.png"), int64(buf.Len()), "e1"))
+	_, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), int64(buf.Len()), "e1"))
 
 	var se *StrengthError
 	if !errors.As(err, &se) {
@@ -650,15 +695,15 @@ func TestDownscaleNeverTouchesAreaOutsideMask(t *testing.T) {
 	for _, factor := range []int{1, 4, 8, 16} {
 		f := newFakeS3()
 		body := detailedPNG(t, 240, 240)
-		f.put("shared", origKey("x", "y", "z", "a.png"), body, nil)
+		f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), body, nil)
 
 		h := newHandler(f, func(c *config.Config) { c.DownscaleFactor = factor })
-		if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.png"), int64(len(body)), "e1")); err != nil {
+		if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), int64(len(body)), "e1")); err != nil {
 			t.Fatalf("factor %d: %v", factor, err)
 		}
 
 		src := imaging.ToRGBA(mustDecode(t, body))
-		out := imaging.ToRGBA(mustDecode(t, f.objects["shared/"+maskedKey("x", "y", "z", "a.png")]))
+		out := imaging.ToRGBA(mustDecode(t, f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")]))
 		for y := 120; y < 240; y++ {
 			for x := 0; x < 240; x++ {
 				if src.RGBAAt(x, y) != out.RGBAAt(x, y) {
@@ -674,15 +719,15 @@ func TestBlurPassesDoNotAffectAreaOutsideMask(t *testing.T) {
 	for _, passes := range []int{2, 3, 5} {
 		f := newFakeS3()
 		body := detailedPNG(t, 240, 240)
-		f.put("shared", origKey("x", "y", "z", "a.png"), body, nil)
+		f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), body, nil)
 
 		h := newHandler(f, func(c *config.Config) { c.BlurPasses = passes })
-		if _, err := h.Handle(context.Background(), s3Event("shared", origKey("x", "y", "z", "a.png"), int64(len(body)), "e1")); err != nil {
+		if _, err := h.Handle(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "a.png"), int64(len(body)), "e1")); err != nil {
 			t.Fatalf("passes %d: %v", passes, err)
 		}
 
 		src := imaging.ToRGBA(mustDecode(t, body))
-		out := imaging.ToRGBA(mustDecode(t, f.objects["shared/"+maskedKey("x", "y", "z", "a.png")]))
+		out := imaging.ToRGBA(mustDecode(t, f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "a.png")]))
 		for y := 120; y < 240; y++ {
 			for x := 0; x < 240; x++ {
 				if src.RGBAAt(x, y) != out.RGBAAt(x, y) {
@@ -733,26 +778,26 @@ var _ = strings.TrimPrefix
 func TestHandleRequestMasksTheKeyBuiltFromVariables(t *testing.T) {
 	f := newFakeS3()
 	body := detailedJPEG(t, 400, 300)
-	f.put("shared", origKey("tenant-a", "2026-09", "front", "id.jpg"), body, map[string]string{})
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "id.jpg"), body, map[string]string{})
 
 	h := newHandler(f)
-	res, err := h.Handle(context.Background(), request("tenant-a", "2026-09", "front", "id.jpg"))
+	res, err := h.Handle(context.Background(), request("t-001", "2026-09-14", "loc-12", "id.jpg"))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if res == nil {
 		t.Fatal("response is nil")
 	}
-	if want := origKey("tenant-a", "2026-09", "front", "id.jpg"); res.SourceKey != want {
+	if want := origKey("t-001", "2026-09-14", "loc-12", "id.jpg"); res.SourceKey != want {
 		t.Errorf("SourceKey = %q, want %q", res.SourceKey, want)
 	}
-	if want := maskedKey("tenant-a", "2026-09", "front", "id.jpg"); res.OutputKey != want {
+	if want := maskedKey("t-001", "2026-09-14", "loc-12", "id.jpg"); res.OutputKey != want {
 		t.Errorf("OutputKey = %q, want %q", res.OutputKey, want)
 	}
 	if res.Skipped {
 		t.Error("Skipped = true, want false")
 	}
-	if _, ok := f.objects["shared/"+maskedKey("tenant-a", "2026-09", "front", "id.jpg")]; !ok {
+	if _, ok := f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "id.jpg")]; !ok {
 		t.Errorf("output not written; objects = %v", keys(f.objects))
 	}
 }
@@ -760,11 +805,11 @@ func TestHandleRequestMasksTheKeyBuiltFromVariables(t *testing.T) {
 func TestHandleRequestIsIdempotent(t *testing.T) {
 	f := newFakeS3()
 	body := detailedJPEG(t, 200, 200)
-	f.put("shared", origKey("x", "y", "z", "a.jpg"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "a.jpg"), body, nil)
 
 	h := newHandler(f)
 	for i := 0; i < 2; i++ {
-		res, err := h.Handle(context.Background(), request("x", "y", "z", "a.jpg"))
+		res, err := h.Handle(context.Background(), request("t-001", "2026-09-14", "loc-12", "a.jpg"))
 		if err != nil {
 			t.Fatalf("Handle #%d: %v", i+1, err)
 		}
@@ -781,7 +826,7 @@ func TestHandleRequestRejectsMissingObject(t *testing.T) {
 	f := newFakeS3()
 	h := newHandler(f)
 
-	_, err := h.Handle(context.Background(), request("x", "y", "z", "missing.jpg"))
+	_, err := h.Handle(context.Background(), request("t-001", "2026-09-14", "loc-12", "missing.jpg"))
 	var ve *ValidationError
 	if !errors.As(err, &ve) {
 		t.Fatalf("error = %v, want ValidationError", err)
@@ -794,20 +839,20 @@ func TestHandleRequestRejectsMissingObject(t *testing.T) {
 func TestHandleRequestRejectsInjectedVariables(t *testing.T) {
 	// 変数は呼び出し側から来る。キーを別の場所へ向ける細工を通さないこと。
 	tests := []struct {
-		name       string
-		x, y, z, n string
+		name                string
+		tid, date, lid, eid string
 	}{
-		{"スラッシュで階層を増やす", "a/b", "y", "z", "n.jpg"},
-		{"上の階層を指す", "..", "y", "z", "n.jpg"},
-		{"infix を差し替える", "x", "y", "z", "../v1/z/n.jpg"},
-		{"空の変数", "", "y", "z", "n.jpg"},
+		{"スラッシュで階層を増やす", "a/b", "2026-09-14", "loc-12", "e-1"},
+		{"上の階層を指す", "..", "2026-09-14", "loc-12", "e-1"},
+		{"infix を差し替える", "t-001", "../masked", "loc-12", "e-1"},
+		{"空のエントリ", "t-001", "2026-09-14", "loc-12", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFakeS3()
 			h := newHandler(f)
 
-			_, err := h.Handle(context.Background(), request(tt.x, tt.y, tt.z, tt.n))
+			_, err := h.Handle(context.Background(), request(tt.tid, tt.date, tt.lid, tt.eid))
 			var ve *ValidationError
 			if !errors.As(err, &ve) {
 				t.Errorf("error = %v, want ValidationError", err)
@@ -837,9 +882,9 @@ func TestHandleSkipsKeysOutsideTheLayout(t *testing.T) {
 	f := newFakeS3()
 	h := newHandler(f)
 	for _, key := range []string{
-		"masking/x/y/original/z/sub/a.jpg", // 階層が多い
-		"masking/x/y/original/a.jpg",       // 階層が足りない
-		"other/x/y/original/z/a.jpg",       // プレフィックスが違う
+		"masking/t-001/no-masked/2026-09-14/loc-12/sub/a.jpg", // 階層が多い
+		"masking/t-001/no-masked/2026-09-14/a.jpg",            // 階層が足りない
+		"other/t-001/no-masked/2026-09-14/loc-12/a.jpg",       // プレフィックスが違う
 	} {
 		if _, err := h.Handle(context.Background(), s3Event("shared", key, 100, "e1")); err != nil {
 			t.Errorf("Handle(%q) = %v, want nil (skip)", key, err)

@@ -52,7 +52,7 @@ type Handler struct {
 	Log *slog.Logger
 }
 
-// Request はリクエスト起動のペイロード。キーの変数部分だけを受け取り、
+// Request はリクエスト起動のペイロード。キーの変数だけを受け取り、
 // 固定部分（バケット・プレフィックス・infix）は Lambda 側の設定から組み立てる。
 type Request struct {
 	s3key.Parts
@@ -73,8 +73,8 @@ type Response struct {
 // 変数を持つものはリクエストとして扱う。
 func (h *Handler) Handle(ctx context.Context, payload json.RawMessage) (*Response, error) {
 	var probe struct {
-		Records []json.RawMessage `json:"Records"`
-		X       string            `json:"x"`
+		Records  []json.RawMessage `json:"Records"`
+		TenantID string            `json:"tenant_id"`
 	}
 	if err := json.Unmarshal(payload, &probe); err != nil {
 		return nil, invalid("cannot parse the event payload: %v", err)
@@ -83,10 +83,10 @@ func (h *Handler) Handle(ctx context.Context, payload json.RawMessage) (*Respons
 	switch {
 	case len(probe.Records) > 0:
 		return nil, h.handleS3Event(ctx, payload)
-	case probe.X != "":
+	case probe.TenantID != "":
 		return h.handleRequest(ctx, payload)
 	default:
-		return nil, invalid("payload is neither an S3 notification nor a request with key variables")
+		return nil, invalid("payload is neither an S3 notification nor a request with key variables (tenant_id, date, location_id, entry_id)")
 	}
 }
 

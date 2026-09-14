@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/rxsxkxd/lim/internal/s3key"
 )
 
 func TestLoadRejectsWeakMaskSettings(t *testing.T) {
@@ -50,7 +52,7 @@ func TestLoadRejectsWeakMaskSettings(t *testing.T) {
 		},
 		{
 			name: "原本とマスク済みの infix が同じ",
-			env:  map[string]string{"ORIGINAL_INFIX": "v1"},
+			env:  map[string]string{"ORIGINAL_INFIX": "masked"},
 			want: "must differ",
 		},
 		{
@@ -71,6 +73,53 @@ func TestLoadRejectsWeakMaskSettings(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("error = %q, want it to mention %s", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadFallsBackForRequiredInfix(t *testing.T) {
+	// infix は必須。空文字を渡された場合は既定値に落とす（prefix と違い、
+	// 空のまま組み立てると階層が潰れてキーの形が変わってしまう）。
+	t.Setenv("INPUT_BUCKET", "shared")
+	t.Setenv("ORIGINAL_INFIX", "")
+
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.OriginalInfix != "no-masked" {
+		t.Errorf("OriginalInfix = %q, want no-masked", c.OriginalInfix)
+	}
+}
+
+func TestLoadAcceptsBothPrefixPatterns(t *testing.T) {
+	// prefix は指定あり・なしの両方を受け付ける。
+	tests := []struct {
+		name   string
+		prefix string
+		want   string
+	}{
+		{"prefix なし", "", "t-001/no-masked/2026-09-14/loc-12/e-1"},
+		{"prefix あり", "masking", "masking/t-001/no-masked/2026-09-14/loc-12/e-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("INPUT_BUCKET", "shared")
+			t.Setenv("KEY_PREFIX", tt.prefix)
+
+			c, err := Load()
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			got, err := c.Layout().Original(s3key.Parts{
+				TenantID: "t-001", Date: "2026-09-14", LocationID: "loc-12", EntryID: "e-1",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Errorf("Original = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -109,8 +158,10 @@ func TestLoadDefaults(t *testing.T) {
 		{"DownscaleFactor", c.DownscaleFactor, 4},
 		{"StrengthBlockPx", c.StrengthBlockPx, 64},
 		{"MaxLaplacianVar", c.MaxLaplacianVar, 15.0},
-		{"KeyPrefix", c.KeyPrefix, "masking"},
-		{"OriginalInfix", c.OriginalInfix, "original"},
+		// prefix は任意。未設定なら付けない。
+		{"KeyPrefix", c.KeyPrefix, ""},
+		{"OriginalInfix", c.OriginalInfix, "no-masked"},
+		{"MaskedInfix", c.MaskedInfix, "masked"},
 		{"PolicyVersion", c.PolicyVersion, "v1"},
 		// 出力先を指定しなければ原本と同じバケットに出す。
 		{"OutputBucket", c.OutputBucket, "shared"},

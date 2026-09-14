@@ -20,13 +20,20 @@ const MinAllowedBlurRatio = 0.004
 // Config は設計書 §8.4 の環境変数に対応する。
 // マスク強度に関わる値はサーバー側でのみ決まり、アップローダ側からは弱められない。
 type Config struct {
-	// キーは <bucket>/<prefix>/<x>/<y>/<infix>/<z>/<n> の形に固定する。
-	// 変数（x, y, z, n）は呼び出し側から受け取り、それ以外はここで定義する。
+	// キーは <bucket>/[<prefix>/]<tid>/<infix>/<date>/<lid>/<eid> の形に固定する。
+	// 変数（tid, date, lid, eid）は呼び出し側から受け取り、それ以外はここで定義する。
+	// prefix は任意で、設定しなければ tid から始まる。
 	InputBucket   string // 原本のあるバケット
 	OutputBucket  string // マスク済みの出力先。未指定なら InputBucket と同じ
-	KeyPrefix     string // 共有バケット内でこのアプリが使うルート
-	OriginalInfix string // 原本の階層
-	PolicyVersion string // マスク済みの階層（マスキングポリシー版）
+	KeyPrefix     string // 共有バケット内でこのアプリが使うルート。空なら付けない
+	OriginalInfix string // 原本の階層（必須）
+	MaskedInfix   string // マスク済みの階層（必須）
+
+	// PolicyVersion はキーには含めず、出力のメタデータにだけ記録する。
+	// マスク済みの階層が固定名のため、強度に関わる設定を変えても
+	// キーは変わらない。過去の出力を作り直すかどうかは、この値の一致で判断する
+	// （一致しなければ再処理して上書きする）。
+	PolicyVersion string
 
 	MaskHeightRatio float64 // 画像上部からマスクする高さの比率（0.5 = 上半分）
 	BlurRatio       float64 // 短辺に対するぼかし半径の比率
@@ -43,10 +50,12 @@ type Config struct {
 // Load は環境変数から設定を組み立てる。既定値は設計書 §8.4 に合わせている。
 func Load() (Config, error) {
 	c := Config{
-		InputBucket:     os.Getenv("INPUT_BUCKET"),
-		OutputBucket:    os.Getenv("OUTPUT_BUCKET"),
-		KeyPrefix:       env("KEY_PREFIX", "masking"),
-		OriginalInfix:   env("ORIGINAL_INFIX", "original"),
+		InputBucket:  os.Getenv("INPUT_BUCKET"),
+		OutputBucket: os.Getenv("OUTPUT_BUCKET"),
+		// prefix は任意。未設定なら付けない。
+		KeyPrefix:       os.Getenv("KEY_PREFIX"),
+		OriginalInfix:   env("ORIGINAL_INFIX", "no-masked"),
+		MaskedInfix:     env("MASKED_INFIX", "masked"),
 		PolicyVersion:   env("MASKING_POLICY_VERSION", "v1"),
 		MaskHeightRatio: envFloat("MASK_HEIGHT_RATIO", 0.5),
 		BlurRatio:       envFloat("MIN_BLUR_RATIO", 0.04),
@@ -98,7 +107,7 @@ func (c Config) Layout() s3key.Layout {
 	return s3key.Layout{
 		Prefix:        c.KeyPrefix,
 		OriginalInfix: c.OriginalInfix,
-		MaskedInfix:   c.PolicyVersion,
+		MaskedInfix:   c.MaskedInfix,
 	}
 }
 

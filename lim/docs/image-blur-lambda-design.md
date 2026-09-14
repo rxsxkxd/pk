@@ -71,9 +71,9 @@ S3 に置かれた画像に対してぼかし処理を適用し、**元の情報
 | # | 想定していること | 崩れた場合に起きること | 確認状況 |
 |---|---|---|---|
 | A1 | **隠したい情報は常に画像の上半分にある** | **無警告で機密が露出する**（検知手段がない） | **未確認（Q9）** |
-| A2 | 入力は JPEG / PNG のみ | 非対応形式は全件 DLQ 行きになる | 確定（WebP は考慮外） |
-| A3 | 1 枚 20 MB / 8000×8000 px 以内 | 上限超過は全件 DLQ 行き | 未確認（Q7） |
-| A4 | ラプラシアン分散 15.0 が「設定を桁で外した事故」を拾える | 厳しすぎれば正常画像が DLQ に落ち、緩すぎれば事故を見逃す | 合成画像では正常時 0.46〜2.68。**実データで要確認（§14.1）** |
+| A2 | 入力は JPEG / PNG のみ | 非対応形式は全件失敗になる | 確定（WebP は考慮外） |
+| A3 | 1 枚 20 MB / 8000×8000 px 以内 | 上限超過は全件失敗 | 未確認（Q7） |
+| A4 | ラプラシアン分散 15.0 が「設定を桁で外した事故」を拾える | 厳しすぎれば正常画像まで失敗になり、緩すぎれば事故を見逃す | 合成画像では正常時 0.46〜2.68。**実データで要確認（§14.1）** |
 | A5 | ぼかし半径 4%（短辺比）で内容が判別不能になる | マスクが不十分なまま出力される | 合成画像では確認済み。**許容ラインは 0.004 と判断し既定はその 10 倍**（§12.6）。実データ未確認 |
 | A6 | 原本の置き場への書き込みは信頼できる経路のみ | 悪意ある巨大画像・不正形式で処理系が消耗する | 未確認 |
 | A10 | リクエスト起動の呼び出し元は信頼できる | 変数の細工でキーを別の場所へ向けられる（検証で防いでいるが、任意のオブジェクトを処理させられる余地は残る） | **未確認（Q14）** |
@@ -114,18 +114,18 @@ Lambda 側の物理制約（設計値の根拠）:
 | FR-2b | マスク領域の高さ比率を設定で変更できる | `MASK_HEIGHT_RATIO=0.25 / 1.0` で領域が変わり、境界直下が無変更である |
 | FR-3 | マスク強度は**サーバー側ポリシーで決定**し、クライアントは弱められない | メタデータで小さい半径を指定しても、下限を下回らない |
 | FR-4 | 出力キーは決定的な規約に従う | 同一入力・同一ポリシー版に対し常に同一の出力キーになる |
-| FR-5 | 入力形式・寸法・サイズを検証し、不正な入力は加工せず失敗として記録する | 非対応形式の投入で DLQ に入り、理由が構造化ログに残る |
+| FR-5 | 入力形式・寸法・サイズを検証し、不正な入力は加工せず失敗として記録する | 非対応形式の投入で失敗し、理由が構造化ログに残る |
 | FR-6 | EXIF Orientation を反映し、方向が正しい画像を出力する | 回転情報付き JPEG で見た目の向きが保たれる |
 | FR-7 | 同一入力の重複配信・再実行で結果が壊れない（冪等） | 同じイベントを 2 回投げても出力が 1 つ、内容は同一 |
-| FR-8 | 失敗した入力を後から再処理できる | DLQ からの再投入手順で処理が完了する |
+| FR-8 | 失敗した入力を後から再処理できる | 変数を渡したリクエスト起動で処理が完了する（§10.2） |
 | **FR-9** | **出力画像からすべてのメタデータを除去する** | 出力に EXIF / GPS / 埋め込みサムネイル / コメントが 1 バイトも残らない（`exiftool` で検証） |
-| **FR-10** | **マスク強度を出力前に自己検証し、基準未達なら出力しない** | 検証不合格時に出力オブジェクトが作成されず、DLQ に入る |
+| **FR-10** | **マスク強度を出力前に自己検証し、基準未達なら出力しない** | 検証不合格時に出力オブジェクトが作成されず、失敗として記録される |
 | **FR-10b** | **強度検証はマスク領域のみを対象とする** | 鮮明な非マスク領域を含む正常画像が検証を通過する |
 | **FR-10c** | **強度検証は領域内の区画ごとの最悪値で判定する** | 領域の一部だけが素通しの画像が検証に落ちる |
 | **FR-13** | **許容ラインを下回るぼかし設定では起動しない** | `MIN_BLUR_RATIO=0.001` で起動が失敗する |
 | **FR-10c** | **強度検証は領域内の区画ごとの最悪値で判定する** | 領域の一部だけが素通しの画像が検証に落ちる |
 | **FR-11** | **原画像へのアクセスが監査ログに残る** | CloudTrail データイベントに `GetObject` が記録される |
-| **FR-12** | **マスキングポリシーの版を出力に記録する** | 出力メタデータに `masking-policy-version` が入り、後から一括再処理の判断ができる |
+| **FR-12** | **マスキングポリシーの版を出力に記録する** | 出力メタデータに `masking-policy-version` が入り、版を上げると過去分が作り直される |
 
 ---
 
@@ -138,7 +138,7 @@ Lambda 側の物理制約（設計値の根拠）:
 | 性能 | 4000×3000 px JPEG を p95 3 秒以内で処理（メモリ 2048 MB 時） |
 | スケール | 同時実行 100 まで即応。予約同時実行 200 を上限とする |
 | 可用性 | Lambda / S3 のマネージド可用性に依拠。単一 AZ 障害で機能停止しない |
-| 完全性 | 取りこぼしゼロ。3 回失敗した入力は必ず DLQ に残る |
+| 完全性 | 失敗した入力を特定できること。**失敗イベント自体は保持しない**（§10.2） |
 | セキュリティ | 最小権限 IAM、SSE-KMS（CMK）、パブリックアクセス全面ブロック、監査ログ有効 |
 | プライバシー | ログ・メトリクスに画像本体および画像内の個人情報を出力しない |
 | コスト | 月 10 万枚で USD 15 以下（§13） |
@@ -151,15 +151,14 @@ Lambda 側の物理制約（設計値の根拠）:
 
 ```mermaid
 flowchart LR
-  U[アップローダ] -->|PUT .../original/...| B[(S3 画像バケット<br/>共有)]
+  U[アップローダ] -->|PUT .../no-masked/...| B[(S3 画像バケット<br/>共有)]
   R[呼び出し元] -->|x, y, z, n| L[Lambda: image-mask]
   B -->|ObjectCreated 通知| L
-  L -->|GetObject .../original/...| B
-  L -->|PutObject .../v1/...<br/>検証通過時のみ| B
-  L -.->|失敗 / 検証不合格| DLQ[[SQS DLQ]]
+  L -->|GetObject .../no-masked/...| B
+  L -->|PutObject .../masked/...<br/>検証通過時のみ| B
+  L -.->|失敗 / 検証不合格| A[アラーム → メール]
   L -.-> LOG[CloudWatch Logs / Metrics]
   B -.->|データイベント| CT[CloudTrail 監査ログ]
-  DLQ -.->|手動/定期再投入| L
 ```
 
 ### 6.1 構成要素
@@ -168,7 +167,6 @@ flowchart LR
 |---|---|---|
 | 画像バケット | 原本とマスク済みを同じバケットの別 infix に置く。他のリソースとも共有する前提 | バージョニング有効、SSE-KMS、パブリックアクセス全ブロック、CloudTrail データイベント有効 |
 | Lambda | マスキング処理本体 | Go / arm64 / メモリ 2048 MB / タイムアウト 60 秒 |
-| DLQ | 失敗・検証不合格イベントの退避 | SQS 標準、保持 14 日、KMS 暗号化 |
 | CloudWatch | ログ・メトリクス・アラーム | ログ保持 30 日 |
 | CloudTrail | 画像バケットのデータイベント | 専用トレイル、ログ改変防止（Object Lock） |
 
@@ -179,7 +177,7 @@ flowchart LR
 
 | 項目 | 別バケットなら | 同一バケットでは |
 |---|---|---|
-| IAM の分離 | バケット単位で明快 | **ワイルドカードで可能**（`<prefix>/*/*/original/*`）。同等に絞れる |
+| IAM の分離 | バケット単位で明快 | **ワイルドカードで可能**（`<prefix>/*/no-masked/*`）。同等に絞れる |
 | KMS キーの分離 | 原本用と出力用で別キー | **不可**。既定の暗号化はバケット単位。1 つのキーになる |
 | 再帰ループ防止 | 通知の対象バケットが別 | **通知フィルタでは絞れない**。マスク済みの書き込みでも通知が飛ぶ。**コード側の infix 判定**で止める |
 | 監査ログの範囲 | 原本バケットだけ記録 | `KEY_PREFIX` 配下すべてが記録される |
@@ -194,7 +192,8 @@ S3 通知 → Lambda 直結（非同期呼び出し）を採用。
 
 | 案 | 採否 | 理由 |
 |---|---|---|
-| S3 通知 → Lambda 直結 | ◯ 採用 | 最小構成。Lambda 標準の 2 回自動リトライ + DLQ で要件を満たす |
+| リクエスト起動 | ◯ 採用（既定） | 呼び出し元が処理の成否を直接受け取れる |
+| S3 通知 → Lambda 直結 | △ 実装済み・既定は無効 | パラメータ 1 つで有効化できる |
 | S3 → SQS → Lambda | 将来検討 | 流量制御・バッチ処理が必要になった場合 |
 | S3 → EventBridge → Lambda | 将来検討 | 複数コンシューマへのファンアウトが必要になった場合 |
 
@@ -209,7 +208,7 @@ S3 通知 → Lambda 直結（非同期呼び出し）を採用。
 5. `HeadObject` でメタデータ取得（`Content-Type`、`eTag`）
 6. **冪等性チェック**: 出力キーを `HeadObject`。存在し `source-etag` と `masking-policy-version` が一致 → スキップして正常終了
 7. `GetObject`（`IfMatch=eTag` を付け、処理中の上書きと競合しないようにする）
-8. **検証(2)**: Pillow でヘッダを開き実フォーマットと寸法を確認。`Image.MAX_IMAGE_PIXELS` で decompression bomb を防止
+8. **検証(2)**: `image.DecodeConfig` でヘッダだけを読み、実フォーマットと寸法を確認。総画素数の上限（`MAX_INPUT_PIXELS`）で decompression bomb を防止
 9. EXIF Orientation を適用（`ImageOps.exif_transpose`）
 10. カラーモード正規化: `CMYK`/`P`/`LA` → `RGB` / `RGBA`（アルファは保持）
 11. **マスキング適用**: 半径を `max(8, 短辺 × 0.04)` で算出。上半分の矩形 `(0,0,W,H×0.5)` を切り出してぼかし、元画像へ貼り戻す（§12.3）
@@ -227,33 +226,69 @@ S3 通知 → Lambda 直結（非同期呼び出し）を採用。
 
 ### 8.1 キー構造
 
-キーは 7 要素をスラッシュで連ねた形に固定する。**変数だけを呼び出し側から受け取り、
-それ以外は Lambda 側で定義する。**
+キーは次の形に固定する。**変数だけを呼び出し側から受け取り、それ以外は Lambda 側で定義する。**
 
 ```
-<bucket>/<prefix>/<x>/<y>/<infix>/<z>/<n>
+<bucket>/[<prefix>/]<tid>/<infix>/<date>/<lid>/<eid>
 ```
 
 | 要素 | 決める側 | 内容 |
 |---|---|---|
 | `bucket` | Lambda | 画像バケット。他のリソースと共有する前提 |
-| `prefix` | Lambda | 共有バケット内でこのアプリが使うルート（`KEY_PREFIX`、既定 `masking`） |
-| `x`, `y` | **呼び出し側** | 変数 |
-| `infix` | Lambda | **原本とマスク済みを分ける階層** |
-| `z` | **呼び出し側** | 変数 |
-| `n` | **呼び出し側** | ファイル名 |
+| `prefix` | Lambda | 共有バケット内でこのアプリが使うルート（`KEY_PREFIX`）。**任意** |
+| `tid` | **呼び出し側** | テナント ID |
+| `infix` | Lambda | **原本とマスク済みを分ける階層。必須** |
+| `date` | **呼び出し側** | 日付 |
+| `lid` | **呼び出し側** | ロケーション ID |
+| `eid` | **呼び出し側** | エントリ ID（オブジェクト名にあたる） |
 
 **原本とマスク済みは `infix` だけが異なり、他の変数は共通。**
 
 ```
-原本      : masking/tenant-a/2026-09/original/front/id.jpg
-マスク済み: masking/tenant-a/2026-09/v1/front/id.jpg
-                                      ^^ ここだけ違う
+原本      : masking/t-001/no-masked/2026-09-14/loc-12/e-98765
+マスク済み: masking/t-001/masked/2026-09-14/loc-12/e-98765
+                          ^^ ここだけ違う
 ```
 
-マスク済み側の infix には**マスキングポリシー版**（`MASKING_POLICY_VERSION`）を使う。
-強度に関わる設定を変えたらこれを上げる。上げないと処理済みのオブジェクトが
-再処理されず、同じ階層に新旧の強度が混在する。
+#### prefix は任意（指定あり・なしの両方に対応）
+
+`KEY_PREFIX` を設定しなければ `tid` から始まる。
+
+```
+prefix あり: masking/t-001/no-masked/2026-09-14/loc-12/e-98765
+prefix なし: t-001/no-masked/2026-09-14/loc-12/e-98765
+```
+
+**指定しない場合、バケット全体がこのアプリの領域とみなされる。** IAM の対象も
+S3 通知のフィルタも CloudTrail のセレクタもバケット全体に広がるため、
+他のリソースとバケットを共有するなら指定を推奨する。
+
+`infix` は**必須**。空にすると階層が潰れてキーの形が変わるため、空文字が渡された場合は
+既定値（`no-masked` / `masked`）に落とす。
+
+#### マスキングポリシー版（`MASKING_POLICY_VERSION`）
+
+infix は `no-masked` / `masked` の固定名で、**強度の情報を含まない**。そのため
+「この出力がどの強度設定で作られたか」を別に記録する必要がある。それがポリシー版で、
+**出力オブジェクトのメタデータ `x-amz-meta-masking-policy-version` に入る**。
+
+用途は 1 つ。**強度に関わる設定を変えたときに、過去の出力を作り直すこと。**
+
+処理は冪等なので、同じ入力は 2 回目以降スキップされる（§10.3）。この判定に
+ポリシー版を含めてあるため、版が変われば「未処理」とみなされて作り直される。
+
+```
+MASKING_POLICY_VERSION=v1 で処理 → メタデータに v1 が入る
+  設定を変えて v2 に上げる
+    → 既存の出力は v1 なので一致しない → 作り直して同じキーを上書き
+```
+
+**上書きになる点に注意。** infix が固定名のため出力キーが変わらず、新旧が並存しない。
+古い版が必要ならバケットのバージョニングから取り出す。
+
+版を上げるのは手動の判断であり、設定との整合を機械的に保証する仕組みはない。
+上げ忘れれば古い強度のまま残り続ける。設定値から自動で導出する（ハッシュを取る）方法も
+あるが、現時点では手動としている。
 
 #### 変数の検証
 
@@ -265,37 +300,55 @@ S3 通知 → Lambda 直結（非同期呼び出し）を採用。
 - 空文字（階層を潰す）
 - 前後の空白、制御文字、255 バイト超
 
-日本語やスペースを含む名前は S3 のキーとして正当なので通す。
+`eid` は拡張子があってもなくても通す。日本語やスペースを含む値も S3 のキーとして
+正当なので通す。
+
+> **日付の形式は検証していない。** `2026-09-14` でも `20260914` でも通る。
+> 形式が決まっているなら検証を足せる（Q15）。
 
 ### 8.2 起動方法
 
-2 通りを受け付ける。ペイロードの形で判別する。
+実装は 2 通りを受け付ける。ペイロードの形で判別する。
+**ただし現在の設定では S3 通知は無効**で、リクエスト起動だけが有効になっている。
 
-#### S3 の ObjectCreated 通知
+| 起動方法 | 実装 | 既定の設定 |
+|---|---|---|
+| リクエスト | 対応 | **有効** |
+| S3 の ObjectCreated 通知 | 対応 | **無効**（`EnableS3Trigger=true` で有効化） |
 
-従来どおり。通知されたキーをレイアウトに照らして解釈する。
+#### S3 の ObjectCreated 通知（既定では無効）
+
+通知されたキーをレイアウトに照らして解釈する。
 
 - レイアウトに合わないキー → **スキップ**（エラーにしない。他のリソースが同じバケットを使う前提のため）
 - `infix` が原本以外 → **スキップ**（マスク済みの書き込みで自分自身が起動するのを防ぐ）
 
 > **通知フィルタでは原本に絞れない。** S3 の通知フィルタはプレフィックスと接尾辞しか
-> 指定できず、`infix` は可変の `x/y` の後ろにある。したがってマスク済みの書き込みでも
+> 指定できず、`infix` は可変の `tid` の後ろにある。したがってマスク済みの書き込みでも
 > 通知は飛ぶ。再帰ループを止めているのは**コード側の infix 判定**である。
 
-#### リクエスト
+> 実装もテストも残してあるので、パラメータ 1 つで有効化できる。
+> 有効化した場合の注意は §6.1.1（通知フィルタで原本に絞れない）を参照。
+
+#### リクエスト（既定で有効）
 
 変数だけを渡す。
 
 ```json
-{ "x": "tenant-a", "y": "2026-09", "z": "front", "n": "id.jpg" }
+{
+  "tenant_id": "t-001",
+  "date": "2026-09-14",
+  "location_id": "loc-12",
+  "entry_id": "e-98765"
+}
 ```
 
 Lambda がキーを組み立てて `HeadObject` でオブジェクトを確認し、処理する。応答:
 
 ```json
 {
-  "sourceKey": "masking/tenant-a/2026-09/original/front/id.jpg",
-  "outputKey": "masking/tenant-a/2026-09/v1/front/id.jpg",
+  "sourceKey": "masking/t-001/no-masked/2026-09-14/loc-12/e-98765",
+  "outputKey": "masking/t-001/masked/2026-09-14/loc-12/e-98765",
   "skipped": false,
   "radiusPx": 36,
   "strengthScore": 1.15
@@ -310,7 +363,7 @@ Lambda がキーを組み立てて `HeadObject` でオブジェクトを確認�
 | キー | 例 | 用途 |
 |---|---|---|
 | `x-amz-meta-source-bucket` | `raw-bucket` | 追跡 |
-| `x-amz-meta-source-key` | `masking/tenant-a/2026-09/original/front/id.jpg` | 追跡 |
+| `x-amz-meta-source-key` | `masking/t-001/no-masked/2026-09-14/loc-12/e-98765` | 追跡 |
 | `x-amz-meta-source-etag` | `d41d8c...` | 冪等性判定 |
 | `x-amz-meta-masking-policy-version` | `v1` | 再処理判断（FR-12） |
 | `x-amz-meta-blur-radius-px` | `120` | 実際に適用した半径（監査用） |
@@ -326,9 +379,10 @@ Lambda がキーを組み立てて `HeadObject` でオブジェクトを確認�
 |---|---|---|---|
 | `INPUT_BUCKET` | ○ | — | 原本のあるバケット |
 | `OUTPUT_BUCKET` | | = `INPUT_BUCKET` | 出力先。既定は同じバケット |
-| `KEY_PREFIX` | | `masking` | 共有バケット内のルート（§8.1） |
-| `ORIGINAL_INFIX` | | `original` | 原本の階層 |
-| `MASKING_POLICY_VERSION` | | `v1` | マスク済みの階層。ポリシー版 |
+| `KEY_PREFIX` | | （空） | 共有バケット内のルート。**任意**（§8.1） |
+| `ORIGINAL_INFIX` | | `original` | 原本の階層。既定 `no-masked` |
+| `MASKED_INFIX` | | `masked` | マスク済みの階層 |
+| `MASKING_POLICY_VERSION` | | `v1` | 強度設定のラベル。**キーには含めずメタデータにだけ記録**（§8.1） |
 | `MASK_HEIGHT_RATIO` | | `0.5` | 上部からマスクする高さの比率。1.0 で全面（§12.3） |
 | `MIN_BLUR_RATIO` | | `0.04` | ぼかし半径（短辺に対する比率、§12.1）。**0.004 未満は起動時に拒否**（§12.6） |
 | `MIN_BLUR_RADIUS_PX` | | `8` | ぼかし半径の絶対下限（小さい画像用） |
@@ -352,7 +406,7 @@ Lambda がキーを組み立てて `HeadObject` でオブジェクトを確認�
 | ぼかしの実装 | **ボックスぼかし 3 回でガウス分布を近似** | 半径 120px 級では素朴な畳み込みが破綻する（4000×3000 で 10^10 オーダー）。近似なら半径によらず O(pixels) で、視覚的な差はない |
 | アーキテクチャ | arm64 (Graviton2) | x86_64 比で概ね 20% 安く、画像処理でも性能同等以上 |
 | パッケージング | 単一バイナリ（`bootstrap`）。Layer 不要 | `sam build`（`BuildMethod: go1.x`）でそのままビルドできる |
-| **IaC** | **AWS SAM**（確定） | Lambda + S3 通知 + DLQ + IAM を最短で記述できる。バケットポリシー・IAM の差分がレビュー可能になる点がマスキング用途で重要 |
+| **IaC** | **AWS SAM**（確定） | Lambda + S3 通知 + IAM を最短で記述できる。バケットポリシー・IAM の差分がレビュー可能になる点がマスキング用途で重要 |
 
 ### 9.0 パッケージ構成
 
@@ -371,31 +425,48 @@ internal/config   … 環境変数
 internal/metrics  … EMF によるメトリクス出力
 ```
 
-### 9.1 SAM テンプレートの構成（実装時の骨格）
+### 9.1 CloudFormation (SAM) テンプレートの構成
+
+ファイル名は `cloudformation.yaml`。SAM CLI の既定は `template.yaml` なので、
+コマンドには `-t` が要る（Makefile 側で渡している）。
 
 ```
-template.yaml
-├── Globals              … Runtime: python3.13 / Architectures: [arm64] / Timeout: 60 / MemorySize: 2048
-├── ImageBucket          … 画像バケット（暗号化・パブリックブロック・バージョニング・通知）
-├── ImageKey             … KMS CMK（バケット単位なので 1 つ）
-├── MaskFunction         … AWS::Serverless::Function
-│   ├── 通知: ImageBucket の NotificationConfiguration（Filter: prefix=<KeyPrefix>/）
-│   ├── Policies: 最小権限をインラインで記述（§11.1）
-│   ├── EventInvokeConfig: MaximumRetryAttempts=2 / OnFailure→DLQ
-│   └── Layers: [PillowLayer]
-├── PillowLayer          … AWS::Serverless::LayerVersion（aarch64 wheel を同梱）
-├── DLQ                  … AWS::SQS::Queue
-├── Trail                … CloudTrail データイベント（RawBucket）
-└── Alarms               … §13 のアラーム群
+cloudformation.yaml
+├── Parameters
+│   ├── Env                   … dev / stg / prod
+│   ├── EnableS3Trigger       … S3 通知で起動するか（既定 false）
+│   ├── AlertEmail            … アラート通知先（空なら購読を作らない）
+│   ├── KeyPrefix             … 共有バケット内のルート
+│   ├── OriginalInfix         … 原本の階層
+│   ├── MaskingPolicyVersion  … マスク済みの階層
+│   └── MaskHeightRatio / BlurRatio / DownscaleFactor / MaxAllowedLaplacianVar
+├── Conditions
+│   ├── S3TriggerEnabled
+│   └── HasAlertEmail
+├── Globals                   … Runtime: provided.al2023 / arm64 / Timeout 60 / Memory 2048
+├── ImageKey                  … KMS CMK（バケット単位なので 1 つ）
+├── ImageBucket               … 画像バケット（暗号化・パブリックブロック・バージョニング）
+│   └── NotificationConfiguration … S3TriggerEnabled のときだけ付く
+├── ImageBucketPolicy         … TLS 強制 / マスク済み階層への書き込み制限
+├── MaskFunctionInvokePermission … S3 からの起動許可（通知を有効化する際に必要）
+├── MaskFunction              … AWS::Serverless::Function（BuildMethod: go1.x）
+│   ├── Policies              … 最小権限をインラインで記述（§11.1）
+│   └── EventInvokeConfig     … MaximumRetryAttempts=2（退避先は置かない）
+├── AlertTopic                … SNS。アラームの通知先
+├── AlertEmailSubscription    … HasAlertEmail のときだけ作る（承認は手動）
+├── TrailBucket / TrailBucketPolicy / Trail … CloudTrail データイベント
+└── Alarms                    … §13 のアラーム 4 種（すべて AlertTopic へ）
 ```
 
-`sam build && sam deploy --guided` でデプロイ。環境（dev/prod）はパラメータで切り替える。
+`make build` / `make deploy` でデプロイする（内部で `-t cloudformation.yaml` を渡す）。
+環境（dev/stg/prod）はパラメータで切り替える。
+
 
 **副次的な利点**: Go の標準エンコーダは EXIF / XMP を一切書き出さないため、
 再エンコードした時点で FR-9（メタデータ完全除去）が構造的に満たされる。
-Pillow のように「メタデータを引き継がないよう気をつける」必要がない。
+「メタデータを引き継がないよう気をつける」という運用に頼らずに済む。
 
-**制限**: 対応形式は **JPEG / PNG のみ**。WebP は今回考慮外とし、検証エラーとして DLQ へ送る
+**制限**: 対応形式は **JPEG / PNG のみ**。WebP は今回考慮外とし、検証エラーとして扱う
 （Go 標準ライブラリに WebP エンコーダがないため、対応するなら別形式での出力か cgo 依存の導入が要る）。
 
 ---
@@ -406,16 +477,58 @@ Pillow のように「メタデータを引き継がないよう気をつける�
 
 | 分類 | 例 | 挙動 |
 |---|---|---|
-| 検証エラー（恒久） | 非対応形式、サイズ超過、寸法超過 | リトライしても直らない。ERROR ログ + メトリクス。**例外を投げて DLQ へ**（取りこぼし禁止のため成功扱いにしない） |
-| **強度検証不合格** | マスク領域に高周波成分が残る | **出力せず** DLQ へ。要調査（半径算出またはパラメータの問題） |
+| 検証エラー（恒久） | 非対応形式、サイズ超過、寸法超過 | リトライしても直らない。ERROR ログ + メトリクス + アラーム。成功扱いにはしない |
+| **強度検証不合格** | マスク領域に高周波成分が残る | **出力しない**。要調査（半径算出またはパラメータの問題） |
 | 一時エラー | S3 / KMS スロットリング、タイムアウト | 例外送出 → Lambda が自動リトライ（最大 2 回、間隔 1 分 / 2 分） |
-| スキップ | 出力プレフィックス配下、既に処理済み | 正常終了（INFO ログ） |
+| スキップ | レイアウト外のキー、マスク済みの infix、既に処理済み | 正常終了（INFO ログ） |
 
-### 10.2 リトライと DLQ
+### 10.2 リトライと失敗時の扱い
+
 - 非同期呼び出しの `MaximumRetryAttempts=2`、`MaximumEventAgeInSeconds=3600`
-- 失敗後の宛先（`OnFailure`）に SQS DLQ を設定。元イベントと失敗理由が入る
-- DLQ に 1 件でも入ったらアラーム（§13）
-- 再処理: DLQ から取り出して同一 Lambda に再投入するスクリプトを用意（冪等なので安全）
+- **失敗イベントの退避先（DLQ）は置いていない。** リトライを使い切ったイベントは破棄される
+- 失敗したことと対象は、構造化ログ（`sourceKey` を含む）とメトリクス、アラームメールで分かる
+
+#### リトライを提供しているのは誰か
+
+リトライは自前で実装していない。3 つの層がそれぞれ提供する。
+
+| 層 | 提供元 | 内容 |
+|---|---|---|
+| ① イベント配信 | S3 | 通知の配信をリトライする（at-least-once）。**通知が無効な現在は関係しない** |
+| ② 非同期呼び出し | Lambda | 関数がエラーを返すと再実行。`MaximumRetryAttempts=2`、間隔は概ね 1 分 → 2 分。スロットリング等は `MaximumEventAgeInSeconds`（1 時間）まで粘る |
+| ③ API 呼び出し | AWS SDK | S3 / KMS の呼び出しをリトライ（`aws-sdk-go-v2` の既定、最大 3 回・指数バックオフ）。コード側で上書きしていない |
+
+**②は非同期呼び出しにしか効かない。** リクエスト起動を同期（`RequestResponse`）で呼ぶ場合、
+Lambda はリトライせず、エラーはそのまま呼び出し元に返る。**再試行は呼び出し元の責任**になる。
+現在の既定構成（リクエスト起動のみ・DLQ なし）では、これが標準の動作になる。
+
+なお恒久的な検証エラー（非対応形式など）もハンドラはエラーを返す。非同期で呼んだ場合は
+②が 2 回再実行するため、直らないと分かっている処理を 3 回走らせることになる。
+同期呼び出しが前提であれば、この無駄は発生しない。
+
+#### 失敗した入力の再処理（FR-8）
+
+イベントは残らないが、**キーの変数さえ分かれば再処理できる**（§8.2 のリクエスト起動）。
+ログに出ている `sourceKey` から変数を読み取り、そのまま投げ直す。
+
+```bash
+aws lambda invoke --function-name image-mask-dev \
+  --payload '{"tenant_id":"t-001","date":"2026-09-14","location_id":"loc-12","entry_id":"e-98765"}' out.json
+```
+
+処理は冪等なので、既に成功していたものを投げ直しても害はない（`skipped: true` が返る）。
+
+#### この構成で失うもの
+
+| | DLQ がある場合 | 現在 |
+|---|---|---|
+| 失敗の検知 | アラーム | アラーム（同じ） |
+| 失敗した対象の特定 | DLQ のメッセージ | **ログ**（保持 30 日） |
+| 再処理 | DLQ から再投入 | **リクエスト起動で投げ直す** |
+| 取りこぼし | 起きない | **ログの保持期間を過ぎると追えなくなる** |
+
+実質的な差は最後の 1 行。失敗に長期間気づかないまま放置した場合、何が失敗したのかを
+追えなくなる。アラームメールが届く運用であれば、その前に気づく想定。
 
 ### 10.3 冪等性（FR-7）
 出力キーが「入力キー + ポリシー版」から決定的に決まり、書き込み前に `source-etag` 一致で早期リターンする。競合して二重に書いても内容は同一なので last-writer-wins で問題ない。
@@ -436,10 +549,9 @@ Pillow のように「メタデータを引き継がないよう気をつける�
 ## 11. セキュリティ・プライバシー
 
 ### 11.1 IAM 最小権限
-- 原本: `s3:GetObject`, `s3:GetObjectVersion` を `arn:.../<prefix>/*/*/original/*` に限定。`ListBucket` は付与しない
-- マスク済み: `s3:PutObject` と冪等性判定用の `s3:GetObject` を `arn:.../<prefix>/*/*/v1/*` に限定。`DeleteObject` は付与しない
+- 原本: `s3:GetObject`, `s3:GetObjectVersion` を `arn:.../<prefix>/*/*/no-masked/*` に限定。`ListBucket` は付与しない
+- マスク済み: `s3:PutObject` と冪等性判定用の `s3:GetObject` を `arn:.../<prefix>/*/masked/*` に限定。`DeleteObject` は付与しない
 - KMS: 1 つのキーに `Decrypt` / `GenerateDataKey` / `Encrypt`（§6.1.1 のとおり分離できない）
-- DLQ: `sqs:SendMessage`
 
 ### 11.2 バケット設定
 - `BlockPublicAcls` 等 4 項目すべて有効
@@ -460,8 +572,10 @@ Pillow のように「メタデータを引き継がないよう気をつける�
 - 例外のスタックトレースに画像データが混入しないよう、例外メッセージに生データを含めない
 
 ### 11.5 脆弱性管理
-信頼できない入力をパースするため、Pillow のパーサ脆弱性が直接のリスクになる。
-- Pillow を常に最新に追随（Dependabot 等）
+信頼できない入力をパースするため、画像デコーダの脆弱性が直接のリスクになる。
+デコードは Go 標準ライブラリ（`image/jpeg`、`image/png`）が担うため、リスクは
+Go 本体のセキュリティ更新に集約される。
+- Go のバージョンを更新に追随させる（`go.mod` の go ディレクティブとビルド環境）
 - CI に依存脆弱性スキャンを組み込む
 - Lambda 実行環境は VPC 外（S3 と KMS のみアクセス）。万一のコード実行でも到達範囲を絞る
 
@@ -590,7 +704,7 @@ DOWNSCALE_FACTOR = 1   … 無効（ぼかしのみ）
   引きずられて正常な入力がすべて不合格になる
 - **判定**: マスク領域を `STRENGTH_BLOCK_PX`（既定 64px）の区画に割り、
   **最もエッジが残った区画**のスコアが `MAX_ALLOWED_LAPLACIAN_VAR`（既定 15.0）以下なら合格（FR-10c）
-- **不合格時**: **PutObject を行わず**例外を投げて DLQ へ（fail-closed、§10.4）
+- **不合格時**: **PutObject を行わず**例外を投げる（fail-closed、§10.4）
 
 #### なぜ区画に割るのか
 
@@ -633,7 +747,7 @@ DOWNSCALE_FACTOR = 1   … 無効（ぼかしのみ）
 - **この検査は、設定を桁で取り違えた事故を拾う粗い網に徹する。** しきい値 15.0 は
   比率 0.004 相当のスコアのばらつき（1.88〜8.19）の上に置いてある
 
-しきい値を正常系ぎりぎり（5.0）に置くと、細部の多い実写真で**正常なのに DLQ に落ちる**
+しきい値を正常系ぎりぎり（5.0）に置くと、細部の多い実写真で**正常なのに失敗になる**
 事故が起きやすい。`idcard.jpg` は正常時ですら 2.68 で、既に近い。
 
 #### 既定設定での実測（区画 64px）
@@ -698,43 +812,83 @@ $ OUTPUT_BUCKET=x MIN_BLUR_RATIO=0.001 ./bootstrap
 - **`StrengthScore`（None）** — 傾向監視。徐々に上がっていたら劣化の兆候
 - `InputBytes` / `OutputBytes`
 
-### アラーム
+### アラームと通知
+
+エラーはメトリクスとして記録し、アラーム経由で SNS に送り、メールで通知する。
+
+```
+処理の失敗
+  ├─ EMF でカスタムメトリクスを出力（StrengthCheckFailures / ValidationErrors / TransientErrors）
+  └─ ハンドラがエラーを返す → Lambda が 2 回リトライ → 破棄（AWS/Lambda の Errors が立つ）
+        │
+        ▼
+   CloudWatch アラーム ──▶ SNS トピック ──▶ メール
+```
+
 | 名前 | 条件 | 重要度 |
 |---|---|---|
-| **`MaskStrengthCheckFailed`** | `StrengthCheckFailures` >= 1 | **Critical** |
-| `MaskLambdaErrors` | `Errors` >= 1（5 分） | High |
-| `MaskDLQNotEmpty` | `ApproximateNumberOfMessagesVisible` >= 1 | High |
-| `MaskLambdaThrottles` | `Throttles` >= 1（5 分） | Medium |
-| `MaskLambdaDurationP95` | p95 > 10,000 ms（15 分） | Medium |
+| **`strength-check-failed`** | `ImageMask/StrengthCheckFailures` >= 1（5 分） | **Critical** |
+| `validation-errors` | `ImageMask/ValidationErrors` >= 1（5 分） | High |
+| `errors` | `AWS/Lambda Errors` >= 1（5 分） | High |
+| `throttles` | `AWS/Lambda Throttles` >= 1（5 分） | Medium |
+
+すべて `AlarmActions` に SNS トピックを指定してある。
+
+#### メール通知の構成（CloudFormation で記述できるか）
+
+**できる。** ただし 1 点だけ CloudFormation では完結しない。
+
+| 要素 | CFN での記述 | 備考 |
+|---|---|---|
+| SNS トピック | `AWS::SNS::Topic` | できる |
+| メール購読 | `AWS::SNS::Subscription`（`Protocol: email`） | リソースは作れるが **承認は手動** |
+| アラームからの通知 | アラームの `AlarmActions` | できる |
+
+**承認が手動になる点が唯一の制約。** スタックを作ると指定アドレスに確認メールが届き、
+本人がリンクを押すまで購読は `PendingConfirmation` のまま通知が届かない。
+CloudFormation はこの承認を代行できず、しかも**未承認でもスタックの作成は成功する**ので、
+承認を忘れると「アラームは鳴っているのにメールが来ない」状態に気づけない。
+デプロイ後に承認状態を確認すること。
+
+```bash
+aws sns list-subscriptions-by-topic --topic-arn "$ALERT_TOPIC_ARN" \
+  --query 'Subscriptions[].[Endpoint,SubscriptionArn]' --output table
+# SubscriptionArn が PendingConfirmation なら未承認
+```
+
+通知先を指定せずにデプロイもできる（`AlertEmail` が空ならサブスクリプションを作らない）。
+アラーム自体は動くので、あとからコンソールや別スタックで購読を足せる。
+
+#### SNS トピックの暗号化について
+
+暗号化は掛けていない。掛ける場合、SNS 管理の既定キーでは CloudWatch からの発行が
+通らないため、カスタマー管理キーを作り、キーポリシーで `cloudwatch.amazonaws.com` に
+`kms:GenerateDataKey*` と `kms:Decrypt` を許可する必要がある。
+アラート本文にマスク対象の内容は含めないため、現時点では掛けていない。
 
 - 構造化 JSON ログ（`requestId`, `sourceBucket`, `keyHash`, `radiusPx`, `strengthScore`, `durationMs`, `result`）
 - X-Ray 有効化
-- ポリシー変更時の運用: `MASKING_POLICY_VERSION` を上げて再デプロイ → 過去分は S3 Batch Operations で一括再処理
+- ポリシー変更時の運用: `MASKING_POLICY_VERSION` を上げて再デプロイ → 過去分は再投入して作り直す（同じキーが上書きされる、§8.1）
 
-### 13.1 DLQ からの再処理手順
+### 13.1 失敗した入力の再処理
 
-処理は冪等なので、DLQ のメッセージをそのまま関数へ再投入して問題ない。
+失敗イベントは保持していない（§10.2）。再処理はログから対象を特定して投げ直す。
 
 ```bash
-# 1. 何が落ちているかを確認する（理由は requestContext / responsePayload に入る）
-aws sqs receive-message --queue-url "$DLQ_URL" --max-number-of-messages 10 \
-  | jq -r '.Messages[].Body | fromjson | {reason: .requestContext.condition, payload: .responsePayload}'
+# 1. 失敗したキーをログから拾う
+aws logs filter-log-events --log-group-name /aws/lambda/image-mask-dev \
+  --filter-pattern '{ $.level = "ERROR" }' \
+  --query 'events[].message' --output text | jq -r '.sourceKey'
 
-# 2. 原因を直す（パラメータ修正・デプロイなど）
-
-# 3. 元イベントを取り出して再投入する
-aws sqs receive-message --queue-url "$DLQ_URL" --max-number-of-messages 10 \
-  | jq -c '.Messages[].Body | fromjson | .requestPayload' \
-  | while read -r ev; do
-      aws lambda invoke --function-name "$FUNCTION_NAME" \
-        --invocation-type Event --payload "$ev" /dev/null
-    done
-
-# 4. 成功を確認してからメッセージを削除する
+# 2. キーの変数部分をリクエストにして投げ直す
+#    masking/t-001/no-masked/2026-09-14/loc-12/e-98765
+#            ^^^^^          ^^^^^^^^^^ ^^^^^^ ^^^^^^^
+#            tid            date       lid    eid
+aws lambda invoke --function-name image-mask-dev \
+  --payload '{"tenant_id":"t-001","date":"2026-09-14","location_id":"loc-12","entry_id":"e-98765"}' out.json
 ```
 
-> **未実装**: この手順をまとめたスクリプトは用意していない（§15）。件数がまとまって出るように
-> なったら `scripts/reprocess_dlq.sh` として実装する。
+処理は冪等なので、既に成功していたものを投げ直しても害はない。
 
 ### 13.2 性能の実測値
 
@@ -837,7 +991,7 @@ aws sqs receive-message --queue-url "$DLQ_URL" --max-number-of-messages 10 \
 | **強度検証の対象範囲** | **鮮明な非マスク領域を含む正常画像が検証を通過すること**（領域のみを測っていることの回帰テスト） |
 | **局所的な素通しの検知** | **領域の一部だけに細部が残る画像が検証に落ちること。領域全体の平均ではしきい値を下回る水準の模様で確認する**（区画判定の回帰テスト） |
 | **半径算出** | **200px〜8000px の各寸法で半径が仕様どおり算出され、大きい画像でもマスクが成立すること**（絶対値固定による事故の回帰テスト） |
-| **閾値キャリブレーション** | **実画像 1,000 枚程度でラプラシアン分散の分布を取り、`MAX_ALLOWED_LAPLACIAN_VAR` を決定。正常画像が DLQ に落ちない水準であることを確認**。`cmd/maskfile -report-only -json` で一括収集する |
+| **閾値キャリブレーション** | **実画像 1,000 枚程度でラプラシアン分散の分布を取り、`MAX_ALLOWED_LAPLACIAN_VAR` を決定。正常画像が失敗しない水準であることを確認**。`cmd/maskfile -report-only -json` で一括収集する |
 | 目視確認 | `cmd/maskfile` で実画像を処理し、マスク領域と境界を目で確認する |
 | **復元耐性** | **逆畳み込み（Wiener filter）を出力に適用し、元情報が読めないことを確認**。半径比 1%/2%/4%/8% で比較し、4% が十分であることの根拠を残す（§12.1 のキャリブレーション） |
 | **メタデータ除去** | **出力を `exiftool` で検査し、EXIF / GPS / 埋め込みサムネイルが 0 件であること** |
@@ -921,7 +1075,7 @@ photo.jpg  jpeg 1200x900  radius=36px  top 50% (0,0,1200,450)
 #### しきい値（A4 / `MAX_ALLOWED_LAPLACIAN_VAR`）のキャリブレーション
 
 **リリース前に必ず行う。** 既定値 15.0 は合成画像 4 枚から置いた暫定値であり、
-厳しすぎれば正常画像が DLQ に落ちる。マスクの強さ自体は `MIN_BLUR_RATIO`
+厳しすぎれば正常な画像まで失敗になる。マスクの強さ自体は `MIN_BLUR_RATIO`
 （許容ライン 0.004、既定 0.04）で担保しており、ここで測るのは事故検知の網の粗さ。
 
 ```bash
@@ -951,7 +1105,7 @@ done
 
 #### 異常系の確認
 
-本番で DLQ に入るのと同じ分類が表示され、終了コードが 1 になる。
+本番で失敗になるのと同じ分類が表示され、終了コードが 1 になる。
 
 ```
 broken.jpg  FAILED (validation) cannot decode image header: image: unknown format
@@ -966,12 +1120,12 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.
 |---|---|
 | S3 イベントの発火、プレフィックスフィルタ | dev 環境へ PUT して出力を確認 |
 | IAM 最小権限（出力バケットを読めない、原本に書けない） | dev 環境で当該操作が拒否されることを確認 |
-| リトライ回数と DLQ への到達 | 意図的に失敗させて DLQ の中身を確認 |
+| リトライ回数とアラームの発火 | 意図的に失敗させてメールが届くことを確認 |
 | KMS の暗号化・復号 | dev 環境で PUT / GET |
 | CloudTrail データイベントの記録（FR-11） | 原本を GET してログに現れることを確認 |
 | アラームの発火 | メトリクスを手動投入するか、意図的に失敗させる |
 | 実環境での処理時間・スロットリング | 負荷試験（§14 の負荷テスト） |
-| `template.yaml` の妥当性 | `make validate`（`sam validate --lint`） |
+| `cloudformation.yaml` の妥当性 | `make validate`（`sam validate --lint`） |
 
 冪等性・fail-closed・領域・メタデータ除去はハンドラのユニットテストで代替済み。
 
@@ -983,7 +1137,7 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.
 
 | 要件 | 実装 | テスト |
 |---|---|---|
-| FR-1 S3 起点の自動処理 | `template.yaml` (S3 イベント), `internal/handler` | ローカル不可（§14.2） |
+| FR-1 S3 起点の自動処理 | `cloudformation.yaml` (S3 イベント), `internal/handler` | ローカル不可（§14.2） |
 | FR-2 上半分へのぼかし | `internal/masking.Apply`, `internal/imaging.TopRegion` | `TestHandleMasksOnlyTopHalf`, `TestApplyMasksTopHalfOnly` |
 | FR-2b 領域比率の設定 | `MASK_HEIGHT_RATIO` | `TestHandleMaskHeightRatio` |
 | マスク領域外を変更しない | `masking.Apply`（領域を切り出して処理） | `TestDownscaleNeverTouchesAreaOutsideMask`, `TestBlurPassesDoNotAffectAreaOutsideMask` |
@@ -992,22 +1146,21 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.
 | FR-5 入力検証 | `masking.Apply`（形式・寸法・サイズ） | `TestHandleRejectsBadInput`, `TestApplyRejectsBadInput` |
 | FR-6 EXIF Orientation | `imaging.JPEGOrientation`, `imaging.ApplyOrientation` | `TestApplyOrientationRotates90` |
 | FR-7 冪等性 | `handler.alreadyProcessed` | `TestHandleIsIdempotent`, `TestHandleReprocessesWhenSourceChanged` |
-| FR-8 DLQ からの再処理 | `template.yaml` (DLQ) | 手順のみ（§13.1）。**スクリプト未実装** |
+| FR-8 失敗した入力の再処理 | リクエスト起動（§8.2） | `TestHandleRequestMasksTheKeyBuiltFromVariables`。手順は §13.1 |
 | FR-9 メタデータ除去 | Go 標準エンコーダの性質（構造的に保証） | `TestHandleStripsAllMetadata` |
 | FR-10 強度の自己検証 | `masking.Apply`, `imaging.LaplacianVariance` | `TestHandleFailsClosedOnWeakMask` |
 | FR-10b 領域のみを検証 | `masking.Apply`（`part` を測る） | `TestHandleStrengthCheckIgnoresUnmaskedArea` |
-| FR-11 監査ログ | `template.yaml` (CloudTrail) | ローカル不可（§14.2） |
-| FR-12 ポリシー版の記録 | `handler.put` のメタデータ | `TestHandleMasksImageAndWritesMetadata` |
+| FR-11 監査ログ | `cloudformation.yaml` (CloudTrail) | ローカル不可（§14.2） |
+| FR-12 ポリシー版の記録 | `handler.put` のメタデータ | `TestHandleMasksImageAndWritesMetadata`, `TestHandleReprocessesWhenPolicyVersionChanged` |
 
 ### 15.2 未実装・未検証
 
 | 項目 | 状況 | 対応 |
 |---|---|---|
-| WebP 対応 | **対象外（確定）**。検証エラーとして DLQ 行き | 今回は考慮しない。必要になったら別形式での出力か cgo 依存の導入を検討 |
+| WebP 対応 | **対象外（確定）**。検証エラーとして扱う | 今回は考慮しない。必要になったら別形式での出力か cgo 依存の導入を検討 |
 | **`MAX_ALLOWED_LAPLACIAN_VAR` の値** | 暫定値 15.0（合成画像 4 枚から） | §14.1 の手順でリリース前に決定する |
 | **許容ライン `MIN_BLUR_RATIO >= 0.004`** | 合成画像 1 枚に対する目視判断（§12.6） | 実データで見直す。既定はその 10 倍の余裕を持たせてある |
-| **`template.yaml` の検証** | `sam validate` / デプロイとも未実施 | SAM CLI のある環境で `make validate` |
-| **DLQ 再処理スクリプト** | 手順のみ（§13.1）。スクリプト未実装 | 運用開始後、必要になった時点で |
+| **`cloudformation.yaml` の検証** | `sam validate` / デプロイとも未実施 | SAM CLI のある環境で `make validate` |
 | CloudTrail ログバケットの Object Lock | 未設定（§11.3 では要求している） | コンプライアンス要件確定後（Q4） |
 | アニメーション画像 | 非対応（静止画のみ） | スコープ外 |
 | **EXIF Orientation のテスト** | **意図的に保留**。`JPEGOrientation` は Orientation=1 の 1 ケースのみ | 実データに Orientation が付くと分かってから（Q12 / A9） |
@@ -1025,10 +1178,40 @@ internal/masking  … マスキング処理そのもの。上 2 つが共有す�
 internal/imaging  … ぼかし・領域切り出し・EXIF 向き補正・強度測定
 internal/config   … 環境変数
 internal/metrics  … EMF によるメトリクス出力
-template.yaml     … バケット・KMS・Lambda・DLQ・CloudTrail・アラーム
+cloudformation.yaml … バケット・KMS・Lambda・SNS・CloudTrail・アラーム
 ```
 
 外部依存は `aws-lambda-go` と `aws-sdk-go-v2` のみ。画像処理は標準ライブラリだけで実装している。
+
+### 15.4 要件として出ていないが入れたもの
+
+依頼になかったが設計側の判断で入れた構成。**外す判断ができるよう、理由と外した場合の影響を
+残しておく。** 実際、原本の自動削除（ライフサイクル）は同様の追加だったが、不要との判断で削除した。
+
+#### 安全側の既定として入れたもの（外すと弱くなる）
+
+| 項目 | 理由 | 外した場合 | 追加コスト |
+|---|---|---|---|
+| マスク強度の自己検証（§12.4） | 設定を桁で取り違えた事故を拾う | 誤設定に気づけない。§12.4 のとおり万能ではないが、無いよりは拾える | 処理時間 +12 ms |
+| fail-closed（§10.4） | 検証を通るまで出力しない | 中途半端な結果が出回りうる | なし |
+| メタデータ除去（FR-9） | EXIF に未加工のプレビューが埋まっていることがある | 本体をぼかす意味が薄れる | なし（Go の標準エンコーダの性質） |
+| 冪等性（§10.3） | S3 通知は at-least-once | 重複配信で二重処理。結果は壊れないが無駄 | HeadObject 1 回 |
+| 入力サイズ・画素数の上限 | 不正な入力で処理系が消耗するのを防ぐ | 巨大画像でタイムアウト・高コスト | なし |
+| パブリックアクセスブロック、`SecureTransport` 強制 | S3 の基本設定 | 設定ミスが露出に直結 | なし |
+
+#### 運用コストがあるもの（要判断）
+
+| 項目 | 理由 | 外した場合 | 追加コスト |
+|---|---|---|---|
+| **CloudTrail データイベント**（§11.3） | 誰がいつ原本を取得したかの監査（FR-11） | 監査証跡が残らない。規程（Q4）次第では必須になりうる | 約 USD 0.2/月 + ログ保管。**Q4 が決まるまでの先回り** |
+| **KMS カスタマー管理キー** | 鍵の管理主体を明示する | S3 管理の暗号化（SSE-S3）でも保管時は暗号化される | 約 USD 1/月 + リクエスト料。**Q4 が決まるまでの先回り** |
+| **バケットのバージョニング** | 誤上書き・誤削除からの復旧 | 上書きすると元に戻せない | ストレージが増える（世代分） |
+| X-Ray | S3 呼び出しのレイテンシ分解 | 遅延の内訳が追いにくい | 少額 |
+| 予約同時実行 200 | 下流とコストの保護 | バーストで同時実行が跳ねうる | なし（むしろ抑制） |
+
+> **Q4（準拠すべき規程）が決まれば、CloudTrail と KMS の要否は自動的に決まる。**
+> それまでは入れておき、不要と分かった時点で外すほうが安全側だと判断した。
+> 外す場合はいずれも `cloudformation.yaml` の該当リソースを削るだけで、コード変更は不要。
 
 ## 16. 将来拡張
 
@@ -1055,6 +1238,7 @@ template.yaml     … バケット・KMS・Lambda・DLQ・CloudTrail・アラー
 | Q6 | マスク済画像の配信先・公開範囲（一般公開 / 社内限定） | 一般公開なら強度要件をさらに上げる |
 | Q7 | 入力サイズ上限 20 MB・8000 px は実データに合っているか（想定 A3） | 実測データがあれば提示ください |
 | Q12 | 入力画像に EXIF Orientation が付くか（想定 A9） | 付くなら向き補正の信頼性が「どちらの半分をマスクするか」に直結する。付かないなら対処不要。**実データ確認まで保留** |
+| Q15 | `date` の形式は決まっているか（`2026-09-14` / `20260914` など） | 決まっていれば検証を足せる。現状は形式を見ていない |
 | Q14 | リクエスト起動の呼び出し元は何か（API Gateway / 他サービス / 手動） | **未定**。決まるまでは Lambda を直接 invoke する前提で実装してある。API Gateway を前段に置くなら認証・認可とスロットリングの設計が追加になる |
 
 ### 解決済み

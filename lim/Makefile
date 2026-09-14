@@ -1,3 +1,7 @@
+# CloudFormation (SAM) の定義ファイル。SAM CLI の既定は template.yaml なので
+# 명示的に -t で渡す必要がある。
+TEMPLATE := cloudformation.yaml
+
 .PHONY: all test lint build build-cli deploy clean fmt run sample
 
 all: fmt test build
@@ -11,7 +15,7 @@ test:
 
 # SAM が BuildMethod: go1.x で bootstrap を作るため、通常はこちらを使う。
 build:
-	sam build
+	sam build -t $(TEMPLATE)
 
 # 動作確認・性能計測用のサンプル画像を testdata/ に生成する。
 sample:
@@ -34,7 +38,7 @@ build-local:
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -o build/bootstrap ./cmd/mask
 
 validate:
-	sam validate --lint
+	sam validate -t $(TEMPLATE) --lint
 
 deploy: build
 	sam deploy --guided

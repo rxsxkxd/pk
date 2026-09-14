@@ -11,22 +11,44 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, stg, prod]
+  EnableS3Trigger:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >
+      S3 の ObjectCreated 通知で起動するかどうか。既定は無効で、リクエスト起動のみ。
+      実装は両方に対応しているので、true にすれば通知起動も使える。
+  AlertEmail:
+    Type: String
+    Default: ''
+    Description: >
+      アラート通知先のメールアドレス。空なら通知先を作らない（アラーム自体は動く）。
+      指定した場合、デプロイ後にそのアドレス宛の確認メールに承認リンクが届く。
+      承認するまで通知は届かない（CloudFormation では自動承認できない）。
   KeyPrefix:
     Type: String
-    Default: masking
+    Default: ''
     Description: >
-      共有バケット内でこのアプリが使うルート。キーは
-      <prefix>/<x>/<y>/<infix>/<z>/<n> の形に固定する。
+      共有バケット内でこのアプリが使うルート。任意で、空なら付けない。
+      キーは [<prefix>/]<tid>/<infix>/<date>/<lid>/<eid> の形に固定する。
+      空にすると IAM も通知フィルタもバケット全体が対象になるため、
+      他のリソースと共有するバケットでは指定を推奨。
   OriginalInfix:
     Type: String
-    Default: original
-    Description: 原本の階層名。マスク済みは MaskingPolicyVersion の階層に出る。
+    Default: no-masked
+    Description: 原本の階層名。
+  MaskedInfix:
+    Type: String
+    Default: masked
+    Description: マスク済みの階層名。原本とはこの階層だけが異なる。
   MaskingPolicyVersion:
     Type: String
     Default: v1
     Description: >
-      マスク済みの階層名。マスクの強度に関わる設定を変えたらこれも上げる。
-      上げないと、処理済みのオブジェクトが再処理されず新旧が混在する。
+      マスクの強度設定を識別するラベル。キーには含めず、出力のメタデータにだけ記録する。
+      強度に関わる設定（MaskHeightRatio / BlurRatio / DownscaleFactor など）を変えたら
+      これも上げる。上げると過去の出力が作り直され、同じキーが上書きされる。
+      上げないと、処理済みのオブジェクトは古い強度のまま残る。
   MaskHeightRatio:
     Type: String
     Default: '0.5'
@@ -45,9 +67,14 @@ Parameters:
     Type: String
     Default: '15.0'
     Description: >
-      マスク強度の自己検証しきい値。超えたら出力せず DLQ へ送る。
+      マスク強度の自己検証しきい値。超えたら出力せず失敗にする。
       マスクの強さ自体は BlurRatio で担保しており、これは設定を桁で取り違えた
-      事故を拾うための粗い網。厳しくしすぎると正常な画像が DLQ に落ちる。
+      事故を拾うための粗い網。厳しくしすぎると正常な画像まで失敗になる。
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  S3TriggerEnabled: !Equals [!Ref EnableS3Trigger, 'true']
+  HasKeyPrefix: !Not [!Equals [!Ref KeyPrefix, '']]
 
 Globals:
   Function:
@@ -101,21 +128,28 @@ Resources:
           - Id: abort-incomplete-uploads
             Status: Enabled
             AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
-      NotificationConfiguration:
-        LambdaConfigurations:
-          - Event: 's3:ObjectCreated:*'
-            Function: !GetAtt MaskFunction.Arn
-            Filter:
-              S3Key:
-                Rules:
-                  # 通知フィルタはプレフィックスと接尾辞しか指定できず、
-                  # infix は x/y の後ろにあるため原本だけに絞れない。
-                  # マスク済みの書き込みでも通知が飛ぶので、Lambda 側で infix を見て
-                  # 弾いている（再帰ループ防止）。
-                  - Name: prefix
-                    Value: !Sub '${KeyPrefix}/'
+      # 通知は既定で無効。EnableS3Trigger=true で有効になる。
+      NotificationConfiguration: !If
+        - S3TriggerEnabled
+        - LambdaConfigurations:
+            - Event: 's3:ObjectCreated:*'
+              Function: !GetAtt MaskFunction.Arn
+              Filter:
+                S3Key:
+                  Rules:
+                    # 通知フィルタはプレフィックスと接尾辞しか指定できず、
+                    # infix は tid の後ろにあるため原本だけには絞れない。
+                    # マスク済みの書き込みでも通知が飛ぶので、Lambda 側で infix を見て
+                    # 弾いている（再帰ループ防止）。
+                    # KeyPrefix が空のときはバケット全体が対象になる。
+                    - Name: prefix
+                      Value: !If [HasKeyPrefix, !Sub '${KeyPrefix}/', '']
+        - !Ref AWS::NoValue
     DependsOn: MaskFunctionInvokePermission
 
+  # 通知を有効にする際、S3 が権限を検証できるよう先に作っておく必要がある。
+  # 通知が無効なうちは誰も呼ばないため、常に作っておいて差し支えない
+  # （SourceAccount で自アカウントに限定してある）。
   MaskFunctionInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -145,18 +179,32 @@ Resources:
             Effect: Deny
             Principal: '*'
             Action: ['s3:PutObject', 's3:PutObjectAcl']
-            Resource: !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/*/${MaskingPolicyVersion}/*'
+            Resource: !If
+              - HasKeyPrefix
+              - !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/${MaskedInfix}/*'
+              - !Sub '${ImageBucket.Arn}/*/${MaskedInfix}/*'
             Condition:
               StringNotEquals:
                 'aws:PrincipalArn': !GetAtt MaskFunctionRole.Arn
 
-  # ---------- 失敗イベントの退避先 ----------
-  DLQ:
-    Type: AWS::SQS::Queue
+  # ---------- アラート通知 ----------
+  # アラーム -> SNS -> メール。
+  # 暗号化は掛けていない。掛ける場合は SNS 管理の既定キーではなく
+  # カスタマー管理キーが必要で、CloudWatch からの発行を許可する
+  # キーポリシーを書く必要がある（既定キーはポリシーを変更できない）。
+  AlertTopic:
+    Type: AWS::SNS::Topic
     Properties:
-      QueueName: !Sub 'image-mask-dlq-${Env}'
-      MessageRetentionPeriod: 1209600 # 14 日
-      SqsManagedSseEnabled: true
+      TopicName: !Sub 'image-mask-alerts-${Env}'
+      DisplayName: !Sub 'image-mask ${Env}'
+
+  AlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
 
   # ---------- Lambda ----------
   MaskFunction:
@@ -174,6 +222,7 @@ Resources:
           OUTPUT_BUCKET: !Sub 'image-mask-${Env}-${AWS::AccountId}'
           KEY_PREFIX: !Ref KeyPrefix
           ORIGINAL_INFIX: !Ref OriginalInfix
+          MASKED_INFIX: !Ref MaskedInfix
           MASKING_POLICY_VERSION: !Ref MaskingPolicyVersion
           MASK_HEIGHT_RATIO: !Ref MaskHeightRatio
           MIN_BLUR_RATIO: !Ref BlurRatio
@@ -189,32 +238,39 @@ Resources:
       EventInvokeConfig:
         MaximumRetryAttempts: 2
         MaximumEventAgeInSeconds: 3600
-        DestinationConfig:
-          OnFailure:
-            Type: SQS
-            Destination: !GetAtt DLQ.Arn
+        # 失敗イベントの退避先（DLQ）は置いていない。リトライを使い切った
+        # イベントは破棄される。どのオブジェクトで失敗したかはログとアラームで
+        # 分かるので、再処理は変数を渡したリクエスト起動で行う（設計書 §10.2）。
       Policies:
         # 最小権限。原本は読むだけ、マスク済みは書くだけ。
-        # x と y は可変なのでワイルドカードで受ける。
+        # tid は可変なのでワイルドカードで受ける。
+        #   [<prefix>/]<tid>/<infix>/<date>/<lid>/<eid>
         - Statement:
             - Sid: ReadOriginals
               Effect: Allow
               Action: ['s3:GetObject', 's3:GetObjectVersion']
-              Resource: !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/*/${OriginalInfix}/*'
+              Resource: !If
+                - HasKeyPrefix
+                - !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/${OriginalInfix}/*'
+                - !Sub '${ImageBucket.Arn}/*/${OriginalInfix}/*'
             - Sid: WriteMasked
               Effect: Allow
               Action: 's3:PutObject'
-              Resource: !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/*/${MaskingPolicyVersion}/*'
+              Resource: !If
+                - HasKeyPrefix
+                - !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/${MaskedInfix}/*'
+                - !Sub '${ImageBucket.Arn}/*/${MaskedInfix}/*'
             - Sid: HeadMaskedForIdempotency
               Effect: Allow
               Action: 's3:GetObject'
-              Resource: !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/*/${MaskingPolicyVersion}/*'
+              Resource: !If
+                - HasKeyPrefix
+                - !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/${MaskedInfix}/*'
+                - !Sub '${ImageBucket.Arn}/*/${MaskedInfix}/*'
             - Sid: UseKey
               Effect: Allow
               Action: ['kms:Decrypt', 'kms:GenerateDataKey', 'kms:Encrypt', 'kms:DescribeKey']
               Resource: !GetAtt ImageKey.Arn
-        - SQSSendMessagePolicy:
-            QueueName: !GetAtt DLQ.QueueName
 
   # ---------- 監査: 誰がいつ原本を取得したかを記録する (FR-11) ----------
   TrailBucket:
@@ -262,7 +318,8 @@ Resources:
             # 原本だけに絞りたいが、データイベントのセレクタもプレフィックス指定のため
             # x/y の後ろにある infix では絞れない。KeyPrefix 配下すべてを記録する。
             - Type: 'AWS::S3::Object'
-              Values: [!Sub '${ImageBucket.Arn}/${KeyPrefix}/']
+              Values:
+                - !If [HasKeyPrefix, !Sub '${ImageBucket.Arn}/${KeyPrefix}/', !Sub '${ImageBucket.Arn}/']
 
   # ---------- アラーム ----------
   MaskStrengthCheckFailedAlarm:
@@ -278,6 +335,24 @@ Resources:
       Period: 300
       EvaluationPeriods: 1
       Threshold: 1
+      AlarmActions: [!Ref AlertTopic]
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ValidationErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'image-mask-${Env}-validation-errors'
+      AlarmDescription: >
+        入力が不正で処理できなかった。リトライしても直らない。
+        投入元の問題か、対応形式の想定漏れ。ログで対象のキーを確認すること。
+      Namespace: ImageMask
+      MetricName: ValidationErrors
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      AlarmActions: [!Ref AlertTopic]
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
@@ -292,20 +367,7 @@ Resources:
       Period: 300
       EvaluationPeriods: 1
       Threshold: 1
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-
-  DLQNotEmptyAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub 'image-mask-${Env}-dlq-not-empty'
-      Namespace: AWS/SQS
-      MetricName: ApproximateNumberOfMessagesVisible
-      Dimensions: [{ Name: QueueName, Value: !GetAtt DLQ.QueueName }]
-      Statistic: Maximum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 1
+      AlarmActions: [!Ref AlertTopic]
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
@@ -320,21 +382,31 @@ Resources:
       Period: 300
       EvaluationPeriods: 1
       Threshold: 1
+      AlarmActions: [!Ref AlertTopic]
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
 
 Outputs:
+  S3TriggerEnabled:
+    Description: S3 通知で起動するか。false ならリクエスト起動のみ
+    Value: !Ref EnableS3Trigger
+  AlertTopicArn:
+    Description: アラートの通知先。メールは確認リンクの承認が必要
+    Value: !Ref AlertTopic
   ImageBucketName:
     Description: 原本とマスク済みを置くバケット
     Value: !Ref ImageBucket
   OriginalKeyPattern:
-    Description: 原本のキー。ここへ PUT すると処理が走る
-    Value: !Sub '${KeyPrefix}/<x>/<y>/${OriginalInfix}/<z>/<n>'
+    Description: 原本のキー
+    Value: !If
+      - HasKeyPrefix
+      - !Sub '${KeyPrefix}/<tid>/${OriginalInfix}/<date>/<lid>/<eid>'
+      - !Sub '<tid>/${OriginalInfix}/<date>/<lid>/<eid>'
   MaskedKeyPattern:
     Description: マスク済みのキー
-    Value: !Sub '${KeyPrefix}/<x>/<y>/${MaskingPolicyVersion}/<z>/<n>'
-  DLQUrl:
-    Description: 失敗イベントの退避先
-    Value: !Ref DLQ
+    Value: !If
+      - HasKeyPrefix
+      - !Sub '${KeyPrefix}/<tid>/${MaskedInfix}/<date>/<lid>/<eid>'
+      - !Sub '<tid>/${MaskedInfix}/<date>/<lid>/<eid>'
   FunctionName:
     Value: !Ref MaskFunction

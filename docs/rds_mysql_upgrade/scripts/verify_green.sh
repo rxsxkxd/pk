@@ -158,9 +158,17 @@ report_args=(
   --output "$output_dir/green-verification-report.md"
 )
 [[ -n "$runtime_values_file" ]] && report_args+=(--runtime-values "$runtime_values_file")
-# CI は GREEN_REPORT_GENERATOR にマルチステージ Docker ビルド済み Go バイナリを指定する。
-# 指定がないローカル実行では、互換性のため既存 Ruby 版を使用する。
-report_generator=${GREEN_REPORT_GENERATOR:-"$(dirname "$0")/generate_green_verification_report.rb"}
+# レポート生成器は Go 版だけである（decisions/implementation-language-policy.md）。
+# CI は事前にビルドしたバイナリを GREEN_REPORT_GENERATOR で渡す。
+# 指定がない場合はここでビルドする。go build の -o だけ絶対パスにすれば、
+# 呼び出し元のカレントディレクトリに依存せず、引数の相対パスもそのまま通る。
+report_generator=${GREEN_REPORT_GENERATOR:-}
+if [[ -z "$report_generator" ]]; then
+  repository_root=$(cd "$(dirname "$0")/.." && pwd)
+  report_generator=$(mktemp "${TMPDIR:-/tmp}/green-verification-report.XXXXXX")
+  trap 'rm -f "$report_generator"' EXIT
+  go -C "$repository_root" build -o "$report_generator" ./scripts
+fi
 "$report_generator" "${report_args[@]}"
 if [[ "$replica_lag_failed" == true ]]; then
   echo "Artifacts: $output_dir"

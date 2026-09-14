@@ -16,7 +16,7 @@
 #   - 呼び出し側は MYSQL_PWD 経由で MySQL クライアントのプロセスにだけ渡す。
 #   - 読み取りは config と AWS の読み取り API のみ。AWS の状態を変更しない。
 
-# 設定の読み取りは deployment_config.sh（python3 で YAML→JSON、jq で取り出し）に委ねる。
+# 設定の読み取りは deployment_config.sh（Ruby で YAML→JSON、jq で取り出し）に委ねる。
 # shellcheck source=deployment_config.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deployment_config.sh"
 

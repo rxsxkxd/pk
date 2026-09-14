@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# CloudFormation の短縮記法（!Ref / !Sub など）を、テンプレートを読む 3 実装が
-# 同じように解釈することを確認する。AWS へは接続しない。
+# CloudFormation の短縮記法（!Ref / !Sub など）の解釈と、Step 4 レポートの
+# 2 つの実行形態（MySQL 実効値あり／なし）を確認する。AWS へは接続しない。
 #
-#   scripts/internal/cfn                     (Go / gopkg.in/yaml.v3。共有ライブラリ)
-#   generate_green_verification_report.rb    (Ruby / Psych)
-#   generate_green_verification_report.go    (Go。Docker で単体ビルドするため自前実装)
-#
-# いずれも「短縮記法を長形式へ正規化し、組み込み関数の値は比較対象から外す」挙動である。
-# Ruby / Go が未導入の環境では、その実装をスキップする。
+# 短縮記法の実装は scripts/internal/cfn に一本化してあり、
+# パラメータ名の列挙（list_db_parameter_names）とレポート生成器がどちらもこれを使う。
+# 「短縮記法を長形式へ正規化し、組み込み関数の値は比較対象から外す」挙動である。
+# Go が未導入の環境ではスキップする。
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -55,39 +53,38 @@ report_args=(
   --replica-lag "$COLLECTED/replica-lag.json"
 )
 
-if command -v ruby >/dev/null 2>&1; then
-  if ruby scripts/generate_green_verification_report.rb "${report_args[@]}" --output "$work/ruby.md" 2>"$work/ruby.err"; then
-    body=$(cat "$work/ruby.md")
-    check 'Ruby: 組み込み関数は比較不能として出る' '比較不能（Ref）' "$body"
-    check 'Ruby: 素のスカラーは通常どおり比較する' '| binlog_format | ROW | ROW | 一致' "$body"
-    check 'Ruby: 誤ったドリフトを報告しない' '' "$(cat "$work/ruby.err")"
-  else
-    printf 'FAIL  %-52s %s\n' 'Ruby: 短縮記法で失敗した' "$(cat "$work/ruby.err")"; failed=$((failed + 1))
-  fi
-else
-  echo 'skip  Ruby（未導入）'
-fi
-
-# レポート生成器は scripts/ 直下の package main である（同ディレクトリの他コマンドは
-# サブパッケージ）。単体ビルドするため一時ディレクトリへ写して組む。
-# 依存は go.sum に固定済みで、モジュールキャッシュがあればオフラインで通る。
+# レポート生成器は scripts/ 直下の package main で、internal/cfn を import する。
+# リポジトリからそのままビルドする（依存は go.sum に固定済み）。
 build_go() {
-  mkdir -p "$work/go"
-  cp go.mod go.sum scripts/generate_green_verification_report.go "$work/go/" || return 1
-  ( cd "$work/go" && go build -o "$work/gen" . ) >"$work/go.err" 2>&1
+  go build -o "$work/gen" ./scripts >"$work/go.err" 2>&1
 }
 
 if command -v go >/dev/null 2>&1 && build_go; then
   if "$work/gen" "${report_args[@]}" --output "$work/go.md" 2>"$work/go.err"; then
     check 'Go: 組み込み関数は比較不能として出る' '比較不能（Ref）' "$(cat "$work/go.md")"
-    # Ruby 版と Go 版はレポート全文が一致していなければならない
-    # （CLAUDE.md の「両方を同時に更新すること」を担保する）。
-    if [[ -f "$work/ruby.md" ]]; then
-      if diff -u "$work/ruby.md" "$work/go.md" > "$work/report.diff"; then
-        echo 'ok    Ruby と Go のレポートが全文一致する'
+    check 'Go: 素のスカラーは通常どおり比較する' '| binlog_format | ROW | ROW | 一致' "$(cat "$work/go.md")"
+    check 'Go: 誤ったドリフトを報告しない' '' "$(cat "$work/go.err")"
+    # --- Step 4 の 2 つの実行形態を同じバイナリで賄えること -------------------
+    # リモート（CI）は MySQL へ接続できない構成もありうるため、実効値なしでも
+    # レポートを出せる必要がある。その場合は「未収集」と示す。
+    check 'Go: MySQL 実効値なしでもレポートを出す（リモート）' \
+      '| binlog_format | ROW | ROW | 一致 |  | 未収集 |' "$(cat "$work/go.md")"
+    # ローカルは実効値を収集して同じバイナリへ渡す。列が埋まるだけで他は変わらない。
+    if "$work/gen" "${report_args[@]}" --runtime-values "$COLLECTED/green-runtime-values.json" \
+        --output "$work/go-mysql.md" 2>"$work/go.err"; then
+      check 'Go: MySQL 実効値ありなら列が埋まる（ローカル）' \
+        '| binlog_format | ROW | ROW | 一致 |  | ROW |' "$(cat "$work/go-mysql.md")"
+      # 実効値の有無以外はレポートが変わらないこと（判定は AWS 側の値で行う）。
+      if diff <(sed 's/| 未収集 |/| X |/' "$work/go.md") \
+              <(sed -E 's/\| (ROW|ON|4|67108864) \| user \|/| X | user |/' "$work/go-mysql.md") \
+              > "$work/mode.diff"; then
+        echo 'ok    Go: 実効値の有無で変わるのは MySQL 実効値列だけ'
       else
-        echo 'FAIL  Ruby と Go のレポートが不一致'; head -20 "$work/report.diff"; failed=$((failed + 1))
+        echo 'FAIL  Go: 実効値の有無で他の列も変わっている'; head -20 "$work/mode.diff"; failed=$((failed + 1))
       fi
+    else
+      printf 'FAIL  %-52s %s\n' 'Go: --runtime-values 付きで失敗した' "$(cat "$work/go.err")"
+      failed=$((failed + 1))
     fi
   else
     printf 'FAIL  %-52s %s\n' 'Go: 短縮記法で失敗した' "$(cat "$work/go.err")"; failed=$((failed + 1))

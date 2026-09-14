@@ -56,7 +56,7 @@ docker pull --platform linux/amd64 public.ecr.aws/codebuild/local-builds:latest
 docker pull --platform linux/arm64 public.ecr.aws/codebuild/local-builds:aarch64
 
 # x86_64 用: Local Agent 専用の軽量実行 image を作成する。
-# Python 3.11、PyYAML、AWS CLI v2、Docker CLI/Buildx を含む。
+# Ruby 3.4.10（YAML/JSON は標準ライブラリ）、jq、AWS CLI v2、Docker CLI/Buildx を含む。
 docker build \
   --platform linux/amd64 \
   --tag rds-codebuild-runner:local-amd64 \
@@ -203,7 +203,7 @@ mkdir -p .local
   -c -p your-readonly-profile -m
 ```
 
-この状態では `build_green.sh` が `pending` を検出して終了するため、RDS API の変更操作は行わない。確認対象は Python と PyYAML の存在、環境変数の受け渡し、buildspec の構文、成果物出力先である。
+この状態では `build_green.sh` が `pending` を検出して終了するため、RDS API の変更操作は行わない。確認対象は Ruby と jq の存在、環境変数の受け渡し、buildspec の構文、成果物出力先である。
 
 ### 実 AWS 操作を含む検証
 
@@ -211,7 +211,7 @@ mkdir -p .local
 
 ## 3. VerifyGreen 単体検証
 
-対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.sh` である。VerifyGreen は Go レポート生成器を同一イメージ内でビルドする（Docker は使わない）。Local Agent のランナー image に Go が無い場合は `runtime-versions` が解決できないため、Go を含む image を使うか、この単体検証では `GREEN_REPORT_GENERATOR` に Ruby 版を指定する。
+対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.sh` である。VerifyGreen は Go レポート生成器を同一イメージ内でビルドする（Docker は使わない）。**Local Agent のランナー image は `runtime-versions` を解決しない**ため、Go を含む image を使うか、あらかじめホストで `go build -o .tools/green-report/generate_green_verification_report ./scripts` したバイナリを `GREEN_REPORT_GENERATOR` で渡す。
 
 ```bash
 ./ci/codebuild_build.sh \
@@ -265,9 +265,9 @@ scripts/verify_green.sh \
   --output-dir artifacts/verify-green-direct
 ```
 
-ただしこの直接実行は CodeBuild の Python runtime、PyYAML install、Docker Buildx、buildspec artifacts を検証しない。CodeBuild 導入前の最終確認には、各節の Local Agent コマンドを使う。
+ただしこの直接実行は CodeBuild の `runtime-versions` 解決と buildspec artifacts を検証しない。CodeBuild 導入前の最終確認には、各節の Local Agent コマンドを使う。
 
-直接実行では事前に `python3 -m pip install 'PyYAML==6.0.2'` が必要である。また `GREEN_REPORT_GENERATOR` を指定しない VerifyGreen は、互換用に残している Ruby 版のレポート生成器を使う。CodeBuild と同じ Go バイナリ経路を確認する目的には、必ず Local Agent の VerifyGreen 手順を使う。
+直接実行では Ruby と jq があれば追加作業は要らない。ただし VerifyGreen のレポート生成器は Go 版だけなので、`GREEN_REPORT_GENERATOR` を指定しない場合は `verify_green.sh` がその場でビルドする（Go が必要）。
 
 ## 6. 実行しない確認項目
 

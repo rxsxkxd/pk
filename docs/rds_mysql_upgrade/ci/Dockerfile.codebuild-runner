@@ -3,13 +3,14 @@
 FROM docker:27.5-cli AS docker-cli
 FROM public.ecr.aws/aws-cli/aws-cli:2.36.37 AS aws-cli
 
-# aws-cli 2.36.37 がインストーラにバンドルする Python（3.14.6、CLI 内部の実行専用で
-# このイメージの python3 とは別物）のマイナーバージョンに合わせて 3.14 系を使う。
-FROM python:3.14.7-slim-bookworm
+# 設定 YAML の読み取りに使う Ruby。compose.yaml の ruby サービスと同じ版で固定する。
+# YAML / JSON はどちらも標準ライブラリなので、追加パッケージの導入は要らない。
+FROM ruby:3.4.10-slim-bookworm
 
-# Shell scripts、apt による任意の mysql-client 導入、TLS、Docker CLI 実行に必要な最小パッケージ。
+# Shell scripts、JSON 読み取り（jq）、apt による任意の mysql-client 導入、TLS、
+# Docker CLI 実行に必要な最小パッケージ。
 RUN apt-get update \
-  && apt-get install --no-install-recommends -y bash ca-certificates sudo \
+  && apt-get install --no-install-recommends -y bash ca-certificates jq sudo \
   && rm -rf /var/lib/apt/lists/*
 
 # AWS CLI v2 は公式イメージから、Docker CLI と Buildx は公式 Docker CLI イメージから取り込む。
@@ -20,8 +21,5 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/
 # AWS 公式 image の /usr/local/bin/aws はシンボリックリンクである。COPY で実体だけを
 # 取り出すと、AWS CLI 同梱の libpython を見つけられないため、コピー済みの配下へリンクする。
 RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws
-
-# シェルスクリプトの YAML 解析に必要な Python パッケージを image 内で固定する。
-RUN python3 -m pip install --no-cache-dir --disable-pip-version-check 'PyYAML==6.0.2'
 
 WORKDIR /workspace

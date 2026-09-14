@@ -30,18 +30,20 @@ AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS �
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
-| BuildGreen | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2`（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
-| VerifyGreen | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2`（jq は image 同梱）。Go は buildspec の `runtime-versions: golang` で用意 | 不要、`PrivilegedMode: false` | 同一イメージ内で Go バイナリをビルドし、シェルスクリプトと共に実行 |
-| Switchover | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2`（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
+| BuildGreen | `aws/codebuild/standard:7.0` | `runtime-versions: ruby: 3.4.10`（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
+| VerifyGreen | `aws/codebuild/standard:7.0` | `runtime-versions` で `ruby: 3.4.10` と `golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | 同一イメージ内で Go バイナリをビルドし、シェルスクリプトと共に実行 |
+| Switchover | `aws/codebuild/standard:7.0` | `runtime-versions: ruby: 3.4.10`（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
 
 ### 共通コンテナ
 
-AWS 用と Local Agent 用で buildspec を分けないため、Python については `runtime-versions` を指定しない。各 image に備わる `python3` を使用し、install フェーズで PyYAML の存在を確認する。
+AWS 用と Local Agent 用で buildspec を分けないが、**設定 YAML の読み取りに使う Ruby は `runtime-versions: ruby: 3.4.10` で明示する**。YAML / JSON は Ruby の標準ライブラリなので、install フェーズでのパッケージ導入は無い（PyPI へも到達しない）。
 
-**例外は VerifyGreen の Go である。**Docker を使わずに Go レポート生成器をビルドするため、`verify-green.yml` だけが `runtime-versions: golang` を指定する。Local Agent のランナー image がその runtime を解決できない場合は、Go を含む image を使うか、Ruby 版の生成器を指定して回避する。
+VerifyGreen だけは `golang: 1.25` も併記する。Docker を使わずに Go レポート生成器を同一イメージ内でビルドするためである。
+
+> **イメージが提供する managed runtime のバージョンは AWS の更新で変わる。**`ruby: 3.4.10` や `golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、指定を image が提供するバージョンへ下げる。Local Agent のランナー image は `runtime-versions` を解決しないため、`ci/Dockerfile.codebuild-runner` 側で Ruby を固定している。
 
 ```bash
-python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
+ruby --version   # YAML / JSON は標準ライブラリなので追加導入は無い
 ```
 
 用途は、`scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` と、その下位スクリプトが環境設定 YAML を読み取るためである。Ruby は CodeBuild のいずれのプロジェクトでも使用しない。AWS managed image では `standard:7.0` に含まれる Python 3 を、ローカル代替 image では Dockerfile で固定した Python 3.11 を使用する。

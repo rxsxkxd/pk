@@ -63,6 +63,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 - [binlog-format-bluegreen-compatibility.md](decisions/binlog-format-bluegreen-compatibility.md) — Blue `MIXED` → Green `ROW` の Blue/Green レプリケーション互換性
 - [structure-review-proposal.md](decisions/structure-review-proposal.md) — リポジトリ構成・フロー全体の見直し対案(**未採択**。着手順を含む)
 - [idempotency-strategy.md](decisions/idempotency-strategy.md) — 各フェーズの冪等性の現状評価とあるべき姿(**未採択**)。switchover が 2 回目に必ず失敗する点、cleanup が部分完了で成功を返す点など
+- [implementation-language-policy.md](decisions/implementation-language-policy.md) — 実装言語の役割分担(**採択済み**)。プログラムは Go、シェルからの YAML 読み取りは Ruby、JSON は jq。Step 4 をローカル実行前提に寄せる判断を含む
 
 ### `reports/`
 

@@ -2,13 +2,15 @@
 
 Step 2 が生成する DB パラメータグループのテンプレートは**長形式**（`Ref: Xxx`）で出力されるが、Step 2 のレビューで人が CFn 慣用の**短縮記法**（`!Ref` / `!Sub`）へ書き換えることがある。
 
-このテンプレートを読む実装は 3 つあり、以前はいずれも短縮記法を正しく扱えなかった。
+テンプレートの読み取りは **`scripts/internal/cfn` に一本化**してあり、レポート生成器（`generate_green_verification_report.go`）、パラメータ名の列挙（`list_db_parameter_names`）、レビューレポート生成（`generate_blue_green_config_report`）がいずれもこれを使う。
 
-| 実装 | 以前の挙動 |
+以前は読み取り実装が 3 つに分かれており、いずれも短縮記法を正しく扱えなかった。
+
+| 当時の実装 | 当時の挙動 |
 |---|---|
-| `scripts/collect_green_runtime_values.sh`（Python / `yaml.safe_load`） | **即座に失敗**（`could not determine a constructor for the tag '!Ref'`） |
-| `scripts/generate_green_verification_report.rb`（Ruby / Psych） | **黙って通るが、タグを捨てて引数の文字列だけを残す** |
-| `scripts/generate_green_verification_report.go`（Go / yaml.v3） | 同上 |
+| `collect_green_runtime_values.sh`（Python / `yaml.safe_load`） | **即座に失敗**（`could not determine a constructor for the tag '!Ref'`） |
+| `generate_green_verification_report.rb`（Ruby / Psych） | **黙って通るが、タグを捨てて引数の文字列だけを残す** |
+| `generate_green_verification_report.go`（Go / yaml.v3。自前実装） | 同上 |
 
 Ruby / Go は `replica_parallel_workers: !Ref Workers` を `"Workers"` という値として読み、RDS の実値と比較して**存在しないドリフトを報告**していた。
 

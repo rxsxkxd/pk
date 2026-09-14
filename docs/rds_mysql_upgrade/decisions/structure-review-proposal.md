@@ -39,7 +39,7 @@
 | 種別 | 箇所 |
 |---|---|
 | インライン `python3 -c` | 8 ファイル・計 38 箇所（`verify_green.sh` だけで 12） |
-| Ruby | `evaluate_blue_green_prereqs.rb` 106 行、`generate_mysql84_parameter_group.rb` 307 行、`generate_green_verification_report.rb` 114 行 |
+| Ruby | `evaluate_blue_green_prereqs.rb` 106 行、`generate_mysql84_parameter_group.rb` 307 行、`generate_green_verification_report.rb` 114 行（**このうちレポート生成器は 2026-09-14 に削除し Go へ一本化**。残り 2 本の扱いは [implementation-language-policy.md](implementation-language-policy.md)） |
 | Go | `generate_green_verification_report.go` 259 行（Ruby 版と同一機能） |
 | bash | 9 ファイル。各々が同じ `--config/--service/--region/--profile/--output-dir` のパースを持つ |
 
@@ -48,7 +48,7 @@
 - インライン python が 1 行に `(_ for _ in ()).throw(SystemExit(...))` を詰め込む形式であり、読めない・単体テストできない・エラーメッセージを制御できない。設定ファイル解析という同じ処理が各スクリプトに散っている。
 - レポート生成器の Ruby 版と Go 版が並存している。Go 版は CodeBuild に Ruby ランタイムを置かないためだけに存在し、そのために `VerifyGreenProject` を `PrivilegedMode: true` にして Docker マルチステージビルドを回している。**ランタイムを 1 つ導入しない代償として、実装の重複とビルド特権を購入している**状態であり、収支が合っていない。
 
-  > 追記（2026-09-14）: このうち**ビルド特権は解消済み**である。CodeBuild は buildspec の `runtime-versions: golang` で同一イメージ内をビルドするようになり、`PrivilegedMode` は全プロジェクトで不要になった。**実装の重複（Ruby 版と Go 版の並存）は未解決のまま**であり、下の提案 2 はなお有効である。
+  > 追記（2026-09-14）: **解消済み。**CodeBuild は `runtime-versions: golang` で同一イメージ内をビルドするようになり `PrivilegedMode` は全プロジェクトで不要になった。さらに `generate_green_verification_report.rb` を削除して Go 版へ一本化し、短縮記法の実装も `scripts/internal/cfn` へ集約した（`ci/Dockerfile.green-verification-report` も削除）。方針は [implementation-language-policy.md](implementation-language-policy.md) にある。**下の提案 2 は実施済みである。**
 
 ### 対案
 
@@ -64,7 +64,7 @@
 案 A を採る場合の移行順序を以下に示す。
 
 1. 設定ファイル解決とアクション判定を Go に実装し、`--config`／`--service` から解決した値を JSON で出力するサブコマンドを作る。既存 bash はまずこれを呼ぶだけに変える（インライン python の除去）。
-2. `generate_green_verification_report.rb` を削除し、Go 版に一本化する。`GREEN_REPORT_GENERATOR` の分岐を外す（`PrivilegedMode` は対応済みで、すでに設定していない）。
+2. ~~`generate_green_verification_report.rb` を削除し、Go 版に一本化する。~~**実施済み（2026-09-14）。**
 3. `evaluate_blue_green_prereqs.rb`／`generate_mysql84_parameter_group.rb` を移植する。この 2 つはローカル実行のみで CI に載らないため、優先度は低い。
 
 ---

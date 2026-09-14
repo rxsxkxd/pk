@@ -38,7 +38,7 @@ done
 [[ -n "$service" ]] || { echo '--service is required.' >&2; exit 2; }
 [[ -n "$config" ]] || { echo '--config is required.' >&2; exit 2; }
 [[ "$wait_timeout_seconds" =~ ^[0-9]+$ ]] || { echo '--wait-timeout-seconds must be an integer.' >&2; exit 2; }
-# JSON の読み取りに jq を使う（設定 YAML も python3 で JSON 化してから jq で読む）。
+# JSON の読み取りに jq を使う（設定 YAML も Ruby で JSON 化してから jq で読む）。
 command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読み取りに必要である。' >&2; exit 1; }
 
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-create.XXXXXX")

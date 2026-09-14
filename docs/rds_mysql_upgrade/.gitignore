@@ -11,6 +11,8 @@ global-bundle.pem
 # Local-only CodeBuild env files and script output directories (see ci/codebuild-local-verification.md)
 .local/
 artifacts/
+# Go build output for the Step 4 report generator (CI and local both write here)
+.tools/
 
 # Generated verification reports (see examples/mysql-timezone-replication/)
 examples/mysql-timezone-replication/probe/reports/

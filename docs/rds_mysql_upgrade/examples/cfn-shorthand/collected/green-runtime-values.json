@@ -1,0 +1,9 @@
+{
+  "CollectedAt": "2026-09-14T00:00:00Z",
+  "Parameters": {
+    "binlog_format": "ROW",
+    "log_replica_updates": "ON",
+    "max_allowed_packet": "67108864",
+    "replica_parallel_workers": "4"
+  }
+}

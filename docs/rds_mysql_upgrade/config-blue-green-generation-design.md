@@ -254,11 +254,7 @@ git diff -- config/blue-green/production.deployment.yml
 tests/test_generate_blue_green_config.sh
 ```
 
-テストにも PyYAML が必要である。未導入の場合は次を一度だけ実行する。
-
-```bash
-python3 -m pip install 'PyYAML==6.0.2'
-```
+アサーションは Ruby（`ruby -ryaml -rjson`）で書いてある。**YAML / JSON はどちらも標準ライブラリなので、追加導入は要らない。**
 
 ## 8. 実装しないこと
 

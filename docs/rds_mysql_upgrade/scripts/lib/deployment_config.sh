@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 実行設定 YAML（config/blue-green/<環境>.deployment.yml）の読み取り。
 #
-# python3 は YAML を JSON へ変換するためだけに使う（jq は YAML を読めない）。
+# Ruby は YAML を JSON へ変換するためだけに使う（jq は YAML を読めない）。
+# YAML と JSON はどちらも Ruby の標準ライブラリ（psych / json）なので、
+# 追加パッケージの導入は要らない。
 # 取り出しと検証は jq が行い、各スクリプトは必要な項目だけを宣言する。
 #
 # 使い方:
@@ -38,21 +40,22 @@ DEPLOYMENT_CONFIG_FUNCTIONS='
     to_entries[] | "\(.key)=\(.value | tostring | @sh)";
 '
 
-# YAML を JSON にするためだけの変換。ここ以外で python3 を使わない。
+# YAML を JSON にするためだけの変換。設定の読み取りでこれ以外のコードを書かない。
+# safe_load はエイリアス・任意クラスの復元を許さない（設定ファイルは素のマッピングだけ）。
 deployment_config_json() {
-  python3 -c 'import json, sys, yaml; json.dump(yaml.safe_load(open(sys.argv[1])), sys.stdout)' "$1"
+  ruby -ryaml -rjson -e 'print JSON.generate(YAML.safe_load(File.read(ARGV[0])))' "$1"
 }
 
 # 設定から eval 可能な代入行を組み立てる。
 # 使い方: deployment_config_vars <config> <service> <jq フィルタ>
 deployment_config_vars() {
   local config=$1 service=$2 filter=$3
-  # python3 の失敗を握り潰さないよう、パイプではなくいったん変数へ受ける。
-  # トレースバックをそのまま出すと読みにくいため、最後の 1 行だけを添える。
+  # Ruby の失敗を握り潰さないよう、パイプではなくいったん変数へ受ける。
+  # バックトレースをそのまま出すと読みにくいため、最初の 1 行だけを添える。
   local document reason
   reason=$(mktemp "${TMPDIR:-/tmp}/deployment-config.XXXXXX")
   document=$(deployment_config_json "$config" 2>"$reason") || {
-    echo "${config}: YAML を読み込めなかった: $(tail -n 1 "$reason")" >&2
+    echo "${config}: YAML を読み込めなかった: $(head -n 1 "$reason")" >&2
     rm -f "$reason"
     return 1
   }

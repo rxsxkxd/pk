@@ -79,18 +79,22 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 
 CFn の `MySqlCredentialsParameterArns` に、パスワード用とユーザー名用の 2 本の SSM パラメータ ARN をカンマ区切りで渡す。指定したときだけ `ssm:GetParameter` が `VerifyGreenRole` に付く。
 
-Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。ビルド方法は実行基盤で異なる。
+Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。
+
+**リモートでは MySQL へ接続しない構成を前提にできる。**Green DB へ到達するには CodeBuild を VPC 内へ配置する必要があり、それが運用上難しい場合は `mysql_verification.enabled: false` のまま AWS API による検証だけを行う。MySQL 実効値を含めた確認はローカルから実施する。**同じレポート生成器が両方を賄い**、実効値が無い場合はレポートの該当列が `未収集` になるだけである（判定は AWS API の値で行うため内容は変わらない）。方針は [decisions/implementation-language-policy.md](../decisions/implementation-language-policy.md) にある。
+
+ビルド方法は実行基盤で異なる。
 
 | 実行基盤 | ビルド方法 |
 |---|---|
 | CodeBuild | buildspec の `runtime-versions: golang` で**同一イメージ内**をビルドする（`go build ./scripts`）。Docker を使わないため `PrivilegedMode` は不要 |
-| GitHub Actions | [Dockerfile.green-verification-report](Dockerfile.green-verification-report) をマルチステージビルドし、`.tools/green-report/` へ取り出す |
+| GitHub Actions | ランナー同梱の Go で `go build ./scripts`（CodeBuild と同じ手順。Docker は使わない） |
 
 CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定）が必要なツールチェーンを取得する。VPC 内で実行する場合は、その取得経路も確保する。Ruby ランタイムは CodeBuild に不要である。
 
-各 buildspec は設定 YAML を読むために `PyYAML==6.0.2` を導入する。ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、事前に `python3 -m pip install 'PyYAML==6.0.2'` を一度実行する。
+各 buildspec は設定 YAML を読むために `runtime-versions: ruby: 3.4.10` を指定する。**YAML / JSON は Ruby の標準ライブラリなので、パッケージの追加導入は無く、PyPI へも到達しない。**ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、Ruby があれば追加作業は要らない。
 
-データの読み取りは `jq` に一本化している。設定 YAML は `scripts/lib/deployment_config.sh` が python3 で JSON へ変換し、そこから先の取り出しと検証は jq が行う。CodeBuild の managed image と GitHub Actions のランナーには jq が同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
+データの読み取りは `jq` に一本化している。設定 YAML は `scripts/lib/deployment_config.sh` が **Ruby の標準ライブラリ**で JSON へ変換し、そこから先の取り出しと検証は jq が行う。CodeBuild の managed image と GitHub Actions のランナーには jq が同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
 
 実効値収集を有効にする場合は、CodeBuild プロジェクトを RDS に到達できるネットワークに配置する必要がある。テンプレートには VPC・サブネット・セキュリティグループを組み込んでいないため、組織の既存ネットワーク方針に従い `VerifyGreenProject` に `VpcConfig` を追加する。あわせて CodeBuild 実行ロールに対象 SSM パラメータの `ssm:GetParameter` と、KMS カスタマー管理キーを使う場合は `kms:Decrypt` を許可する。
 

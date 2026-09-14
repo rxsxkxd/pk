@@ -13,11 +13,14 @@ env:
 
 phases:
   install:
+    # 設定 YAML の読み取りに Ruby の標準ライブラリ（psych / json）を使う。
+    # 追加パッケージの導入は不要で、PyPI へも到達しない。
+    runtime-versions:
+      ruby: 3.4.10
     commands:
       # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
       # 落ちていれば復元し、落ちていなければ何も変わらない。
       - chmod +x scripts/*.sh scripts/lib/*.sh
-      - python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
   build:
     commands:
       - scripts/cleanup.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts

@@ -62,26 +62,44 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
 - `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。
 
-Step 2 の CloudFormation テンプレートを読む実装（`scripts/internal/cfn`、Step 4 レポート生成器の Ruby と Go）は、**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化して読む**。`scripts/generate_green_verification_report.go` は Docker で単体ビルドする制約から `internal/cfn` を使わず自前の実装を持っている——**短縮記法の扱いを変えるときは 3 箇所すべてを直す。**
+`collect_green_runtime_values.sh`（Step 4 の実効値収集）は、対象パラメータ名を `go run ./scripts/list_db_parameter_names` で得る（`internal/cfn` 経由）。**Go への依存は Step 4 に閉じている。**値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
 
-`collect_green_runtime_values.sh`（Step 4 の実効値収集）は、対象パラメータ名を `go run ./scripts/list_db_parameter_names` で得る。**Go への依存はこの経路＝VerifyGreen だけに閉じている。**値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
+**Step 4 は同じ Go プログラムで 2 つの実行形態を賄う。**MySQL 実効値の収集は Green DB への到達が必要で、リモート（CodeBuild）では VPC 構成が別途要るため成立しない場合がある。そのときは MySQL 接続を伴う確認をローカルから行い、レポート出力までローカルで完結させる。
 
-Step 4 のレポート生成器は Ruby 版（`generate_green_verification_report.rb`、ローカル既定）と Go 版（`generate_green_verification_report.go`、CI が `GREEN_REPORT_GENERATOR` で渡す）が並存する。**両方を同時に更新すること。**Go 版のビルド方法は基盤で異なり、CodeBuild は buildspec の `runtime-versions: golang` で同一イメージ内をビルドし（`PrivilegedMode` 不要）、GitHub Actions は `ci/Dockerfile.green-verification-report` のマルチステージビルドを使う。
+| 実行形態 | MySQL 接続 | レポート生成器へ渡す引数 | 「MySQL 実効値」列 |
+|---|---|---|---|
+| リモート（CodeBuild／GitHub Actions） | しない | `--runtime-values` を渡さない | `未収集` |
+| ローカル | する | `--runtime-values <収集結果 JSON>` | 収集した実効値 |
+
+**実効値の有無で変わるのはこの列だけで、判定は AWS API から取得した値で行う。**リモートでも判定内容は変わらない。この性質は `scripts/lib/cfn_shorthand_test.sh` が両形態を突き合わせて固定しているので、**レポート生成器を変更したら両形態のテストを通すこと。**
+
+レポート生成器は **Go 版だけ**である（`generate_green_verification_report.go`）。CodeBuild と GitHub Actions はどちらも `go build ./scripts` でビルドし、`GREEN_REPORT_GENERATOR` で `verify_green.sh` へ渡す。未指定なら `verify_green.sh` が一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
+
+**CloudFormation テンプレートの読み取りは `scripts/internal/cfn` に一本化してある。**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化し、値が組み込み関数の項目は「比較不能」として比較対象から外す。同じライブラリを `list_db_parameter_names` と `generate_blue_green_config_report` も使う。**短縮記法の扱いを変えるときはここだけを直す。**
 
 ## 実行方法
 
 ### 前提
 
-シェルスクリプトのデータ読み取りは **jq に一本化**している。`python3` + PyYAML は **YAML を JSON にする 1 行**だけに使い、その 1 行は `scripts/lib/deployment_config.sh` にしかない（jq は YAML を読めないため）。
+### 実装言語の使い分け
+
+**プログラムは Go、シェルからの設定 YAML 読み取りだけ Ruby、JSON の取り出しは jq。**理由と適用範囲は `decisions/implementation-language-policy.md`（採択済み）にある。
+
+- **新しいプログラムは Go で書く。**
+- 既存の Ruby（`evaluate_blue_green_prereqs.rb`、`generate_mysql84_parameter_group.rb`）は**一律には移行しない。**テスト可能性が問題になったものから順に移す。`.rb` を全廃しても、設定 YAML の読み取りが Ruby ランタイムを要求し続けるため依存は消えない
+- `examples/mysql-timezone-replication/probe/` の Go / Ruby / Python は**移行対象外**である。ドライバごとの `time_zone` の扱いの違いを示すことが目的で、3 実装が並ぶこと自体が結論の根拠になっている
+
+シェルスクリプトのデータ読み取りは **jq に一本化**している。YAML を JSON にする **Ruby の 1 行**だけが例外で（jq は YAML を読めないため）、その 1 行は `scripts/lib/deployment_config.sh` にしかない。**YAML / JSON はどちらも Ruby の標準ライブラリ（psych / json）なので、追加パッケージの導入は要らない。**
 
 - 設定 YAML → `deployment_config_vars <config> <service> '<jq フィルタ>'` で読む。フィルタは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを宣言する。共通関数（`required` / `optional` / `service` / `shellvars`）も同じファイルにある
 - AWS 応答などの JSON → jq で直接読む
-- **スクリプトに新しくインライン `python3` を書かない。**設定の読み取りは上の 1 経路だけである
+- **スクリプトに Python を書かない。**設定の読み取りは上の 1 経路だけで、YAML を扱うのは Ruby、それ以外は jq である
+- CodeBuild では各 buildspec が `runtime-versions: ruby: 3.4.10` で Ruby を用意する（パッケージの追加導入は無く、PyPI へも到達しない）
 
-ローカルで Step 3〜5 を直接実行する前に一度だけ:
+ローカルで Step 3〜5 を直接実行する前に、必要なコマンドがあることを確認する:
 
 ```bash
-python3 -m pip install 'PyYAML==6.0.2'
+ruby --version && jq --version
 ```
 
 Blue/Green 設定の収集・生成コマンドは Go である。**`go.mod` と `go.sum` はリポジトリ直下**に置き（`scripts/` 配下ではない）、`go run ./scripts/<コマンド名>` で実行する。こうしておくと go コマンドが作業ディレクトリを変えないため、**引数の相対パスが実行時のカレントディレクトリ基準で解決される**。`go -C scripts run ./<コマンド名>` と書くと cwd が `scripts/` へ移り、相対パスが `scripts/` 配下へ出てしまう。

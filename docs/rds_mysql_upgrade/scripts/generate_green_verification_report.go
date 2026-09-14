@@ -1,7 +1,12 @@
 // Step 4: 収集済み JSON と Step 2 の CloudFormation YAML から、Green 構成・
-// パラメーター整合性レポートを生成する。Ruby 版は後方互換のため維持する。
+// パラメーター整合性レポートを生成する。
 //
-// 依存: gopkg.in/yaml.v3（ビルド方法・依存管理の導入は別途実施する）。
+// MySQL 実効値（--runtime-values）は任意である。リモートでは Green DB へ到達できない
+// 構成もありうるため、渡さなければ該当列を「未収集」として出す。判定は AWS API から
+// 取得した値で行うので、実効値の有無で判定内容は変わらない。
+// 方針は decisions/implementation-language-policy.md にある。
+//
+// CloudFormation テンプレートの読み取り（短縮記法の正規化）は internal/cfn に委ねる。
 package main
 
 import (
@@ -12,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"rds-mysql-upgrade/scripts/internal/cfn"
 )
 
 type parameter struct {
@@ -54,57 +59,6 @@ func escape(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, "|", "\\|"), "\n", "<br>")
 }
 
-// cfnIntrinsicKey は CloudFormation の短縮記法タグ（!Ref / !Sub など）を
-// 長形式のキー（Ref / Fn::Sub）へ変換する。CFn 以外のタグでは空文字を返す。
-func cfnIntrinsicKey(tag string) string {
-	if !strings.HasPrefix(tag, "!") || strings.HasPrefix(tag, "!!") {
-		return ""
-	}
-	name := tag[1:]
-	if name == "Ref" || name == "Condition" {
-		return name
-	}
-	return "Fn::" + name
-}
-
-// cfnNodeToAny は短縮記法を長形式へ正規化しながら YAML を Go の値へ変換する。
-// yaml.Unmarshal へ直接 map を渡すとタグが黙って捨てられ、`!Ref Workers` が
-// "Workers" という文字列に化けて RDS の実値と誤って比較されるため、Node を経由する。
-func cfnNodeToAny(node *yaml.Node) any {
-	if node == nil {
-		return nil
-	}
-	if node.Kind == yaml.DocumentNode {
-		if len(node.Content) == 0 {
-			return nil
-		}
-		return cfnNodeToAny(node.Content[0])
-	}
-	if key := cfnIntrinsicKey(node.Tag); key != "" {
-		return map[string]any{key: cfnUntaggedToAny(node)}
-	}
-	return cfnUntaggedToAny(node)
-}
-
-func cfnUntaggedToAny(node *yaml.Node) any {
-	switch node.Kind {
-	case yaml.MappingNode:
-		result := map[string]any{}
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			result[node.Content[i].Value] = cfnNodeToAny(node.Content[i+1])
-		}
-		return result
-	case yaml.SequenceNode:
-		result := make([]any, 0, len(node.Content))
-		for _, child := range node.Content {
-			result = append(result, cfnNodeToAny(child))
-		}
-		return result
-	default:
-		return node.Value
-	}
-}
-
 func main() {
 	templatePath := flag.String("template", "", "CloudFormation YAML")
 	greenInstancePath := flag.String("green-instance", "", "Green DB instance JSON")
@@ -129,54 +83,14 @@ func main() {
 	}
 
 	// CloudFormation の Resources から DBParameterGroup を探し、YAML 上の宣言値を取得する。
-	content, err := os.ReadFile(*templatePath)
-	if err != nil {
-		die("%s: %v", *templatePath, err)
-	}
-	var root yaml.Node
-	if err := yaml.Unmarshal(content, &root); err != nil {
-		die("%s: YAML を解析できません: %v", *templatePath, err)
-	}
-	template, ok := cfnNodeToAny(&root).(map[string]any)
-	if !ok {
-		die("%s: テンプレートの最上位がマッピングではありません。", *templatePath)
-	}
-	resources, resourcesFound := template["Resources"].(map[string]any)
-	if !resourcesFound {
-		die("%s: Resources が見つかりません。", *templatePath)
-	}
-	expected := map[string]string{}
 	// 値が組み込み関数（Ref / Fn::*）の項目は、CloudFormation のパラメータ解決なしには
 	// 実値が決まらない。比較すると誤ったドリフトになるため、比較対象から外して明示する。
-	unresolved := map[string]string{}
-	found := false
-	for _, raw := range resources {
-		resource, isMap := raw.(map[string]any)
-		if !isMap || resource["Type"] != "AWS::RDS::DBParameterGroup" {
-			continue
-		}
-		found = true
-		properties, _ := resource["Properties"].(map[string]any)
-		parameters, _ := properties["Parameters"].(map[string]any)
-		for name, value := range parameters {
-			switch typed := value.(type) {
-			case map[string]any:
-				unresolved[name] = "Fn::*"
-				for key := range typed {
-					unresolved[name] = key
-					break
-				}
-			case []any:
-				unresolved[name] = "Fn::*"
-			default:
-				expected[name] = fmt.Sprint(value)
-			}
-		}
-		break
+	group, err := cfn.ReadDBParameterGroup(*templatePath)
+	if err != nil {
+		die("%v", err)
 	}
-	if !found {
-		die("%s: AWS::RDS::DBParameterGroup が見つかりません。", *templatePath)
-	}
+	expected := group.Declared
+	unresolved := group.Unresolved
 
 	user := readParameters(*userParametersPath)
 	system := readParameters(*systemParametersPath)

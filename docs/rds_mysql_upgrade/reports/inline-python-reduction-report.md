@@ -146,3 +146,10 @@ printf '{"source_parameter_group":"%s","collected_at":"%s"}\n' "$source_pg" "$(d
 **YAML の読み込みは jq では代替できないため、Python + PyYAML のままである。**本記録の「YAML設定ファイル読み込みは代替不可能」という結論はいまも有効で、変わったのは JSON 側の方針だけである。yq は引き続き導入していない。
 
 さらに同日、**設定 YAML の読み取り自体も 1 箇所へ統合した。**各スクリプトが持っていたインライン Python（9 箇所・206 行）を、`scripts/lib/deployment_config.sh` の「YAML を JSON にする 1 行」と、同ファイルの共通関数を使った宣言的な jq フィルタへ置き換えた。各スクリプトは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを書く。置き換えは、変換前後で `eval` 後のシェル変数が一致することを 9 箇所 × 3 パターンで確認したうえで行った。
+
+さらに同日、**設定 YAML の読み取り自体を Python から Ruby へ切り替えた。**Ruby は YAML（psych）と JSON をどちらも標準ライブラリで持つため、`PyYAML` のような追加パッケージの導入が不要になり、**CI から PyPI への到達要件が消えた**。CodeBuild では各 buildspec が `runtime-versions: ruby: 3.4.10` で Ruby を用意する（install フェーズの `pip install` は全廃）。ローカル Local Agent 用の `ci/Dockerfile.codebuild-runner` も、ベースイメージを `python:3.14.7-slim` から `ruby:3.4.10-slim` へ差し替えた。
+
+同日、`tests/test_generate_blue_green_config.sh` のアサーションも Ruby へ移した。**これで移行フローの実行経路とテストから Python が消えた。**
+
+残る Python は `examples/mysql-timezone-replication/probe/probe.py` だけである。これは **`time_zone` の扱いがドライバによって違うことを示すための検証装置**で、Go / Ruby / Python の 3 実装が並ぶこと自体が結論の根拠になっている（`decisions/implementation-language-policy.md` の「対象外とするもの」）。コンテナ内に閉じており、ホストにも CI にも Python を要求しない。
+

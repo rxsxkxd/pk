@@ -22,8 +22,10 @@ phases:
   install:
     # Go レポート生成器は CodeBuild イメージの managed runtime でビルドする。
     # Docker のマルチステージビルドをやめたため PrivilegedMode は不要になった。
+    # Ruby は設定 YAML の読み取りに使う（標準ライブラリのみ。追加導入は不要）。
     runtime-versions:
       golang: 1.25
+      ruby: 3.4.10
     commands:
       # --- 診断: sh / bash 問題の切り分け用。原因が確定したら削除する ---------
       - ls -l scripts/*.sh scripts/lib/*.sh
@@ -34,7 +36,6 @@ phases:
       # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
       # 落ちていれば復元し、落ちていなければ何も変わらない。
       - chmod +x scripts/*.sh scripts/lib/*.sh
-      - python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
 
   pre_build:
     commands:
@@ -56,7 +57,12 @@ phases:
       #    config の mysql_verification が決め、verify_green.sh が解決する。
       - |
         set -eu
-        MYSQL_ENABLED=$(python3 -c 'import sys, yaml; d = yaml.safe_load(open(sys.argv[1])); m = d["services"][sys.argv[2]].get("mysql_verification") or {}; print("true" if m.get("enabled") else "false")' "$CONFIG_FILE" "$SERVICE_NAME")
+        # 設定の読み取りはスクリプト本体と同じ経路を使う（Ruby で YAML→JSON、jq で取り出し）。
+        . scripts/lib/deployment_config.sh
+        eval "$(deployment_config_vars "$CONFIG_FILE" "$SERVICE_NAME" '
+          service($service) as $svc | {
+            MYSQL_ENABLED: (if ($svc.mysql_verification.enabled // false) then "true" else "false" end),
+          } | shellvars')"
         echo "mysql_verification.enabled=${MYSQL_ENABLED}"
         if [ "$MYSQL_ENABLED" = "true" ]; then
           command -v mysql >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y mysql-client; }

@@ -24,7 +24,7 @@ CloudFormation で 8.4 パラメータグループを作成済み
 
 ## 2. 共通準備
 
-リポジトリのルートで実行する。直接実行には Bash、AWS CLI v2、Python 3、PyYAML、GNU `date` が必要である。`verify_green.sh` は `date -d` を使うため、macOS の標準 `date` だけでは動作しない。Linux 環境または GNU coreutils を提供するコンテナで実行する。
+リポジトリのルートで実行する。直接実行には Bash、AWS CLI v2、Ruby、jq、GNU `date` が必要である。`verify_green.sh` は `date -d` を使うため、macOS の標準 `date` だけでは動作しない。Linux 環境または GNU coreutils を提供するコンテナで実行する。
 
 ```bash
 export CONFIG_FILE=config/blue-green/staging.deployment.yml
@@ -37,9 +37,10 @@ mkdir -p "$ARTIFACT_ROOT"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 
 # シェルスクリプトが設定 YAML を読むために必要。
-python3 -c 'import yaml' || python3 -m pip install 'PyYAML==6.0.2'
-# 設定と JSON の読み取りに jq を使う。無い場合は該当スクリプトが起動直後に停止する。
-command -v jq
+# 設定 YAML の読み取りは Ruby の標準ライブラリで行う（追加導入は不要）。
+ruby --version
+# JSON の読み取りに jq を使う。無い場合は該当スクリプトが起動直後に停止する。
+jq --version
 ```
 
 `CONFIG_FILE` の `aws_region` を既定で使用する。別リージョンを使う場合だけ、各コマンドに `--region <region>` を追加する。
@@ -117,23 +118,22 @@ Green 作成中・作成後も、切替は実行しない。`AVAILABLE` を確�
 
 `verify_green.sh` は、Green のエンジンバージョン、DB インスタンスクラス、関連付けパラメータグループ、`Source=user` 値、`ReplicaLag` を確認し、Markdown レポートを出力する。
 
-### 5-1. Go レポート生成器を使う推奨実行
+### 5-1. レポート生成器
 
-CI と同じ Go レポート生成器を使用する。実行環境の CPU アーキテクチャに対応するバイナリを作成する。
+レポート生成器は Go 版だけである。**`GREEN_REPORT_GENERATOR` を指定しなければ `verify_green.sh` が一時ファイルへビルドして使う**ため、通常は何も用意しなくてよい（Go が必要）。
 
 ```bash
-case "$(uname -m)" in
-  x86_64) build_platform=linux/amd64 ;;
-  aarch64|arm64) build_platform=linux/arm64 ;;
-  *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 2 ;;
-esac
+scripts/verify_green.sh \
+  --config "$CONFIG_FILE" \
+  --service "$SERVICE_NAME" \
+  --profile "$AWS_PROFILE" \
+  --output-dir "$ARTIFACT_ROOT/03-verify-green"
+```
 
-docker buildx build \
-  --platform "$build_platform" \
-  --file ci/Dockerfile.green-verification-report \
-  --target export \
-  --output type=local,dest=.tools/green-report \
-  .
+繰り返し実行するなら、CI と同じようにバイナリを作って渡す方が速い。
+
+```bash
+go build -o .tools/green-report/generate_green_verification_report ./scripts
 
 GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" \
   scripts/verify_green.sh \
@@ -145,17 +145,9 @@ GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_rep
 
 判定が成功した場合でも、アプリケーション検証を完了するまで Step 5 へ進まない。失敗時は `green-verification-report.md` と収集済み JSON を確認し、Green の作り直しまたは設定修正を判断する。
 
-### 5-2. Ruby 互換経路
+### 5-2. MySQL 実効値を含める場合
 
-`GREEN_REPORT_GENERATOR` を指定しなければ、直接実行では Ruby 版 `generate_green_verification_report.rb` を使う。Docker Buildx を使えない場合の互換経路であり、CI と同じ経路を検証する目的には使用しない。
-
-```bash
-scripts/verify_green.sh \
-  --config "$CONFIG_FILE" \
-  --service "$SERVICE_NAME" \
-  --profile "$AWS_PROFILE" \
-  --output-dir "$ARTIFACT_ROOT/03-verify-green-ruby"
-```
+`mysql_verification.enabled: true` にすると、`verify_green.sh` が Green DB へ接続して実効値を収集し、同じレポートの「MySQL 実効値」列を埋める。**リモート（CodeBuild）では VPC 構成が別途必要になるため、この確認はローカルから行う運用を想定している**（[decisions/implementation-language-policy.md](decisions/implementation-language-policy.md)）。実効値なしでもレポートは出力され、判定内容は変わらない。
 
 ### 5-3. MySQL 実効値をレポートへ加える場合
 

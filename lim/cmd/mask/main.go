@@ -1,4 +1,11 @@
 // Command mask は S3 上の画像にガウスぼかしを適用して S3 に保存する Lambda。
+//
+// 起動方法は 2 つ。
+//
+//	S3 の ObjectCreated 通知
+//	キーの変数部分を渡すリクエスト: {"x":"...","y":"...","z":"...","n":"..."}
+//
+// どちらもペイロードの形で判別する（internal/handler.Handle）。
 package main
 
 import (

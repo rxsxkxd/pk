@@ -1,20 +1,32 @@
 # image-mask
 
-S3 に置かれた画像の**上半分にガウスぼかしを適用**して、別バケットへ保存する Lambda。
+S3 に置かれた画像の**上半分にガウスぼかしを適用**して、同じバケットの別階層へ保存する Lambda。
 
 - 言語: Go 1.24 / `provided.al2023` / arm64
 - IaC: AWS SAM（`template.yaml`）
 - 設計: [docs/image-blur-lambda-design.md](docs/image-blur-lambda-design.md)
 
+キーは 7 要素に固定し、**変数だけを呼び出し側から受け取る**。
+
 ```
-s3://…-raw/uploads/2026/09/doc.jpg
-        │  ObjectCreated 通知
-        ▼
-   Lambda (image-mask)  ── 失敗 ──▶ SQS DLQ
-        │
-        ▼
-s3://…-out/masked/v1/2026/09/doc.jpg   ← 上半分だけぼけた画像
+<bucket>/<prefix>/<x>/<y>/<infix>/<z>/<n>
+          ~~~~~~   ~   ~   ~~~~~   ~   ~
+          Lambda  変数 変数 Lambda 変数 変数(ファイル名)
 ```
+
+原本とマスク済みは **infix だけが異なる**。
+
+```
+原本      : masking/tenant-a/2026-09/original/front/id.jpg
+                 │  ObjectCreated 通知 or {"x","y","z","n"} のリクエスト
+                 ▼
+            Lambda (image-mask)  ── 失敗 ──▶ SQS DLQ
+                 │
+                 ▼
+マスク済み: masking/tenant-a/2026-09/v1/front/id.jpg
+```
+
+マスク済み側の infix はマスキングポリシー版。強度に関わる設定を変えたら上げる。
 
 ## 構成
 
@@ -26,6 +38,7 @@ s3://…-out/masked/v1/2026/09/doc.jpg   ← 上半分だけぼけた画像
 | `internal/handler` | S3 イベント処理（検証・冪等性・fail-closed） |
 | `internal/masking` | マスキング処理そのもの。Lambda と CLI が共有する |
 | `internal/imaging` | ぼかし、領域切り出し、EXIF 向き補正、強度測定 |
+| `internal/s3key` | キー構造の組み立てと解釈、変数の検証 |
 | `internal/config` | 環境変数の読み込み |
 | `internal/metrics` | EMF によるカスタムメトリクス出力 |
 | `template.yaml` | バケット・KMS・Lambda・DLQ・CloudTrail・アラーム |
@@ -132,13 +145,32 @@ make validate  # sam validate --lint（SAM CLI が必要）
 make deploy    # sam build && sam deploy --guided
 ```
 
-デプロイ後、出力された `RawBucketName` の `uploads/` 配下に画像を置くと、
-`MaskedBucketName` の `masked/v1/…` に結果が出る。
+### 起動方法は 2 つ
+
+**1. S3 に置く**
 
 ```bash
-aws s3 cp photo.jpg s3://$RAW_BUCKET/uploads/photo.jpg
-aws s3 cp s3://$MASKED_BUCKET/masked/v1/photo.jpg ./masked.jpg
+aws s3 cp id.jpg s3://$BUCKET/masking/tenant-a/2026-09/original/front/id.jpg
+aws s3 cp s3://$BUCKET/masking/tenant-a/2026-09/v1/front/id.jpg ./masked.jpg
 ```
+
+**2. 変数を渡して呼ぶ**
+
+```bash
+aws lambda invoke --function-name image-mask-dev \
+  --payload '{"x":"tenant-a","y":"2026-09","z":"front","n":"id.jpg"}' out.json
+```
+
+```json
+{
+  "sourceKey": "masking/tenant-a/2026-09/original/front/id.jpg",
+  "outputKey": "masking/tenant-a/2026-09/v1/front/id.jpg",
+  "skipped": false, "radiusPx": 36, "strengthScore": 1.15
+}
+```
+
+処理済みなら `skipped: true`（冪等）。変数にスラッシュや `..` を含めてキーを
+別の場所へ向ける細工は検証で弾く。
 
 ## 前提としていること
 
@@ -232,9 +264,10 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 
 | 名前 | 既定 | 説明 |
 |---|---|---|
-| `OUTPUT_BUCKET` | （必須） | 出力先バケット |
-| `INPUT_PREFIX` | `uploads/` | 入力プレフィックス |
-| `OUTPUT_PREFIX` | `masked/` | 出力プレフィックス |
+| `OUTPUT_BUCKET` | = `INPUT_BUCKET` | 出力先。既定は同じバケット |
+| `INPUT_BUCKET` | （必須） | 原本のあるバケット |
+| `KEY_PREFIX` | `masking` | 共有バケット内のルート |
+| `ORIGINAL_INFIX` | `original` | 原本の階層 |
 | `MASKING_POLICY_VERSION` | `v1` | 出力キーに含まれるポリシー版 |
 | `MASK_HEIGHT_RATIO` | `0.5` | 上部からマスクする高さの比率 |
 | `MIN_BLUR_RATIO` | `0.04` | 短辺に対するぼかし半径の比率 |

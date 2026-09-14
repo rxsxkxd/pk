@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/rxsxkxd/lim/internal/imaging"
+	"github.com/rxsxkxd/lim/internal/s3key"
 )
 
 // MinAllowedBlurRatio はぼかし半径の比率として許容する下限。
@@ -19,10 +20,14 @@ const MinAllowedBlurRatio = 0.004
 // Config は設計書 §8.4 の環境変数に対応する。
 // マスク強度に関わる値はサーバー側でのみ決まり、アップローダ側からは弱められない。
 type Config struct {
-	OutputBucket    string
-	InputPrefix     string
-	OutputPrefix    string
-	PolicyVersion   string
+	// キーは <bucket>/<prefix>/<x>/<y>/<infix>/<z>/<n> の形に固定する。
+	// 変数（x, y, z, n）は呼び出し側から受け取り、それ以外はここで定義する。
+	InputBucket   string // 原本のあるバケット
+	OutputBucket  string // マスク済みの出力先。未指定なら InputBucket と同じ
+	KeyPrefix     string // 共有バケット内でこのアプリが使うルート
+	OriginalInfix string // 原本の階層
+	PolicyVersion string // マスク済みの階層（マスキングポリシー版）
+
 	MaskHeightRatio float64 // 画像上部からマスクする高さの比率（0.5 = 上半分）
 	BlurRatio       float64 // 短辺に対するぼかし半径の比率
 	MinBlurRadiusPx float64 // 小さい画像向けの半径の絶対下限
@@ -38,9 +43,10 @@ type Config struct {
 // Load は環境変数から設定を組み立てる。既定値は設計書 §8.4 に合わせている。
 func Load() (Config, error) {
 	c := Config{
+		InputBucket:     os.Getenv("INPUT_BUCKET"),
 		OutputBucket:    os.Getenv("OUTPUT_BUCKET"),
-		InputPrefix:     env("INPUT_PREFIX", "uploads/"),
-		OutputPrefix:    env("OUTPUT_PREFIX", "masked/"),
+		KeyPrefix:       env("KEY_PREFIX", "masking"),
+		OriginalInfix:   env("ORIGINAL_INFIX", "original"),
 		PolicyVersion:   env("MASKING_POLICY_VERSION", "v1"),
 		MaskHeightRatio: envFloat("MASK_HEIGHT_RATIO", 0.5),
 		BlurRatio:       envFloat("MIN_BLUR_RATIO", 0.04),
@@ -54,8 +60,15 @@ func Load() (Config, error) {
 		JPEGQuality:     envInt("JPEG_QUALITY", 85),
 	}
 
+	if c.InputBucket == "" {
+		return c, fmt.Errorf("INPUT_BUCKET is required")
+	}
 	if c.OutputBucket == "" {
-		return c, fmt.Errorf("OUTPUT_BUCKET is required")
+		// 同一バケットの別 infix に出す構成が既定。
+		c.OutputBucket = c.InputBucket
+	}
+	if err := c.Layout().Validate(); err != nil {
+		return c, err
 	}
 	if c.MaskHeightRatio <= 0 || c.MaskHeightRatio > 1 {
 		return c, fmt.Errorf("MASK_HEIGHT_RATIO must be in (0, 1], got %v", c.MaskHeightRatio)
@@ -78,6 +91,15 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("DOWNSCALE_FACTOR must be >= 1, got %d", c.DownscaleFactor)
 	}
 	return c, nil
+}
+
+// Layout はキーの固定部分を返す。
+func (c Config) Layout() s3key.Layout {
+	return s3key.Layout{
+		Prefix:        c.KeyPrefix,
+		OriginalInfix: c.OriginalInfix,
+		MaskedInfix:   c.PolicyVersion,
+	}
 }
 
 func env(k, def string) string {

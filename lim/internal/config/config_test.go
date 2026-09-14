@@ -44,14 +44,24 @@ func TestLoadRejectsWeakMaskSettings(t *testing.T) {
 			want: "STRENGTH_BLOCK_PX",
 		},
 		{
-			name: "出力先が未設定",
-			env:  map[string]string{"OUTPUT_BUCKET": ""},
-			want: "OUTPUT_BUCKET",
+			name: "入力バケットが未設定",
+			env:  map[string]string{"INPUT_BUCKET": ""},
+			want: "INPUT_BUCKET",
+		},
+		{
+			name: "原本とマスク済みの infix が同じ",
+			env:  map[string]string{"ORIGINAL_INFIX": "v1"},
+			want: "must differ",
+		},
+		{
+			name: "プレフィックスにスラッシュ",
+			env:  map[string]string{"KEY_PREFIX": "a/b"},
+			want: "KEY_PREFIX",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv("OUTPUT_BUCKET", "masked")
+			t.Setenv("INPUT_BUCKET", "shared")
 			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}
@@ -68,7 +78,7 @@ func TestLoadRejectsWeakMaskSettings(t *testing.T) {
 
 func TestLoadAcceptsTheAcceptanceLine(t *testing.T) {
 	// 許容ラインちょうどは通る。
-	t.Setenv("OUTPUT_BUCKET", "masked")
+	t.Setenv("INPUT_BUCKET", "shared")
 	t.Setenv("MIN_BLUR_RATIO", "0.004")
 
 	c, err := Load()
@@ -81,7 +91,7 @@ func TestLoadAcceptsTheAcceptanceLine(t *testing.T) {
 }
 
 func TestLoadDefaults(t *testing.T) {
-	t.Setenv("OUTPUT_BUCKET", "masked")
+	t.Setenv("INPUT_BUCKET", "shared")
 
 	c, err := Load()
 	if err != nil {
@@ -99,6 +109,11 @@ func TestLoadDefaults(t *testing.T) {
 		{"DownscaleFactor", c.DownscaleFactor, 4},
 		{"StrengthBlockPx", c.StrengthBlockPx, 64},
 		{"MaxLaplacianVar", c.MaxLaplacianVar, 15.0},
+		{"KeyPrefix", c.KeyPrefix, "masking"},
+		{"OriginalInfix", c.OriginalInfix, "original"},
+		{"PolicyVersion", c.PolicyVersion, "v1"},
+		// 出力先を指定しなければ原本と同じバケットに出す。
+		{"OutputBucket", c.OutputBucket, "shared"},
 	}
 	for _, ch := range checks {
 		if ch.got != ch.want {

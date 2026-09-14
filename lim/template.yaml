@@ -1,7 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  S3 上の画像の上半分にガウスぼかしを適用してマスキングし、別バケットへ保存する。
+  S3 上の画像の上半分にガウスぼかしを適用してマスキングし、同じバケットの
+  別階層へ保存する。キーは <prefix>/<x>/<y>/<infix>/<z>/<n> の形に固定し、
+  原本とマスク済みは infix だけが異なる。
   設計: docs/image-blur-lambda-design.md
 
 Parameters:
@@ -9,10 +11,22 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, stg, prod]
-  RawRetentionDays:
-    Type: Number
-    Default: 30
-    Description: 原本（未マスク）画像の保持日数。短いほど漏洩リスクが小さい。
+  KeyPrefix:
+    Type: String
+    Default: masking
+    Description: >
+      共有バケット内でこのアプリが使うルート。キーは
+      <prefix>/<x>/<y>/<infix>/<z>/<n> の形に固定する。
+  OriginalInfix:
+    Type: String
+    Default: original
+    Description: 原本の階層名。マスク済みは MaskingPolicyVersion の階層に出る。
+  MaskingPolicyVersion:
+    Type: String
+    Default: v1
+    Description: >
+      マスク済みの階層名。マスクの強度に関わる設定を変えたらこれも上げる。
+      上げないと、処理済みのオブジェクトが再処理されず新旧が混在する。
   MaskHeightRatio:
     Type: String
     Default: '0.5'
@@ -46,11 +60,13 @@ Globals:
       LogFormat: JSON
 
 Resources:
-  # ---------- KMS: 原本用と出力用でキーを分け、原本を復号できる主体を最小化する ----------
-  RawKey:
+  # ---------- KMS ----------
+  # 原本とマスク済みを同じバケットに置くため、バケット既定の暗号化キーは 1 つになる。
+  # 別バケット構成なら原本用と出力用でキーを分けられたが、この構成では分けられない。
+  ImageKey:
     Type: AWS::KMS::Key
     Properties:
-      Description: !Sub 'image-mask ${Env} raw (unmasked) originals'
+      Description: !Sub 'image-mask ${Env}'
       EnableKeyRotation: true
       KeyPolicy:
         Version: '2012-10-17'
@@ -60,24 +76,12 @@ Resources:
             Action: 'kms:*'
             Resource: '*'
 
-  MaskedKey:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: !Sub 'image-mask ${Env} masked outputs'
-      EnableKeyRotation: true
-      KeyPolicy:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root' }
-            Action: 'kms:*'
-            Resource: '*'
-
-  # ---------- 原本バケット: 機密。読めるのは Lambda だけ ----------
-  RawBucket:
+  # ---------- 画像バケット ----------
+  # 他のリソースと共有する前提。このアプリの領域は KeyPrefix 配下に閉じる。
+  ImageBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'image-mask-raw-${Env}-${AWS::AccountId}'
+      BucketName: !Sub 'image-mask-${Env}-${AWS::AccountId}'
       VersioningConfiguration: { Status: Enabled }
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
@@ -88,24 +92,42 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: aws:kms
-              KMSMasterKeyID: !Ref RawKey
+              KMSMasterKeyID: !Ref ImageKey
             BucketKeyEnabled: true
       LifecycleConfiguration:
         Rules:
-          # 原本を持ち続けることが最大のリスクなので、期限で確実に消す。
-          - Id: expire-originals
-            Status: Enabled
-            Prefix: uploads/
-            ExpirationInDays: !Ref RawRetentionDays
-            NoncurrentVersionExpiration: { NoncurrentDays: 1 }
+          # 中断したマルチパートアップロードの断片を片付けるだけ。
+          # オブジェクトの自動削除は行わない（保持期間は要件が出てから決める）。
           - Id: abort-incomplete-uploads
             Status: Enabled
             AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Function: !GetAtt MaskFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  # 通知フィルタはプレフィックスと接尾辞しか指定できず、
+                  # infix は x/y の後ろにあるため原本だけに絞れない。
+                  # マスク済みの書き込みでも通知が飛ぶので、Lambda 側で infix を見て
+                  # 弾いている（再帰ループ防止）。
+                  - Name: prefix
+                    Value: !Sub '${KeyPrefix}/'
+    DependsOn: MaskFunctionInvokePermission
 
-  RawBucketPolicy:
+  MaskFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt MaskFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+
+  ImageBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
-      Bucket: !Ref RawBucket
+      Bucket: !Ref ImageBucket
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -114,50 +136,16 @@ Resources:
             Principal: '*'
             Action: 's3:*'
             Resource:
-              - !GetAtt RawBucket.Arn
-              - !Sub '${RawBucket.Arn}/*'
+              - !GetAtt ImageBucket.Arn
+              - !Sub '${ImageBucket.Arn}/*'
             Condition:
               Bool: { 'aws:SecureTransport': false }
-
-  # ---------- マスク済バケット: 出力先。原本と必ず分ける ----------
-  MaskedBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub 'image-mask-out-${Env}-${AWS::AccountId}'
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: aws:kms
-              KMSMasterKeyID: !Ref MaskedKey
-            BucketKeyEnabled: true
-
-  MaskedBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref MaskedBucket
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: DenyInsecureTransport
-            Effect: Deny
-            Principal: '*'
-            Action: 's3:*'
-            Resource:
-              - !GetAtt MaskedBucket.Arn
-              - !Sub '${MaskedBucket.Arn}/*'
-            Condition:
-              Bool: { 'aws:SecureTransport': false }
-          - Sid: OnlyMaskFunctionMayWrite
-            # 原本が誤ってここへコピーされる経路を塞ぐ。
+          - Sid: OnlyMaskFunctionMayWriteMaskedObjects
+            # 原本が誤ってマスク済みの階層へコピーされる経路を塞ぐ。
             Effect: Deny
             Principal: '*'
             Action: ['s3:PutObject', 's3:PutObjectAcl']
-            Resource: !Sub '${MaskedBucket.Arn}/*'
+            Resource: !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/*/${MaskingPolicyVersion}/*'
             Condition:
               StringNotEquals:
                 'aws:PrincipalArn': !GetAtt MaskFunctionRole.Arn
@@ -182,10 +170,11 @@ Resources:
       ReservedConcurrentExecutions: 200
       Environment:
         Variables:
-          OUTPUT_BUCKET: !Ref MaskedBucket
-          INPUT_PREFIX: uploads/
-          OUTPUT_PREFIX: masked/
-          MASKING_POLICY_VERSION: v1
+          INPUT_BUCKET: !Sub 'image-mask-${Env}-${AWS::AccountId}'
+          OUTPUT_BUCKET: !Sub 'image-mask-${Env}-${AWS::AccountId}'
+          KEY_PREFIX: !Ref KeyPrefix
+          ORIGINAL_INFIX: !Ref OriginalInfix
+          MASKING_POLICY_VERSION: !Ref MaskingPolicyVersion
           MASK_HEIGHT_RATIO: !Ref MaskHeightRatio
           MIN_BLUR_RATIO: !Ref BlurRatio
           MIN_BLUR_RADIUS_PX: '8'
@@ -197,17 +186,6 @@ Resources:
           MAX_INPUT_PIXELS: '64000000'
           JPEG_QUALITY: '85'
           LOG_LEVEL: INFO
-      Events:
-        ImageUploaded:
-          Type: S3
-          Properties:
-            Bucket: !Ref RawBucket
-            Events: 's3:ObjectCreated:*'
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: uploads/
       EventInvokeConfig:
         MaximumRetryAttempts: 2
         MaximumEventAgeInSeconds: 3600
@@ -216,28 +194,25 @@ Resources:
             Type: SQS
             Destination: !GetAtt DLQ.Arn
       Policies:
-        # 最小権限。出力バケットへは「書くだけ」で読めない。
+        # 最小権限。原本は読むだけ、マスク済みは書くだけ。
+        # x と y は可変なのでワイルドカードで受ける。
         - Statement:
             - Sid: ReadOriginals
               Effect: Allow
               Action: ['s3:GetObject', 's3:GetObjectVersion']
-              Resource: !Sub '${RawBucket.Arn}/uploads/*'
+              Resource: !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/*/${OriginalInfix}/*'
             - Sid: WriteMasked
               Effect: Allow
               Action: 's3:PutObject'
-              Resource: !Sub '${MaskedBucket.Arn}/masked/*'
+              Resource: !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/*/${MaskingPolicyVersion}/*'
             - Sid: HeadMaskedForIdempotency
               Effect: Allow
               Action: 's3:GetObject'
-              Resource: !Sub '${MaskedBucket.Arn}/masked/*'
-            - Sid: DecryptOriginals
+              Resource: !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/*/${MaskingPolicyVersion}/*'
+            - Sid: UseKey
               Effect: Allow
-              Action: ['kms:Decrypt', 'kms:DescribeKey']
-              Resource: !GetAtt RawKey.Arn
-            - Sid: EncryptMasked
-              Effect: Allow
-              Action: ['kms:GenerateDataKey', 'kms:Encrypt', 'kms:DescribeKey']
-              Resource: !GetAtt MaskedKey.Arn
+              Action: ['kms:Decrypt', 'kms:GenerateDataKey', 'kms:Encrypt', 'kms:DescribeKey']
+              Resource: !GetAtt ImageKey.Arn
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DLQ.QueueName
 
@@ -284,8 +259,10 @@ Resources:
         - ReadWriteType: All
           IncludeManagementEvents: false
           DataResources:
+            # 原本だけに絞りたいが、データイベントのセレクタもプレフィックス指定のため
+            # x/y の後ろにある infix では絞れない。KeyPrefix 配下すべてを記録する。
             - Type: 'AWS::S3::Object'
-              Values: [!Sub '${RawBucket.Arn}/uploads/']
+              Values: [!Sub '${ImageBucket.Arn}/${KeyPrefix}/']
 
   # ---------- アラーム ----------
   MaskStrengthCheckFailedAlarm:
@@ -347,12 +324,15 @@ Resources:
       TreatMissingData: notBreaching
 
 Outputs:
-  RawBucketName:
-    Description: 原本のアップロード先（uploads/ 配下に置く）
-    Value: !Ref RawBucket
-  MaskedBucketName:
-    Description: マスク済画像の出力先
-    Value: !Ref MaskedBucket
+  ImageBucketName:
+    Description: 原本とマスク済みを置くバケット
+    Value: !Ref ImageBucket
+  OriginalKeyPattern:
+    Description: 原本のキー。ここへ PUT すると処理が走る
+    Value: !Sub '${KeyPrefix}/<x>/<y>/${OriginalInfix}/<z>/<n>'
+  MaskedKeyPattern:
+    Description: マスク済みのキー
+    Value: !Sub '${KeyPrefix}/<x>/<y>/${MaskingPolicyVersion}/<z>/<n>'
   DLQUrl:
     Description: 失敗イベントの退避先
     Value: !Ref DLQ

@@ -52,7 +52,7 @@
    ▼
 ┌─────────────────────────────────────────┐
 │ 5. VerifyGreen              [Step 4]     │  Green 構成 + ReplicaLag の検証
-│    PrivilegedMode: true（Go ビルド用）    │  切替後は「対象なし」で成功
+│    Go は runtime-versions でビルド        │  切替後は「対象なし」で成功
 └─────────────────────────────────────────┘
    │
    ▼
@@ -128,7 +128,7 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 | `ReadApprovalsProject` | `read-approvals.yml` | `read_action_approvals.sh` | AWS API を呼ばない |
 | `PrecheckProject` | `precheck-target-parameter-group.yml` | `check_target_parameter_group.sh` | 読み取りのみ |
 | `BuildGreenProject` | `build-green.yml` | `build_green.sh` | **timeout 120 分**（Green の作成待ち） |
-| `VerifyGreenProject` | `verify-green.yml` | `verify_green.sh` | **PrivilegedMode: true**（Go レポート生成器の Docker ビルド） |
+| `VerifyGreenProject` | `verify-green.yml` | `verify_green.sh` | Go レポート生成器を `runtime-versions: golang` で同一イメージ内ビルド（`PrivilegedMode` 不要） |
 | `SwitchoverProject` | `switchover.yml` | `switchover.sh` | **timeout 60 分**（切替完了待ち） |
 | `CleanupProject` | `cleanup.yml` | `cleanup.sh` | 既定 60 分 |
 

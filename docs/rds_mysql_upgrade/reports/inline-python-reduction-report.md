@@ -130,3 +130,17 @@ printf '{"source_parameter_group":"%s","collected_at":"%s"}\n' "$source_pg" "$(d
 ## 関連ドキュメント
 
 - [structure-review-proposal.md](../decisions/structure-review-proposal.md) — 論点1(実装言語の統一)。今回の対応はその中間ステップであり、Ruby/Go実装の統一自体は未着手。
+
+---
+
+## 追記（2026-09-14）: jq 非導入の前提は取り下げた
+
+本記録は「jq／yq を新規導入しない」という当時の前提のもとで実施したものである。その後、**CI（CodeBuild）から呼ばれるスクリプトの JSON 処理は jq へ置き換えた**。
+
+| スクリプト | 置き換えた処理 |
+|---|---|
+| `create_blue_green_deployment.sh` | 作成応答からの `BlueGreenDeploymentIdentifier` 取り出し |
+| `check_target_parameter_group.sh` | `describe-db-parameter-groups` 応答の件数・名前・ファミリー確認 |
+| `collect_green_runtime_values.sh` | MySQL `--batch` 出力（TSV）から実効値 JSON の生成 |
+
+**YAML の読み込みは jq では代替できないため、Python + PyYAML のままである。**本記録の「YAML設定ファイル読み込みは代替不可能」という結論はいまも有効で、変わったのは JSON 側の方針だけである。yq は引き続き導入していない。

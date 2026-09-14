@@ -30,13 +30,15 @@ AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS �
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
-| BuildGreen | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2` | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
-| VerifyGreen | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2`。Go レポート生成器のビルド時だけ `golang:1.25` を pull | 必要、`PrivilegedMode: true` | CodeBuild コンテナ上で Go バイナリとシェルスクリプトを実行 |
-| Switchover | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2` | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
+| BuildGreen | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2`（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
+| VerifyGreen | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2`（jq は image 同梱）。Go は buildspec の `runtime-versions: golang` で用意 | 不要、`PrivilegedMode: false` | 同一イメージ内で Go バイナリをビルドし、シェルスクリプトと共に実行 |
+| Switchover | `aws/codebuild/standard:7.0` | Python 3 と `PyYAML==6.0.2`（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
 
 ### 共通コンテナ
 
-AWS 用と Local Agent 用で buildspec を分けないため、`runtime-versions` は指定しない。各 image に備わる `python3` を使用し、install フェーズで PyYAML の存在を確認する。
+AWS 用と Local Agent 用で buildspec を分けないため、Python については `runtime-versions` を指定しない。各 image に備わる `python3` を使用し、install フェーズで PyYAML の存在を確認する。
+
+**例外は VerifyGreen の Go である。**Docker を使わずに Go レポート生成器をビルドするため、`verify-green.yml` だけが `runtime-versions: golang` を指定する。Local Agent のランナー image がその runtime を解決できない場合は、Go を含む image を使うか、Ruby 版の生成器を指定して回避する。
 
 ```bash
 python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.2'
@@ -44,25 +46,22 @@ python3 -c 'import yaml' || python3 -m pip install --disable-pip-version-check '
 
 用途は、`scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` と、その下位スクリプトが環境設定 YAML を読み取るためである。Ruby は CodeBuild のいずれのプロジェクトでも使用しない。AWS managed image では `standard:7.0` に含まれる Python 3 を、ローカル代替 image では Dockerfile で固定した Python 3.11 を使用する。
 
-### VerifyGreen の Docker マルチステージビルド
+### VerifyGreen の Go レポート生成器
 
-VerifyGreen だけは、[Dockerfile.green-verification-report](Dockerfile.green-verification-report) を Docker Buildx でビルドする。
+VerifyGreen だけは Go バイナリを使う。**Docker は使わず、buildspec の `runtime-versions` が用意した Go で同一イメージ内をビルドする。**
 
 ```text
 aws/codebuild/standard:7.0（実行コンテナ）
-  └─ docker buildx build
-       ├─ builder: golang:1.25
-       │    └─ gopkg.in/yaml.v3 v3.0.1 を取得して Go レポート生成器を静的ビルド
-       └─ export: scratch
-            └─ generate_green_verification_report バイナリだけを .tools/green-report/ に出力
-
-aws/codebuild/standard:7.0（実行コンテナ）
-  └─ verify_green.sh が上記バイナリを GREEN_REPORT_GENERATOR として実行
+  ├─ install:  runtime-versions: golang: 1.25
+  ├─ pre_build: CGO_ENABLED=0 go build ... -o .tools/green-report/... ./scripts
+  └─ build:     verify_green.sh が上記バイナリを GREEN_REPORT_GENERATOR として実行
 ```
 
-ビルド済み Docker イメージをレジストリへ push したり、最終ステージのコンテナを常駐起動したりはしない。Go バイナリを CodeBuild の作業ディレクトリへ取り出して実行するだけである。`PrivilegedMode: true` はこの Docker ビルドのためだけに VerifyGreen へ設定している。
+**`PrivilegedMode` はどのプロジェクトにも設定しない。**
 
-そのため VerifyGreen は、CodeBuild managed image の取得先に加えて、`golang:1.25` の取得先と Go module の取得先へ到達できる必要がある。VPC 内で動かす場合は NAT gateway または組織で許可されたプロキシ・VPC endpoint を用意する。
+VerifyGreen は Go module の取得先（`proxy.golang.org`）へ到達できる必要がある。イメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定。buildspec で明示している）が必要なツールチェーンを取得するため、その経路も要る。VPC 内で動かす場合は NAT gateway または組織で許可されたプロキシ・VPC endpoint を用意する。
+
+> イメージが提供する managed runtime の Go バージョンは AWS の更新で変わる。`runtime-versions: golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブをイメージが提供するバージョンへ下げる。
 
 ### 任意の MySQL 実効値収集時だけ追加されるもの
 
@@ -132,7 +131,7 @@ Step ごとの変更権限は次のとおりである。
 4. `VerifyGreenProject` に、Green DB へ到達できる `VpcConfig`（VPC、private subnet、security group）を追加する。
 5. MySQL ユーザーに `performance_schema.global_variables` を参照できる最小限の権限を与える。
 
-テンプレートの VerifyGreenProject は Go レポート生成器の Docker マルチステージビルドのため `PrivilegedMode: true` である。VPC 内の CodeBuild から Docker Hub／Go module の取得、S3、CloudWatch Logs、AWS API に到達できるよう、NAT gateway または必要な VPC endpoint を用意する。これは `CollectMySqlRuntimeValues=false` でも Docker ビルドを使うため必要である。
+VPC 内の CodeBuild から Go モジュール（`proxy.golang.org`）、S3、CloudWatch Logs、AWS API に到達できるよう、NAT gateway または必要な VPC endpoint を用意する。これは `CollectMySqlRuntimeValues=false` でも Go のビルドを行うため必要である。イメージの Go が `go.mod` の要求より古い場合は `GOTOOLCHAIN=auto` がツールチェーンを取得するため、その経路も同様に必要である。
 
 ## 4. CloudFormation での作成
 
@@ -211,7 +210,7 @@ VerifyGreen の artifact と CloudWatch・アプリケーション検証の結�
 - この Pipeline は Step 3・4・5 を対象にする。切替後の観測・旧 Blue の削除は別手順で管理する。
 - `ManualApproval` は CodePipeline の承認であり、構成リポジトリの Pull Request 承認を置き換えない。`actions.switchover: approved` は構成変更レビューで管理する。
 - RDS への変更権限は CodeBuild 実行ロールに集約し、通常の作業者に RDS API の直接変更権限を付与しない。
-- `PrivilegedMode: true` は VerifyGreenProject の Docker ビルドにだけ必要である。BuildGreen と Switchover には設定しない。
+- `PrivilegedMode` はどのプロジェクトにも設定しない。Go レポート生成器は Docker ではなく `runtime-versions: golang` でビルドする。
 - Step 4 の MySQL 実効値は YAML や `Source=user` と比較して合否を出す対象ではない。RDS の計算値・上限調整を含むため、人がレポートで判断する。
 
 ## 参考

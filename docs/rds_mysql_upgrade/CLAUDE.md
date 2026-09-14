@@ -64,13 +64,15 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 
 Step 2 の CloudFormation テンプレートを読む実装（`collect_green_runtime_values.sh` の Python、Step 4 レポート生成器の Ruby と Go、`scripts/internal/cfn`）は、**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化して読む**。`scripts/generate_green_verification_report.go` は Docker で単体ビルドする制約から `internal/cfn` を使わず自前の実装を持っている——**短縮記法の扱いを変えるときは 4 箇所すべてを直す。**値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
 
-Step 4 のレポート生成器は Ruby 版（`generate_green_verification_report.rb`、ローカル既定）と Go 版（`generate_green_verification_report.go`、CI が `ci/Dockerfile.green-verification-report` のマルチステージビルドで作り `GREEN_REPORT_GENERATOR` で渡す）が並存する。**両方を同時に更新すること。**
+Step 4 のレポート生成器は Ruby 版（`generate_green_verification_report.rb`、ローカル既定）と Go 版（`generate_green_verification_report.go`、CI が `GREEN_REPORT_GENERATOR` で渡す）が並存する。**両方を同時に更新すること。**Go 版のビルド方法は基盤で異なり、CodeBuild は buildspec の `runtime-versions: golang` で同一イメージ内をビルドし（`PrivilegedMode` 不要）、GitHub Actions は `ci/Dockerfile.green-verification-report` のマルチステージビルドを使う。
 
 ## 実行方法
 
 ### 前提
 
-シェルスクリプトは設定 YAML の読み取りにインライン `python3` + PyYAML を使う。ローカルで Step 3〜5 を直接実行する前に一度だけ:
+シェルスクリプトは**設定 YAML の読み取りに** インライン `python3` + PyYAML を、**JSON の読み取り・生成に** `jq` を使う（`check_target_parameter_group.sh`、`create_blue_green_deployment.sh`、`collect_green_runtime_values.sh`）。jq が無ければ該当スクリプトは起動直後に明示エラーで停止する。**JSON を扱うコードを足すときは Python ではなく jq を使う。**YAML は jq では読めないため Python のままである。
+
+ローカルで Step 3〜5 を直接実行する前に一度だけ:
 
 ```bash
 python3 -m pip install 'PyYAML==6.0.2'

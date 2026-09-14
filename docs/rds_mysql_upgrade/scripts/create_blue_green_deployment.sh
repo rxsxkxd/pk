@@ -35,6 +35,8 @@ done
 [[ -n "$service" ]] || { echo '--service is required.' >&2; exit 2; }
 [[ -n "$config" ]] || { echo '--config is required.' >&2; exit 2; }
 [[ "$wait_timeout_seconds" =~ ^[0-9]+$ ]] || { echo '--wait-timeout-seconds must be an integer.' >&2; exit 2; }
+# JSON の読み取りに jq を使う。設定 YAML の読み取りは引き続き python3 + PyYAML である。
+command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読み取りに必要である。' >&2; exit 1; }
 
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-create.XXXXXX")
 mkdir -p "$output_dir"
@@ -105,7 +107,13 @@ aws "${aws_args[@]}" rds create-blue-green-deployment \
   --output json > "$output_dir/create-blue-green-deployment.json"
 # create-blue-green-deployment は変更操作であり呼び直せない（呼び直すと二重作成になる）。
 # --query による再取得ができないため、保存済みレスポンス JSON から読み取る。
-deployment_identifier=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["BlueGreenDeployment"]["BlueGreenDeploymentIdentifier"])' "$output_dir/create-blue-green-deployment.json")
+# jq -e は最後の出力が null / false のとき終了コード 1 を返す。
+# 応答の形が変わって識別子を取れなかった場合に、空文字のまま先へ進ませない。
+deployment_identifier=$(jq -re '.BlueGreenDeployment.BlueGreenDeploymentIdentifier' \
+  "$output_dir/create-blue-green-deployment.json") || {
+  echo "create-blue-green-deployment.json から BlueGreenDeploymentIdentifier を取得できなかった。" >&2
+  exit 1
+}
 
 echo "Created Blue/Green Deployment: $deployment_identifier"
 echo "Waiting for status AVAILABLE before verification..."

@@ -13,9 +13,17 @@ version: 0.2
 env:
   # Linux で指定できるのは bash または /bin/sh。明示しておく。
   shell: bash
+  variables:
+    # managed runtime の Go が go.mod の要求より古い場合に、必要なツールチェーンを
+    # 自動取得させる（Go 1.21 以降の既定動作。明示して意図を残す）。
+    GOTOOLCHAIN: auto
 
 phases:
   install:
+    # Go レポート生成器は CodeBuild イメージの managed runtime でビルドする。
+    # Docker のマルチステージビルドをやめたため PrivilegedMode は不要になった。
+    runtime-versions:
+      golang: 1.25
     commands:
       # --- 診断: sh / bash 問題の切り分け用。原因が確定したら削除する ---------
       - ls -l scripts/*.sh scripts/lib/*.sh
@@ -30,27 +38,15 @@ phases:
 
   pre_build:
     commands:
-      # 1. ビルドするアーキテクチャを決める
-      - |
-        set -eu
-        case "$(uname -m)" in
-          x86_64)        BUILD_PLATFORM=linux/amd64 ;;
-          aarch64|arm64) BUILD_PLATFORM=linux/arm64 ;;
-          *) echo "Unsupported CPU architecture: $(uname -m)" >&2; exit 2 ;;
-        esac
-        echo "BUILD_PLATFORM=${BUILD_PLATFORM}"
-      # 2. Go レポート生成器をマルチステージビルドで作る（PrivilegedMode: true が必要）
-      - >-
-        docker buildx build
-        --platform "$BUILD_PLATFORM"
-        --file ci/Dockerfile.green-verification-report
-        --target export
-        --output type=local,dest=.tools/green-report
-        .
-      # 3. バイナリが取り出せたことを確認する
+      # 1. 使う Go を確認する。go.mod の go ディレクティブ（1.25）を満たさない場合は
+      #    GOTOOLCHAIN=auto が必要なツールチェーンを取得する（要ネットワーク）。
+      - go version
+      # 2. レポート生成器をこのイメージ内でビルドする。依存は go.sum に固定済み。
+      #    静的リンクにして、実行時に Go ランタイムへ依存させない。
+      - CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o .tools/green-report/generate_green_verification_report ./scripts
+      # 3. バイナリができたことを確認する
       - GREEN_REPORT_GENERATOR="$CODEBUILD_SRC_DIR/.tools/green-report/generate_green_verification_report"
       - ls -l "$GREEN_REPORT_GENERATOR"
-      - chmod +x "$GREEN_REPORT_GENERATOR"
       - export GREEN_REPORT_GENERATOR
 
   build:

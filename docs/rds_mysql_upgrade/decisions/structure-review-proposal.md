@@ -48,6 +48,8 @@
 - インライン python が 1 行に `(_ for _ in ()).throw(SystemExit(...))` を詰め込む形式であり、読めない・単体テストできない・エラーメッセージを制御できない。設定ファイル解析という同じ処理が各スクリプトに散っている。
 - レポート生成器の Ruby 版と Go 版が並存している。Go 版は CodeBuild に Ruby ランタイムを置かないためだけに存在し、そのために `VerifyGreenProject` を `PrivilegedMode: true` にして Docker マルチステージビルドを回している。**ランタイムを 1 つ導入しない代償として、実装の重複とビルド特権を購入している**状態であり、収支が合っていない。
 
+  > 追記（2026-09-14）: このうち**ビルド特権は解消済み**である。CodeBuild は buildspec の `runtime-versions: golang` で同一イメージ内をビルドするようになり、`PrivilegedMode` は全プロジェクトで不要になった。**実装の重複（Ruby 版と Go 版の並存）は未解決のまま**であり、下の提案 2 はなお有効である。
+
 ### 対案
 
 判定・レポート生成・設定ファイル解決を 1 言語へ寄せ、bash は AWS CLI を呼ぶ薄い層に留めるか廃する。
@@ -62,7 +64,7 @@
 案 A を採る場合の移行順序を以下に示す。
 
 1. 設定ファイル解決とアクション判定を Go に実装し、`--config`／`--service` から解決した値を JSON で出力するサブコマンドを作る。既存 bash はまずこれを呼ぶだけに変える（インライン python の除去）。
-2. `generate_green_verification_report.rb` を削除し、Go 版に一本化する。`GREEN_REPORT_GENERATOR` の分岐と `PrivilegedMode: true` を外す。
+2. `generate_green_verification_report.rb` を削除し、Go 版に一本化する。`GREEN_REPORT_GENERATOR` の分岐を外す（`PrivilegedMode` は対応済みで、すでに設定していない）。
 3. `evaluate_blue_green_prereqs.rb`／`generate_mysql84_parameter_group.rb` を移植する。この 2 つはローカル実行のみで CI に載らないため、優先度は低い。
 
 ---

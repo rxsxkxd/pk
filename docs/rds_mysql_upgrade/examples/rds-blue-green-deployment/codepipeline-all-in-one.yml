@@ -272,7 +272,8 @@ Resources:
                   - 'rds:AddTagsToResource'
                 Resource: '*'
 
-  # Step 4: 読み取りのみ。Docker ビルドは IAM ではなく PrivilegedMode で許可する。
+  # Step 4: 読み取りのみ。Go レポート生成器は buildspec の runtime-versions で
+  # 同一イメージ内をビルドするため、Docker も PrivilegedMode も要らない。
   VerifyGreenRole:
     Type: AWS::IAM::Role
     Properties:
@@ -491,9 +492,10 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
+        # Go レポート生成器は buildspec の runtime-versions でビルドする。
+        # イメージが提供する managed runtime の Go が go.mod の要求より古い場合は、
+        # GOTOOLCHAIN=auto が必要なツールチェーンを取得する（ネットワーク到達が必要）。
         Image: aws/codebuild/standard:7.0
-        # Go レポート生成器を Docker のマルチステージビルドで作るために必要。
-        PrivilegedMode: true
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }

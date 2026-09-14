@@ -24,6 +24,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$config" && -n "$service" ]] || { usage >&2; exit 2; }
+# JSON の読み取りに jq を使う。設定 YAML の読み取りは引き続き python3 + PyYAML である。
+command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読み取りに必要である。' >&2; exit 1; }
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-target-pg-check.XXXXXX")
 mkdir -p "$output_dir"
 
@@ -66,40 +68,47 @@ aws "${aws_args[@]}" rds describe-db-parameter-groups \
 
 # Green の目標エンジンバージョンと、RDS が返したパラメーターグループの
 # メジャー・マイナーファミリーが一致することを確認する。
-python3 - \
-  "$output_dir/target-db-parameter-group.json" \
-  "$target_parameter_group_name" \
-  "$target_engine_version" \
-  > "$output_dir/target-parameter-group-check.md" <<'PY'
-import json
-import sys
+result_json="$output_dir/target-db-parameter-group.json"
 
-result_path, expected_name, target_version = sys.argv[1:]
-with open(result_path, encoding="utf-8") as handle:
-    groups = json.load(handle).get("DBParameterGroups", [])
-if len(groups) != 1:
-    raise SystemExit(
-        f"expected exactly one DB parameter group for {expected_name}, got {len(groups)}"
-    )
+# 名前を指定して引いているため応答は 1 件のはずである。0 件・複数件は前提が
+# 崩れているので、判定せずに落とす。
+group_count=$(jq '.DBParameterGroups | length' "$result_json")
+if [[ "$group_count" != 1 ]]; then
+  echo "expected exactly one DB parameter group for ${target_parameter_group_name}, got ${group_count}" >&2
+  exit 1
+fi
 
-group = groups[0]
-actual_name = group.get("DBParameterGroupName", "")
-actual_family = group.get("DBParameterGroupFamily", "")
-expected_family = f"mysql{'.'.join(target_version.split('.')[:2])}"
-matched = actual_name == expected_name and actual_family == expected_family
+actual_name=$(jq -r '.DBParameterGroups[0].DBParameterGroupName // ""' "$result_json")
+actual_family=$(jq -r '.DBParameterGroups[0].DBParameterGroupFamily // ""' "$result_json")
 
-print("# 移行先 DB パラメータグループ事前確認")
-print()
-print(f"- 対象名: `{expected_name}`")
-print(f"- RDS が返した名前: `{actual_name}`")
-print(f"- 期待ファミリー: `{expected_family}`")
-print(f"- RDS が返したファミリー: `{actual_family}`")
-print(f"- 判定: {'PASS' if matched else 'FAIL'}")
+# 8.4.10 → mysql8.4。パッチバージョンはファミリー名に含まれない。
+if [[ "$target_engine_version" == *.* ]]; then
+  version_major=${target_engine_version%%.*}
+  version_rest=${target_engine_version#*.}
+  expected_family="mysql${version_major}.${version_rest%%.*}"
+else
+  expected_family="mysql${target_engine_version}"
+fi
 
-if not matched:
-    raise SystemExit(
-        "target DB parameter group does not match the configured name or engine family"
-    )
-PY
+verdict=PASS
+if [[ "$actual_name" != "$target_parameter_group_name" || "$actual_family" != "$expected_family" ]]; then
+  verdict=FAIL
+fi
+
+# 判定結果は不適合でも成果物に残す。CI のログだけでなくレポートからも追えるようにする。
+{
+  printf '# 移行先 DB パラメータグループ事前確認\n'
+  printf '\n'
+  printf -- '- 対象名: `%s`\n' "$target_parameter_group_name"
+  printf -- '- RDS が返した名前: `%s`\n' "$actual_name"
+  printf -- '- 期待ファミリー: `%s`\n' "$expected_family"
+  printf -- '- RDS が返したファミリー: `%s`\n' "$actual_family"
+  printf -- '- 判定: %s\n' "$verdict"
+} > "$output_dir/target-parameter-group-check.md"
+
+if [[ "$verdict" != PASS ]]; then
+  echo 'target DB parameter group does not match the configured name or engine family' >&2
+  exit 1
+fi
 
 echo "Target DB parameter group check passed. Artifacts: $output_dir"

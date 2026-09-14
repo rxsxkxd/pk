@@ -18,6 +18,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$template" && -n "$host" && -n "$user" && -n "$output" ]] || { usage >&2; exit 2; }
+# JSON の読み取りに jq を使う。設定 YAML の読み取りは引き続き python3 + PyYAML である。
+command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読み取りに必要である。' >&2; exit 1; }
 
 # CloudFormation YAML で明示したパラメーター名だけを SQL に展開する。値は SQL に含めない。
 # CloudFormation の短縮記法（!Ref / !Sub など）は yaml.safe_load が解釈できないため、
@@ -73,5 +75,14 @@ else
   # ローカル実行は MySQL クライアントの対話入力を使用する。
   mysql "${mysql_args[@]}" --password --execute="$sql" > "$tmp_output"
 fi
-python3 -c 'import datetime,json,sys; v={}; [v.__setitem__(p[0], p[1] if len(p)>1 else "") for p in (line.rstrip("\n").split("\t", 1) for line in open(sys.argv[1])) if p[0]]; json.dump({"CollectedAt":datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"), "Parameters":v}, open(sys.argv[2], "w"), ensure_ascii=False, indent=2); open(sys.argv[2], "a").write("\n")' "$tmp_output" "$output"
+# MySQL の --batch 出力（変数名 TAB 値）を JSON へ組み立てる。
+# 値そのものにタブが含まれても壊れないよう、最初のタブだけで区切る。
+jq -Rn --arg collected_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+  reduce (inputs | select(length > 0)) as $line ({};
+    ($line | index("\t")) as $separator
+    | if $separator == null then . + {($line): ""}
+      else . + {($line[0:$separator]): $line[$separator + 1:]}
+      end)
+  | {CollectedAt: $collected_at, Parameters: .}
+' < "$tmp_output" > "$output"
 echo "Collected runtime values: $output"

@@ -81,9 +81,9 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
+        # Go レポート生成器は buildspec の runtime-versions で同一イメージ内をビルドする。
+        # Docker を使わないため PrivilegedMode は不要である。
         Image: aws/codebuild/standard:7.0
-        # Go レポート生成器を Docker のマルチステージビルドで作るために Docker を許可する。
-        PrivilegedMode: true
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT

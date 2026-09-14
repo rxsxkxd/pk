@@ -211,7 +211,7 @@ mkdir -p .local
 
 ## 3. VerifyGreen 単体検証
 
-対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.sh` である。VerifyGreen は Go レポート生成器を Docker のマルチステージビルドで生成するため、共通コマンドに `-d` を追加する。
+対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.sh` である。VerifyGreen は Go レポート生成器を同一イメージ内でビルドする（Docker は使わない）。Local Agent のランナー image に Go が無い場合は `runtime-versions` が解決できないため、Go を含む image を使うか、この単体検証では `GREEN_REPORT_GENERATOR` に Ruby 版を指定する。
 
 ```bash
 ./ci/codebuild_build.sh \
@@ -221,7 +221,7 @@ mkdir -p .local
   -s . \
   -b ci/codebuild/verify-green.yml \
   -e .local/codebuild-local.env \
-  -c -p your-readonly-profile -m -d
+  -c -p your-readonly-profile -m
 ```
 
 この通常モード（`COLLECT_MYSQL_RUNTIME_VALUES=false`）は、Green DB へ MySQL 接続を行わない。実行すると AWS 読み取り API、CloudWatch `ReplicaLag`、Docker Buildx、Go バイナリ生成、レポート出力を確認する。対象の Blue/Green deployment が実在しない場合は、期待どおり検証が失敗する。

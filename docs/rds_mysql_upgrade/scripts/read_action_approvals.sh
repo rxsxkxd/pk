@@ -28,18 +28,13 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$config" && -n "$service" ]] || { usage >&2; exit 2; }
 
+# shellcheck source=lib/deployment_config.sh
+source "$(dirname "$0")/lib/deployment_config.sh"
+
 # 未定義のアクションは pending として扱う（承認されていない側に倒す）。
-# f-string 内のエスケープは Python 3.12 未満で構文エラーになるため連結で書く。
-python3 -c '
-import shlex, sys, yaml
-d = yaml.safe_load(open(sys.argv[1]))
-services = d.get("services") or {}
-if sys.argv[2] not in services:
-    sys.exit(sys.argv[1] + ": services." + sys.argv[2] + " が未定義です")
-actions = services[sys.argv[2]].get("actions") or {}
-for key, name in (("build", "BUILD_APPROVED"),
-                  ("switchover", "SWITCHOVER_APPROVED"),
-                  ("cleanup", "CLEANUP_APPROVED")):
-    value = actions.get(key) or "pending"
-    print(name + "=" + shlex.quote(str(value)))
-' "$config" "$service"
+deployment_config_vars "$config" "$service" '
+  service($service).actions as $actions | {
+    BUILD_APPROVED:      optional($actions.build; "pending"),
+    SWITCHOVER_APPROVED: optional($actions.switchover; "pending"),
+    CLEANUP_APPROVED:    optional($actions.cleanup; "pending"),
+  } | shellvars'

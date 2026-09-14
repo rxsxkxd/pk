@@ -18,47 +18,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$template" && -n "$host" && -n "$user" && -n "$output" ]] || { usage >&2; exit 2; }
-# JSON の読み取りに jq を使う。設定 YAML の読み取りは引き続き python3 + PyYAML である。
+# JSON の読み取りに jq を使う（設定 YAML も python3 で JSON 化してから jq で読む）。
 command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読み取りに必要である。' >&2; exit 1; }
 
 # CloudFormation YAML で明示したパラメーター名だけを SQL に展開する。値は SQL に含めない。
-# CloudFormation の短縮記法（!Ref / !Sub など）は yaml.safe_load が解釈できないため、
-# 長形式（{"Ref": ...} / {"Fn::Sub": ...}）へ正規化して読み込む。
-# ここで必要なのはパラメータ名だけであり、組み込み関数の解決は行わない。
-sql=$(python3 -c '
-import re, sys, yaml
-
-
-class CfnLoader(yaml.SafeLoader):
-    pass
-
-
-def _intrinsic(loader, suffix, node):
-    key = suffix if suffix in ("Ref", "Condition") else "Fn::" + suffix
-    if isinstance(node, yaml.ScalarNode):
-        value = loader.construct_scalar(node)
-    elif isinstance(node, yaml.SequenceNode):
-        value = loader.construct_sequence(node, deep=True)
-    else:
-        value = loader.construct_mapping(node, deep=True)
-    return {key: value}
-
-
-CfnLoader.add_multi_constructor("!", _intrinsic)
-
-template = yaml.load(open(sys.argv[1]), Loader=CfnLoader)
-resource = next((v for v in template["Resources"].values()
-                 if v.get("Type") == "AWS::RDS::DBParameterGroup"), None)
-if resource is None:
-    sys.exit("AWS::RDS::DBParameterGroup not found")
-names = list(resource.get("Properties", {}).get("Parameters", {}).keys())
-if not names:
-    sys.exit("No declared parameters")
-if not all(re.fullmatch(r"[A-Za-z0-9_]+", x) for x in names):
-    sys.exit("Invalid parameter name")
-print("SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables "
-      "WHERE VARIABLE_NAME IN (" + ",".join(repr(x) for x in names) + ") ORDER BY VARIABLE_NAME;")
-' "$template")
+# テンプレートの読み取り（短縮記法 !Ref / !Sub の正規化を含む）は Go の
+# list_db_parameter_names に委ねる。この経路は Step 4 でしか通らないため、
+# Go への依存は VerifyGreen に閉じている。
+names=$(go -C "$(cd "$(dirname "$0")/.." && pwd)" run ./scripts/list_db_parameter_names \
+  --template "$(cd "$(dirname "$template")" && pwd)/$(basename "$template")")
+# 名前を SQL の IN リストへ組み立てる。名前は Go 側で [A-Za-z0-9_]+ に限定済みである。
+sql=$(printf '%s\n' "$names" | jq -R -s -r '
+  [splits("\n") | select(length > 0) | "\u0027\(.)\u0027"] | join(",")
+  | "SELECT VARIABLE_NAME, VARIABLE_VALUE FROM performance_schema.global_variables "
+    + "WHERE VARIABLE_NAME IN (\(.)) ORDER BY VARIABLE_NAME;"')
 
 tmp_output=$(mktemp "${TMPDIR:-/tmp}/rds-green-runtime.XXXXXX")
 trap 'rm -f "$tmp_output"' EXIT

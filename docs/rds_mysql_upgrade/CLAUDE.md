@@ -62,7 +62,9 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
 - `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。
 
-Step 2 の CloudFormation テンプレートを読む実装（`collect_green_runtime_values.sh` の Python、Step 4 レポート生成器の Ruby と Go、`scripts/internal/cfn`）は、**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化して読む**。`scripts/generate_green_verification_report.go` は Docker で単体ビルドする制約から `internal/cfn` を使わず自前の実装を持っている——**短縮記法の扱いを変えるときは 4 箇所すべてを直す。**値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
+Step 2 の CloudFormation テンプレートを読む実装（`scripts/internal/cfn`、Step 4 レポート生成器の Ruby と Go）は、**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化して読む**。`scripts/generate_green_verification_report.go` は Docker で単体ビルドする制約から `internal/cfn` を使わず自前の実装を持っている——**短縮記法の扱いを変えるときは 3 箇所すべてを直す。**
+
+`collect_green_runtime_values.sh`（Step 4 の実効値収集）は、対象パラメータ名を `go run ./scripts/list_db_parameter_names` で得る。**Go への依存はこの経路＝VerifyGreen だけに閉じている。**値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
 
 Step 4 のレポート生成器は Ruby 版（`generate_green_verification_report.rb`、ローカル既定）と Go 版（`generate_green_verification_report.go`、CI が `GREEN_REPORT_GENERATOR` で渡す）が並存する。**両方を同時に更新すること。**Go 版のビルド方法は基盤で異なり、CodeBuild は buildspec の `runtime-versions: golang` で同一イメージ内をビルドし（`PrivilegedMode` 不要）、GitHub Actions は `ci/Dockerfile.green-verification-report` のマルチステージビルドを使う。
 
@@ -70,7 +72,11 @@ Step 4 のレポート生成器は Ruby 版（`generate_green_verification_repor
 
 ### 前提
 
-シェルスクリプトは**設定 YAML の読み取りに** インライン `python3` + PyYAML を、**JSON の読み取り・生成に** `jq` を使う（`check_target_parameter_group.sh`、`create_blue_green_deployment.sh`、`collect_green_runtime_values.sh`）。jq が無ければ該当スクリプトは起動直後に明示エラーで停止する。**JSON を扱うコードを足すときは Python ではなく jq を使う。**YAML は jq では読めないため Python のままである。
+シェルスクリプトのデータ読み取りは **jq に一本化**している。`python3` + PyYAML は **YAML を JSON にする 1 行**だけに使い、その 1 行は `scripts/lib/deployment_config.sh` にしかない（jq は YAML を読めないため）。
+
+- 設定 YAML → `deployment_config_vars <config> <service> '<jq フィルタ>'` で読む。フィルタは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを宣言する。共通関数（`required` / `optional` / `service` / `shellvars`）は `scripts/lib/config.jq` にある
+- AWS 応答などの JSON → jq で直接読む
+- **スクリプトに新しくインライン `python3` を書かない。**設定の読み取りは上の 1 経路だけである
 
 ローカルで Step 3〜5 を直接実行する前に一度だけ:
 
@@ -122,6 +128,9 @@ bash -n scripts/*.sh scripts/lib/*.sh
 
 # 移行フェーズ判定のテーブル駆動テスト（AWS へ接続しない）
 scripts/lib/migration_phase_test.sh
+
+# 設定 YAML の読み取りテスト（AWS へ接続しない）
+scripts/lib/deployment_config_test.sh
 
 # MySQL 接続方式の解決テスト（AWS へ接続しない）
 scripts/lib/mysql_credentials_test.sh

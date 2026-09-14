@@ -90,7 +90,7 @@ CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`�
 
 各 buildspec は設定 YAML を読むために `PyYAML==6.0.2` を導入する。ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、事前に `python3 -m pip install 'PyYAML==6.0.2'` を一度実行する。
 
-JSON の読み取り・生成には `jq` を使う。CodeBuild の managed image と GitHub Actions のランナーには同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
+データの読み取りは `jq` に一本化している。設定 YAML は `scripts/lib/deployment_config.sh` が python3 で JSON へ変換し、そこから先の取り出しと検証は jq が行う。CodeBuild の managed image と GitHub Actions のランナーには jq が同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
 
 実効値収集を有効にする場合は、CodeBuild プロジェクトを RDS に到達できるネットワークに配置する必要がある。テンプレートには VPC・サブネット・セキュリティグループを組み込んでいないため、組織の既存ネットワーク方針に従い `VerifyGreenProject` に `VpcConfig` を追加する。あわせて CodeBuild 実行ロールに対象 SSM パラメータの `ssm:GetParameter` と、KMS カスタマー管理キーを使う場合は `kms:Decrypt` を許可する。
 

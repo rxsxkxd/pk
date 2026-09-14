@@ -16,6 +16,10 @@
 #   - 呼び出し側は MYSQL_PWD 経由で MySQL クライアントのプロセスにだけ渡す。
 #   - 読み取りは config と AWS の読み取り API のみ。AWS の状態を変更しない。
 
+# 設定の読み取りは deployment_config.sh（python3 で YAML→JSON、jq で取り出し）に委ねる。
+# shellcheck source=deployment_config.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deployment_config.sh"
+
 # 設定ファイルから mysql_verification を読む。AWS API は呼び出さない。
 #
 # 使い方: read_mysql_verification_config <config> <service>
@@ -29,52 +33,42 @@
 #   MYSQL_VERIFY_PORT            接続ポート（既定 3306）
 read_mysql_verification_config() {
   local config=$1 service=$2 resolved
-  # eval "$(...)" は python の終了コードを握り潰すため、いったん変数へ受けて判定する。
-  resolved=$(python3 -c '
-import shlex, sys, yaml
-
-d = yaml.safe_load(open(sys.argv[1]))
-services = d.get("services") or {}
-if sys.argv[2] not in services:
-    sys.exit(sys.argv[1] + ": services." + sys.argv[2] + " が未定義です")
-m = services[sys.argv[2]].get("mysql_verification") or {}
-environment = str(d.get("environment") or "")
-
-VALID = ("parameter_store", "plaintext", "prompt")
-enabled = bool(m.get("enabled", False))
-auth = str(m.get("auth_method") or "prompt")
-
-if enabled:
-    if auth not in VALID:
-        sys.exit("mysql_verification.auth_method が不正です: " + auth
-                 + "（有効な値: " + ", ".join(VALID) + "）")
-    # parameter_store はユーザー名も必ず秘匿側へ置く。config の user は使わない。
-    # 秘匿側を持たない plaintext / prompt では config の user を必須とする。
-    if auth != "parameter_store" and not m.get("user"):
-        sys.exit("auth_method: " + auth + " には mysql_verification.user が必要です")
-    # plaintext は設定ファイルが Git 追跡対象であるため、本番では使わせない。
-    if auth == "plaintext" and environment == "production":
-        sys.exit("auth_method: plaintext は production では使用できません。"
-                 "parameter_store を使ってください")
-    required = {"parameter_store": ("parameter_name", "user_parameter_name"),
-                "plaintext": ("password",)}
-    for key in required.get(auth, ()):
-        if not m.get(key):
-            sys.exit("auth_method: " + auth + " には mysql_verification." + key + " が必要です")
-
-values = {
-    "MYSQL_VERIFY_ENABLED": "true" if enabled else "false",
-    "MYSQL_VERIFY_USER": m.get("user") or "",
-    "MYSQL_VERIFY_AUTH": auth,
-    "MYSQL_VERIFY_PARAMETER_NAME": m.get("parameter_name") or "",
-    "MYSQL_VERIFY_USER_PARAMETER_NAME": m.get("user_parameter_name") or "",
-    "MYSQL_VERIFY_PLAINTEXT": m.get("password") or "",
-    "MYSQL_VERIFY_SSL_CA": m.get("ssl_ca") or "",
-    "MYSQL_VERIFY_PORT": str(m.get("port") or 3306),
-}
-for k, v in values.items():
-    print(k + "=" + shlex.quote(str(v)))
-' "$config" "$service") || return 1
+  # jq の失敗（検証エラー）を握り潰さないよう、いったん変数へ受けて判定する。
+  # 検証内容は上のコメントのとおりで、jq の error() が理由を stderr へ出す。
+  resolved=$(deployment_config_vars "$config" "$service" '
+    service($service).mysql_verification as $m
+    | (.environment // "") as $environment
+    | ($m.enabled // false) as $enabled
+    | ($m.auth_method // "prompt") as $auth
+    | (["parameter_store", "plaintext", "prompt"]) as $valid
+    | (if $enabled then
+        (if ($valid | index($auth)) == null then
+           error("mysql_verification.auth_method が不正です: \($auth)（有効な値: \($valid | join(", "))）")
+         # parameter_store はユーザー名も必ず秘匿側へ置く。config の user は使わない。
+         # 秘匿側を持たない plaintext / prompt では config の user を必須とする。
+         elif $auth != "parameter_store" and (($m.user // "") == "") then
+           error("auth_method: \($auth) には mysql_verification.user が必要です")
+         # plaintext は設定ファイルが Git 追跡対象であるため、本番では使わせない。
+         elif $auth == "plaintext" and $environment == "production" then
+           error("auth_method: plaintext は production では使用できません。parameter_store を使ってください")
+         else
+           ({parameter_store: ["parameter_name", "user_parameter_name"], plaintext: ["password"]}[$auth] // [])
+           | map(select(($m[.] // "") == "")) | first
+           | if . != null then
+               error("auth_method: \($auth) には mysql_verification.\(.) が必要です")
+             else empty end
+         end)
+       else empty end)
+    // {
+      MYSQL_VERIFY_ENABLED:             (if $enabled then "true" else "false" end),
+      MYSQL_VERIFY_USER:                optional($m.user; ""),
+      MYSQL_VERIFY_AUTH:                $auth,
+      MYSQL_VERIFY_PARAMETER_NAME:      optional($m.parameter_name; ""),
+      MYSQL_VERIFY_USER_PARAMETER_NAME: optional($m.user_parameter_name; ""),
+      MYSQL_VERIFY_PLAINTEXT:           optional($m.password; ""),
+      MYSQL_VERIFY_SSL_CA:              optional($m.ssl_ca; ""),
+      MYSQL_VERIFY_PORT:                optional($m.port; 3306),
+    } | shellvars') || return 1
   eval "$resolved"
 }
 

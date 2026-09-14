@@ -4,6 +4,9 @@
 # Green が AVAILABLE になるまで待機して終了する。切替は実施しない。
 set -euo pipefail
 
+# shellcheck source=lib/deployment_config.sh
+source "$(dirname "$0")/lib/deployment_config.sh"
+
 usage() {
   cat <<'USAGE'
 Usage: create_blue_green_deployment.sh --config FILE --service NAME [options]
@@ -35,36 +38,24 @@ done
 [[ -n "$service" ]] || { echo '--service is required.' >&2; exit 2; }
 [[ -n "$config" ]] || { echo '--config is required.' >&2; exit 2; }
 [[ "$wait_timeout_seconds" =~ ^[0-9]+$ ]] || { echo '--wait-timeout-seconds must be an integer.' >&2; exit 2; }
-# JSON の読み取りに jq を使う。設定 YAML の読み取りは引き続き python3 + PyYAML である。
+# JSON の読み取りに jq を使う（設定 YAML も python3 で JSON 化してから jq で読む）。
 command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読み取りに必要である。' >&2; exit 1; }
 
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-create.XXXXXX")
 mkdir -p "$output_dir"
 # config のサービスに対応する作成設定を読み取る。AWS API は呼び出さない。
-# YAML の読み込みは 1 回だけ行い、以降は python3 -c を呼ばずシェル変数として使う。
-eval "$(python3 -c '
-import shlex, sys, yaml
-c, s = sys.argv[1:]
-d = yaml.safe_load(open(c))
-t = d["services"][s]
-for k in ("source_db_instance_identifier", "target_engine_version", "target_db_instance_class", "target_db_parameter_group_name"):
-    if not t.get(k):
-        sys.exit(f"{c}: services.{s}.{k} が未定義です")
-for k in ("environment", "aws_region"):
-    if not d.get(k):
-        sys.exit(f"{c}: {k} が未定義です")
-values = {
-    "source_db_instance_identifier": t["source_db_instance_identifier"],
-    "target_engine_version": t["target_engine_version"],
-    "target_db_instance_class": t["target_db_instance_class"],
-    "target_db_parameter_group_name": t["target_db_parameter_group_name"],
-    "environment": d["environment"],
-    "config_region": d["aws_region"],
-    "config_profile": d.get("aws_profile", ""),
-}
-for k, v in values.items():
-    print(f"{k}={shlex.quote(str(v))}")
-' "$config" "$service")"
+# 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
+# 必要な項目とその必須・任意だけをここに宣言する（取り出しは lib/config.jq）。
+eval "$(deployment_config_vars "$config" "$service" '
+  service($service) as $svc | {
+    source_db_instance_identifier:  required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
+    target_engine_version:          required("target_engine_version"; $svc.target_engine_version),
+    target_db_instance_class:       required("target_db_instance_class"; $svc.target_db_instance_class),
+    target_db_parameter_group_name: required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
+    environment:                    required("environment"; .environment),
+    config_region:                  required("aws_region"; .aws_region),
+    config_profile:                 optional(.aws_profile; ""),
+  } | shellvars')"
 [[ -n "$region" ]] || region=$config_region
 [[ -n "$profile" ]] || profile=$config_profile
 aws_args=(--region "$region")

@@ -2,9 +2,9 @@
 # CloudFormation の短縮記法（!Ref / !Sub など）を、テンプレートを読む 3 実装が
 # 同じように解釈することを確認する。AWS へは接続しない。
 #
-#   collect_green_runtime_values.sh          (Python / yaml)
+#   scripts/internal/cfn                     (Go / gopkg.in/yaml.v3。共有ライブラリ)
 #   generate_green_verification_report.rb    (Ruby / Psych)
-#   generate_green_verification_report.go    (Go / gopkg.in/yaml.v3)
+#   generate_green_verification_report.go    (Go。Docker で単体ビルドするため自前実装)
 #
 # いずれも「短縮記法を長形式へ正規化し、組み込み関数の値は比較対象から外す」挙動である。
 # Ruby / Go が未導入の環境では、その実装をスキップする。
@@ -27,20 +27,22 @@ check() {
   fi
 }
 
-# --- Python: パラメータ名を抽出できること -----------------------------------
-# collect_green_runtime_values.sh に埋め込んだ python を取り出して単体で動かす。
-sed -n "/^sql=\$(python3 -c/,/^' \"\$template\")\$/p" scripts/collect_green_runtime_values.sh \
-  | tail -n +2 | sed '$d' > "$work/extract.py"
-
-for template in "$FIXTURE" "$LONGFORM"; do
-  if ! sql=$(python3 "$work/extract.py" "$template" 2>&1); then
-    printf 'FAIL  %-52s %s\n' "Python: $(basename "$template")" "$sql"; failed=$((failed + 1)); continue
-  fi
-  check "Python: $(basename "$template") から SQL 生成" 'performance_schema.global_variables' "$sql"
-done
-# 組み込み関数で宣言した項目もパラメータ名としては拾う（実効値の収集対象になる）。
-sql=$(python3 "$work/extract.py" "$FIXTURE" 2>/dev/null)
-check 'Python: 組み込み関数の項目も名前は拾う' "'replica_parallel_workers'" "$sql"
+# --- internal/cfn: パラメータ名を抽出できること -----------------------------
+# collect_green_runtime_values.sh が実効値収集の対象を決めるために使う経路である。
+if command -v go >/dev/null 2>&1; then
+  for template in "$FIXTURE" "$LONGFORM"; do
+    if ! names=$(go run ./scripts/list_db_parameter_names --template "$template" 2>&1); then
+      printf 'FAIL  %-52s %s\n' "internal/cfn: $(basename "$template")" "$names"
+      failed=$((failed + 1)); continue
+    fi
+    check "internal/cfn: $(basename "$template") から名前を抽出" 'binlog_format' "$names"
+  done
+  # 組み込み関数で宣言した項目もパラメータ名としては拾う（実効値の収集対象になる）。
+  names=$(go run ./scripts/list_db_parameter_names --template "$FIXTURE" 2>/dev/null)
+  check 'internal/cfn: 組み込み関数の項目も名前は拾う' 'replica_parallel_workers' "$names"
+else
+  echo 'skip  internal/cfn（Go 未導入）'
+fi
 
 # --- レポート生成器: 組み込み関数を「比較不能」として扱うこと ----------------
 report_args=(

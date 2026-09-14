@@ -41,10 +41,10 @@ CI 側でこの環境変数を設定している箇所は `ci/codebuild/verify-g
 |---|---|---|
 | Bash | 全エントリポイントの実行シェル。`set -euo pipefail` 前提 | 全 `.sh` ファイル（9 本） |
 | AWS CLI | RDS／CloudWatch／CloudFormation の読み取り・変更操作 | Step 1・3・4・5・7 の全 `.sh` |
-| Python3 + PyYAML | **設定 YAML の読み込み専用**（`config/blue-green/*.yml` と Step 2 の CloudFormation テンプレート）。`eval "$(python3 -c ...)"` パターンで 1 回だけ呼ばれる | `build_green.sh`、`create_blue_green_deployment.sh`、`verify_green.sh`、`switchover.sh`、`switchover_blue_green_deployment.sh`、`cleanup.sh` |
+| Python3 + PyYAML | **YAML を JSON へ変換する 1 行だけ**。実体は `scripts/lib/deployment_config.sh` の 1 箇所のみで、取り出しと検証は jq が行う | `build_green.sh`、`create_blue_green_deployment.sh`、`verify_green.sh`、`switchover.sh`、`switchover_blue_green_deployment.sh`、`cleanup.sh` |
 | Ruby | 判定ロジック（Step 1）・生成ロジック（Step 2）・レポート生成（Step 4 ローカル既定） | `evaluate_blue_green_prereqs.rb`（Step 1 エントリポイント）、`generate_mysql84_parameter_group.rb`（Step 2 エントリポイント）、`generate_green_verification_report.rb`（Step 4 内部処理。単体では実行せず、`verify_green.sh` からのみ呼ばれる） |
 | Go | Step 4 のレポート生成器の CI 版。CodeBuild は buildspec の `runtime-versions: golang` で同一イメージ内をビルドし、GitHub Actions は `ci/Dockerfile.green-verification-report` でマルチステージビルドする。実行時はバイナリ単体（Go ランタイム不要）。および Blue/Green 設定生成の入力を集める RDS インベントリ収集器 | `generate_green_verification_report.go`（Step 4 内部処理。ビルド時のみ Go が必要。実行時も単体では叩かず、`verify_green.sh` が `GREEN_REPORT_GENERATOR` 経由で呼ぶ）、`collect_rds_instance_inventory/`（Step 3 の前準備。内部で AWS CLI を呼ぶ）、`generate_blue_green_config/`（同じく Step 3 の前準備。AWS を呼ばない）、`generate_blue_green_config_report/`（同じ入力からレビュー用 Markdown を出す。設定ファイルは書き換えない）。いずれも `go run ./scripts/<コマンド名>` で実行し（`go.mod` はリポジトリ直下にあるため、引数の相対パスは実行時のカレントディレクトリ基準になる）、ロジックは `scripts/internal/{common,collect,generate,cfn,report}` にある（`go test ./...` で単体テスト可能） |
-| jq | **JSON の読み取り・生成**。AWS CLI 応答からの値取り出しと、MySQL の `--batch` 出力の JSON 化に使う | `check_target_parameter_group.sh`（Step 3 前）、`create_blue_green_deployment.sh`（Step 3）、`collect_green_runtime_values.sh`（Step 4 補助） |
+| jq | **設定と JSON の読み取り・生成**。設定 YAML（JSON 化後）からのシェル変数組み立て、AWS CLI 応答からの値取り出し、MySQL の `--batch` 出力の JSON 化 | 設定読み取りは `scripts/lib/deployment_config.sh` 経由で Step 3・4・5・7 の全 `.sh`。JSON は `check_target_parameter_group.sh`、`create_blue_green_deployment.sh`、`collect_green_runtime_values.sh` |
 | MySQL クライアント（mysql／mysqlsh） | DB 接続を伴う実効値収集・逆レプリケーション確認。既定ではスキップされ、明示フラグ指定時のみ使用（CI に本番 DB 認証情報を常設しない方針のため） | `collect_green_runtime_values.sh`（Step 4 補助）、`cleanup.sh` の `--mysql-user` 指定時（Step 7） |
 
 ## 実行形態（ローカル／CI）との対応
@@ -56,8 +56,14 @@ CI 側でこの環境変数を設定している箇所は `ci/codebuild/verify-g
 | 4 | CI（構成確認）＋ローカル（任意の DB 接続） | レポート生成は CI が Go 版、ローカルが Ruby 版と分岐する |
 | 7 | CI（承認付き） | 逆レプリチェックは CI では実行されない。承認前にローカルから `--mysql-user` 付きで手動確認する運用が前提 |
 
-## 補足: Python3 はほぼ全ステップの実質的な必須依存である
+## 補足: Python3 への依存は YAML→JSON の 1 行だけになった
 
-Step 3・4・5・7 の `.sh` はいずれも内部で Python3 を 1 回呼び出す構造（設定 YAML 読み込み専用）になっている。これは [reports/inline-python-reduction-report.md](../reports/inline-python-reduction-report.md) で実施した削減対応の結果であり、以前は `python3 -c` が 38 箇所に散在していたものを、各スクリプト 1 箇所（YAML 読み込み）まで絞り込んだ。「AWS CLI さえあれば Bash だけで動く」わけではなく、**Python3 + PyYAML が実質的に必須の依存**である点に注意する。
+Step 3・4・5・7 の `.sh` はいずれも設定 YAML を 1 回読むが、**その読み取りは `scripts/lib/deployment_config.sh` に集約されている**。python3 + PyYAML を使うのは同ファイルの次の 1 行だけで、他のスクリプトにインライン Python は無い。
 
-**jq は 2026-09-14 に導入した。** CI（CodeBuild）から呼ばれるスクリプトの JSON 処理を Python から jq へ置き換えたためである（YAML の読み込みは jq では代替できないので Python のまま）。jq が無い環境では、該当スクリプトが起動直後に明示エラーで停止する。yq は引き続き導入していない。
+```bash
+python3 -c 'import json, sys, yaml; json.dump(yaml.safe_load(open(sys.argv[1])), sys.stdout)' "$1"
+```
+
+取り出しと検証は jq が行い、各スクリプトは必要な項目だけを宣言する（共通関数は `scripts/lib/config.jq`）。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込んでいたものを、2026-09-14 に 1 箇所へ統合した。
+
+**「AWS CLI さえあれば Bash だけで動く」わけではない。**python3 + PyYAML と jq が実質的に必須の依存である点は変わらない。yq は引き続き導入していない。

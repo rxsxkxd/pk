@@ -2,6 +2,9 @@
 # Step 4: Green の RDS 構成と ReplicaLag を AWS 読み取り API だけで検証する。
 set -euo pipefail
 
+# shellcheck source=lib/deployment_config.sh
+source "$(dirname "$0")/lib/deployment_config.sh"
+
 usage() { echo 'Usage: verify_green.sh --config FILE --service NAME [--runtime-values-file FILE | --mysql-user USER] [--mysql-password-env NAME] [--region REGION] [--profile PROFILE] [--output-dir DIR]'; }
 config=''; service=''; runtime_values_file=''; mysql_user=''; mysql_password_env='MYSQL_PASSWORD'; region=''; profile=''; output_dir=''
 while [[ $# -gt 0 ]]; do
@@ -27,30 +30,19 @@ source "$(dirname "$0")/lib/migration_phase.sh"
 # shellcheck source=lib/mysql_credentials.sh
 source "$(dirname "$0")/lib/mysql_credentials.sh"
 
-# YAML の読み込みは 1 回だけ行い、以降は python3 -c を呼ばずシェル変数として使う。
-eval "$(python3 -c '
-import shlex, sys, yaml
-d = yaml.safe_load(open(sys.argv[1]))
-t = d["services"][sys.argv[2]]
-for k in ("source_db_instance_identifier", "source_engine_version",
-          "source_db_parameter_group_name", "target_engine_version",
-          "target_db_instance_class", "target_db_parameter_group_name",
-          "target_parameter_group_template_path"):
-    if not t.get(k):
-        sys.exit(f"missing {k}")
-values = {
-    "source_id": t["source_db_instance_identifier"],
-    "source_engine_version": t["source_engine_version"],
-    "source_db_parameter_group_name": t["source_db_parameter_group_name"],
-    "target_engine_version": t["target_engine_version"],
-    "target_db_instance_class": t["target_db_instance_class"],
-    "target_db_parameter_group_name": t["target_db_parameter_group_name"],
-    "target_parameter_group_template_path": t["target_parameter_group_template_path"],
-    "config_region": d["aws_region"],
-}
-for k, v in values.items():
-    print(f"{k}={shlex.quote(str(v))}")
-' "$config" "$service")"
+# 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
+# 必要な項目とその必須・任意だけをここに宣言する（取り出しは lib/config.jq）。
+eval "$(deployment_config_vars "$config" "$service" '
+  service($service) as $svc | {
+    source_id:                            required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
+    source_engine_version:                required("source_engine_version"; $svc.source_engine_version),
+    source_db_parameter_group_name:       required("source_db_parameter_group_name"; $svc.source_db_parameter_group_name),
+    target_engine_version:                required("target_engine_version"; $svc.target_engine_version),
+    target_db_instance_class:             required("target_db_instance_class"; $svc.target_db_instance_class),
+    target_db_parameter_group_name:       required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
+    target_parameter_group_template_path: required("target_parameter_group_template_path"; $svc.target_parameter_group_template_path),
+    config_region:                        required("aws_region"; .aws_region),
+  } | shellvars')"
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 

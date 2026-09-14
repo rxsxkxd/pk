@@ -3,6 +3,9 @@
 # AWS API は describe-db-parameter-groups（読み取り）だけを使用する。
 set -euo pipefail
 
+# shellcheck source=lib/deployment_config.sh
+source "$(dirname "$0")/lib/deployment_config.sh"
+
 usage() {
   echo 'Usage: check_target_parameter_group.sh --config FILE --service NAME [--region REGION] [--profile PROFILE] [--output-dir DIR]'
 }
@@ -24,36 +27,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$config" && -n "$service" ]] || { usage >&2; exit 2; }
-# JSON の読み取りに jq を使う。設定 YAML の読み取りは引き続き python3 + PyYAML である。
+# JSON の読み取りに jq を使う（設定 YAML も python3 で JSON 化してから jq で読む）。
 command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読み取りに必要である。' >&2; exit 1; }
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-target-pg-check.XXXXXX")
 mkdir -p "$output_dir"
 
 # config/blue-green/<environment>.deployment.yml から、確認対象のリモート DB
 # パラメータグループ名・リージョン・目標エンジンバージョンを取得する。AWS API は呼ばない。
-eval "$(python3 - "$config" "$service" <<'PY'
-import shlex
-import sys
-import yaml
-
-config_path, service_name = sys.argv[1:]
-with open(config_path, encoding="utf-8") as handle:
-    config = yaml.safe_load(handle)
-try:
-    service = config["services"][service_name]
-    values = {
-        "config_region": config["aws_region"],
-        "target_parameter_group_name": service["target_db_parameter_group_name"],
-        "target_engine_version": service["target_engine_version"],
-    }
-except KeyError as error:
-    raise SystemExit(f"configuration key is missing: {error}")
-for key, value in values.items():
-    if not value:
-        raise SystemExit(f"configuration value is empty: {key}")
-    print(f"{key}={shlex.quote(str(value))}")
-PY
-)"
+eval "$(deployment_config_vars "$config" "$service" '
+  service($service) as $svc | {
+    config_region:               required("aws_region"; .aws_region),
+    target_parameter_group_name: required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
+    target_engine_version:       required("target_engine_version"; $svc.target_engine_version),
+  } | shellvars')"
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region")
 [[ -n "$profile" ]] && aws_args+=(--profile "$profile")

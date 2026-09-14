@@ -15,6 +15,9 @@
 #   2 引数の誤り
 set -euo pipefail
 
+# shellcheck source=lib/deployment_config.sh
+source "$(dirname "$0")/lib/deployment_config.sh"
+
 usage() {
   cat <<'USAGE'
 Usage: build_green.sh --config FILE --service NAME [options]
@@ -75,30 +78,19 @@ mkdir -p "$output_dir"
 source "$(dirname "$0")/lib/migration_phase.sh"
 
 # 設定ファイルの承認宣言と、スナップショット・移行元 DB の識別子を取得する。AWS API は呼び出さない。
-# YAML の読み込みは 1 回だけ行い、以降は python3 -c を呼ばずシェル変数として使う。
-eval "$(python3 -c '
-import shlex, sys, yaml
-d = yaml.safe_load(open(sys.argv[1]))
-s = d["services"][sys.argv[2]]
-a = s.get("actions", {})
-for k in ("source_db_instance_identifier", "protection_snapshot_identifier",
-          "source_engine_version", "source_db_parameter_group_name",
-          "target_engine_version", "target_db_parameter_group_name"):
-    if not s.get(k):
-        sys.exit(f"missing {k}")
-values = {
-    "build": a.get("build", "pending"),
-    "source_id": s["source_db_instance_identifier"],
-    "snapshot_id": s["protection_snapshot_identifier"],
-    "source_engine_version": s["source_engine_version"],
-    "source_db_parameter_group_name": s["source_db_parameter_group_name"],
-    "target_engine_version": s["target_engine_version"],
-    "target_db_parameter_group_name": s["target_db_parameter_group_name"],
-    "config_region": d["aws_region"],
-}
-for k, v in values.items():
-    print(f"{k}={shlex.quote(str(v))}")
-' "$config" "$service")"
+# 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
+# 必要な項目とその必須・任意だけをここに宣言する（取り出しは lib/config.jq）。
+eval "$(deployment_config_vars "$config" "$service" '
+  service($service) as $svc | $svc.actions as $actions | {
+    build:                          optional($actions.build; "pending"),
+    source_id:                      required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
+    snapshot_id:                    required("protection_snapshot_identifier"; $svc.protection_snapshot_identifier),
+    source_engine_version:          required("source_engine_version"; $svc.source_engine_version),
+    source_db_parameter_group_name: required("source_db_parameter_group_name"; $svc.source_db_parameter_group_name),
+    target_engine_version:          required("target_engine_version"; $svc.target_engine_version),
+    target_db_parameter_group_name: required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
+    config_region:                  required("aws_region"; .aws_region),
+  } | shellvars')"
 [[ "$build" == approved ]] || { echo 'build: pending; no changes made.'; exit 0; }
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")

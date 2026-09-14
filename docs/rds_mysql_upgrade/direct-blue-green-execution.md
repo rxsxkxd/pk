@@ -38,7 +38,7 @@ aws sts get-caller-identity --profile "$AWS_PROFILE"
 
 # シェルスクリプトが設定 YAML を読むために必要。
 python3 -c 'import yaml' || python3 -m pip install 'PyYAML==6.0.2'
-# JSON の読み取りに jq を使う。無い場合は該当スクリプトが起動直後に停止する。
+# 設定と JSON の読み取りに jq を使う。無い場合は該当スクリプトが起動直後に停止する。
 command -v jq
 ```
 

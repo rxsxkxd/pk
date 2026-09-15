@@ -88,4 +88,4 @@ aws "${aws_args[@]}" cloudwatch get-metric-statistics --namespace AWS/RDS --metr
 
 printf '{"db_instance_id":"%s","target_engine_version":"%s","collected_at":"%s"}\n' "$db_instance_id" "$target_engine_version" "$end_time" > "$output_dir/metadata.json"
 echo "Collected read-only AWS CLI results: $output_dir"
-echo "Evaluate: ruby scripts/evaluate_blue_green_prereqs.rb --input-dir $output_dir"
+echo "Evaluate: ruby tools/evaluate_blue_green_prereqs.rb --input-dir $output_dir"

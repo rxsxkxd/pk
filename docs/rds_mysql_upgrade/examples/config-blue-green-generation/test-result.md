@@ -89,7 +89,7 @@ staging では `time_zone` が `Asia/Tokyo` から `UTC` へ変わる旨が「�
 
 ## テストの実行
 
-ロジックの単体テストは `scripts/internal/{common,collect,generate,cfn,report}` にある。**すべて PASS。** AWS へは接続しない（`internal/collect` は PATH 上の `aws` をダミーへ差し替えて引数の組み立てを検証する）。
+ロジックの単体テストは `tools/internal/{common,collect,generate,cfn,report}` にある。**すべて PASS。** AWS へは接続しない（`tools/internal/collect` は PATH 上の `aws` をダミーへ差し替えて引数の組み立てを検証する）。
 
 ```bash
 go test ./...

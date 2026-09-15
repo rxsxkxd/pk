@@ -48,7 +48,7 @@
 - インライン python が 1 行に `(_ for _ in ()).throw(SystemExit(...))` を詰め込む形式であり、読めない・単体テストできない・エラーメッセージを制御できない。設定ファイル解析という同じ処理が各スクリプトに散っている。
 - レポート生成器の Ruby 版と Go 版が並存している。Go 版は CodeBuild に Ruby ランタイムを置かないためだけに存在し、そのために `VerifyGreenProject` を `PrivilegedMode: true` にして Docker マルチステージビルドを回している。**ランタイムを 1 つ導入しない代償として、実装の重複とビルド特権を購入している**状態であり、収支が合っていない。
 
-  > 追記（2026-09-14）: **解消済み。**CodeBuild は `runtime-versions: golang` で同一イメージ内をビルドするようになり `PrivilegedMode` は全プロジェクトで不要になった。さらに `generate_green_verification_report.rb` を削除して Go 版へ一本化し、短縮記法の実装も `scripts/internal/cfn` へ集約した（`ci/Dockerfile.green-verification-report` も削除）。方針は [implementation-language-policy.md](implementation-language-policy.md) にある。**下の提案 2 は実施済みである。**
+  > 追記（2026-09-14）: **解消済み。**CodeBuild は `runtime-versions: golang` で同一イメージ内をビルドするようになり `PrivilegedMode` は全プロジェクトで不要になった。さらに `generate_green_verification_report.rb` を削除して Go 版へ一本化し、短縮記法の実装も `internal/cfn` へ集約した（`ci/Dockerfile.green-verification-report` も削除）。なお `scripts/` と `tools/` で Go ライブラリを共有しない方針としたため、`internal/cfn` は現在同一内容を両者へ複製し `tests/cfn_shorthand_test.sh` で一致を検査している。方針は [implementation-language-policy.md](implementation-language-policy.md) にある。**下の提案 2 は実施済みである。**
 
 ### 対案
 
@@ -230,7 +230,7 @@ services:
 
 いずれかを採る。
 
-1. 内側 2 本を `scripts/internal/` へ移し、README は外側のみを案内する。
+1. 内側 2 本を `internal/` へ移し、README は外側のみを案内する。
 2. 内側にも設定ファイルの承認チェックを入れる（外側と二重になるが、迂回経路がなくなる）。
 
 論点 1 の案 A（単一バイナリ）を採る場合、内外の分離自体が消えるためこの論点も同時に解消する。

@@ -92,7 +92,7 @@ docker compose --env-file .env run --rm mysql \
 
 # Ruby スクリプトの実行
 docker compose --env-file .env run --rm ruby \
-  scripts/generate_mysql84_parameter_group.rb --help
+  tools/generate_mysql84_parameter_group.rb --help
 
 # Go プログラムの実行
 docker compose --env-file .env run --rm go version
@@ -131,7 +131,7 @@ docker run --rm -it \
 
 # Ruby。AWS credential・RDS 証明書はマウントしない
 docker run --rm -it -v "$(pwd):/workspace" -w /workspace \
-  ruby:3.4.10 scripts/generate_mysql84_parameter_group.rb --help
+  ruby:3.4.10 tools/generate_mysql84_parameter_group.rb --help
 
 # Go。AWS credential・RDS 証明書はマウントしない
 docker run --rm -it -v "$(pwd):/workspace" -w /workspace \

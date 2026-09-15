@@ -14,7 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"rds-mysql-upgrade/scripts/internal/common"
+	"rds-mysql-upgrade/tools/internal/common"
 )
 
 // 移行先の共通ターゲット。カタログで engine_version を省略した接続はこの値へ上げる。

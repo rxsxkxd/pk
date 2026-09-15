@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"rds-mysql-upgrade/scripts/internal/common"
+	"rds-mysql-upgrade/tools/internal/common"
 )
 
 // testInventory は blue と audit の 2 インスタンスを持つ最小のインベントリである。

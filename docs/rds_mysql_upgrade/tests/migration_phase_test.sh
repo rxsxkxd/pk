@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # resolve_migration_phase のテーブル駆動テスト。AWS へは接続しない。
 #
-# 実行: scripts/lib/migration_phase_test.sh
+# 実行: tests/migration_phase_test.sh
 # 不適合が 1 件でもあれば終了コード 1 を返す。
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
-# shellcheck source=migration_phase.sh
-source ./migration_phase.sh
+# shellcheck source=../scripts/lib/migration_phase.sh
+source scripts/lib/migration_phase.sh
 
 SOURCE_VERSION='8.0'
 SOURCE_GROUP='svc-prod-mysql80-v1'

@@ -67,4 +67,4 @@ fi
 # GNU date 前提（他スクリプトと同じ ISO8601 形式）。source_pg は AWS リソース識別子で文字種が限定されるため直接埋め込む。
 printf '{"source_parameter_group":"%s","collected_at":"%s"}\n' "$source_pg" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$output_dir/metadata.json"
 echo "Collected read-only AWS CLI results: $output_dir"
-echo "Generate: ruby scripts/generate_mysql84_parameter_group.rb --input-dir $output_dir --output-dir <generated-dir> --system <system> --environment <environment>"
+echo "Generate: ruby tools/generate_mysql84_parameter_group.rb --input-dir $output_dir --output-dir <generated-dir> --system <system> --environment <environment>"

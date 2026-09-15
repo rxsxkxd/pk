@@ -167,7 +167,7 @@ printf '{"db_instance_id":"%s","target_engine_version":"%s","collected_at":"%s"}
   "$DB_INSTANCE_ID" "$TARGET_ENGINE_VERSION" "$(ruby -rtime -e 'puts Time.now.utc.iso8601')" \
   > "$OUTPUT_DIR/metadata.json"
 
-ruby scripts/evaluate_blue_green_prereqs.rb --input-dir "$OUTPUT_DIR"
+ruby tools/evaluate_blue_green_prereqs.rb --input-dir "$OUTPUT_DIR"
 ```
 
 `STOP` は Blue/Green 作成前に解消が必要な不適合、`REVIEW` は手動確認または対応方針の記録が必要な項目である。0-1-06 は常に `REVIEW` となるため、手順 9 の確認結果を作業証跡として残す。

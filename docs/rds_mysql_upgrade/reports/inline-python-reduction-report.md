@@ -118,8 +118,8 @@ printf '{"source_parameter_group":"%s","collected_at":"%s"}\n' "$source_pg" "$(d
 ## 変更したファイル
 
 - `scripts/build_green.sh`
-- `scripts/collect_blue_green_prereqs.sh`
-- `scripts/collect_mysql84_parameter_inputs.sh`
+- `tools/collect_blue_green_prereqs.sh`
+- `tools/collect_mysql84_parameter_inputs.sh`
 - `scripts/create_blue_green_deployment.sh`
 - `scripts/switchover.sh`
 - `scripts/switchover_blue_green_deployment.sh`

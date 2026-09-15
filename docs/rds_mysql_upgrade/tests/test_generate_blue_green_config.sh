@@ -39,7 +39,7 @@ AWS_MOCK_ARGUMENTS="$work_dir/aws-arguments.txt" \
 AWS_MOCK_INSTANCES="$fixture_dir/rds-instance-inventory.test.json" \
 AWS_MOCK_PARAMETERS_DIR="$fixture_dir/describe-db-parameters" \
 PATH="$work_dir/bin:$PATH" \
-go -C "$repo_root" run ./scripts/collect_rds_instance_inventory \
+go -C "$repo_root" run ./tools/collect_rds_instance_inventory \
   --region ap-northeast-1 \
   --profile test-readonly \
   --output "$work_dir/rds-instance-inventory.json"
@@ -93,14 +93,14 @@ RB
 for environment in development staging production; do
   # go.mod はリポジトリ直下にある。ここでは呼び出し元の cwd に依存しないよう
   # -C でリポジトリ直下を指定し、入出力は絶対パスで渡す。
-  go -C "$repo_root" run ./scripts/generate_blue_green_config \
+  go -C "$repo_root" run ./tools/generate_blue_green_config \
     --catalog "$fixture_dir/migration-catalog.test.yml" \
     --inventory "$work_dir/rds-instance-inventory.json" \
     --environment "$environment" \
     --output "$work_dir/output/$environment.yml"
 
   # レポートは YAML 生成とは別コマンドである。同じ入力から Markdown を組み立てる。
-  go -C "$repo_root" run ./scripts/generate_blue_green_config_report \
+  go -C "$repo_root" run ./tools/generate_blue_green_config_report \
     --catalog "$fixture_dir/migration-catalog.test.yml" \
     --inventory "$work_dir/rds-instance-inventory.json" \
     --environment "$environment" \

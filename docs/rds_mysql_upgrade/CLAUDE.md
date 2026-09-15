@@ -41,17 +41,29 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 
 `config/blue-green/{staging,production}.deployment.yml` が環境ごとの単一の入力である。全スクリプトが `--config FILE --service NAME` だけを引数に取り、DB 識別子・バージョン・パラメータグループ名・`actions` の承認状態をここから解決する。
 
-Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する接続定義）と RDS インベントリから生成できる。**収集と生成は別コマンドで、ロジックは `scripts/internal/` のライブラリにある。**
+Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する接続定義）と RDS インベントリから生成できる。**収集と生成は別コマンドで、ロジックは `tools/internal/` のライブラリにある。**
 
 | パッケージ | 役割 |
 |---|---|
-| `internal/common` | 収集器が書き生成器が読む**インベントリ JSON の型（契約）**、原子的ファイル書き込み |
-| `internal/collect` | AWS CLI を exec し `describe-db-instances` とパラメータグループごとの `describe-db-parameters` だけを呼ぶ |
-| `internal/generate` | カタログの検証・解決と、deployment YAML の組み立て。**AWS を呼ばない** |
-| `internal/cfn` | Step 2 の CloudFormation テンプレートから DB パラメータグループの宣言値を読む。**短縮記法を長形式へ正規化**し、組み込み関数の項目は「比較不能」として扱う |
-| `internal/report` | 切替前レビュー用の Markdown 組み立て。判定は行わず、`internal/generate` を再利用して材料を並べる |
+| `tools/internal/common` | 収集器が書き生成器が読む**インベントリ JSON の型（契約）**、原子的ファイル書き込み |
+| `tools/internal/collect` | AWS CLI を exec し `describe-db-instances` とパラメータグループごとの `describe-db-parameters` だけを呼ぶ |
+| `tools/internal/generate` | カタログの検証・解決と、deployment YAML の組み立て。**AWS を呼ばない** |
+| `tools/internal/report` | 切替前レビュー用の Markdown 組み立て。判定は行わず、`tools/internal/generate` を再利用して材料を並べる |
+| `tools/internal/cfn` | Step 2 の CloudFormation テンプレートから DB パラメータグループの宣言値を読む。**短縮記法を長形式へ正規化**し、組み込み関数の項目は「比較不能」として扱う |
 
-コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `internal/` 側とその単体テストを直す。**生成結果の `source_db_parameters` は Blue のパラメータグループから採取した実値（パラメータ名をキーにした `value` / `source`。採取対象は `internal/collect` の `CollectedParameters` で決め、現在は `time_zone` のみ）で、**切替前の人のレビュー専用**——実行スクリプトは読まない。レポートはこれと移行先テンプレートの宣言値を突き合わせて `一致` / `差異` / `比較不能` を示す。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。
+**フォルダの分け方**——`scripts/` は **CI（buildspec）から到達するものだけ**である。人が手で実行するものは置かない。
+
+| ディレクトリ | 中身 |
+|---|---|
+| `scripts/` | CI から到達する実行スクリプトと、その共有ライブラリ（`lib/` / `internal/`）、Step 4 のレポート生成器 |
+| `tools/` | **人が手で実行するもの一式。**Step 1・2 の収集・判定（`collect_blue_green_prereqs.sh` / `evaluate_blue_green_prereqs.rb` / `collect_mysql84_parameter_inputs.sh` / `generate_mysql84_parameter_group.rb`）、Blue/Green 設定の Go コマンド（`collect_rds_instance_inventory` / `generate_blue_green_config` / `generate_blue_green_config_report`）と、そのライブラリ（`internal/`）。個別実行手順は `tools/README.md` |
+| `tests/` | テスト一式 |
+
+**`scripts/internal/` と `tools/internal/` は共有しない。**CI から到達する側と人が実行する側を独立させるための方針で、Go の `internal/` 可視性がそれを強制する。唯一内容が重なる `cfn` は両方に複製して置いており、**片方を直したらもう片方へ同じ変更を入れる**（`tests/cfn_shorthand_test.sh` が 2 本の一致を検査するので、ずれるとテストが落ちる）。
+
+**`upgrade-flow-steps.md` の Step 1・2 の実装リンクだけが `scripts/` の旧パスのまま残っている。**同ファイルはレビュー中につき内容を変更しない方針のため、意図的に更新していない。**レビューが終わったら `tools/` へ直すこと**（対象は 20 行目と 30 行目の 4 リンク）。それ以外のドキュメントは `tools/` を指すよう更新済みである。
+
+コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `tools/internal/` 側とその単体テストを直す。**生成結果の `source_db_parameters` は Blue のパラメータグループから採取した実値（パラメータ名をキーにした `value` / `source`。採取対象は `tools/internal/collect` の `CollectedParameters` で決め、現在は `time_zone` のみ）で、**切替前の人のレビュー専用**——実行スクリプトは読まない。レポートはこれと移行先テンプレートの宣言値を突き合わせて `一致` / `差異` / `比較不能` を示す。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。
 
 `config/mysql80-to-84-parameter-rules.yml` は 8.0 → 8.4 のパラメータ変換ルール（`copy` / `force` / `omit` / `target_only`）を持ち、`generate_mysql84_parameter_group.rb` の唯一のルールソースである。パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。
 
@@ -62,7 +74,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
 - `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。
 
-`collect_green_runtime_values.sh`（Step 4 の実効値収集）は、対象パラメータ名を `go run ./scripts/list_db_parameter_names` で得る（`internal/cfn` 経由）。**Go への依存は Step 4 に閉じている。**値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
+`collect_green_runtime_values.sh`（Step 4 の実効値収集）は、対象パラメータ名を**同じレポート生成器バイナリの `--list-parameter-names`** で得る（`scripts/internal/cfn` 経由）。`verify_green.sh` が `--report-generator` でそのバイナリを渡すため、**収集側も Go を必要としない**。値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
 
 **Step 4 は同じ Go プログラムで 2 つの実行形態を賄う。**MySQL 実効値の収集は Green DB への到達が必要で、リモート（CodeBuild）では VPC 構成が別途要るため成立しない場合がある。そのときは MySQL 接続を伴う確認をローカルから行い、レポート出力までローカルで完結させる。
 
@@ -71,11 +83,11 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 | リモート（CodeBuild／GitHub Actions） | しない | `--runtime-values` を渡さない | `未収集` |
 | ローカル | する | `--runtime-values <収集結果 JSON>` | 収集した実効値 |
 
-**実効値の有無で変わるのはこの列だけで、判定は AWS API から取得した値で行う。**リモートでも判定内容は変わらない。この性質は `scripts/lib/cfn_shorthand_test.sh` が両形態を突き合わせて固定しているので、**レポート生成器を変更したら両形態のテストを通すこと。**
+**実効値の有無で変わるのはこの列だけで、判定は AWS API から取得した値で行う。**リモートでも判定内容は変わらない。この性質は `tests/cfn_shorthand_test.sh` が両形態を突き合わせて固定しているので、**レポート生成器を変更したら両形態のテストを通すこと。**
 
 レポート生成器は **Go 版だけ**である（`generate_green_verification_report.go`）。CodeBuild と GitHub Actions はどちらも `go build ./scripts` でビルドし、`GREEN_REPORT_GENERATOR` で `verify_green.sh` へ渡す。未指定なら `verify_green.sh` が一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
 
-**CloudFormation テンプレートの読み取りは `scripts/internal/cfn` に一本化してある。**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化し、値が組み込み関数の項目は「比較不能」として比較対象から外す。同じライブラリを `list_db_parameter_names` と `generate_blue_green_config_report` も使う。**短縮記法の扱いを変えるときはここだけを直す。**
+**CloudFormation テンプレートの読み取りは `internal/cfn` が担う。**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化し、値が組み込み関数の項目は「比較不能」として比較対象から外す。レポート生成器の `--list-parameter-names` が `scripts/internal/cfn` を、`tools/generate_blue_green_config_report` が `tools/internal/cfn` を使う。**この 2 本は同一内容の複製なので、短縮記法の扱いを変えるときは両方を直す**（`tests/cfn_shorthand_test.sh` が一致を検査する）。
 
 ## 実行方法
 
@@ -107,7 +119,7 @@ Blue/Green 設定の収集・生成コマンドは Go である。**`go.mod` と
 `go run` は cwd がモジュール内にあることを要求する。リポジトリ外から実行する場合はバイナリを作って渡す:
 
 ```bash
-go build -o /tmp/collect-rds-inventory ./scripts/collect_rds_instance_inventory
+go build -o /tmp/collect-rds-inventory ./tools/collect_rds_instance_inventory
 ```
 
 AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`local-execution.md`）。実接続時だけ `.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。**ファイルはすべて `read_only` マウント**である。
@@ -116,19 +128,19 @@ STS の一時認証情報（`AWS_ACCESS_KEY_ID`／`AWS_SECRET_ACCESS_KEY`／`AWS
 
 ```bash
 docker compose --env-file .env run --rm awscli sts get-caller-identity
-docker compose --env-file .env run --rm ruby scripts/generate_mysql84_parameter_group.rb --help
+docker compose --env-file .env run --rm ruby tools/generate_mysql84_parameter_group.rb --help
 ```
 
 ### 各 Step
 
 ```bash
 # Step 1: 収集 → 判定（STOP が残る間は先へ進まない）
-scripts/collect_blue_green_prereqs.sh --db-instance-id <blue-id> --region <region> --profile <profile>
-ruby scripts/evaluate_blue_green_prereqs.rb --input-dir <収集先>
+tools/collect_blue_green_prereqs.sh --db-instance-id <blue-id> --region <region> --profile <profile>
+ruby tools/evaluate_blue_green_prereqs.rb --input-dir <収集先>
 
 # Step 2: 収集 → ルール突合 → レポートと CFn テンプレート生成
-scripts/collect_mysql84_parameter_inputs.sh --source-parameter-group <8.0-pg-name>
-ruby scripts/generate_mysql84_parameter_group.rb --input-dir <dir> --output-dir <dir> --system <name> --environment <env>
+tools/collect_mysql84_parameter_inputs.sh --source-parameter-group <8.0-pg-name>
+ruby tools/generate_mysql84_parameter_group.rb --input-dir <dir> --output-dir <dir> --system <name> --environment <env>
 
 # Step 3〜5（CI と同じエントリポイント。設定が pending なら 3/5 は何もせず正常終了）
 scripts/build_green.sh   --config config/blue-green/staging.deployment.yml --service example-service
@@ -142,33 +154,33 @@ scripts/switchover.sh    --config config/blue-green/staging.deployment.yml --ser
 
 ```bash
 # シェル構文チェック
-bash -n scripts/*.sh scripts/lib/*.sh
+bash -n scripts/*.sh scripts/lib/*.sh tools/*.sh tests/*.sh
 
 # 移行フェーズ判定のテーブル駆動テスト（AWS へ接続しない）
-scripts/lib/migration_phase_test.sh
+tests/migration_phase_test.sh
 
 # 設定 YAML の読み取りテスト（AWS へ接続しない）
-scripts/lib/deployment_config_test.sh
+tests/deployment_config_test.sh
 
 # MySQL 接続方式の解決テスト（AWS へ接続しない）
-scripts/lib/mysql_credentials_test.sh
+tests/mysql_credentials_test.sh
 
 # CloudFormation 短縮記法（!Ref / !Sub）を 3 実装が同じに解釈するかのテスト
-scripts/lib/cfn_shorthand_test.sh
+tests/cfn_shorthand_test.sh
 
 # 変数展開の直後に全角文字が来ていないかの点検（`$VAR）` は変数名の一部と解釈され
 # set -u 下で unbound variable になる。`${VAR}）` と書く）
-grep -nP '\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]' scripts/*.sh scripts/lib/*.sh
+grep -nP '\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]' scripts/*.sh scripts/lib/*.sh tools/*.sh
 
 # Ruby スクリプトの回帰確認（サンプル入力で再生成し、examples/ の出力との差分を見る）
 # このサンプルは「要レビュー」が 1 件残るため終了コード 1 が正常
-ruby scripts/generate_mysql84_parameter_group.rb \
+ruby tools/generate_mysql84_parameter_group.rb \
   --input-dir examples/mysql84-parameter-generation/input \
   --output-dir examples/mysql84-parameter-generation/output \
-  --system sample --environment production
+  --system example --environment production
 
 # Go（レポート生成器、RDS インベントリ収集器、Blue/Green 設定生成器）
-# ロジックは internal/{common,collect,generate} にあり、単体テストを持つ。
+# ロジックは tools/internal/{common,collect,generate} にあり、単体テストを持つ。
 go vet ./... && go build ./... && go test ./...
 
 # GitHub Actions をローカル実行（.actrc に AWS profile と絶対パスマウントを設定してから）

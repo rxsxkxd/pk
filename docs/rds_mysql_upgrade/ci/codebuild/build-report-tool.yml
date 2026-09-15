@@ -29,14 +29,72 @@ phases:
       # GOTOOLCHAIN=auto が必要なツールチェーンを取得する（要ネットワーク）。
       - go version
 
+  pre_build:
+    commands:
+      # --- なぜこの解決処理が要るか ---------------------------------------
+      # go の module モードには相対 import が無く、モジュール内の import は
+      # すべて go.mod の module 行（rds-mysql-upgrade）を接頭辞に持つ。
+      # そのため go.mod が効いていない cwd で走らせると、Go は
+      # rds-mysql-upgrade/... を「外部モジュール」と解釈して次のように失敗する。
+      #
+      #   cwd が go.mod の外          : go.mod file not found in ... any parent directory
+      #   GO111MODULE=off             : cannot find package "rds-mysql-upgrade/..." in any of: $GOROOT $GOPATH
+      #   別 module として認識された  : package rds-mysql-upgrade/... is not in std
+      #
+      # どれもエラー文にモジュール名が出るためモジュール名の不備に見えるが、
+      # 実際の原因は「cwd が go.mod のあるディレクトリではない」だけである。
+      # CODEBUILD_SRC_DIR がリポジトリのどこを指すかは source の設定次第で
+      # 変わる（このプロジェクトが大きなリポジトリのサブディレクトリに置かれる
+      # 場合を含む）ので、cwd に依存せず go.mod を自力で突き止める。
+      - |
+        set -e
+        search_root=${CODEBUILD_SRC_DIR:-$(pwd)}
+        # module 行が rds-mysql-upgrade のものだけを選ぶ。examples 配下の
+        # probe は別モジュール（独自の go.mod を持つ）なので拾わない。
+        MODULE_DIR=''
+        for candidate in $(find "$search_root" -maxdepth 4 -name go.mod -type f 2>/dev/null); do
+          if grep -q '^module[[:space:]]\+rds-mysql-upgrade$' "$candidate"; then
+            MODULE_DIR=$(dirname "$candidate")
+            break
+          fi
+        done
+        if [ -z "$MODULE_DIR" ]; then
+          echo "module rds-mysql-upgrade の go.mod が $search_root 配下に見つからない。" >&2
+          echo "見つかった go.mod:" >&2
+          find "$search_root" -maxdepth 4 -name go.mod -type f 2>/dev/null >&2 || true
+          exit 1
+        fi
+        echo "MODULE_DIR=$MODULE_DIR"
+        # build フェーズへ渡す。シェル変数や cwd がフェーズをまたいで残るかは
+        # 保証されないため、ファイル経由という確実な方法にしておく。
+        echo "$MODULE_DIR" > /tmp/module_dir
+
+      # --- 失敗したときに原因を一目で分かるようにする診断 --------------------
+      # 上の 3 パターンのどれに当たったかは、この 2 行の出力で切り分けられる。
+      # GO111MODULE が off なら GOPATH モード、go list -m が別名を返せば
+      # 想定と違う go.mod を掴んでいる。
+      - go env GO111MODULE GOFLAGS GOPATH GOMODCACHE GOTOOLCHAIN
+      - cd "$(cat /tmp/module_dir)" && go list -m
+
   build:
     commands:
       # 依存は go.sum に固定済み。静的リンクにして、実行側に Go を要求しない。
-      - CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o .tools/green-report/generate_green_verification_report ./scripts
+      #
+      # -o は絶対パスで CODEBUILD_SRC_DIR 直下へ出す。go.mod がサブディレクトリに
+      # あっても、artifacts の files（CODEBUILD_SRC_DIR 相対）が常に成立するため。
+      - |
+        set -e
+        out_dir=${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report
+        mkdir -p "$out_dir"
+        cd "$(cat /tmp/module_dir)"
+        CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+          -o "$out_dir/generate_green_verification_report" ./scripts
       # バイナリができたことを確認する。
-      - ls -l .tools/green-report/generate_green_verification_report
+      - ls -l "${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report/generate_green_verification_report"
       # AWS を呼ばずに動くことだけ確かめる（引数不足で usage を出して落ちるのが正常）。
-      - .tools/green-report/generate_green_verification_report --help 2>&1 | head -1 || true
+      - |
+        "${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report/generate_green_verification_report" \
+          --help 2>&1 | head -1 || true
 
 artifacts:
   files:

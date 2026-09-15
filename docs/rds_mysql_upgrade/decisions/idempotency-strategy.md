@@ -275,7 +275,7 @@ reconciliation 型では次の意味づけが正しい。**現状は switchover 
 ### 実装の要点
 
 - 判定関数は `scripts/lib/migration_phase.sh` に切り出し、Step 3・5・7 から `source` して共用する
-- テーブル駆動テスト `scripts/lib/migration_phase_test.sh` を用意した。AWS へ接続しないため単体で実行できる。**このテストが実装中に前方一致の破綻を検出した**（上述）
+- テーブル駆動テスト `tests/migration_phase_test.sh` を用意した。AWS へ接続しないため単体で実行できる。**このテストが実装中に前方一致の破綻を検出した**（上述）
 - Step 5 は切替完了まで待つようにした。`exit 0` が「望ましい終了状態に到達した」ことを意味するようにするためである
 - Step 3 の `PROVISIONING` 待機は明示的なポーリングで実装した。**AWS CLI に Blue/Green 用の waiter は存在しない**（RDS の waiter は `DBInstanceAvailable` / `DBSnapshotAvailable` など DB インスタンスとスナップショット系のみ）
 - Step 7 は最終スナップショット名を `final_snapshot_identifier` として config 化した。タイムスタンプ由来の名前は再実行で別名になり、スナップショットが増殖するためである

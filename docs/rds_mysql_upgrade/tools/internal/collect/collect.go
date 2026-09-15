@@ -18,7 +18,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"rds-mysql-upgrade/scripts/internal/common"
+	"rds-mysql-upgrade/tools/internal/common"
 )
 
 // CollectedParameters は、確認用に採取するパラメータグループのパラメータ名である。

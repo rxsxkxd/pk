@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # deployment_config.sh（設定 YAML の読み取り）のテスト。AWS へは接続しない。
-# 実行: scripts/lib/deployment_config_test.sh
+# 実行: tests/deployment_config_test.sh
 set -uo pipefail
-cd "$(dirname "$0")/../.."
-# shellcheck source=deployment_config.sh
+cd "$(dirname "$0")/.."
+# shellcheck source=../scripts/lib/deployment_config.sh
 source scripts/lib/deployment_config.sh
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT

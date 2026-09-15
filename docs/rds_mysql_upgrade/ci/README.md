@@ -92,7 +92,7 @@ Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERAT
 
 | 実行基盤 | ビルド方法 |
 |---|---|
-| CodeBuild | **ビルドと実行を別ステージに分けている。**`BuildReportTool` が `go build ./scripts` を行い、バイナリを artifact（`ReportToolOutput`）として出す。`VerifyGreen` はそれを 2 つ目の input artifact として受け取り、`CODEBUILD_SRC_DIR_ReportToolOutput` から実行する。**VerifyGreen は Go も外部ネットワークも必要としない。**2 つのプロジェクトは同一 VPC に置き、**レポート実行だけを専用 subnet へ隔離**する（`VpcId` / `BuildSubnetIds` / `VerifyGreenSubnetIds` を指定する）。外部へ出るのはビルド用 subnet だけである。Docker を使わないため `PrivilegedMode` も不要 |
+| CodeBuild | **ビルドと実行を別ステージに分けている。**`BuildReportTool` が `go build ./scripts` を行い（`go.mod` のあるディレクトリを自力で突き止めてから実行する。理由は buildspec のコメント）、バイナリを artifact（`ReportToolOutput`）として出す。`VerifyGreen` はそれを 2 つ目の input artifact として受け取り、`CODEBUILD_SRC_DIR_ReportToolOutput` から実行する。**VerifyGreen は Go も外部ネットワークも必要としない。**2 つのプロジェクトは同一 VPC に置き、**レポート実行だけを専用 subnet へ隔離**する（`VpcId` / `BuildSubnetIds` / `VerifyGreenSubnetIds` を指定する）。外部へ出るのはビルド用 subnet だけである。Docker を使わないため `PrivilegedMode` も不要 |
 | GitHub Actions | ランナー同梱の Go で `go build ./scripts`（CodeBuild と同じ手順。Docker は使わない） |
 
 CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定）が必要なツールチェーンを取得する。VPC 内で実行する場合は、その取得経路も確保する。Ruby ランタイムは CodeBuild に不要である。

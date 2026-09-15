@@ -81,14 +81,14 @@ Phase 1 の時点では DB インスタンスにまだ関連付けないため�
 
 ```bash
 # 1. 現行の user／system 値、8.0／8.4 の engine default、任意で関連付け状態を一時ディレクトリへ収集する
-bash scripts/collect_mysql84_parameter_inputs.sh \
+bash tools/collect_mysql84_parameter_inputs.sh \
   --source-parameter-group <current-mysql80-parameter-group> \
   --db-instance-id <blue-instance-id> \
   --region <region> \
   --profile <profile>
 
 # 2. ルールベースで比較し、レビュー報告と CloudFormation YAML を生成する
-ruby scripts/generate_mysql84_parameter_group.rb \
+ruby tools/generate_mysql84_parameter_group.rb \
   --input-dir <collector-output-dir> \
   --output-dir <generated-dir> \
   --system <system> \

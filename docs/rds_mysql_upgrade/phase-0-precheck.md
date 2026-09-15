@@ -37,17 +37,17 @@
 
 収集は AWS CLI の読み取り API（`Describe*`／`Get*`）だけで行い、判定は AWS API を呼ばない Ruby スクリプトで行う。収集スクリプト内では、各 AWS CLI コマンドの直前に「何を取得し、どの成立条件の判定に使うか」をコメントで明記している。
 
-個別の AWS CLI コマンドを実行する場合は、[個別実行手順](scripts/README.md)を参照する。
+個別の AWS CLI コマンドを実行する場合は、[個別実行手順](tools/README.md)を参照する。
 
 ```bash
 # 1. AWS の情報を一時ディレクトリへ収集する（変更操作なし）
-bash scripts/collect_blue_green_prereqs.sh \
+bash tools/collect_blue_green_prereqs.sh \
   --db-instance-id <blue-instance-id> \
   --region <region> \
   --profile <profile>
 
 # 2. 前コマンドが表示した一時ディレクトリを指定して、ローカルで判定する
-ruby scripts/evaluate_blue_green_prereqs.rb \
+ruby tools/evaluate_blue_green_prereqs.rb \
   --input-dir <collector-output-dir>
 ```
 

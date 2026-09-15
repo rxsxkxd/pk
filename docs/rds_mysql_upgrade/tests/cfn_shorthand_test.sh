@@ -2,12 +2,14 @@
 # CloudFormation の短縮記法（!Ref / !Sub など）の解釈と、Step 4 レポートの
 # 2 つの実行形態（MySQL 実効値あり／なし）を確認する。AWS へは接続しない。
 #
-# 短縮記法の実装は scripts/internal/cfn に一本化してあり、
-# パラメータ名の列挙（list_db_parameter_names）とレポート生成器がどちらもこれを使う。
+# 短縮記法の実装は scripts/internal/cfn と tools/internal/cfn の 2 本があり、
+# 前者をレポート生成器（--list-parameter-names を含む）が、後者を tools/ のコマンドが
+# 使う。scripts/ と tools/ は Go のライブラリを共有しない方針のため複製しており、
+# 内容が一致していることをこのテストで担保する。
 # 「短縮記法を長形式へ正規化し、組み込み関数の値は比較対象から外す」挙動である。
 # Go が未導入の環境ではスキップする。
 set -uo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 
 FIXTURE=examples/cfn-shorthand/mysql84-parameter-group-shorthand.yaml
 LONGFORM=examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml
@@ -25,23 +27,6 @@ check() {
   fi
 }
 
-# --- internal/cfn: パラメータ名を抽出できること -----------------------------
-# collect_green_runtime_values.sh が実効値収集の対象を決めるために使う経路である。
-if command -v go >/dev/null 2>&1; then
-  for template in "$FIXTURE" "$LONGFORM"; do
-    if ! names=$(go run ./scripts/list_db_parameter_names --template "$template" 2>&1); then
-      printf 'FAIL  %-52s %s\n' "internal/cfn: $(basename "$template")" "$names"
-      failed=$((failed + 1)); continue
-    fi
-    check "internal/cfn: $(basename "$template") から名前を抽出" 'binlog_format' "$names"
-  done
-  # 組み込み関数で宣言した項目もパラメータ名としては拾う（実効値の収集対象になる）。
-  names=$(go run ./scripts/list_db_parameter_names --template "$FIXTURE" 2>/dev/null)
-  check 'internal/cfn: 組み込み関数の項目も名前は拾う' 'replica_parallel_workers' "$names"
-else
-  echo 'skip  internal/cfn（Go 未導入）'
-fi
-
 # --- レポート生成器: 組み込み関数を「比較不能」として扱うこと ----------------
 report_args=(
   --template "$FIXTURE"
@@ -53,13 +38,37 @@ report_args=(
   --replica-lag "$COLLECTED/replica-lag.json"
 )
 
-# レポート生成器は scripts/ 直下の package main で、internal/cfn を import する。
+# --- 2 本の internal/cfn が一致していること --------------------------------
+# 片方だけ直して黙ってずれるのを防ぐ。差分が出たら両方へ同じ変更を入れる。
+if diff -r -q scripts/internal/cfn tools/internal/cfn >"$work/cfn.diff" 2>&1; then
+  echo 'ok    scripts/internal/cfn と tools/internal/cfn が一致している'
+else
+  printf 'FAIL  %-52s %s\n' '2 本の internal/cfn がずれている' "$(cat "$work/cfn.diff")"
+  failed=$((failed + 1))
+fi
+
+# レポート生成器は scripts/ 直下の package main で、scripts/internal/cfn を import する。
 # リポジトリからそのままビルドする（依存は go.sum に固定済み）。
 build_go() {
   go build -o "$work/gen" ./scripts >"$work/go.err" 2>&1
 }
 
 if command -v go >/dev/null 2>&1 && build_go; then
+  # --- パラメータ名の抽出（--list-parameter-names）-------------------------
+  # collect_green_runtime_values.sh が実効値収集の対象を決めるために使う経路である。
+  # レポート生成と同じバイナリなので、実行側（VerifyGreen）へ Go を持ち込まない。
+  for template in "$FIXTURE" "$LONGFORM"; do
+    if ! names=$("$work/gen" --list-parameter-names --template "$template" 2>&1); then
+      printf 'FAIL  %-52s %s\n' "名前抽出: $(basename "$template")" "$names"
+      failed=$((failed + 1)); continue
+    fi
+    check "名前抽出: $(basename "$template")" 'binlog_format' "$names"
+  done
+  # 組み込み関数で宣言した項目もパラメータ名としては拾う（実効値の収集対象になる）。
+  names=$("$work/gen" --list-parameter-names --template "$FIXTURE" 2>/dev/null)
+  check '名前抽出: 組み込み関数の項目も名前は拾う' 'replica_parallel_workers' "$names"
+
+  # --- レポート生成 ---------------------------------------------------------
   if "$work/gen" "${report_args[@]}" --output "$work/go.md" 2>"$work/go.err"; then
     check 'Go: 組み込み関数は比較不能として出る' '比較不能（Ref）' "$(cat "$work/go.md")"
     check 'Go: 素のスカラーは通常どおり比較する' '| binlog_format | ROW | ROW | 一致' "$(cat "$work/go.md")"

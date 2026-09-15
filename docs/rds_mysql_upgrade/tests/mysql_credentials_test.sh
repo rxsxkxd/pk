@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # mysql_credentials.sh の設定読み取りと検証ロジックのテスト。AWS へは接続しない。
-# 実行: scripts/lib/mysql_credentials_test.sh
+# 実行: tests/mysql_credentials_test.sh
 set -uo pipefail
-cd "$(dirname "$0")"
-# shellcheck source=mysql_credentials.sh
-source ./mysql_credentials.sh
+cd "$(dirname "$0")/.."
+# shellcheck source=../scripts/lib/mysql_credentials.sh
+source scripts/lib/mysql_credentials.sh
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 failed=0

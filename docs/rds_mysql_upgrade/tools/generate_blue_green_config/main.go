@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"os"
 
-	"rds-mysql-upgrade/scripts/internal/common"
-	"rds-mysql-upgrade/scripts/internal/generate"
+	"rds-mysql-upgrade/tools/internal/common"
+	"rds-mysql-upgrade/tools/internal/generate"
 )
 
 func main() {

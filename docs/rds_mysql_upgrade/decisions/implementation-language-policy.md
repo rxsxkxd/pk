@@ -40,13 +40,14 @@
 
 **CodeBuild ではビルドと実行を別ステージに分けている。**`BuildReportTool` が Go でビルドして artifact へ出し、`VerifyGreen` はそれを受け取って実行する。VerifyGreen は Green DB へ到達するため VPC 内へ置く可能性があるので、**外部ネットワークへの依存をそこへ持ち込まない**ためである。
 
-**実効値の有無で変わるのはこの列だけである。**パラメータグループのドリフト判定・Green の構成確認・レプリカ同期の判定はいずれも AWS API から取得した値で行うため、リモートでも判定内容は変わらない。この性質は `scripts/lib/cfn_shorthand_test.sh` が両形態のレポートを突き合わせて固定している。
+**実効値の有無で変わるのはこの列だけである。**パラメータグループのドリフト判定・Green の構成確認・レプリカ同期の判定はいずれも AWS API から取得した値で行うため、リモートでも判定内容は変わらない。この性質は `tests/cfn_shorthand_test.sh` が両形態のレポートを突き合わせて固定している。
 
 ## この方針に沿って実施したこと
 
 - **`generate_green_verification_report.rb`（161 行）を削除し、Go 版に一本化した。**`verify_green.sh` は `GREEN_REPORT_GENERATOR` 未指定なら一時ファイルへ自分でビルドする。削除前に、Ruby 版と Go 版のレポートが全文一致することを確認している
 - **`tests/test_generate_blue_green_config.sh` のアサーションを Python から Ruby へ移した。**これで**移行フローの実行経路とテストから Python が消えた**（残る Python は下記の対象外のものだけ）。移した後、意図的に壊した入力でアサーションが実際に落ちることを 4 パターン確認している
-- **CloudFormation 短縮記法の実装を `scripts/internal/cfn` に一本化した。**Go 版レポート生成器が自前実装を持っていたのは、GitHub Actions が `.go` 1 ファイルだけを Docker でビルドしていたためである。GitHub Actions も CodeBuild と同じ `go build ./scripts` に変えたことで制約が消え、**`ci/Dockerfile.green-verification-report` も削除した**（3 箇所 → 1 箇所）
+- **CloudFormation 短縮記法の実装を `internal/cfn` へ集約した。**Go 版レポート生成器が自前実装を持っていたのは、GitHub Actions が `.go` 1 ファイルだけを Docker でビルドしていたためである。GitHub Actions も CodeBuild と同じ `go build ./scripts` に変えたことで制約が消え、**`ci/Dockerfile.green-verification-report` も削除した**（3 箇所 → 1 箇所）
+  - 追記（2026-09-15）: **`scripts/` と `tools/` で Go のライブラリを共有しない**方針に変えたため、`internal/cfn` は `scripts/internal/cfn` と `tools/internal/cfn` の 2 本になった（1 箇所 → 2 箇所）。CI から到達する側と人が実行する側を独立させることを優先した判断である。同一内容の複製なので、**片方を直したらもう片方へ同じ変更を入れる**。ずれると `tests/cfn_shorthand_test.sh` が落ちる
 
 ## 残っている Ruby プログラムの扱い
 
@@ -54,7 +55,7 @@
 
 | ファイル | 行数 | 判断 | 理由 |
 |---|---|---|---|
-| `scripts/generate_mysql84_parameter_group.rb` | 307 | **移行を検討する** | `config/mysql80-to-84-parameter-rules.yml` の `copy` / `force` / `omit` / `target_only` を解釈する判定ロジックが重く、「要レビューが残れば exit 1」という判定も持つ。現状のテストは `examples/mysql84-parameter-generation/` のゴールデンファイル差分を人が見るだけで、**単体テストが無い**。CloudFormation YAML を扱うので `scripts/internal/cfn` と噛み合う |
-| `scripts/evaluate_blue_green_prereqs.rb` | 108 | **急がない** | 収集済み JSON を読んで STOP / 要判断を並べるだけで、Go 化して得られるのは単体テストだけである |
+| `tools/generate_mysql84_parameter_group.rb` | 307 | **移行を検討する** | `config/mysql80-to-84-parameter-rules.yml` の `copy` / `force` / `omit` / `target_only` を解釈する判定ロジックが重く、「要レビューが残れば exit 1」という判定も持つ。現状のテストは `examples/mysql84-parameter-generation/` のゴールデンファイル差分を人が見るだけで、**単体テストが無い**。CloudFormation YAML を扱うので `tools/internal/cfn` と噛み合う |
+| `tools/evaluate_blue_green_prereqs.rb` | 108 | **急がない** | 収集済み JSON を読んで STOP / 要判断を並べるだけで、Go 化して得られるのは単体テストだけである |
 
 どちらも `collect_*.sh` から直接呼ばれておらず、収集後に実行すべきコマンドを `echo` で案内しているだけである。**エントリポイントが人の手なので、移行しても呼び出し側の改修はほぼ案内文の書き換えで済む。**

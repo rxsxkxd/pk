@@ -1,6 +1,6 @@
 # MySQL 8.4 パラメータグループ生成サンプル
 
-`scripts/collect_mysql84_parameter_inputs.sh` が取得する JSON 形式を模した、匿名化済みの入力データである。AWS への API 呼び出しは行わない。
+`tools/collect_mysql84_parameter_inputs.sh` が取得する JSON 形式を模した、匿名化済みの入力データである。AWS への API 呼び出しは行わない。
 
 `source-system-parameters.json` は `Source=system` の取得結果である。このサンプルでは空配列としているが、実運用の収集結果では RDS が決定する該当パラメータを格納する。`mysql80-default-parameters.json` と `mysql84-default-parameters.json` は、それぞれファミリーの **engine default** であり、`Source=system` とは別の値である。
 
@@ -24,10 +24,10 @@
 リポジトリ直下で実行する。
 
 ```bash
-ruby scripts/generate_mysql84_parameter_group.rb \
+ruby tools/generate_mysql84_parameter_group.rb \
   --input-dir examples/mysql84-parameter-generation/input \
   --output-dir examples/mysql84-parameter-generation/output \
-  --system sample \
+  --system example \
   --environment production
 ```
 

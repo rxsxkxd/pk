@@ -234,7 +234,7 @@ flowchart TD
 ```bash
 # ビルド側（成果物が .tools/green-report/ に出ることを確認する）
 # 実行側（artifact を受け取れない場合に停止することを確認する）
-scripts/lib/cfn_shorthand_test.sh   # レポート生成器の 2 形態（実効値あり/なし）を固定している
+tests/cfn_shorthand_test.sh   # レポート生成器の 2 形態（実効値あり/なし）を固定している
 ```
 
 Local Agent を使う場合の注意は [CodeBuild 各フローの単体ローカル検証](codebuild-local-verification.md) にある。**Local Agent のランナー image は `runtime-versions` を解決しない**ため、ホストで先にビルドしたバイナリを `GREEN_REPORT_GENERATOR` で渡す。

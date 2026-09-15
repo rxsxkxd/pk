@@ -2,11 +2,14 @@
 # Step 4 補助: MySQL クライアントで Green DB の実効値を収集する。AWS API は呼び出さない。
 set -euo pipefail
 
-usage() { echo 'Usage: collect_green_runtime_values.sh --template FILE --host HOST --user USER --output FILE [--password-env NAME] [--defaults-extra-file FILE] [--ssl-ca FILE]'; }
+usage() { echo 'Usage: collect_green_runtime_values.sh --template FILE --host HOST --user USER --output FILE [--report-generator FILE] [--password-env NAME] [--defaults-extra-file FILE] [--ssl-ca FILE]'; }
 template=''; host=''; user=''; output=''; password_env='MYSQL_PASSWORD'; defaults_file=''; ssl_ca=''
+# パラメータ名の抽出に使うビルド済みバイナリ。未指定ならその場でビルドする（ローカル実行用）。
+report_generator=${GREEN_REPORT_GENERATOR:-}
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --template) template=${2:?}; shift 2 ;;
+    --report-generator) report_generator=${2:?}; shift 2 ;;
     --host) host=${2:?}; shift 2 ;;
     --user) user=${2:?}; shift 2 ;;
     --output) output=${2:?}; shift 2 ;;
@@ -22,11 +25,18 @@ done
 command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読み取りに必要である。' >&2; exit 1; }
 
 # CloudFormation YAML で明示したパラメーター名だけを SQL に展開する。値は SQL に含めない。
-# テンプレートの読み取り（短縮記法 !Ref / !Sub の正規化を含む）は Go の
-# list_db_parameter_names に委ねる。この経路は Step 4 でしか通らないため、
-# Go への依存は VerifyGreen に閉じている。
-names=$(go -C "$(cd "$(dirname "$0")/.." && pwd)" run ./scripts/list_db_parameter_names \
-  --template "$(cd "$(dirname "$template")" && pwd)/$(basename "$template")")
+# テンプレートの読み取り（短縮記法 !Ref / !Sub の正規化を含む）は、レポート生成器と
+# 同じバイナリの --list-parameter-names に委ねる。
+#
+# **CI ではビルド済みバイナリを受け取る。**VerifyGreen は Go も外部ネットワークも
+# 持たない前提なので、ここでビルドしない。未指定のローカル実行でだけその場でビルドする。
+if [[ -z "$report_generator" ]]; then
+  repository_root=$(cd "$(dirname "$0")/.." && pwd)
+  report_generator=$(mktemp "${TMPDIR:-/tmp}/green-verification-report.XXXXXX")
+  trap 'rm -f "$report_generator"' EXIT
+  go -C "$repository_root" build -o "$report_generator" ./scripts
+fi
+names=$("$report_generator" --list-parameter-names --template "$template")
 # 名前を SQL の IN リストへ組み立てる。名前は Go 側で [A-Za-z0-9_]+ に限定済みである。
 sql=$(printf '%s\n' "$names" | jq -R -s -r '
   [splits("\n") | select(length > 0) | "\u0027\(.)\u0027"] | join(",")

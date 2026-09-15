@@ -39,7 +39,9 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 
 | フォルダ | 内容 |
 |---|---|
-| `scripts/` | 各 Step の収集・判定・実行スクリプト。[scripts/README.md](scripts/README.md) |
+| `scripts/` | **CI（CodeBuild / GitHub Actions）から到達する**実行スクリプト。Step 3〜5 と Step 4 のレポート生成器 |
+| `tools/` | **人が手で実行する**コマンド。Step 1・2 の収集と判定、Blue/Green 設定の生成。[tools/README.md](tools/README.md) |
+| `tests/` | テスト一式(`bash tests/*.sh` と `go test ./...`) |
 | `config/` | 環境別設定ファイル(`blue-green/{staging,production}.yml`)とパラメータ変換ルール |
 | `ci/` | GitHub Actions / CodeBuild・CodePipeline の実行定義。[ci/README.md](ci/README.md) |
 | (ルート直下) | ローカル実行用コンテナ定義。`compose.yaml`、`aws-config/`、`global-bundle.pem`、`my.cnf`。[local-execution.md](local-execution.md) |

@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -59,6 +60,35 @@ func escape(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, "|", "\\|"), "\n", "<br>")
 }
 
+// safeParameterName は SQL へ埋め込める識別子だけを通す。
+var safeParameterName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// printDeclaredParameterNames は テンプレートが宣言しているパラメータ名を並べる。
+// 実値が決まっているものも組み込み関数のものも、名前としては同じように必要である。
+func printDeclaredParameterNames(templatePath string) {
+	group, err := cfn.ReadDBParameterGroup(templatePath)
+	if err != nil {
+		die("%v", err)
+	}
+	names := make([]string, 0, len(group.Declared)+len(group.Unresolved))
+	for name := range group.Declared {
+		names = append(names, name)
+	}
+	for name := range group.Unresolved {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		die("%s: パラメータが 1 つも宣言されていません。", templatePath)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if !safeParameterName.MatchString(name) {
+			die("%s: パラメータ名として扱えない文字が含まれます: %q", templatePath, name)
+		}
+		fmt.Println(name)
+	}
+}
+
 func main() {
 	templatePath := flag.String("template", "", "CloudFormation YAML")
 	greenInstancePath := flag.String("green-instance", "", "Green DB instance JSON")
@@ -69,7 +99,19 @@ func main() {
 	replicaLagPath := flag.String("replica-lag", "", "ReplicaLag JSON")
 	runtimeValuesPath := flag.String("runtime-values", "", "optional MySQL runtime values JSON")
 	outputPath := flag.String("output", "", "report Markdown")
+	// Step 4 の実効値収集が、問い合わせ対象のパラメータ名を得るために使う。
+	// 同じバイナリに入れておけば、実行側（VerifyGreen）へ Go を持ち込まずに済む。
+	listParameterNames := flag.Bool("list-parameter-names", false,
+		"print the parameter names declared in --template, one per line, then exit")
 	flag.Parse()
+
+	if *listParameterNames {
+		if *templatePath == "" {
+			die("--template is required with --list-parameter-names.")
+		}
+		printDeclaredParameterNames(*templatePath)
+		return
+	}
 
 	for name, value := range map[string]string{
 		"template": *templatePath, "green-instance": *greenInstancePath,

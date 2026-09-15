@@ -110,6 +110,21 @@ elif [[ "$MYSQL_VERIFY_ENABLED" == true ]]; then
   resolve_mysql_credentials "$region" "$profile"
 fi
 
+# レポート生成器は Go 版だけである（decisions/implementation-language-policy.md）。
+# CI は事前にビルドしたバイナリを GREEN_REPORT_GENERATOR で渡す。
+# 指定がない場合はここでビルドする。go build の -o だけ絶対パスにすれば、
+# 呼び出し元のカレントディレクトリに依存せず、引数の相対パスもそのまま通る。
+#
+# レポート生成より前に決めておく。MySQL 実効値の収集も、パラメータ名の抽出に
+# 同じバイナリ（--list-parameter-names）を使うためである。
+report_generator=${GREEN_REPORT_GENERATOR:-}
+if [[ -z "$report_generator" ]]; then
+  repository_root=$(cd "$(dirname "$0")/.." && pwd)
+  report_generator=$(mktemp "${TMPDIR:-/tmp}/green-verification-report.XXXXXX")
+  trap 'rm -f "$report_generator"' EXIT
+  go -C "$repository_root" build -o "$report_generator" ./scripts
+fi
+
 if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then
   green_endpoint=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$target_id" \
     --query 'DBInstances[0].Endpoint.Address' --output text)
@@ -123,7 +138,9 @@ if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then
   # CA バンドルを指定した場合だけ TLS を検証する。パスワードを平文で流さないため推奨する。
   [[ -n "$MYSQL_VERIFY_SSL_CA" ]] && collect_args+=(--ssl-ca "$MYSQL_VERIFY_SSL_CA")
   export MYSQL_VERIFY_PASSWORD
-  "$(dirname "$0")/collect_green_runtime_values.sh" "${collect_args[@]}"
+  # パラメータ名の抽出も同じバイナリが行う。収集側で Go を使わせない。
+  "$(dirname "$0")/collect_green_runtime_values.sh" "${collect_args[@]}" \
+    --report-generator "$report_generator"
   unset MYSQL_VERIFY_PASSWORD
   runtime_values_file="$output_dir/green-runtime-values.json"
 fi
@@ -158,17 +175,6 @@ report_args=(
   --output "$output_dir/green-verification-report.md"
 )
 [[ -n "$runtime_values_file" ]] && report_args+=(--runtime-values "$runtime_values_file")
-# レポート生成器は Go 版だけである（decisions/implementation-language-policy.md）。
-# CI は事前にビルドしたバイナリを GREEN_REPORT_GENERATOR で渡す。
-# 指定がない場合はここでビルドする。go build の -o だけ絶対パスにすれば、
-# 呼び出し元のカレントディレクトリに依存せず、引数の相対パスもそのまま通る。
-report_generator=${GREEN_REPORT_GENERATOR:-}
-if [[ -z "$report_generator" ]]; then
-  repository_root=$(cd "$(dirname "$0")/.." && pwd)
-  report_generator=$(mktemp "${TMPDIR:-/tmp}/green-verification-report.XXXXXX")
-  trap 'rm -f "$report_generator"' EXIT
-  go -C "$repository_root" build -o "$report_generator" ./scripts
-fi
 "$report_generator" "${report_args[@]}"
 if [[ "$replica_lag_failed" == true ]]; then
   echo "Artifacts: $output_dir"

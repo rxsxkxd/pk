@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"os"
 
-	"rds-mysql-upgrade/scripts/internal/collect"
-	"rds-mysql-upgrade/scripts/internal/common"
+	"rds-mysql-upgrade/tools/internal/collect"
+	"rds-mysql-upgrade/tools/internal/common"
 )
 
 func main() {

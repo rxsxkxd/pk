@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"rds-mysql-upgrade/scripts/internal/common"
+	"rds-mysql-upgrade/tools/internal/common"
 )
 
 // Deployment は生成する設定ファイルの全体である。

@@ -1,0 +1,22 @@
+{
+  "Records": [
+    {
+      "eventVersion": "2.1",
+      "eventSource": "aws:s3",
+      "awsRegion": "ap-northeast-1",
+      "eventName": "ObjectCreated:Put",
+      "s3": {
+        "s3SchemaVersion": "1.0",
+        "bucket": {
+          "name": "image-mask-dev-000000000000",
+          "arn": "arn:aws:s3:::image-mask-dev-000000000000"
+        },
+        "object": {
+          "key": "t-001/no-masked/2026-09-14/loc-12/e-98765",
+          "size": 153000,
+          "eTag": "0123456789abcdef0123456789abcdef"
+        }
+      }
+    }
+  ]
+}

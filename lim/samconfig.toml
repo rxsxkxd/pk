@@ -1,0 +1,78 @@
+# SAM CLI の設定。sam build / validate / deploy がここから既定値を読む。
+#
+#   sam validate                 … default 環境（dev）
+#   sam deploy                   … default 環境（dev）へデプロイ
+#   sam deploy --config-env prod … prod 環境へデプロイ
+#
+# 秘密情報は書かない。AlertEmail は各自の環境で上書きする（下の注記を参照）。
+
+version = 0.1
+
+# ---------------- dev（既定） ----------------
+
+[default.global.parameters]
+stack_name = "image-mask-dev"
+
+[default.validate.parameters]
+region = "ap-northeast-1"
+lint = true
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+region = "ap-northeast-1"
+# Lambda の実行ロールを作るため必須。
+capabilities = "CAPABILITY_IAM"
+# 変更内容を確認してから適用する。
+confirm_changeset = true
+# デプロイ用の S3 バケットを SAM に用意させる。
+resolve_s3 = true
+# パラメータの既定値は template.yml 側にある。ここでは環境ごとに変わるものだけ指定する。
+#
+# 通知メールを受け取るには AlertEmail を足す。コマンドラインで渡してもよい:
+#   sam deploy --parameter-overrides 'Env="dev" AlertEmail="you@example.com"'
+#
+# S3 通知でも起動したい場合は EnableS3Trigger="true" を足す。
+parameter_overrides = "Env=\"dev\""
+
+# ---------------- stg ----------------
+
+[stg.global.parameters]
+stack_name = "image-mask-stg"
+
+[stg.validate.parameters]
+region = "ap-northeast-1"
+lint = true
+
+[stg.build.parameters]
+cached = true
+parallel = true
+
+[stg.deploy.parameters]
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+parameter_overrides = "Env=\"stg\""
+
+# ---------------- prod ----------------
+
+[prod.global.parameters]
+stack_name = "image-mask-prod"
+
+[prod.validate.parameters]
+region = "ap-northeast-1"
+lint = true
+
+[prod.build.parameters]
+cached = true
+parallel = true
+
+[prod.deploy.parameters]
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+parameter_overrides = "Env=\"prod\""

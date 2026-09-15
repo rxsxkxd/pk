@@ -1,8 +1,7 @@
-# CloudFormation (SAM) の定義ファイル。SAM CLI の既定は template.yaml なので
-# 명示的に -t で渡す必要がある。
-TEMPLATE := cloudformation.yaml
+# テンプレートは template.yml（SAM の既定名）、設定は samconfig.toml。
+# どちらも SAM CLI が自動で見つけるため、-t や --region の指定は要らない。
 
-.PHONY: all test lint build build-cli deploy clean fmt run sample
+.PHONY: all test lint build build-cli build-MaskFunction deploy clean fmt run sample
 
 all: fmt test build
 
@@ -15,11 +14,19 @@ test:
 
 # SAM が BuildMethod: go1.x で bootstrap を作るため、通常はこちらを使う。
 build:
-	sam build -t $(TEMPLATE)
+	sam build
 
 # 動作確認・性能計測用のサンプル画像を testdata/ に生成する。
 sample:
 	go run ./cmd/gensample -out-dir testdata
+
+# SAM (BuildMethod: makefile) から呼ばれるターゲット。
+# ARTIFACTS_DIR は SAM が渡す。ldflags でシンボルとデバッグ情報を落とし、
+# -trimpath でビルドパスを埋め込まないようにする。
+build-MaskFunction:
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+		go build -trimpath -ldflags="-s -w" -tags lambda.norpc \
+		-o $(ARTIFACTS_DIR)/bootstrap ./cmd/mask
 
 # ローカル確認用 CLI。S3 を使わずに手元の画像をマスクできる。
 # 出力先は既定で tmp/（.gitignore 済み）。
@@ -38,10 +45,14 @@ build-local:
 	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -o build/bootstrap ./cmd/mask
 
 validate:
-	sam validate -t $(TEMPLATE) --lint
+	sam validate
 
+# 初回も 2 回目以降も同じ。設定は samconfig.toml にある。
+#   make deploy           … dev
+#   make deploy ENV=prod  … prod
+ENV ?= default
 deploy: build
-	sam deploy --guided
+	sam deploy --config-env $(ENV)
 
 clean:
 	rm -rf build .aws-sam tmp

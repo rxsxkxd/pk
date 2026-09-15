@@ -3,8 +3,13 @@
 S3 に置かれた画像の**上半分にガウスぼかしを適用**して、同じバケットの別階層へ保存する Lambda。
 
 - 言語: Go 1.24 / `provided.al2023` / arm64
-- IaC: AWS SAM（`cloudformation.yaml`）
-- 設計: [docs/image-blur-lambda-design.md](docs/image-blur-lambda-design.md)
+- IaC: AWS SAM（`template.yml` + `samconfig.toml`）
+| 文書 | 内容 |
+|---|---|
+| [docs/test-local.md](docs/test-local.md) | **ローカルテスト（Go のみ）**。AWS も Docker も不要 |
+| [docs/test-sam-local.md](docs/test-sam-local.md) | **SAM 経由のローカルテスト**。Docker + AWS 認証情報が必要 |
+| [docs/deploy.md](docs/deploy.md) | **AWS へのデプロイ** |
+| [docs/image-blur-lambda-design.md](docs/image-blur-lambda-design.md) | 設計 |
 
 キーは 7 要素に固定し、**変数だけを呼び出し側から受け取る**。
 
@@ -19,9 +24,9 @@ S3 に置かれた画像の**上半分にガウスぼかしを適用**して、�
 
 ```
 原本      : masking/t-001/no-masked/2026-09-14/loc-12/e-98765
-                 │  リクエスト（または S3 通知）
+                 │  リクエスト（または S3 イベント通知）
                  ▼
-            Lambda (image-mask)  ── 失敗 ──▶ アラーム ──▶ メール
+            Lambda (image-mask)  ── 失敗 ──▶ CloudWatch アラーム ──▶ メール
                  │
                  ▼
 マスク済み: masking/t-001/masked/2026-09-14/loc-12/e-98765
@@ -45,7 +50,8 @@ S3 に置かれた画像の**上半分にガウスぼかしを適用**して、�
 | `internal/s3key` | キー構造の組み立てと解釈、変数の検証 |
 | `internal/config` | 環境変数の読み込み |
 | `internal/metrics` | EMF によるカスタムメトリクス出力 |
-| `cloudformation.yaml` | バケット・KMS・Lambda・SNS・CloudTrail・アラーム |
+| `template.yml` | バケット・KMS・Lambda・SNS・CloudWatch アラーム |
+| `samconfig.toml` | スタック名・リージョン・環境ごとのパラメータ |
 
 ## 必要なもの
 
@@ -144,16 +150,23 @@ jq -s 'map(.strengthScore) | {max: max, p99: (sort | .[(length*0.99|floor)])}' t
 ## テストとデプロイ
 
 ```bash
-make test      # go test ./... -race
-make validate  # sam validate --lint（SAM CLI が必要）
-make deploy    # sam build && sam deploy --guided
+make test              # go test ./... -race
+make validate          # sam validate
+make deploy            # sam build && sam deploy（dev）
+make deploy ENV=prod   # prod へ
 ```
+
+**手順は [docs/deploy.md](docs/deploy.md) にまとめてある。** 初回デプロイ、デプロイ直後に
+必要な作業、動作確認、設定変更、削除、つまずきやすい点まで。
+
+その前段として、[ローカルテスト（Go のみ）](docs/test-local.md) と
+[SAM 経由のローカルテスト](docs/test-sam-local.md) を別の文書に分けてある。
 
 ### 失敗した入力の扱い
 
 **失敗イベントの退避先（DLQ）は置いていない。** リトライを使い切ったイベントは破棄される。
 
-失敗したことと対象はログ・メトリクス・アラームメールで分かる。再処理はログの `sourceKey`
+失敗したことと対象は CloudWatch のログ・メトリクスと、アラームからのメールで分かる。再処理はログの `sourceKey`
 から変数を読み取り、リクエスト起動で投げ直す（処理は冪等なので投げ直して害はない）。
 
 ```bash
@@ -165,13 +178,13 @@ aws lambda invoke --function-name image-mask-dev --payload '{
 
 ログの保持期間（30 日）を過ぎると、何が失敗したのかを追えなくなる。
 
-### エラー通知
+### エラー通知（Amazon SNS）
 
-エラーはメトリクスに記録され、アラーム経由で SNS からメールに届く。
-デプロイ時に `AlertEmail` を指定する。
+エラーは CloudWatch メトリクスに記録され、CloudWatch アラーム（`AWS::CloudWatch::Alarm`）
+経由で SNS からメールに届く。デプロイ時に `AlertEmail` を指定する。
 
 ```
-処理の失敗 ─▶ CloudWatch メトリクス ─▶ アラーム ─▶ SNS ─▶ メール
+処理の失敗 ─▶ CloudWatch メトリクス ─▶ CloudWatch アラーム ─▶ SNS ─▶ メール
 ```
 
 **デプロイ後、そのアドレスに届く確認メールのリンクを押す必要がある。**
@@ -183,16 +196,16 @@ aws sns list-subscriptions-by-topic --topic-arn "$ALERT_TOPIC_ARN" \
   --query 'Subscriptions[].[Endpoint,SubscriptionArn]' --output table
 ```
 
-`AlertEmail` を空のままデプロイすることもできる（アラームは動くが通知先がない状態）。
+`AlertEmail` を空のままデプロイすることもできる（CloudWatch アラームは動くが通知先がない状態）。
 
 ### 起動方法
 
-実装は 2 通りに対応しているが、**既定では S3 通知は無効**で、リクエスト起動だけが有効。
+実装は 2 通りに対応しているが、**既定では S3 イベント通知は無効**で、リクエスト起動だけが有効。
 
 | 起動方法 | 実装 | 既定 |
 |---|---|---|
 | リクエスト | 対応 | **有効** |
-| S3 の ObjectCreated 通知 | 対応 | 無効（`EnableS3Trigger=true` で有効化） |
+| Amazon S3 イベント通知（`s3:ObjectCreated:*`） | 対応 | 無効（`EnableS3Trigger=true` で有効化） |
 
 **変数を渡して呼ぶ**
 
@@ -336,10 +349,10 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 
 ## 要件外の追加について
 
-依頼になかったが設計側の判断で入れた構成（CloudTrail、KMS カスタマー管理キー、
-バージョニングなど）は、理由と外した場合の影響を
+依頼になかったが設計側の判断で入れた構成（KMS カスタマー管理キー、バージョニングなど）は、
+理由と外した場合の影響を
 [設計書 §15.4](docs/image-blur-lambda-design.md) に一覧してある。
-いずれも `cloudformation.yaml` から削るだけで外せる（コード変更は不要）。
+いずれも `template.yml` から削るだけで外せる（コード変更は不要）。
 
 ## 実装状況・未実装
 
@@ -355,8 +368,8 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 - **許容ライン `MIN_BLUR_RATIO >= 0.004` は合成画像 1 枚に対する目視判断。**
   被写体がさらに小さい写真では不十分な可能性がある（既定はその 10 倍の 0.04）。
 - **アニメーション画像**（GIF / APNG / animated WebP）は非対応。
-- CloudTrail のログバケットに Object Lock を設定していない（設計書 §11.3）。
-- **`sam validate` / `sam deploy` は未実行。** `cloudformation.yaml` はデプロイ検証をしていない。
+- **`sam deploy` は未実行。** `sam validate --lint` と `sam build` は通過しているが、
+  実際に AWS へ反映した確認はしていない。
 - 実環境での処理時間・スロットリングは未計測（ローカル実測のみ）。
 
 ### ローカルで確認できないこと
@@ -367,9 +380,9 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 |---|---|
 | S3 イベントの発火・プレフィックスフィルタ | dev 環境へデプロイして実際に PUT |
 | IAM 最小権限（出力バケットを読めないこと等） | dev 環境で当該操作が拒否されることを確認 |
-| リトライとアラームの発火 | dev 環境で意図的に失敗させる |
-| KMS の暗号化・復号、CloudTrail への記録 | dev 環境で PUT / GET |
-| アラームの発火 | 意図的に失敗させる |
+| リトライと CloudWatch アラームの発火 | dev 環境で意図的に失敗させる |
+| KMS の暗号化・復号 | dev 環境で PUT / GET |
+| CloudWatch アラームの発火 | 意図的に失敗させる |
 | 冪等性・fail-closed・領域・メタデータ除去 | ユニットテストで代替済み |
 
 一覧は[設計書 §14.2](docs/image-blur-lambda-design.md)。

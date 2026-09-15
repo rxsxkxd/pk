@@ -16,13 +16,13 @@ Parameters:
     Default: 'false'
     AllowedValues: ['true', 'false']
     Description: >
-      S3 の ObjectCreated 通知で起動するかどうか。既定は無効で、リクエスト起動のみ。
-      実装は両方に対応しているので、true にすれば通知起動も使える。
+      Amazon S3 イベント通知（`s3:ObjectCreated:*`）で起動するかどうか。既定は無効で、リクエスト起動のみ。
+      実装は両方に対応しているので、true にすればイベント通知による起動も使える。
   AlertEmail:
     Type: String
     Default: ''
     Description: >
-      アラート通知先のメールアドレス。空なら通知先を作らない（アラーム自体は動く）。
+      アラート通知先のメールアドレス。空なら通知先を作らない（CloudWatch アラーム自体は動く）。
       指定した場合、デプロイ後にそのアドレス宛の確認メールに承認リンクが届く。
       承認するまで通知は届かない（CloudFormation では自動承認できない）。
   KeyPrefix:
@@ -31,7 +31,7 @@ Parameters:
     Description: >
       共有バケット内でこのアプリが使うルート。任意で、空なら付けない。
       キーは [<prefix>/]<tid>/<infix>/<date>/<lid>/<eid> の形に固定する。
-      空にすると IAM も通知フィルタもバケット全体が対象になるため、
+      空にすると IAM もイベント通知フィルタもバケット全体が対象になるため、
       他のリソースと共有するバケットでは指定を推奨。
   OriginalInfix:
     Type: String
@@ -108,6 +108,9 @@ Resources:
   ImageBucket:
     Type: AWS::S3::Bucket
     Properties:
+      # このバケット名は Lambda の環境変数と IAM の ARN でも同じ式を書いている
+      # （!GetAtt を使うと循環参照になるため）。変更するときは
+      # 'image-mask-${Env}-${AWS::AccountId}' を検索して全箇所を直すこと。
       BucketName: !Sub 'image-mask-${Env}-${AWS::AccountId}'
       VersioningConfiguration: { Status: Enabled }
       PublicAccessBlockConfiguration:
@@ -128,7 +131,7 @@ Resources:
           - Id: abort-incomplete-uploads
             Status: Enabled
             AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
-      # 通知は既定で無効。EnableS3Trigger=true で有効になる。
+      # イベント通知は既定で無効。EnableS3Trigger=true で有効になる。
       NotificationConfiguration: !If
         - S3TriggerEnabled
         - LambdaConfigurations:
@@ -137,26 +140,38 @@ Resources:
               Filter:
                 S3Key:
                   Rules:
-                    # 通知フィルタはプレフィックスと接尾辞しか指定できず、
+                    # イベント通知フィルタはプレフィックスと接尾辞しか指定できず、
                     # infix は tid の後ろにあるため原本だけには絞れない。
-                    # マスク済みの書き込みでも通知が飛ぶので、Lambda 側で infix を見て
+                    # マスク済みの書き込みでもイベント通知が飛ぶので、Lambda 側で infix を見て
                     # 弾いている（再帰ループ防止）。
                     # KeyPrefix が空のときはバケット全体が対象になる。
                     - Name: prefix
                       Value: !If [HasKeyPrefix, !Sub '${KeyPrefix}/', '']
         - !Ref AWS::NoValue
-    DependsOn: MaskFunctionInvokePermission
 
-  # 通知を有効にする際、S3 が権限を検証できるよう先に作っておく必要がある。
-  # 通知が無効なうちは誰も呼ばないため、常に作っておいて差し支えない
-  # （SourceAccount で自アカウントに限定してある）。
+  # S3 イベント通知を有効にしたときだけ作る。
+  #
+  # S3 はイベント通知の設定を受け付ける際、その場で Lambda を呼べるかを検証する。
+  # そのため本来はこの許可をイベント通知より先に作りたいが、ImageBucket に
+  # DependsOn を書くと、イベント通知が無効なとき「存在しないリソースに依存している」
+  # ことになり cfn-lint (E3005) に弾かれる。
+  # 依存を明示できないため、EnableS3Trigger を false から true に変える更新では
+  # 順序が保証されず、次のエラーで失敗することがある。
+  #
+  #   Unable to validate the following destination configurations
+  #
+  # その場合はもう一度デプロイすれば通る（許可は作成済みになっているため）。
+  # SourceArn はバケット名から組み立てる。!GetAtt ImageBucket.Arn を使うと
+  # 権限 -> バケット -> 権限 の循環参照になる。
   MaskFunctionInvokePermission:
     Type: AWS::Lambda::Permission
+    Condition: S3TriggerEnabled
     Properties:
       FunctionName: !GetAtt MaskFunction.Arn
       Action: lambda:InvokeFunction
       Principal: s3.amazonaws.com
       SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub 'arn:${AWS::Partition}:s3:::image-mask-${Env}-${AWS::AccountId}'
 
   ImageBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -188,7 +203,7 @@ Resources:
                 'aws:PrincipalArn': !GetAtt MaskFunctionRole.Arn
 
   # ---------- アラート通知 ----------
-  # アラーム -> SNS -> メール。
+  # CloudWatch アラーム -> SNS -> メール。
   # 暗号化は掛けていない。掛ける場合は SNS 管理の既定キーではなく
   # カスタマー管理キーが必要で、CloudWatch からの発行を許可する
   # キーポリシーを書く必要がある（既定キーはポリシーを変更できない）。
@@ -210,10 +225,13 @@ Resources:
   MaskFunction:
     Type: AWS::Serverless::Function
     Metadata:
-      BuildMethod: go1.x
+      # go1.x ではなく makefile を使う。ldflags を渡してバイナリを小さくするため
+      # （デバッグ情報とシンボルを落とす）。ビルド手順はリポジトリ直下の Makefile の
+      # build-MaskFunction ターゲットにある。
+      BuildMethod: makefile
     Properties:
       FunctionName: !Sub 'image-mask-${Env}'
-      CodeUri: ./cmd/mask
+      CodeUri: .
       Handler: bootstrap
       ReservedConcurrentExecutions: 200
       Environment:
@@ -239,89 +257,45 @@ Resources:
         MaximumRetryAttempts: 2
         MaximumEventAgeInSeconds: 3600
         # 失敗イベントの退避先（DLQ）は置いていない。リトライを使い切った
-        # イベントは破棄される。どのオブジェクトで失敗したかはログとアラームで
-        # 分かるので、再処理は変数を渡したリクエスト起動で行う（設計書 §10.2）。
+        # イベントは破棄される。どのオブジェクトで失敗したかは CloudWatch Logs と
+        # アラームで分かるので、再処理は変数を渡したリクエスト起動で行う（設計書 §10.2）。
       Policies:
         # 最小権限。原本は読むだけ、マスク済みは書くだけ。
         # tid は可変なのでワイルドカードで受ける。
         #   [<prefix>/]<tid>/<infix>/<date>/<lid>/<eid>
+        #
+        # バケットの ARN は !GetAtt ではなく名前から組み立てる。
+        # バケットはイベント通知で MaskFunction を参照しており、ここで !GetAtt を使うと
+        # バケット -> 関数 -> バケット の循環参照になる（sam validate が弾く）。
+        # バケット名は Env とアカウント ID から決まるので、組み立てても一致する。
         - Statement:
             - Sid: ReadOriginals
               Effect: Allow
               Action: ['s3:GetObject', 's3:GetObjectVersion']
               Resource: !If
                 - HasKeyPrefix
-                - !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/${OriginalInfix}/*'
-                - !Sub '${ImageBucket.Arn}/*/${OriginalInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::image-mask-${Env}-${AWS::AccountId}/${KeyPrefix}/*/${OriginalInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::image-mask-${Env}-${AWS::AccountId}/*/${OriginalInfix}/*'
             - Sid: WriteMasked
               Effect: Allow
               Action: 's3:PutObject'
               Resource: !If
                 - HasKeyPrefix
-                - !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/${MaskedInfix}/*'
-                - !Sub '${ImageBucket.Arn}/*/${MaskedInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::image-mask-${Env}-${AWS::AccountId}/${KeyPrefix}/*/${MaskedInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::image-mask-${Env}-${AWS::AccountId}/*/${MaskedInfix}/*'
             - Sid: HeadMaskedForIdempotency
               Effect: Allow
               Action: 's3:GetObject'
               Resource: !If
                 - HasKeyPrefix
-                - !Sub '${ImageBucket.Arn}/${KeyPrefix}/*/${MaskedInfix}/*'
-                - !Sub '${ImageBucket.Arn}/*/${MaskedInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::image-mask-${Env}-${AWS::AccountId}/${KeyPrefix}/*/${MaskedInfix}/*'
+                - !Sub 'arn:${AWS::Partition}:s3:::image-mask-${Env}-${AWS::AccountId}/*/${MaskedInfix}/*'
             - Sid: UseKey
               Effect: Allow
               Action: ['kms:Decrypt', 'kms:GenerateDataKey', 'kms:Encrypt', 'kms:DescribeKey']
               Resource: !GetAtt ImageKey.Arn
 
-  # ---------- 監査: 誰がいつ原本を取得したかを記録する (FR-11) ----------
-  TrailBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub 'image-mask-trail-${Env}-${AWS::AccountId}'
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
-
-  TrailBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref TrailBucket
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: cloudtrail.amazonaws.com }
-            Action: 's3:GetBucketAcl'
-            Resource: !GetAtt TrailBucket.Arn
-          - Effect: Allow
-            Principal: { Service: cloudtrail.amazonaws.com }
-            Action: 's3:PutObject'
-            Resource: !Sub '${TrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*'
-            Condition:
-              StringEquals: { 's3:x-amz-acl': bucket-owner-full-control }
-
-  Trail:
-    Type: AWS::CloudTrail::Trail
-    DependsOn: TrailBucketPolicy
-    Properties:
-      TrailName: !Sub 'image-mask-${Env}'
-      S3BucketName: !Ref TrailBucket
-      IsLogging: true
-      EventSelectors:
-        - ReadWriteType: All
-          IncludeManagementEvents: false
-          DataResources:
-            # 原本だけに絞りたいが、データイベントのセレクタもプレフィックス指定のため
-            # x/y の後ろにある infix では絞れない。KeyPrefix 配下すべてを記録する。
-            - Type: 'AWS::S3::Object'
-              Values:
-                - !If [HasKeyPrefix, !Sub '${ImageBucket.Arn}/${KeyPrefix}/', !Sub '${ImageBucket.Arn}/']
-
-  # ---------- アラーム ----------
+  # ---------- CloudWatch アラーム ----------
   MaskStrengthCheckFailedAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -388,7 +362,7 @@ Resources:
 
 Outputs:
   S3TriggerEnabled:
-    Description: S3 通知で起動するか。false ならリクエスト起動のみ
+    Description: S3 イベント通知で起動するか。false ならリクエスト起動のみ
     Value: !Ref EnableS3Trigger
   AlertTopicArn:
     Description: アラートの通知先。メールは確認リンクの承認が必要
@@ -409,4 +383,5 @@ Outputs:
       - !Sub '${KeyPrefix}/<tid>/${MaskedInfix}/<date>/<lid>/<eid>'
       - !Sub '<tid>/${MaskedInfix}/<date>/<lid>/<eid>'
   FunctionName:
+    Description: Lambda 関数名。リクエスト起動のときに指定する
     Value: !Ref MaskFunction

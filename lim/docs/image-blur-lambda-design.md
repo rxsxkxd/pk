@@ -124,7 +124,7 @@ Lambda 側の物理制約（設計値の根拠）:
 | **FR-10c** | **強度検証は領域内の区画ごとの最悪値で判定する** | 領域の一部だけが素通しの画像が検証に落ちる |
 | **FR-13** | **許容ラインを下回るぼかし設定では起動しない** | `MIN_BLUR_RATIO=0.001` で起動が失敗する |
 | **FR-10c** | **強度検証は領域内の区画ごとの最悪値で判定する** | 領域の一部だけが素通しの画像が検証に落ちる |
-| **FR-11** | **原画像へのアクセスが監査ログに残る** | CloudTrail データイベントに `GetObject` が記録される |
+| ~~FR-11~~ | ~~原画像へのアクセスが監査ログに残る~~ | **取り下げ**。要件として出ていない追加だったため削除（§15.4）。必要になれば CloudTrail で実現できる |
 | **FR-12** | **マスキングポリシーの版を出力に記録する** | 出力メタデータに `masking-policy-version` が入り、版を上げると過去分が作り直される |
 
 ---
@@ -142,7 +142,7 @@ Lambda 側の物理制約（設計値の根拠）:
 | セキュリティ | 最小権限 IAM、SSE-KMS（CMK）、パブリックアクセス全面ブロック、監査ログ有効 |
 | プライバシー | ログ・メトリクスに画像本体および画像内の個人情報を出力しない |
 | コスト | 月 10 万枚で USD 15 以下（§13） |
-| 可観測性 | 構造化 JSON ログ、カスタムメトリクス、失敗アラーム |
+| 可観測性 | CloudWatch Logs への構造化 JSON ログ、CloudWatch カスタムメトリクス、CloudWatch アラーム |
 | 運用性 | すべて IaC（SAM）管理、再デプロイで環境再現可能 |
 
 ---
@@ -153,22 +153,20 @@ Lambda 側の物理制約（設計値の根拠）:
 flowchart LR
   U[アップローダ] -->|PUT .../no-masked/...| B[(S3 画像バケット<br/>共有)]
   R[呼び出し元] -->|x, y, z, n| L[Lambda: image-mask]
-  B -->|ObjectCreated 通知| L
+  B -->|ObjectCreated イベント通知| L
   L -->|GetObject .../no-masked/...| B
   L -->|PutObject .../masked/...<br/>検証通過時のみ| B
-  L -.->|失敗 / 検証不合格| A[アラーム → メール]
+  L -.->|失敗 / 検証不合格| A[CloudWatch アラーム → SNS → メール]
   L -.-> LOG[CloudWatch Logs / Metrics]
-  B -.->|データイベント| CT[CloudTrail 監査ログ]
 ```
 
 ### 6.1 構成要素
 
 | 要素 | 内容 | 主な設定 |
 |---|---|---|
-| 画像バケット | 原本とマスク済みを同じバケットの別 infix に置く。他のリソースとも共有する前提 | バージョニング有効、SSE-KMS、パブリックアクセス全ブロック、CloudTrail データイベント有効 |
+| 画像バケット | 原本とマスク済みを同じバケットの別 infix に置く。他のリソースとも共有する前提 | バージョニング有効、SSE-KMS、パブリックアクセス全ブロック |
 | Lambda | マスキング処理本体 | Go / arm64 / メモリ 2048 MB / タイムアウト 60 秒 |
-| CloudWatch | ログ・メトリクス・アラーム | ログ保持 30 日 |
-| CloudTrail | 画像バケットのデータイベント | 専用トレイル、ログ改変防止（Object Lock） |
+| CloudWatch | Logs（構造化 JSON）、カスタムメトリクス、アラーム 4 種 | ログ保持 30 日 |
 
 ### 6.1.1 同一バケット構成のトレードオフ
 
@@ -179,8 +177,7 @@ flowchart LR
 |---|---|---|
 | IAM の分離 | バケット単位で明快 | **ワイルドカードで可能**（`<prefix>/*/no-masked/*`）。同等に絞れる |
 | KMS キーの分離 | 原本用と出力用で別キー | **不可**。既定の暗号化はバケット単位。1 つのキーになる |
-| 再帰ループ防止 | 通知の対象バケットが別 | **通知フィルタでは絞れない**。マスク済みの書き込みでも通知が飛ぶ。**コード側の infix 判定**で止める |
-| 監査ログの範囲 | 原本バケットだけ記録 | `KEY_PREFIX` 配下すべてが記録される |
+| 再帰ループ防止 | イベント通知の対象バケットが別 | **イベント通知フィルタでは絞れない**。マスク済みの書き込みでもイベント通知が飛ぶ。**コード側の infix 判定**で止める |
 
 > 将来、原本の保持期間に要件が出た場合（Q3）、S3 のライフサイクルはキーの先頭一致か
 > タグでしか対象を指定できないため、**このキー構造では「原本だけ」をパスで指定できない**。
@@ -188,12 +185,12 @@ flowchart LR
 
 ### 6.2 起動方式の選択
 
-S3 通知 → Lambda 直結（非同期呼び出し）を採用。
+S3 イベント通知 → Lambda 直結（非同期呼び出し）を採用。
 
 | 案 | 採否 | 理由 |
 |---|---|---|
 | リクエスト起動 | ◯ 採用（既定） | 呼び出し元が処理の成否を直接受け取れる |
-| S3 通知 → Lambda 直結 | △ 実装済み・既定は無効 | パラメータ 1 つで有効化できる |
+| S3 イベント通知 → Lambda 直結 | △ 実装済み・既定は無効 | パラメータ 1 つで有効化できる |
 | S3 → SQS → Lambda | 将来検討 | 流量制御・バッチ処理が必要になった場合 |
 | S3 → EventBridge → Lambda | 将来検討 | 複数コンシューマへのファンアウトが必要になった場合 |
 
@@ -260,7 +257,7 @@ prefix なし: t-001/no-masked/2026-09-14/loc-12/e-98765
 ```
 
 **指定しない場合、バケット全体がこのアプリの領域とみなされる。** IAM の対象も
-S3 通知のフィルタも CloudTrail のセレクタもバケット全体に広がるため、
+S3 イベント通知のフィルタもバケット全体に広がるため、
 他のリソースとバケットを共有するなら指定を推奨する。
 
 `infix` は**必須**。空にすると階層が潰れてキーの形が変わるため、空文字が渡された場合は
@@ -309,26 +306,30 @@ MASKING_POLICY_VERSION=v1 で処理 → メタデータに v1 が入る
 ### 8.2 起動方法
 
 実装は 2 通りを受け付ける。ペイロードの形で判別する。
-**ただし現在の設定では S3 通知は無効**で、リクエスト起動だけが有効になっている。
+**ただし現在の設定では S3 イベント通知は無効**で、リクエスト起動だけが有効になっている。
 
 | 起動方法 | 実装 | 既定の設定 |
 |---|---|---|
 | リクエスト | 対応 | **有効** |
-| S3 の ObjectCreated 通知 | 対応 | **無効**（`EnableS3Trigger=true` で有効化） |
+| Amazon S3 イベント通知（`s3:ObjectCreated:*`） | 対応 | **無効**（`EnableS3Trigger=true` で有効化） |
 
-#### S3 の ObjectCreated 通知（既定では無効）
+#### Amazon S3 イベント通知（`s3:ObjectCreated:*`）（既定では無効）
 
-通知されたキーをレイアウトに照らして解釈する。
+無効の間は**イベント通知の設定も、S3 からの起動許可（`AWS::Lambda::Permission`）も作られない**。
+S3 がこの関数を呼ぶ経路自体が存在しない状態になる。
+
+
+イベント通知で渡されたキーをレイアウトに照らして解釈する。
 
 - レイアウトに合わないキー → **スキップ**（エラーにしない。他のリソースが同じバケットを使う前提のため）
 - `infix` が原本以外 → **スキップ**（マスク済みの書き込みで自分自身が起動するのを防ぐ）
 
-> **通知フィルタでは原本に絞れない。** S3 の通知フィルタはプレフィックスと接尾辞しか
+> **イベント通知フィルタでは原本に絞れない。** S3 のイベント通知フィルタはプレフィックスと接尾辞しか
 > 指定できず、`infix` は可変の `tid` の後ろにある。したがってマスク済みの書き込みでも
-> 通知は飛ぶ。再帰ループを止めているのは**コード側の infix 判定**である。
+> イベント通知は飛ぶ。再帰ループを止めているのは**コード側の infix 判定**である。
 
 > 実装もテストも残してあるので、パラメータ 1 つで有効化できる。
-> 有効化した場合の注意は §6.1.1（通知フィルタで原本に絞れない）を参照。
+> 有効化した場合の注意は §6.1.1（イベント通知フィルタで原本に絞れない）を参照。
 
 #### リクエスト（既定で有効）
 
@@ -406,7 +407,7 @@ Lambda がキーを組み立てて `HeadObject` でオブジェクトを確認�
 | ぼかしの実装 | **ボックスぼかし 3 回でガウス分布を近似** | 半径 120px 級では素朴な畳み込みが破綻する（4000×3000 で 10^10 オーダー）。近似なら半径によらず O(pixels) で、視覚的な差はない |
 | アーキテクチャ | arm64 (Graviton2) | x86_64 比で概ね 20% 安く、画像処理でも性能同等以上 |
 | パッケージング | 単一バイナリ（`bootstrap`）。Layer 不要 | `sam build`（`BuildMethod: go1.x`）でそのままビルドできる |
-| **IaC** | **AWS SAM**（確定） | Lambda + S3 通知 + IAM を最短で記述できる。バケットポリシー・IAM の差分がレビュー可能になる点がマスキング用途で重要 |
+| **IaC** | **AWS SAM**（確定） | Lambda + S3 イベント通知 + IAM を最短で記述できる。バケットポリシー・IAM の差分がレビュー可能になる点がマスキング用途で重要 |
 
 ### 9.0 パッケージ構成
 
@@ -427,15 +428,15 @@ internal/metrics  … EMF によるメトリクス出力
 
 ### 9.1 CloudFormation (SAM) テンプレートの構成
 
-ファイル名は `cloudformation.yaml`。SAM CLI の既定は `template.yaml` なので、
-コマンドには `-t` が要る（Makefile 側で渡している）。
+ファイル名は `template.yml`、設定は `samconfig.toml`。どちらも SAM CLI が自動で見つけるため、
+`-t` や `--region` の指定は要らない。
 
 ```
-cloudformation.yaml
+template.yml
 ├── Parameters
 │   ├── Env                   … dev / stg / prod
-│   ├── EnableS3Trigger       … S3 通知で起動するか（既定 false）
-│   ├── AlertEmail            … アラート通知先（空なら購読を作らない）
+│   ├── EnableS3Trigger       … S3 イベント通知で起動するか（既定 false）
+│   ├── AlertEmail            … アラート通知先（空ならサブスクリプションを作らない）
 │   ├── KeyPrefix             … 共有バケット内のルート
 │   ├── OriginalInfix         … 原本の階層
 │   ├── MaskingPolicyVersion  … マスク済みの階層
@@ -448,18 +449,43 @@ cloudformation.yaml
 ├── ImageBucket               … 画像バケット（暗号化・パブリックブロック・バージョニング）
 │   └── NotificationConfiguration … S3TriggerEnabled のときだけ付く
 ├── ImageBucketPolicy         … TLS 強制 / マスク済み階層への書き込み制限
-├── MaskFunctionInvokePermission … S3 からの起動許可（通知を有効化する際に必要）
+├── MaskFunctionInvokePermission … S3 からの起動許可（S3TriggerEnabled のときだけ作る）
 ├── MaskFunction              … AWS::Serverless::Function（BuildMethod: go1.x）
 │   ├── Policies              … 最小権限をインラインで記述（§11.1）
 │   └── EventInvokeConfig     … MaximumRetryAttempts=2（退避先は置かない）
-├── AlertTopic                … SNS。アラームの通知先
+├── AlertTopic                … SNS。CloudWatch アラームの通知先
 ├── AlertEmailSubscription    … HasAlertEmail のときだけ作る（承認は手動）
-├── TrailBucket / TrailBucketPolicy / Trail … CloudTrail データイベント
-└── Alarms                    … §13 のアラーム 4 種（すべて AlertTopic へ）
+└── Alarms                    … AWS::CloudWatch::Alarm 4 種（§13、すべて AlertTopic へ）
 ```
 
-`make build` / `make deploy` でデプロイする（内部で `-t cloudformation.yaml` を渡す）。
-環境（dev/stg/prod）はパラメータで切り替える。
+`make build` / `make deploy` でデプロイする。環境（dev/stg/prod）は `samconfig.toml` の
+設定環境で切り替える（`make deploy ENV=prod`）。手順は [deploy.md](deploy.md)。
+
+#### 循環参照を避けるための約束
+
+バケットはイベント通知で Lambda を参照する。ここで Lambda 側がバケットを `!GetAtt` で参照すると
+
+```
+ImageBucket → MaskFunction → ImageBucket
+```
+
+という閉路になり、`sam validate` が `Circular dependency between resources` で弾く。
+
+そのため **Lambda の IAM ポリシーと S3 からの起動許可では、バケットの ARN を
+`!GetAtt` ではなく名前から組み立てている**。
+
+```yaml
+# 使わない
+Resource: !Sub '${ImageBucket.Arn}/...'
+# こう書く
+Resource: !Sub 'arn:${AWS::Partition}:s3:::image-mask-${Env}-${AWS::AccountId}/...'
+```
+
+バケット名は `Env` とアカウント ID から決まるので、組み立てても実体と一致する。
+代償として**バケット名の式が複数箇所に重複する**（`BucketName`、Lambda の環境変数、
+IAM の ARN、起動許可の `SourceArn`）。名前を変えるときは全箇所を直す必要がある。
+
+バケットポリシーのように、バケットから参照されない側のリソースは `!GetAtt` のままでよい。
 
 
 **副次的な利点**: Go の標準エンコーダは EXIF / XMP を一切書き出さないため、
@@ -477,7 +503,7 @@ cloudformation.yaml
 
 | 分類 | 例 | 挙動 |
 |---|---|---|
-| 検証エラー（恒久） | 非対応形式、サイズ超過、寸法超過 | リトライしても直らない。ERROR ログ + メトリクス + アラーム。成功扱いにはしない |
+| 検証エラー（恒久） | 非対応形式、サイズ超過、寸法超過 | リトライしても直らない。ERROR ログ + CloudWatch メトリクス + アラーム。成功扱いにはしない |
 | **強度検証不合格** | マスク領域に高周波成分が残る | **出力しない**。要調査（半径算出またはパラメータの問題） |
 | 一時エラー | S3 / KMS スロットリング、タイムアウト | 例外送出 → Lambda が自動リトライ（最大 2 回、間隔 1 分 / 2 分） |
 | スキップ | レイアウト外のキー、マスク済みの infix、既に処理済み | 正常終了（INFO ログ） |
@@ -486,7 +512,7 @@ cloudformation.yaml
 
 - 非同期呼び出しの `MaximumRetryAttempts=2`、`MaximumEventAgeInSeconds=3600`
 - **失敗イベントの退避先（DLQ）は置いていない。** リトライを使い切ったイベントは破棄される
-- 失敗したことと対象は、構造化ログ（`sourceKey` を含む）とメトリクス、アラームメールで分かる
+- 失敗したことと対象は、CloudWatch Logs の構造化ログ（`sourceKey` を含む）とメトリクス、アラームからのメールで分かる
 
 #### リトライを提供しているのは誰か
 
@@ -494,7 +520,7 @@ cloudformation.yaml
 
 | 層 | 提供元 | 内容 |
 |---|---|---|
-| ① イベント配信 | S3 | 通知の配信をリトライする（at-least-once）。**通知が無効な現在は関係しない** |
+| ① イベント配信 | Amazon S3 | イベント通知の配信をリトライする（at-least-once）。**イベント通知が無効な現在は関係しない** |
 | ② 非同期呼び出し | Lambda | 関数がエラーを返すと再実行。`MaximumRetryAttempts=2`、間隔は概ね 1 分 → 2 分。スロットリング等は `MaximumEventAgeInSeconds`（1 時間）まで粘る |
 | ③ API 呼び出し | AWS SDK | S3 / KMS の呼び出しをリトライ（`aws-sdk-go-v2` の既定、最大 3 回・指数バックオフ）。コード側で上書きしていない |
 
@@ -522,13 +548,13 @@ aws lambda invoke --function-name image-mask-dev \
 
 | | DLQ がある場合 | 現在 |
 |---|---|---|
-| 失敗の検知 | アラーム | アラーム（同じ） |
+| 失敗の検知 | CloudWatch アラーム | CloudWatch アラーム（同じ） |
 | 失敗した対象の特定 | DLQ のメッセージ | **ログ**（保持 30 日） |
 | 再処理 | DLQ から再投入 | **リクエスト起動で投げ直す** |
 | 取りこぼし | 起きない | **ログの保持期間を過ぎると追えなくなる** |
 
 実質的な差は最後の 1 行。失敗に長期間気づかないまま放置した場合、何が失敗したのかを
-追えなくなる。アラームメールが届く運用であれば、その前に気づく想定。
+追えなくなる。CloudWatch アラームからのメールが届く運用であれば、その前に気づく想定。
 
 ### 10.3 冪等性（FR-7）
 出力キーが「入力キー + ポリシー版」から決定的に決まり、書き込み前に `source-etag` 一致で早期リターンする。競合して二重に書いても内容は同一なので last-writer-wins で問題ない。
@@ -560,11 +586,17 @@ aws lambda invoke --function-name image-mask-dev \
 - バージョニング有効。**オブジェクトの自動削除は行わない**（保持期間の要件が出てから決める、Q3）
 - マスク済みの階層は Lambda 実行ロール以外の `PutObject` を拒否
 
-### 11.3 監査（FR-11）
-- **CloudTrail データイベント**を画像バケットの `KEY_PREFIX` 配下に対して有効化。誰がいつ原画像を取得したかを記録（原本だけに絞ることはできない、§6.1.1）
-- S3 サーバーアクセスログも有効化（別バケットへ）
-- 監査ログ保管先は Object Lock で改変防止
-- ログ保持期間はコンプライアンス要件に合わせる（Q4）
+### 11.3 監査
+
+**現在、監査ログの仕組みは入れていない。** CloudTrail データイベントを当初は入れていたが、
+要件として出ていない追加だったため削除した（§15.4）。
+
+準拠すべき規程（Q4）が決まり監査証跡が必要になった場合は、次を検討する。
+
+- CloudTrail データイベントを画像バケットに対して有効化（原本だけに絞ることはできない、§6.1.1）
+- S3 サーバーアクセスログ
+- 監査ログ保管先の Object Lock による改変防止
+- 保持期間をコンプライアンス要件に合わせる
 
 ### 11.4 ログのプライバシー
 - ログに画像本体（バイト列・base64）を出力しない
@@ -804,7 +836,10 @@ $ OUTPUT_BUCKET=x MIN_BLUR_RATIO=0.001 ./bootstrap
 
 ## 13. 監視・運用・コスト
 
-### カスタムメトリクス（EMF で出力）
+### CloudWatch カスタムメトリクス（EMF で出力）
+
+名前空間は `ImageMask`。Lambda 標準のメトリクスは `AWS/Lambda`。
+
 - `ImagesMasked`（Count）
 - `ProcessingDurationMs`（Milliseconds）
 - `ValidationErrors`（Count、理由を dimension に）
@@ -812,9 +847,10 @@ $ OUTPUT_BUCKET=x MIN_BLUR_RATIO=0.001 ./bootstrap
 - **`StrengthScore`（None）** — 傾向監視。徐々に上がっていたら劣化の兆候
 - `InputBytes` / `OutputBytes`
 
-### アラームと通知
+### CloudWatch アラームと Amazon SNS による通知
 
-エラーはメトリクスとして記録し、アラーム経由で SNS に送り、メールで通知する。
+エラーは CloudWatch メトリクスとして記録し、**CloudWatch アラーム**
+（`AWS::CloudWatch::Alarm`）経由で Amazon SNS トピックに送り、E メールで通知する。
 
 ```
 処理の失敗
@@ -834,20 +870,20 @@ $ OUTPUT_BUCKET=x MIN_BLUR_RATIO=0.001 ./bootstrap
 
 すべて `AlarmActions` に SNS トピックを指定してある。
 
-#### メール通知の構成（CloudFormation で記述できるか）
+#### E メール通知の構成（CloudFormation で記述できるか）
 
 **できる。** ただし 1 点だけ CloudFormation では完結しない。
 
 | 要素 | CFN での記述 | 備考 |
 |---|---|---|
 | SNS トピック | `AWS::SNS::Topic` | できる |
-| メール購読 | `AWS::SNS::Subscription`（`Protocol: email`） | リソースは作れるが **承認は手動** |
-| アラームからの通知 | アラームの `AlarmActions` | できる |
+| E メールサブスクリプション | `AWS::SNS::Subscription`（`Protocol: email`） | リソースは作れるが **承認は手動** |
+| アラームからの通知 | CloudWatch アラームの `AlarmActions` | できる |
 
 **承認が手動になる点が唯一の制約。** スタックを作ると指定アドレスに確認メールが届き、
 本人がリンクを押すまで購読は `PendingConfirmation` のまま通知が届かない。
 CloudFormation はこの承認を代行できず、しかも**未承認でもスタックの作成は成功する**ので、
-承認を忘れると「アラームは鳴っているのにメールが来ない」状態に気づけない。
+承認を忘れると「CloudWatch アラームは鳴っているのにメールが来ない」状態に気づけない。
 デプロイ後に承認状態を確認すること。
 
 ```bash
@@ -857,7 +893,7 @@ aws sns list-subscriptions-by-topic --topic-arn "$ALERT_TOPIC_ARN" \
 ```
 
 通知先を指定せずにデプロイもできる（`AlertEmail` が空ならサブスクリプションを作らない）。
-アラーム自体は動くので、あとからコンソールや別スタックで購読を足せる。
+CloudWatch アラーム自体は動くので、あとからコンソールや別スタックでサブスクリプションを足せる。
 
 #### SNS トピックの暗号化について
 
@@ -969,15 +1005,17 @@ aws lambda invoke --function-name image-mask-dev \
 | YCbCr 平面上で直接ぼかす | 60 ms 程度 | クロマが 1/4 に間引かれているため処理量が減る。ただしクロマの標本格子とマスク境界の整合を取る必要があり、**非マスク領域へにじむ危険**がある。20% のために負うリスクではないと判断 |
 | `MemorySize` を 1769 MB へ | 速度そのまま、コスト −14% | Lambda は 1,769 MB で 1 vCPU。単スレッド処理なのでこれ以上増やしても速くならない。dev 環境で実測してから決める |
 
-### 13.3 コスト試算（東京、月 10 万枚、arm64 / 2048 MB / 平均 1.5 秒）
+### 13.3 コスト試算（東京、月 10 万枚、arm64 / 2048 MB）
 
-上の実測を踏まえ、平均 1.5 秒として再計算した概算。
+§13.2 の実測（4000 × 3000 で 268 ms）を踏まえ、平均 0.5 秒として概算。
 
-- Lambda: 100,000 × 1.5 s × 2 GB = 300,000 GB-s → 約 USD 4.0（リクエスト料は約 USD 0.02）
+- Lambda: 100,000 × 0.5 s × 2 GB = 100,000 GB-s → 約 USD 1.4（リクエスト料は約 USD 0.02）
 - S3: PUT 10 万 + GET 10 万 → 約 USD 0.6、ストレージ 50 GB → 約 USD 1.3
-- CloudTrail データイベント: 20 万イベント → 約 USD 0.2
 - KMS: 20 万リクエスト → 約 USD 0.6
-- 合計 **概ね USD 7/月**（NFR のコスト要件を満たす）
+- SNS: アラート通知のみ → ほぼゼロ
+- 合計 **概ね USD 4/月**（NFR のコスト要件を満たす）
+
+CloudTrail を入れ直す場合は、データイベント 20 万件で月 USD 0.2 程度とログ保管が加わる。
 
 ---
 
@@ -1007,6 +1045,14 @@ aws lambda invoke --function-name image-mask-dev \
 強度・復元耐性・メタデータ除去・fail-closed の 4 つは**リリースブロッカー**として扱う。
 
 ### 14.1 ローカルでの実行・検証手順
+
+> 手順の詳細は段階ごとに分けた文書にある。ここでは何をどこで確認するかの整理だけ。
+>
+> | 段階 | 文書 | 必要なもの |
+> |---|---|---|
+> | 画像処理の確認 | [test-local.md](test-local.md) | Go だけ |
+> | イベントと配線の確認 | [test-sam-local.md](test-sam-local.md) | Docker + AWS 認証情報 |
+> | AWS へ反映 | [deploy.md](deploy.md) | AWS 認証情報 + 権限 |
 
 AWS アカウントも Docker も SAM CLI も不要。必要なのは Go 1.24 以降だけ。
 マスキング処理は `internal/masking` に閉じており Lambda ハンドラと共有しているため、
@@ -1112,7 +1158,18 @@ broken.jpg  FAILED (validation) cannot decode image header: image: unknown forma
 photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.734 > 15.000
 ```
 
-### 14.2 ローカルでは確認できないこと
+### 14.2 各段階で確認できること・できないこと
+
+| | Go のみ | SAM ローカル | AWS |
+|---|---|---|---|
+| 画像処理・マスク強度 | ◯ | ◯ | ◯ |
+| キー構造・変数の検証 | ◯ | ◯ | ◯ |
+| 冪等性・fail-closed | ◯（ユニットテスト） | ◯ | ◯ |
+| 環境変数の読み込み | — | ◯ | ◯ |
+| S3 との実通信 | — | ◯ | ◯ |
+| S3 イベント通知の配線 | — | △（ペイロードの解釈のみ） | ◯ |
+| IAM 最小権限 | — | — | ◯ |
+| リトライ・CloudWatch アラーム・メール | — | — | ◯ |
 
 `cmd/maskfile` で確認できるのは画像処理の部分だけ。以下は dev 環境へのデプロイが必要。
 
@@ -1120,12 +1177,11 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.
 |---|---|
 | S3 イベントの発火、プレフィックスフィルタ | dev 環境へ PUT して出力を確認 |
 | IAM 最小権限（出力バケットを読めない、原本に書けない） | dev 環境で当該操作が拒否されることを確認 |
-| リトライ回数とアラームの発火 | 意図的に失敗させてメールが届くことを確認 |
+| リトライ回数と CloudWatch アラームの発火 | 意図的に失敗させてメールが届くことを確認 |
 | KMS の暗号化・復号 | dev 環境で PUT / GET |
-| CloudTrail データイベントの記録（FR-11） | 原本を GET してログに現れることを確認 |
-| アラームの発火 | メトリクスを手動投入するか、意図的に失敗させる |
+| CloudWatch アラームの発火 | メトリクスを手動投入するか、意図的に失敗させる |
 | 実環境での処理時間・スロットリング | 負荷試験（§14 の負荷テスト） |
-| `cloudformation.yaml` の妥当性 | `make validate`（`sam validate --lint`） |
+| `template.yml` の妥当性 | `make validate`（`sam validate --lint`） |
 
 冪等性・fail-closed・領域・メタデータ除去はハンドラのユニットテストで代替済み。
 
@@ -1137,7 +1193,7 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.
 
 | 要件 | 実装 | テスト |
 |---|---|---|
-| FR-1 S3 起点の自動処理 | `cloudformation.yaml` (S3 イベント), `internal/handler` | ローカル不可（§14.2） |
+| FR-1 S3 起点の自動処理 | `template.yml` (S3 イベント), `internal/handler` | ローカル不可（§14.2） |
 | FR-2 上半分へのぼかし | `internal/masking.Apply`, `internal/imaging.TopRegion` | `TestHandleMasksOnlyTopHalf`, `TestApplyMasksTopHalfOnly` |
 | FR-2b 領域比率の設定 | `MASK_HEIGHT_RATIO` | `TestHandleMaskHeightRatio` |
 | マスク領域外を変更しない | `masking.Apply`（領域を切り出して処理） | `TestDownscaleNeverTouchesAreaOutsideMask`, `TestBlurPassesDoNotAffectAreaOutsideMask` |
@@ -1150,7 +1206,7 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.
 | FR-9 メタデータ除去 | Go 標準エンコーダの性質（構造的に保証） | `TestHandleStripsAllMetadata` |
 | FR-10 強度の自己検証 | `masking.Apply`, `imaging.LaplacianVariance` | `TestHandleFailsClosedOnWeakMask` |
 | FR-10b 領域のみを検証 | `masking.Apply`（`part` を測る） | `TestHandleStrengthCheckIgnoresUnmaskedArea` |
-| FR-11 監査ログ | `cloudformation.yaml` (CloudTrail) | ローカル不可（§14.2） |
+| ~~FR-11 監査ログ~~ | **取り下げ**（§11.3） | — |
 | FR-12 ポリシー版の記録 | `handler.put` のメタデータ | `TestHandleMasksImageAndWritesMetadata`, `TestHandleReprocessesWhenPolicyVersionChanged` |
 
 ### 15.2 未実装・未検証
@@ -1160,8 +1216,8 @@ photo.jpg   FAILED (strength) mask strength check failed: laplacian variance 30.
 | WebP 対応 | **対象外（確定）**。検証エラーとして扱う | 今回は考慮しない。必要になったら別形式での出力か cgo 依存の導入を検討 |
 | **`MAX_ALLOWED_LAPLACIAN_VAR` の値** | 暫定値 15.0（合成画像 4 枚から） | §14.1 の手順でリリース前に決定する |
 | **許容ライン `MIN_BLUR_RATIO >= 0.004`** | 合成画像 1 枚に対する目視判断（§12.6） | 実データで見直す。既定はその 10 倍の余裕を持たせてある |
-| **`cloudformation.yaml` の検証** | `sam validate` / デプロイとも未実施 | SAM CLI のある環境で `make validate` |
-| CloudTrail ログバケットの Object Lock | 未設定（§11.3 では要求している） | コンプライアンス要件確定後（Q4） |
+| **`template.yml` の検証** | `sam validate` / デプロイとも未実施 | SAM CLI のある環境で `make validate` |
+| 監査ログ（CloudTrail） | **入れていない**（§11.3） | コンプライアンス要件確定後（Q4） |
 | アニメーション画像 | 非対応（静止画のみ） | スコープ外 |
 | **EXIF Orientation のテスト** | **意図的に保留**。`JPEGOrientation` は Orientation=1 の 1 ケースのみ | 実データに Orientation が付くと分かってから（Q12 / A9） |
 | 負荷試験 | 未実施 | dev 環境で実施 |
@@ -1178,7 +1234,7 @@ internal/masking  … マスキング処理そのもの。上 2 つが共有す�
 internal/imaging  … ぼかし・領域切り出し・EXIF 向き補正・強度測定
 internal/config   … 環境変数
 internal/metrics  … EMF によるメトリクス出力
-cloudformation.yaml … バケット・KMS・Lambda・SNS・CloudTrail・アラーム
+template.yml … バケット・KMS・Lambda・SNS・CloudWatch アラーム
 ```
 
 外部依存は `aws-lambda-go` と `aws-sdk-go-v2` のみ。画像処理は標準ライブラリだけで実装している。
@@ -1203,15 +1259,15 @@ cloudformation.yaml … バケット・KMS・Lambda・SNS・CloudTrail・アラ�
 
 | 項目 | 理由 | 外した場合 | 追加コスト |
 |---|---|---|---|
-| **CloudTrail データイベント**（§11.3） | 誰がいつ原本を取得したかの監査（FR-11） | 監査証跡が残らない。規程（Q4）次第では必須になりうる | 約 USD 0.2/月 + ログ保管。**Q4 が決まるまでの先回り** |
+| ~~CloudTrail データイベント~~ | 誰がいつ原本を取得したかの監査 | **削除済み**。要件として出ていなかったため。規程（Q4）次第で入れ直す | — |
 | **KMS カスタマー管理キー** | 鍵の管理主体を明示する | S3 管理の暗号化（SSE-S3）でも保管時は暗号化される | 約 USD 1/月 + リクエスト料。**Q4 が決まるまでの先回り** |
 | **バケットのバージョニング** | 誤上書き・誤削除からの復旧 | 上書きすると元に戻せない | ストレージが増える（世代分） |
 | X-Ray | S3 呼び出しのレイテンシ分解 | 遅延の内訳が追いにくい | 少額 |
 | 予約同時実行 200 | 下流とコストの保護 | バーストで同時実行が跳ねうる | なし（むしろ抑制） |
 
-> **Q4（準拠すべき規程）が決まれば、CloudTrail と KMS の要否は自動的に決まる。**
-> それまでは入れておき、不要と分かった時点で外すほうが安全側だと判断した。
-> 外す場合はいずれも `cloudformation.yaml` の該当リソースを削るだけで、コード変更は不要。
+> **Q4（準拠すべき規程）が決まれば、KMS の要否は自動的に決まる。**
+> CloudTrail は同じ理由で入れていたが、要件として出ていないため削除した。
+> 外す・入れ直すのはいずれも `template.yml` の編集だけで、コード変更は不要。
 
 ## 16. 将来拡張
 

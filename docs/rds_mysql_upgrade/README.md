@@ -18,6 +18,7 @@ Step の詳細を掘り下げる際に参照する:
 - [direct-blue-green-execution.md](direct-blue-green-execution.md) — `scripts/*.sh` を直接実行する場合の、パラメータグループ事前確認から後始末までの一連手順
 - [ci/verify-green-vpc-architecture.md](ci/verify-green-vpc-architecture.md) — Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だけを RDS のある VPC 内へ置く構成（図つき）
 - [ci/verify-green-security-group-setup.md](ci/verify-green-security-group-setup.md) — 上記構成で必要なセキュリティグループの設定手順（テンプレートは SG を作らない）
+- [ci/build-report-tool-troubleshooting.md](ci/build-report-tool-troubleshooting.md) — Go ビルド（BuildReportTool）が失敗したときの切り分け。ログの何を見て何をするかの対応表
 
 エージェント向けの作業ガイドは [CLAUDE.md](CLAUDE.md)。
 

@@ -47,17 +47,9 @@ Parameters:
   VpcId:
     Type: String
     Default: ''
-    Description: BuildReportTool と VerifyGreen を配置する VPC。空なら両方とも VPC 外で実行する
-  BuildSubnetIds:
-    Type: CommaDelimitedList
-    Default: ''
     Description: >-
-      BuildReportTool（Go ビルド）を置く subnet。Go module を取得するため
-      外部へ出られる経路（NAT gateway など）が必要。既存の subnet を流用してよい。
-  BuildSecurityGroupIds:
-    Type: CommaDelimitedList
-    Default: ''
-    Description: BuildReportTool に付けるセキュリティグループ。外向き 443/tcp を許可する
+      VerifyGreen（Step 4 の検証実行）を配置する VPC。空なら VPC 外で実行する。
+      BuildReportTool はここに入れない（VPC 外で動かす）。
   VerifyGreenSubnetIds:
     Type: CommaDelimitedList
     Default: ''
@@ -127,14 +119,8 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
-      # Go module を取得するため、外部へ出られる経路がある subnet を指定する。
-      # Elastic Network Interface 作成権限は CodeBuildServiceRoleArn のロール側で付与する。
-      VpcConfig: !If
-        - HasVpc
-        - VpcId: !Ref VpcId
-          Subnets: !Ref BuildSubnetIds
-          SecurityGroupIds: !Ref BuildSecurityGroupIds
-        - !Ref 'AWS::NoValue'
+      # VpcConfig を付けない。VerifyGreen 以外のプロジェクトと同じく VPC 外で動く。
+      # AWS API も RDS も呼ばず、Go module の取得で外部へ出るだけのビルドである。
 
   # Step 4: AWS API 検証を常に行い、MySQL 接続はパラメータが true の場合だけ行う。
   VerifyGreenProject:

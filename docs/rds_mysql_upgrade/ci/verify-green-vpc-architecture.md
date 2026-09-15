@@ -11,9 +11,9 @@ Step 4 は 2 つの性質が異なる仕事を持っている。
 | Go レポート生成器のビルド | Go、**外部ネットワーク**（`proxy.golang.org`） | 何も触らない |
 | Green の検証 | AWS API（読み取り）、**Green DB への到達** | RDS を読む |
 
-このうち **Green DB へ到達するには CodeBuild を VPC 内へ置く必要がある**。両方を 1 つのプロジェクトでやると、VPC 内から外部ネットワークへ出る経路（NAT gateway など）が必須になる。
+このうち **Green DB へ到達するには CodeBuild を VPC 内へ置く必要がある**。両方を 1 つのプロジェクトでやると、VPC 内から外部ネットワークへ出る経路（NAT gateway など）が必須になる。**ビルドだけのために NAT gateway を用意することになり、割に合わない。**
 
-**レポート実行を同一 VPC 内の専用 subnet へ隔離し、そこには外部経路を置かない。**ビルドは外部へ出られる subnet で行い、成果物は artifact で渡す。これで検証を行う subnet から外部依存が消える。
+**検証の実行だけを VPC 内の専用 subnet へ置き、ビルドは VPC の外に出す。**成果物は artifact で渡す。これで検証を行う subnet から外部依存が消え、**ビルド側は VPC の制約を一切受けない**（他の VPC 外プロジェクトと同じ扱いになる）。
 
 ```mermaid
 flowchart LR
@@ -24,11 +24,11 @@ flowchart LR
         V1 --> DB1[("Green DB")]
     end
 
-    subgraph after["変更後: レポート実行を専用 subnet へ隔離する"]
+    subgraph after["変更後: ビルドは VPC 外、検証だけ専用 subnet"]
         direction TB
-        B2["BuildReportTool<br/>外部へ出られる subnet"]
-        B2 -->|"NAT は build 側だけ"| NET2["proxy.golang.org"]
-        B2 -.->|"artifact"| V2["VerifyGreen<br/>レポート実行専用<br/>private subnet"]
+        B2["BuildReportTool<br/>VPC 外（既定）"]
+        B2 -->|"制約なく到達できる"| NET2["proxy.golang.org"]
+        B2 -.->|"artifact"| V2["VerifyGreen<br/>検証専用<br/>private subnet"]
         V2 --> DB2[("Green DB")]
     end
 ```
@@ -48,18 +48,15 @@ flowchart TD
     BRT -.->|"artifact: ReportToolOutput"| VG
 
     classDef outside fill:#e8f4ff,stroke:#3178c6
-    classDef build fill:#eef7ee,stroke:#2e7d32
     classDef inside fill:#fff4e6,stroke:#d97706
-    class S,RA,PC,BG,SW,CU outside
-    class BRT build
+    class S,RA,BRT,PC,BG,SW,CU outside
     class VG inside
 ```
 
-- 薄い青 … VPC 外（CodeBuild の既定）
-- 薄い緑 … 同一 VPC の**ビルド用 subnet**（外部へ出られる。既存のものを流用してよい）
-- 薄い橙 … 同一 VPC の**レポート実行専用 subnet**（外部へ出ない。RDS へ到達する）
+- 薄い青 … VPC 外（CodeBuild の既定）。**`BuildReportTool` もここに含まれる**
+- 薄い橙 … RDS のある VPC の**検証専用 subnet**（外部へ出ない。RDS へ到達する）
 
-VPC 配置は `VpcId` を指定したときだけ有効になる。未指定なら両方とも VPC 外で動く（AWS API の検証のみ）。
+**VPC 内で動くのは `VerifyGreen` だけである。**`VpcId` を指定したときだけ有効になり、未指定なら `VerifyGreen` も VPC 外で動く（AWS API の検証のみ）。
 
 `BuildReportTool` を `ReadApprovals` の直後に置いているのは、**AWS リソースに触る前にビルドを済ませる**ためである。ビルドが失敗しても RDS には何の影響もない。
 
@@ -108,12 +105,12 @@ flowchart TB
     PUB["AWS API<br/>公開エンドポイント"]
     OTHERS --> PUB
 
-    subgraph vpc["RDS のある VPC（同一 VPC）"]
-        subgraph buildsub["ビルド用 subnet（外部へ出られる）"]
-            BRT["BuildReportToolProject"]
-        end
-        NAT["NAT gateway"]
-        subgraph private["レポート実行専用 subnet（外部へ出ない・2 アベイラビリティゾーン以上）"]
+    BRT["BuildReportToolProject<br/>VPC 外"]
+    INET["インターネット<br/>proxy.golang.org"]
+    BRT --> INET
+
+    subgraph vpc["RDS のある VPC"]
+        subgraph private["検証専用 subnet（外部へ出ない・2 アベイラビリティゾーン以上）"]
             VG["VerifyGreenProject<br/>Elastic Network Interface が実行ごとに作られる"]
         end
         subgraph endpoints["VPC endpoint"]
@@ -126,8 +123,6 @@ flowchart TB
         RDS[("Green DB<br/>3306/tcp")]
     end
 
-    INET["インターネット<br/>proxy.golang.org"]
-    BRT --> NAT --> INET
     BRT -.->|"artifact（S3 経由）"| VG
 
     VG --> EPS3
@@ -138,12 +133,12 @@ flowchart TB
     VG -->|"SG で許可"| RDS
 
     classDef ep fill:#eef7ee,stroke:#2e7d32
-    classDef build fill:#eef7ee,stroke:#2e7d32
+    classDef outside fill:#e8f4ff,stroke:#3178c6
     class EPS3,EPLOG,EPRDS,EPMON,EPSSM ep
-    class BRT build
+    class BRT outside
 ```
 
-**要点は、レポート実行を専用 subnet へ隔離することである。**外部への経路（NAT gateway）はビルド用 subnet のルートテーブルにだけ置き、**レポート実行専用 subnet には置かない**。ビルド用は専用に用意する必要はなく、既に外部へ出られる subnet を流用してよい。
+**要点は、VPC 内に入れるのは検証の実行だけだということである。**`BuildReportTool` は VPC 外なので、**NAT gateway も subnet も SG も用意しなくてよい**。検証専用 subnet には外部への経路を置かない。
 
 `VerifyGreen` が VPC 内から呼ぶ API と、対応する endpoint は次のとおりである。**NAT gateway を置かない場合はこれらが必要になる。**
 
@@ -189,9 +184,9 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    P1{"VpcId<br/>を指定したか"} -->|いいえ| OUT["両方とも VPC 外で実行<br/>AWS API の検証だけ<br/>（既定）"]
-    P1 -->|はい| IN["同一 VPC 内で実行<br/>ビルドは BuildSubnetIds（外部へ出られる）<br/>レポート実行は VerifyGreenSubnetIds（専用・隔離）"]
-    IN --> R["両ロールへ<br/>Elastic Network Interface 作成権限を条件付きで追加"]
+    P1{"VpcId<br/>を指定したか"} -->|いいえ| OUT["VerifyGreen も VPC 外で実行<br/>AWS API の検証だけ<br/>（既定）"]
+    P1 -->|はい| IN["VerifyGreen だけ VPC 内で実行<br/>VerifyGreenSubnetIds（専用・隔離）<br/>BuildReportTool は常に VPC 外"]
+    IN --> R["VerifyGreenRole へ<br/>Elastic Network Interface 作成権限を条件付きで追加"]
     R --> P2{"mysql_verification<br/>を有効にするか"}
     P2 -->|いいえ| IN2["VPC 内だが DB へは接続しない"]
     P2 -->|はい| P3{"VerifyGreenImage に<br/>MySQL 入りを指定したか"}
@@ -206,10 +201,8 @@ flowchart TD
 
 | パラメータ | 未指定のとき | 指定したとき |
 |---|---|---|
-| `VpcId` | 両プロジェクトとも VPC 外（Green DB へは接続できない） | **同一 VPC 内で実行。両ロールに Elastic Network Interface 作成権限が自動で付く** |
-| `BuildSubnetIds` | — | ビルドを置く subnet。**外部へ出られる経路（NAT）が必要**。専用に用意しなくてよい |
-| `BuildSecurityGroupIds` | — | BuildReportTool 用 SG。外向き 443/tcp を許可する |
-| `VerifyGreenSubnetIds` | — | **レポート実行専用の private subnet。**RDS へ到達できること。**外部経路は置かない** |
+| `VpcId` | `VerifyGreen` も VPC 外（Green DB へは接続できない） | **`VerifyGreen` だけ VPC 内で実行。`VerifyGreenRole` に Elastic Network Interface 作成権限が自動で付く。`BuildReportTool` は影響を受けない** |
+| `VerifyGreenSubnetIds` | — | **検証専用の private subnet。**RDS へ到達できること。**外部経路は置かない** |
 | `VerifyGreenSecurityGroupIds` | — | RDS 側 inbound で 3306/tcp を許可する SG。**テンプレートは SG を作らない**ので別途用意する（[セキュリティグループ設定](verify-green-security-group-setup.md)） |
 | `VerifyGreenImage` | `aws/codebuild/standard:7.0` | **ECR のカスタムイメージ**。`ImagePullCredentialsType` が `SERVICE_ROLE` へ切り替わり、ECR 読み取り権限が自動で付く |
 | `CollectMySqlRuntimeValues` | AWS API の検証だけ | Green DB へ接続して実効値も収集 |
@@ -220,12 +213,12 @@ flowchart TD
 
 | 症状 | 原因 | 対処 |
 |---|---|---|
-| どちらかのプロジェクトが起動時に失敗する | Elastic Network Interface 作成権限が無い | `VpcId` を指定してテンプレートを更新する（両ロールへ条件付きで付く） |
+| `VerifyGreen` が起動時に失敗する | Elastic Network Interface 作成権限が無い | `VpcId` を指定してテンプレートを更新する（`VerifyGreenRole` へ条件付きで付く） |
 | `Report generator is absent` で停止 | artifact を受け取れていない | `BuildReportTool` ステージの成否と `PrimarySource` の指定を確認する |
 | `mysql_verification is enabled but the MySQL client is absent` | 既定イメージのまま実効値収集を有効にした | `VerifyGreenImage` に MySQL 入りイメージを指定する |
 | AWS API 呼び出しがタイムアウトする | VPC endpoint が足りない | 上の表の 5 種（+ `kms`）を確認する |
 | Green DB へ接続できない | SG / subnet のルーティング | [セキュリティグループ設定](verify-green-security-group-setup.md) の「よくある失敗」を見る |
-| `BuildReportTool` が Go module を取得できない | ビルド用 subnet に外部経路が無い | その subnet のルートテーブルに NAT gateway があるか、`BuildSecurityGroupIds` が外向き 443 を許可しているかを見る |
+| `BuildReportTool` が Go module を取得できない | VPC 外で動くはずのプロジェクトに `VpcConfig` が付いている | `BuildReportToolProject` に `VpcConfig` が無いことを確認する。詳しい切り分けは [BuildReportTool の失敗切り分け](build-report-tool-troubleshooting.md) |
 
 ## 8. ローカルでの確認
 

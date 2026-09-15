@@ -22,11 +22,9 @@ Metadata:
         Parameters: [CodeStarConnectionArn, RepositoryId, BranchName]
       - Label: { default: Step 4 の MySQL 実効値収集（任意） }
         Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterArns]
-      - Label: { default: Step 4 の VPC 配置（任意。ビルドと検証で subnet を分ける） }
+      - Label: { default: Step 4 検証の VPC 配置（任意。VerifyGreen だけが対象） }
         Parameters:
           - VpcId
-          - BuildSubnetIds
-          - BuildSecurityGroupIds
           - VerifyGreenSubnetIds
           - VerifyGreenSecurityGroupIds
           - VerifyGreenImage
@@ -95,23 +93,10 @@ Parameters:
     Type: String
     Default: ''
     Description: >-
-      BuildReportTool と VerifyGreen を配置する VPC。空なら両方とも VPC 外で実行する
+      VerifyGreen（Step 4 の検証実行）を配置する VPC。空なら VPC 外で実行する
       （その場合 Green DB へは接続できない）。
-
-  BuildSubnetIds:
-    Type: CommaDelimitedList
-    Default: ''
-    Description: >-
-      BuildReportTool（Go ビルド）を置く subnet。**外部へ出られる経路が必要**
-      （NAT gateway または組織のプロキシ）。Go module を取得するためである。
-      専用に用意する必要はなく、既に外部へ出られる subnet を流用してよい。
-
-  BuildSecurityGroupIds:
-    Type: CommaDelimitedList
-    Default: ''
-    Description: >-
-      BuildReportTool に付けるセキュリティグループ。外向き 443/tcp を許可する。
-      RDS へは到達しないため、RDS 側 SG への登録は不要である。
+      **BuildReportTool はここに入れない。**Go ビルドは AWS API も RDS も呼ばず、
+      Go module の取得で外部へ出るだけなので、他の VPC 外プロジェクトと揃える。
 
   VerifyGreenSubnetIds:
     Type: CommaDelimitedList
@@ -255,35 +240,9 @@ Resources:
           - Effect: Allow
             Principal: { Service: codebuild.amazonaws.com }
             Action: 'sts:AssumeRole'
+      # VPC 外で動くため Elastic Network Interface の権限は要らない。
+      # ログ出力と artifact の読み書きは CodeBuildCommonPolicy が持つ。
       ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
-      Policies:
-        # VPC 内で動かす場合は Elastic Network Interface を作る。VerifyGreen と同じ権限が要る。
-        - !If
-          - HasVpc
-          - PolicyName: vpc-network-interface
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Sid: DescribeVpcResources
-                  Effect: Allow
-                  Action:
-                    - 'ec2:CreateNetworkInterface'
-                    - 'ec2:DescribeNetworkInterfaces'
-                    - 'ec2:DeleteNetworkInterface'
-                    - 'ec2:DescribeSubnets'
-                    - 'ec2:DescribeSecurityGroups'
-                    - 'ec2:DescribeDhcpOptions'
-                    - 'ec2:DescribeVpcs'
-                  # これらの Describe / Create は個別リソースを指定できない。
-                  Resource: '*'
-                - Sid: CreateNetworkInterfacePermissionForCodeBuild
-                  Effect: Allow
-                  Action: 'ec2:CreateNetworkInterfacePermission'
-                  Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
-                  Condition:
-                    StringEquals:
-                      'ec2:AuthorizedService': codebuild.amazonaws.com
-          - !Ref 'AWS::NoValue'
 
   # Step 2 事前確認: 読み取りのみ。
   PrecheckRole:
@@ -511,6 +470,7 @@ Resources:
                   - !GetAtt ReadApprovalsProject.Arn
                   - !GetAtt PrecheckProject.Arn
                   - !GetAtt BuildGreenProject.Arn
+                  - !GetAtt BuildReportToolProject.Arn
                   - !GetAtt VerifyGreenProject.Arn
                   - !GetAtt SwitchoverProject.Arn
                   - !GetAtt CleanupProject.Arn
@@ -591,17 +551,9 @@ Resources:
 
   # Go レポート生成器をビルドするだけのプロジェクト。
   # **外部ネットワーク（Go module の取得）へ出るのはここだけである。**
-  # VerifyGreen と同一 VPC のまま、外部へ出られる subnet に置く。
-  # AWS API は呼ばない。
+  # VPC には入れない（VerifyGreen 以外のプロジェクトと同じ扱い）。AWS API は呼ばない。
   BuildReportToolProject:
     Type: AWS::CodeBuild::Project
-    # BuildSubnetIds / BuildSecurityGroupIds の既定値は空である。
-    # VpcConfig は HasVpc が真のときだけ展開されるため空値は渡らないが、
-    # cfn-lint は既定値をそのまま型検査して W1030 を出すので、ここだけ抑止する。
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks: [W1030]
     Properties:
       Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-build-report-tool'
       Description: Step 4 - Go レポート生成器のビルド（AWS API は呼ばない）
@@ -615,13 +567,10 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         # buildspec の runtime-versions で Go を用意し、go.mod / go.sum でビルドする。
         Image: aws/codebuild/standard:7.0
-      # Go module を取得するため、外部へ出られる経路がある subnet を指定する。
-      VpcConfig: !If
-        - HasVpc
-        - VpcId: !Ref VpcId
-          Subnets: !Ref BuildSubnetIds
-          SecurityGroupIds: !Ref BuildSecurityGroupIds
-        - !Ref 'AWS::NoValue'
+      # VpcConfig を付けない。VerifyGreen 以外のプロジェクトと同じく VPC 外で動く。
+      # このビルドは AWS API も RDS も呼ばず、Go module の取得で外部へ出るだけである。
+      # VPC へ入れると NAT gateway 経由の外向き経路が必須になり、
+      # Elastic Network Interface の作成権限も要るため、得るものが無い。
 
   VerifyGreenProject:
     Type: AWS::CodeBuild::Project

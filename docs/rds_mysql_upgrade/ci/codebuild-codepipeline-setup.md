@@ -100,23 +100,21 @@ CodePipeline は `BuildReportTool` ステージの出力 artifact（`ReportToolO
 ```text
 CollectMySqlRuntimeValues=true
 VpcId=vpc-xxxxxxxx
-BuildSubnetIds=subnet-build1,subnet-build2          # 外部へ出られる subnet（既存のものを流用してよい）
-BuildSecurityGroupIds=sg-build                      # 外向き 443/tcp を許可
-VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb        # レポート実行専用。RDS へ到達でき、外部へは出ない
+VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb        # 検証専用。RDS へ到達でき、外部へは出ない
 VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティグループ設定」で作る SG
 VerifyGreenImage=<account>.dkr.ecr.<region>.amazonaws.com/rds-bg-verify-green:<tag>
 ```
 
-`VpcId` が空なら両プロジェクトとも VPC 外で動き、AWS API による検証だけを行う（既定）。
+`VpcId` が空なら `VerifyGreen` も VPC 外で動き、AWS API による検証だけを行う（既定）。
 
-**2 つのプロジェクトは同一 VPC に置き、subnet だけを用途で分ける。**
+**VPC 内へ入れるのは `VerifyGreen` だけである。**
 
-| プロジェクト | subnet | 外部への経路 | 用途 |
+| プロジェクト | 配置 | 外部への経路 | 用途 |
 |---|---|---|---|
-| `BuildReportToolProject` | `BuildSubnetIds` | **必要**（NAT gateway など） | Go module を取得してビルドする |
+| `BuildReportToolProject` | **VPC 外**（他の VPC 外プロジェクトと同じ） | ある（VPC の制約を受けない） | Go module を取得してビルドする |
 | `VerifyGreenProject` | `VerifyGreenSubnetIds` | **不要** | RDS へ到達して検証する |
 
-外部への経路はビルド用 subnet のルートテーブルにだけ置き、**レポート実行専用 subnet には置かない**。ビルド用は専用に用意する必要はなく、既に外部へ出られる subnet を流用してよい。
+ビルドは AWS API も RDS も呼ばないので VPC へ入れる理由が無く、入れると NAT gateway と Elastic Network Interface 権限が要るだけになる。**検証専用 subnet には外部への経路を置かない。**
 
 テンプレートは `VpcId` の指定を条件に、**両プロジェクトのロール**へ Elastic Network Interface（VPC 内のリソースに割り当てられる仮想ネットワークインターフェイス）の作成権限（`ec2:CreateNetworkInterface` など）を追加する。**この権限が無いと VPC 内の CodeBuild は起動に失敗する。**さらに絞るなら `ec2:CreateNetworkInterfacePermission` の `Condition` に `ec2:Subnet`（subnet の ARN）を加える。
 

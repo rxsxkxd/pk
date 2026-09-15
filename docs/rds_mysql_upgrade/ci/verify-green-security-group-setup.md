@@ -12,23 +12,21 @@
 
 ## 2. 設定する箇所
 
-**2 つのプロジェクトは同一 VPC に置く。レポート実行だけを専用 subnet へ隔離し、そこには外部経路を置かない。**セキュリティグループも用途ごとに分ける。
+**VPC 内に入れるのは `VerifyGreen` だけである。**`BuildReportTool` は VPC 外で動くので、**セキュリティグループも subnet も要らない**。したがってここで用意する SG は検証の実行にかかわるものだけになる。
 
 ```mermaid
 flowchart LR
-    subgraph vpc["RDS のある VPC（同一 VPC）"]
-        subgraph bs["ビルド用 subnet（外部へ出られる）"]
-            BD["BuildReportTool の Elastic Network Interface<br/>SG-D を付ける"]
-        end
-        subgraph ps["レポート実行専用 subnet（外部へ出ない）"]
+    BD["BuildReportTool<br/>VPC 外・SG は不要"]
+
+    subgraph vpc["RDS のある VPC"]
+        subgraph ps["検証専用 subnet（外部へ出ない）"]
             CB["VerifyGreen の Elastic Network Interface<br/>SG-A を付ける"]
         end
         EP["Interface VPC endpoint<br/>rds / monitoring / ssm / logs<br/>SG-C が付いている"]
         DB[("Green DB<br/>SG-B が付いている")]
     end
-    NAT["NAT gateway → インターネット"]
 
-    BD -->|"⑤ outbound<br/>443/tcp → 0.0.0.0/0"| NAT
+    BD -.->|"artifact（S3 経由）"| CB
     CB -->|"① outbound<br/>3306/tcp → SG-B"| DB
     CB -->|"② outbound<br/>443/tcp → SG-C"| EP
     DB -.->|"③ inbound<br/>3306/tcp ← SG-A"| CB
@@ -37,7 +35,7 @@ flowchart LR
     classDef a fill:#e8f4ff,stroke:#3178c6
     classDef b fill:#fff4e6,stroke:#d97706
     classDef c fill:#eef7ee,stroke:#2e7d32
-    classDef d fill:#f3e8ff,stroke:#7c3aed
+    classDef d fill:#e8f4ff,stroke:#3178c6
     class CB a
     class DB b
     class EP c
@@ -50,9 +48,8 @@ flowchart LR
 | ② | **SG-A** | outbound | 443/tcp → SG-C | 同上 |
 | ③ | **SG-B**（RDS 用） | inbound | 3306/tcp ← SG-A | **必ず追加する** |
 | ④ | **SG-C**（endpoint 用） | inbound | 443/tcp ← SG-A | **必ず追加する。見落としやすい** |
-| ⑤ | **SG-D**（BuildReportTool 用） | outbound | 443/tcp → `0.0.0.0/0` | 既定で満たされる。**RDS 側 SG への登録は不要** |
 
-**SG-D は RDS へ到達しない。**ビルドは Go module の取得だけなので、③ に SG-D を足さない。外部への経路はビルド用 subnet のルートテーブル（NAT gateway）で与える。
+**`BuildReportTool` 用の SG は作らない。**VPC 外で動くため Elastic Network Interface を持たず、SG を付ける先が無い。ビルドが必要とする外部到達（`proxy.golang.org`）は VPC の外なので、NAT gateway も不要である。
 
 `s3` は Gateway endpoint なので SG を持たない（ルートテーブルの設定だけである）。
 
@@ -60,7 +57,7 @@ flowchart LR
 
 ## 3. 手順（専用 SG を作る場合・推奨）
 
-### 3-1. SG-A（VerifyGreen 用）と SG-D（ビルド用）を作る
+### 3-1. SG-A（VerifyGreen 用）を作る
 
 ```bash
 VPC_ID=vpc-xxxxxxxx
@@ -73,18 +70,7 @@ SG_A=$(aws ec2 create-security-group \
 echo "SG-A=$SG_A"
 ```
 
-ビルド用も同じ手順で作る。**こちらは outbound 全許可のままでよい**（NAT 経由で Go module を取得する）。
-
-```bash
-SG_D=$(aws ec2 create-security-group \
-  --group-name rds-bg-build-report-tool \
-  --description 'CodeBuild BuildReportTool Elastic Network Interface' \
-  --vpc-id "$VPC_ID" \
-  --query GroupId --output text)
-echo "SG-D=$SG_D"
-```
-
-**どちらも inbound ルールは追加しない。** CodeBuild の Elastic Network Interface へ外から接続するものは無い。作成直後の SG は inbound が空・outbound が `0.0.0.0/0` 全許可なので、①②⑤ はこの時点で満たされている。
+**inbound ルールは追加しない。** CodeBuild の Elastic Network Interface へ外から接続するものは無い。作成直後の SG は inbound が空・outbound が `0.0.0.0/0` 全許可なので、①② はこの時点で満たされている。
 
 outbound を絞る方針なら、全許可を外してから必要分だけ開ける。
 
@@ -136,8 +122,6 @@ endpoint ごとに SG が違う場合は、`rds` / `monitoring` / `ssm` / `logs`
 
 ```text
 VpcId=vpc-xxxxxxxx
-BuildSubnetIds=subnet-build1,subnet-build2
-BuildSecurityGroupIds=<SG-D の ID>
 VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb
 VerifyGreenSecurityGroupIds=<SG-A の ID>
 ```
@@ -247,6 +231,6 @@ aws rds describe-db-instances \
 | ビルドログが CloudWatch に出ない | `logs` endpoint の SG に ④ が無い | `logs` endpoint の SG |
 | artifact の取得・保存で失敗する | `s3` Gateway endpoint が無い（SG は無関係） | ルートテーブル |
 | 接続が**即座に拒否**される | SG ではなくポート違いや DB 側の設定 | `mysql_verification.port`、DB のユーザー権限 |
-| `BuildReportTool` が Go module を取得できない | ビルド用 subnet に NAT が無い、または SG-D の outbound を絞りすぎ | subnet のルートテーブル、SG-D の outbound |
+| `BuildReportTool` が Go module を取得できない | **SG の問題ではない。**VPC 外で動くはずのプロジェクトに `VpcConfig` が付いている | [BuildReportTool の失敗切り分け](build-report-tool-troubleshooting.md) を見る |
 
 **タイムアウトは SG か endpoint、即時拒否はそれ以外**、という切り分けが目安になる。

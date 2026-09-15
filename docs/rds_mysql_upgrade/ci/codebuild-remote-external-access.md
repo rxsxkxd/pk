@@ -14,7 +14,7 @@ CodeBuild 実行コンテナ
   │    └─ AWS Secrets Manager                 # 実効値収集を有効にした場合だけ
   ├─ RDS for MySQL data plane（DB ユーザー認証） # 実効値収集を有効にした場合だけ
   └─ 公開パッケージ／コンテナ配布元
-       ├─ proxy.golang.org                    # VerifyGreen の Go ビルドだけ
+       ├─ proxy.golang.org                    # BuildReportTool だけ
        ├─ Docker Hub と Go module 配布元       # VerifyGreen では常時
        └─ Ubuntu apt repository                # MySQL client が image にない場合だけ
 
@@ -33,7 +33,7 @@ CodeBuild サービス連携
 | Amazon CloudWatch | `AWS/RDS` の `ReplicaLag` を VerifyGreen で読む | VerifyGreen で常時 | CodeBuild サービスロールの一時 AWS 認証情報 |
 | AWS Secrets Manager | MySQL の `username`／`password` を `GetSecretValue` で読む | `CollectMySqlRuntimeValues=true` の場合だけ | CodeBuild サービスロールの一時 AWS 認証情報。secret が CMK 暗号化なら KMS の復号権限も必要 |
 | RDS for MySQL data plane | `mysql` クライアントで `performance_schema.global_variables` を読む | `CollectMySqlRuntimeValues=true` の場合だけ | Secrets Manager から取得した DB ユーザー名／パスワード。AWS IAM 認証ではない |
-| Go module proxy | VerifyGreen が Go レポート生成器をビルドする | VerifyGreen のみ | 既定は `proxy.golang.org` への TLS 接続で、アプリケーション認証なし。`GOPROXY` で組織のプロキシへ向けた場合はその認証方式に従う。**設定 YAML の読み取りは Ruby 標準ライブラリで行うため、PyPI への到達は不要である。** |
+| Go module proxy | BuildReportTool が Go レポート生成器をビルドする | **BuildReportTool のみ**（VerifyGreen は artifact で受け取るため到達不要） | 既定は `proxy.golang.org` への TLS 接続で、アプリケーション認証なし。`GOPROXY` で組織のプロキシへ向けた場合はその認証方式に従う。**設定 YAML の読み取りは Ruby 標準ライブラリで行うため、PyPI への到達は不要である。** |
 | Docker Hub、Go module 配布元 | `golang:1.25` を取得し、`gopkg.in/yaml.v3` をダウンロードして Go レポート生成器をビルドする | VerifyGreen で常時 | 既定は公開イメージ・公開 module のためアプリケーション認証なし。Docker Hub のレート制限・組織プロキシを使う場合は別途 Docker registry 認証を設定 |
 | Ubuntu apt repository | `mysql` コマンドが存在しない時に `mysql-client` を導入する | `CollectMySqlRuntimeValues=true` かつ image に MySQL client がない場合だけ | 公開 repository への TLS 接続で、アプリケーション認証なし。組織ミラー／proxy 使用時はその認証方式に従う |
 
@@ -86,7 +86,7 @@ CodeConnections による GitHub 接続は CodePipeline の Source ステージ�
 ## 5. ネットワーク設計時の確認事項
 
 - RDS、CloudWatch、Secrets Manager、S3、KMS、CloudWatch Logs は、CodeBuild の実行リージョンに対応する AWS service endpoint へ到達できることを確認する。
-- `VerifyGreenProject` は Go module 配布元へ到達する必要がある。MySQL client の動的導入が発生する環境では apt repository も必要になる。**PyPI への到達は不要になった**（設定 YAML の読み取りが Ruby 標準ライブラリになったため）。
+- Go module 配布元へ到達する必要があるのは `BuildReportToolProject` だけである。`VerifyGreenProject` はビルド済みバイナリを artifact で受け取るため、**外部への到達を必要としない**（MySQL client の動的導入が発生する環境では apt repository だけが例外）。**PyPI への到達は不要になった**（設定 YAML の読み取りが Ruby 標準ライブラリになったため）。
 - CodeBuild を VPC 内に置く場合、RDS MySQL への private 接続に加え、上記の AWS service endpoint と公開配布元への egress を NAT gateway、HTTPS proxy、VPC endpoint、組織ミラーの方針に沿って設計する。
 - Docker Hub／PyPI／apt／Go module への通信を許可しない方針なら、依存物を含むカスタム CodeBuild image と、組織内 registry・package mirror を用意して buildspec の取得元を置き換える。
 

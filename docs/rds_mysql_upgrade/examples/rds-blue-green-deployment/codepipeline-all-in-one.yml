@@ -1,13 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  RDS for MySQL 8.0 -> 8.4 Blue/Green 移行パイプライン（自己完結版）。
-  アーティファクト用 S3 バケット、IAM ロール、CodeBuild プロジェクト、CodePipeline を
-  1 つのスタックで作成する。対象サービスはパイプライン実行時に SERVICE_NAME で指定する。
+  RDS for MySQL 8.0 -> 8.4 Blue/Green 移行パイプライン（IAM・CI 作成版）。
+  既存のアーティファクト用 S3 バケットを利用し、IAM ロール、CodeBuild プロジェクト、
+  CodePipeline を 1 つのスタックで作成する。対象サービスは実行時に SERVICE_NAME で指定する。
 
 # 既存の codepipeline.yml との違い:
 #   codepipeline.yml         … S3 バケットと IAM ロールを既存リソースとして受け取る。
 #                              組織側でロールを一元管理している場合はこちらを使う。
-#   codepipeline-all-in-one  … 本ファイル。必要なリソースをすべて作成する。
+#   codepipeline-all-in-one  … 本ファイル。既存 S3 バケットを受け取り、IAM と CI リソースを作成する。
 #                              検証環境や、スタック単位で権限を閉じたい場合に使う。
 #
 # 環境（staging / production）ごとに 1 スタックを作成する。サービスはパイプライン変数で
@@ -17,7 +17,7 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: パイプライン }
-        Parameters: [PipelineNamePrefix, EnvironmentName, DefaultServiceName]
+        Parameters: [PipelineNamePrefix, EnvironmentName, DefaultServiceName, ArtifactBucketName]
       - Label: { default: ソース（GitHub） }
         Parameters: [CodeStarConnectionArn, RepositoryId, BranchName]
       - Label: { default: Step 4 の MySQL 実効値収集（任意） }
@@ -45,6 +45,12 @@ Parameters:
     Description: >-
       SERVICE_NAME の既定値。パイプライン実行時に --variables で上書きできる。
       config の services 配下に定義したサービス名を指定する。
+
+  ArtifactBucketName:
+    Type: String
+    Description: >-
+      CodePipeline のソースおよび各 Step の成果物を保存する、同一リージョンの既存 S3 バケット名。
+      このスタックはバケットおよびバケットポリシーを作成・変更・削除しない。
 
   CodeStarConnectionArn:
     Type: String
@@ -101,54 +107,6 @@ Conditions:
 
 Resources:
 
-  # --- アーティファクト用 S3 バケット ---------------------------------------
-  # 各 Step の応答 JSON と検証レポートを保持する。移行の証跡になるため
-  # スタック削除時も残す（DeletionPolicy: Retain）。
-  ArtifactBucket:
-    Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      BucketName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-artifacts-${AWS::AccountId}-${AWS::Region}'
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
-      LifecycleConfiguration:
-        Rules:
-          - Id: expire-old-artifacts
-            Status: Enabled
-            # 証跡としての保持期間。組織の方針に合わせて調整する。
-            ExpirationInDays: 365
-            NoncurrentVersionExpirationInDays: 90
-            AbortIncompleteMultipartUpload:
-              DaysAfterInitiation: 7
-
-  ArtifactBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref ArtifactBucket
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: DenyInsecureTransport
-            Effect: Deny
-            Principal: '*'
-            Action: 's3:*'
-            Resource:
-              - !GetAtt ArtifactBucket.Arn
-              - !Sub '${ArtifactBucket.Arn}/*'
-            Condition:
-              Bool:
-                'aws:SecureTransport': 'false'
-
   # --- CodeBuild 共通権限 -----------------------------------------------------
   # ログ出力、アーティファクトの読み書き、RDS の読み取り。
   # 変更操作は各ロールの個別ポリシーでのみ許可する。
@@ -176,11 +134,11 @@ Resources:
               - 's3:GetObjectVersion'
               - 's3:PutObject'
               - 's3:GetBucketLocation'
-            Resource: !Sub '${ArtifactBucket.Arn}/*'
+            Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucketName}/*'
           - Sid: ArtifactBucketList
             Effect: Allow
             Action: 's3:ListBucket'
-            Resource: !GetAtt ArtifactBucket.Arn
+            Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucketName}'
           - Sid: RdsReadOnly
             Effect: Allow
             # Describe 系はリソースレベルの制御に対応しないものがあるため * とする。
@@ -213,6 +171,20 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-read-approvals'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+
+  # Step 4 のレポート生成器のビルド専用。AWS リソースへは一切触らない。
+  # ログ出力と artifact の読み書きだけを共通ポリシーから得る。
+  BuildReportToolRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-build-report-tool'
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -389,8 +361,8 @@ Resources:
                   - 's3:PutObject'
                   - 's3:GetBucketVersioning'
                 Resource:
-                  - !GetAtt ArtifactBucket.Arn
-                  - !Sub '${ArtifactBucket.Arn}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucketName}'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucketName}/*'
               - Sid: StartBuilds
                 Effect: Allow
                 Action:
@@ -479,6 +451,25 @@ Resources:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
+  # Go レポート生成器をビルドするだけのプロジェクト。
+  # **外部ネットワーク（Go module の取得）へ出るのはここだけである。**
+  # VPC 設定は与えない。AWS API も呼ばないため、VPC の外で動かせる。
+  BuildReportToolProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-build-report-tool'
+      Description: Step 4 - Go レポート生成器のビルド（AWS API は呼ばない）
+      ServiceRole: !GetAtt BuildReportToolRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/build-report-tool.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        # buildspec の runtime-versions で Go を用意し、go.mod / go.sum でビルドする。
+        Image: aws/codebuild/standard:7.0
+
   VerifyGreenProject:
     Type: AWS::CodeBuild::Project
     Properties:
@@ -492,9 +483,9 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        # Go レポート生成器は buildspec の runtime-versions でビルドする。
-        # イメージが提供する managed runtime の Go が go.mod の要求より古い場合は、
-        # GOTOOLCHAIN=auto が必要なツールチェーンを取得する（ネットワーク到達が必要）。
+        # レポート生成器は BuildReportTool の artifact から受け取るため、
+        # このプロジェクトは Go も Go module の取得も必要としない。
+        # Green DB へ到達するため VpcConfig を与える場合も、外部への egress は要らない。
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
@@ -549,7 +540,7 @@ Resources:
       RoleArn: !GetAtt CodePipelineRole.Arn
       ArtifactStore:
         Type: S3
-        Location: !Ref ArtifactBucket
+        Location: !Ref ArtifactBucketName
       # 実行時に指定する変数。start-pipeline-execution の --variables で上書きする。
       Variables:
         - Name: ServiceName
@@ -582,6 +573,18 @@ Resources:
               InputArtifacts: [{ Name: SourceOutput }]
               RunOrder: 1
 
+        # Step 4 で使う Go レポート生成器を先にビルドし、artifact で後段へ渡す。
+        # VerifyGreen を VPC 内へ置く構成でも、外部ネットワークが要るのはこのステージだけになる。
+        - Name: BuildReportTool
+          Actions:
+            - Name: BuildReportTool
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref BuildReportToolProject
+              InputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: ReportToolOutput }]
+              RunOrder: 1
+
         # Step 2 の成果物（8.4 パラメータグループ）が適用済みかを確認する。
         - Name: PrecheckParameterGroup
           Actions:
@@ -611,8 +614,14 @@ Resources:
               ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
               Configuration:
                 ProjectName: !Ref VerifyGreenProject
+                # 入力が複数あるため、どれをソースとして展開するかを明示する。
+                # 2 つ目は CODEBUILD_SRC_DIR_ReportToolOutput に展開され、
+                # buildspec がそこからレポート生成器を受け取る。
+                PrimarySource: SourceOutput
                 EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
-              InputArtifacts: [{ Name: SourceOutput }]
+              InputArtifacts:
+                - { Name: SourceOutput }
+                - { Name: ReportToolOutput }
               OutputArtifacts: [{ Name: VerifyGreenOutput }]
               RunOrder: 1
 
@@ -689,10 +698,6 @@ Outputs:
     Value: !Sub >-
       aws codepipeline start-pipeline-execution --name ${BlueGreenPipeline}
       --variables name=ServiceName,value=<service-name>
-
-  ArtifactBucketName:
-    Description: アーティファクト用 S3 バケット（スタック削除時も残る）
-    Value: !Ref ArtifactBucket
 
   CleanupRoleArn:
     Description: 破壊的権限（DeleteDBInstance 等）を持つロール。付与先を監査する際に使う

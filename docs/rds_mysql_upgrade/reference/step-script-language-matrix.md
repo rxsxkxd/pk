@@ -54,7 +54,7 @@ fi
 | Step | 実行形態 | 補足 |
 |---|---|---|
 | 1・2 | ローカル | Bash + AWS CLI + Ruby。コンテナ経由（`compose.yaml`）を推奨 |
-| 3・5 | CI | Bash + AWS CLI + Ruby + jq。CodeBuild は `runtime-versions: ruby: 3.4.10`、GitHub Actions はランナー同梱の Ruby、Local Agent は `ci/Dockerfile.codebuild-runner`（AWS CLI 2.36.37 + Ruby 3.4.10 + jq） |
+| 3・5 | CI | Bash + AWS CLI + Ruby + jq。CodeBuild は install フェーズの `rbenv local 3.4.10`、GitHub Actions はランナー同梱の Ruby、Local Agent は `ci/Dockerfile.codebuild-runner`（AWS CLI 2.36.37 + Ruby 3.4.10 + jq） |
 | 4 | CI（構成確認）＋ローカル（DB 接続を伴う確認） | **リモートで MySQL へ到達できない構成もありうる**（VPC 構成が別途必要）。その場合は MySQL 接続とレポート出力をローカルで完結させる。レポート生成器は同じプログラムで、`--runtime-values` の有無だけが違う。詳細は [decisions/implementation-language-policy.md](../decisions/implementation-language-policy.md) |
 | 7 | CI（承認付き） | 逆レプリチェックは CI では実行されない。承認前にローカルから `--mysql-user` 付きで手動確認する運用が前提 |
 
@@ -70,6 +70,6 @@ ruby -ryaml -rjson -e 'print JSON.generate(YAML.safe_load(File.read(ARGV[0])))' 
 
 経緯は次のとおりである。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込み、2026-09-14 に 1 箇所へ統合したうえで Ruby へ切り替えた。
 
-**Ruby を選んだ理由は、YAML と JSON がどちらも標準ライブラリ（psych / json）だからである。**PyYAML のような追加パッケージの導入が不要になり、CI から **PyPI への到達要件が消えた**。CodeBuild では各 buildspec が `runtime-versions: ruby: 3.4.10` で Ruby を用意する。
+**Ruby を選んだ理由は、YAML と JSON がどちらも標準ライブラリ（psych / json）だからである。**PyYAML のような追加パッケージの導入が不要になり、CI から **PyPI への到達要件が消えた**。CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う）。
 
 **「AWS CLI さえあれば Bash だけで動く」わけではない。**Ruby と jq が実質的に必須の依存である点は変わらない。yq は引き続き導入していない。

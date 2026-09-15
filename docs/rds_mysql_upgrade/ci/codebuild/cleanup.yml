@@ -13,11 +13,13 @@ env:
 
 phases:
   install:
-    # 設定 YAML の読み取りに Ruby の標準ライブラリ（psych / json）を使う。
-    # 追加パッケージの導入は不要で、PyPI へも到達しない。
-    runtime-versions:
-      ruby: 3.4.10
     commands:
+      # 設定 YAML の読み取りに Ruby の標準ライブラリ（psych / json）を使う。
+      # 追加パッケージの導入は不要で、PyPI へも到達しない。
+      # CodeBuild の managed image は rbenv で複数の Ruby を持つため、使う版を固定する。
+      # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
+      - ruby --version
       # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
       # 落ちていれば復元し、落ちていなければ何も変わらない。
       - chmod +x scripts/*.sh scripts/lib/*.sh

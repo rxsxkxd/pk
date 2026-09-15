@@ -94,7 +94,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 - 設定 YAML → `deployment_config_vars <config> <service> '<jq フィルタ>'` で読む。フィルタは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを宣言する。共通関数（`required` / `optional` / `service` / `shellvars`）も同じファイルにある
 - AWS 応答などの JSON → jq で直接読む
 - **スクリプトに Python を書かない。**設定の読み取りは上の 1 経路だけで、YAML を扱うのは Ruby、それ以外は jq である
-- CodeBuild では各 buildspec が `runtime-versions: ruby: 3.4.10` で Ruby を用意する（パッケージの追加導入は無く、PyPI へも到達しない）
+- CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う。パッケージの追加導入は無く、PyPI へも到達しない）
 
 ローカルで Step 3〜5 を直接実行する前に、必要なコマンドがあることを確認する:
 

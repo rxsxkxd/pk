@@ -13,6 +13,8 @@ global-bundle.pem
 artifacts/
 # Go build output for the Step 4 report generator (CI and local both write here)
 .tools/
+# rbenv local が書き出すファイル。buildspec の install フェーズが生成する
+.ruby-version
 
 # Generated verification reports (see examples/mysql-timezone-replication/)
 examples/mysql-timezone-replication/probe/reports/

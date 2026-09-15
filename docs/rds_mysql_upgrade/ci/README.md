@@ -1,6 +1,6 @@
 # CodeBuild / CodePipeline 実行定義
 
-CloudFormation で CodePipeline と CodeBuild プロジェクトを作成する。テンプレートは 2 種類あり、S3 バケットと IAM ロールを自分で作るかどうかで使い分ける（後述の「2 つのテンプレート」）。
+CloudFormation で CodePipeline と CodeBuild プロジェクトを作成する。どちらのテンプレートも既存 S3 バケットを利用し、IAM ロールを既存にするかスタックで作るかで使い分ける（後述の「2 つのテンプレート」）。
 
 デプロイ前に構成を確認する場合は [パイプライン構成図](codepipeline-structure.md) を参照する。ステージ・IAM 権限・実行シナリオをテンプレートの定義から起こしてある。
 
@@ -59,6 +59,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 | `ReadApprovalsProject` | `ci/codebuild/read-approvals.yml` | `scripts/read_action_approvals.sh` | AWS API を呼ばない。config を読むだけ |
 | `PrecheckProject` | `ci/codebuild/precheck-target-parameter-group.yml` | `scripts/check_target_parameter_group.sh` | 読み取りのみ。常に実行 |
 | `BuildGreenProject` | `ci/codebuild/build-green.yml` | `scripts/build_green.sh` | `actions.build: approved` の場合だけ作成 |
+| `BuildReportToolProject` | `ci/codebuild/build-report-tool.yml` | — | Step 4 の Go レポート生成器をビルドするだけ。AWS API を呼ばない。**外部ネットワークへ出るのはここだけ** |
 | `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.sh` | 常に AWS API 検証を実行 |
 | `SwitchoverProject` | `ci/codebuild/switchover.yml` | `scripts/switchover.sh` | 手動承認済みかつ `actions.switchover: approved` の場合だけ切替 |
 | `CleanupProject` | `ci/codebuild/cleanup.yml` | `scripts/cleanup.sh` | 手動承認済みかつ `actions.cleanup: approved` の場合だけ削除 |
@@ -87,12 +88,12 @@ Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERAT
 
 | 実行基盤 | ビルド方法 |
 |---|---|
-| CodeBuild | buildspec の `runtime-versions: golang` で**同一イメージ内**をビルドする（`go build ./scripts`）。Docker を使わないため `PrivilegedMode` は不要 |
+| CodeBuild | **ビルドと実行を別ステージに分けている。**`BuildReportTool` が `go build ./scripts` を行い、バイナリを artifact（`ReportToolOutput`）として出す。`VerifyGreen` はそれを 2 つ目の input artifact として受け取り、`CODEBUILD_SRC_DIR_ReportToolOutput` から実行する。**VerifyGreen は Go も外部ネットワークも必要としない。**Docker を使わないため `PrivilegedMode` も不要 |
 | GitHub Actions | ランナー同梱の Go で `go build ./scripts`（CodeBuild と同じ手順。Docker は使わない） |
 
 CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定）が必要なツールチェーンを取得する。VPC 内で実行する場合は、その取得経路も確保する。Ruby ランタイムは CodeBuild に不要である。
 
-各 buildspec は設定 YAML を読むために `runtime-versions: ruby: 3.4.10` を指定する。**YAML / JSON は Ruby の標準ライブラリなので、パッケージの追加導入は無く、PyPI へも到達しない。**ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、Ruby があれば追加作業は要らない。
+各 buildspec は設定 YAML を読むために、install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（CodeBuild image 同梱の rbenv を使う。`rbenv` が無い環境では何もしない）。**YAML / JSON は Ruby の標準ライブラリなので、パッケージの追加導入は無く、PyPI へも到達しない。**ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、Ruby があれば追加作業は要らない。
 
 データの読み取りは `jq` に一本化している。設定 YAML は `scripts/lib/deployment_config.sh` が **Ruby の標準ライブラリ**で JSON へ変換し、そこから先の取り出しと検証は jq が行う。CodeBuild の managed image と GitHub Actions のランナーには jq が同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
 
@@ -103,7 +104,7 @@ CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`�
 | テンプレート | 作成するもの | 使いどころ |
 |---|---|---|
 | [codepipeline.yml](../examples/rds-blue-green-deployment/codepipeline.yml) | CodeBuild 3 つと CodePipeline。**S3 バケットと IAM ロールは既存リソースとして受け取る** | 組織側でロールを一元管理している場合 |
-| [codepipeline-all-in-one.yml](../examples/rds-blue-green-deployment/codepipeline-all-in-one.yml) | **S3・IAM・CodeBuild 5 つ・CodePipeline のすべて** | 検証環境、スタック単位で権限を閉じたい場合 |
+| [codepipeline-all-in-one.yml](../examples/rds-blue-green-deployment/codepipeline-all-in-one.yml) | **既存 S3 を利用**し、IAM・CodeBuild 5 つ・CodePipeline を作成 | 検証環境、スタック単位で権限を閉じたい場合 |
 
 対象サービスの指定方法も異なる。
 
@@ -113,7 +114,7 @@ CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`�
 | ステージ | Source → BuildGreen → VerifyGreen → 承認 → Switchover | Source → PrecheckPG → BuildGreen → VerifyGreen → 承認 → Switchover → 承認 → Cleanup |
 | IAM の分割 | 全 Step で 1 ロール | **Step ごとに別ロール**（破壊的権限は Cleanup ロールのみ） |
 
-## デプロイ例（自己完結版）
+## デプロイ例（IAM・CI 作成版）
 
 ```bash
 aws cloudformation deploy \
@@ -124,6 +125,7 @@ aws cloudformation deploy \
     PipelineNamePrefix=rds-bg \
     EnvironmentName=staging \
     DefaultServiceName=example-service \
+    ArtifactBucketName=your-existing-codepipeline-artifact-bucket \
     CodeStarConnectionArn=arn:aws:codeconnections:ap-northeast-1:123456789012:connection/xxxxxxxx \
     RepositoryId=your-org/your-repository \
     DbInstanceIdentifierPrefix=example-service-staging

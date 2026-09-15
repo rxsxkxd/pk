@@ -1,0 +1,44 @@
+# Step 4 のレポート生成器（Go）をビルドするだけの buildspec。
+#
+# 実行と分けてある理由:
+#   - VerifyGreen は Green DB へ到達するため VPC 内へ配置する場合がある。
+#     その経路に Go module の取得（proxy.golang.org）を持ち込みたくない。
+#   - ビルドは AWS を一切呼ばない。失敗しても RDS には何の影響もない。
+#
+# 成果物は .tools/green-report/generate_green_verification_report で、
+# 実行側（verify-green.yml）は GREEN_REPORT_GENERATOR でこれを受け取る。
+#
+# 各コマンドは POSIX シェル互換で書いてある（`[[ ]]` / `<<<` / `-o pipefail` を使わない）。
+version: 0.2
+
+env:
+  # Linux で指定できるのは bash または /bin/sh。明示しておく。
+  shell: bash
+  variables:
+    # managed runtime の Go が go.mod の要求より古い場合に、必要なツールチェーンを
+    # 自動取得させる（Go 1.21 以降の既定動作。明示して意図を残す）。
+    GOTOOLCHAIN: auto
+
+phases:
+  install:
+    # Docker のマルチステージビルドをやめたため PrivilegedMode は不要である。
+    runtime-versions:
+      golang: 1.25
+    commands:
+      # 使う Go を記録する。go.mod の go ディレクティブ（1.25）を満たさない場合は
+      # GOTOOLCHAIN=auto が必要なツールチェーンを取得する（要ネットワーク）。
+      - go version
+
+  build:
+    commands:
+      # 依存は go.sum に固定済み。静的リンクにして、実行側に Go を要求しない。
+      - CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o .tools/green-report/generate_green_verification_report ./scripts
+      # バイナリができたことを確認する。
+      - ls -l .tools/green-report/generate_green_verification_report
+      # AWS を呼ばずに動くことだけ確かめる（引数不足で usage を出して落ちるのが正常）。
+      - .tools/green-report/generate_green_verification_report --help 2>&1 | head -1 || true
+
+artifacts:
+  files:
+    - .tools/green-report/generate_green_verification_report
+  discard-paths: false

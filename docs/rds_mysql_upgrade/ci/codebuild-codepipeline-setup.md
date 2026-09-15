@@ -21,6 +21,7 @@ CodePipeline（サービス・環境ごとに 1 本）
 | Step | CodeBuild project | buildspec | 実行スクリプト |
 |---|---|---|---|
 | 3 | `BuildGreenProject` | `ci/codebuild/build-green.yml` | `scripts/build_green.sh` |
+| 4 | `BuildReportToolProject` | `ci/codebuild/build-report-tool.yml` | — （Go レポート生成器のビルドのみ） |
 | 4 | `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.sh` |
 | 5 | `SwitchoverProject` | `ci/codebuild/switchover.yml` | `scripts/switchover.sh` |
 
@@ -30,17 +31,28 @@ AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS �
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
-| BuildGreen | `aws/codebuild/standard:7.0` | `runtime-versions: ruby: 3.4.10`（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
-| VerifyGreen | `aws/codebuild/standard:7.0` | `runtime-versions` で `ruby: 3.4.10` と `golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | 同一イメージ内で Go バイナリをビルドし、シェルスクリプトと共に実行 |
-| Switchover | `aws/codebuild/standard:7.0` | `runtime-versions: ruby: 3.4.10`（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
+| BuildGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
+| VerifyGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` と `runtime-versions: golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | 同一イメージ内で Go バイナリをビルドし、シェルスクリプトと共に実行 |
+| Switchover | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
 
 ### 共通コンテナ
 
-AWS 用と Local Agent 用で buildspec を分けないが、**設定 YAML の読み取りに使う Ruby は `runtime-versions: ruby: 3.4.10` で明示する**。YAML / JSON は Ruby の標準ライブラリなので、install フェーズでのパッケージ導入は無い（PyPI へも到達しない）。
+AWS 用と Local Agent 用で buildspec を分けない。**設定 YAML の読み取りに使う Ruby は、CodeBuild image に同梱の rbenv で選ぶ。**`runtime-versions` では指定しない。
 
-VerifyGreen だけは `golang: 1.25` も併記する。Docker を使わずに Go レポート生成器を同一イメージ内でビルドするためである。
+```yaml
+  install:
+    commands:
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
+      - ruby --version
+```
 
-> **イメージが提供する managed runtime のバージョンは AWS の更新で変わる。**`ruby: 3.4.10` や `golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、指定を image が提供するバージョンへ下げる。Local Agent のランナー image は `runtime-versions` を解決しないため、`ci/Dockerfile.codebuild-runner` 側で Ruby を固定している。
+`rbenv` が無い環境（Local Agent 用のランナー image は Ruby を固定済み）では何もしない。YAML / JSON は Ruby の標準ライブラリなので、install フェーズでのパッケージ導入は無い（PyPI へも到達しない）。
+
+**`rbenv local` は cwd（`CODEBUILD_SRC_DIR`）へ `.ruby-version` を書く。**ローカルで buildspec を試すと作業ツリーにこのファイルが残るため `.gitignore` 済みである。ファイルを作らせたくない場合は `export RBENV_VERSION=3.4.10` でも同じ効果になる。
+
+VerifyGreen だけは `runtime-versions: golang: 1.25` を指定する。Docker を使わずに Go レポート生成器を同一イメージ内でビルドするためである。
+
+> **指定したバージョンが image に無ければ、`rbenv local` はその場で失敗する**（`rbenv: version '3.4.10' not installed`）。別の Ruby で黙って動くより安全側である。利用できる版は `rbenv versions` で確認する。`golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブを image が提供するバージョンへ下げる。
 
 ```bash
 ruby --version   # YAML / JSON は標準ライブラリなので追加導入は無い
@@ -50,18 +62,36 @@ ruby --version   # YAML / JSON は標準ライブラリなので追加導入は�
 
 ### VerifyGreen の Go レポート生成器
 
-VerifyGreen だけは Go バイナリを使う。**Docker は使わず、buildspec の `runtime-versions` が用意した Go で同一イメージ内をビルドする。**
+VerifyGreen だけは Go バイナリを使う。**Docker は使わず、ビルドと実行を別の buildspec に分けている。**
 
 ```text
-aws/codebuild/standard:7.0（実行コンテナ）
+ci/codebuild/build-report-tool.yml   ← ビルドだけ。AWS を呼ばない
   ├─ install:  runtime-versions: golang: 1.25
-  ├─ pre_build: CGO_ENABLED=0 go build ... -o .tools/green-report/... ./scripts
-  └─ build:     verify_green.sh が上記バイナリを GREEN_REPORT_GENERATOR として実行
+  └─ build:    CGO_ENABLED=0 go build ... -o .tools/green-report/... ./scripts
+               → artifact: .tools/green-report/generate_green_verification_report
+
+ci/codebuild/verify-green.yml        ← 実行だけ。Go を使わない
+  ├─ pre_build: CODEBUILD_SRC_DIR_ReportToolOutput から上記バイナリを受け取る
+  │             （受け取れなければ明示エラーで停止する。ここではビルドしない）
+  └─ build:     verify_green.sh が実行
 ```
+
+**分けた理由**は、VerifyGreen が Green DB へ到達するため VPC 内へ配置される可能性があり、その経路に Go module の取得（`proxy.golang.org`）を持ち込みたくないためである。
+
+| プロジェクト | 外部ネットワーク | AWS API | VPC 配置 |
+|---|---|---|---|
+| `BuildReportToolProject` | **必要**（Go module の取得） | 呼ばない | 不要 |
+| `VerifyGreenProject` | **不要** | 読み取りのみ | Green DB へ接続する場合だけ必要 |
+
+CodePipeline は `BuildReportTool` ステージの出力 artifact（`ReportToolOutput`）を `VerifyGreen` の 2 つ目の input artifact として渡す。入力が複数になるため、アクションの `Configuration` に `PrimarySource: SourceOutput` を指定して、どちらをソースとして展開するかを明示している。2 つ目の artifact は `CODEBUILD_SRC_DIR_ReportToolOutput` に展開される。
+
+> **`verify-green.yml` はレポート生成器をビルドしない。**artifact を受け取れない場合は、理由と対処（`build-report-tool.yml` を実行して artifact を渡す、または `GREEN_REPORT_GENERATOR` に既存バイナリを指定する）を出して停止する。外部へ出ないという前提を崩さないためである。
 
 **`PrivilegedMode` はどのプロジェクトにも設定しない。**
 
-VerifyGreen は Go module の取得先（`proxy.golang.org`）へ到達できる必要がある。イメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定。buildspec で明示している）が必要なツールチェーンを取得するため、その経路も要る。VPC 内で動かす場合は NAT gateway または組織で許可されたプロキシ・VPC endpoint を用意する。
+**Go module の取得先（`proxy.golang.org`）へ到達する必要があるのは `BuildReportToolProject` だけである。**イメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定。buildspec で明示している）が必要なツールチェーンを取得するため、その経路も要る。このプロジェクトは VPC 設定を与えないので、VPC 内の経路整備は不要である。
+
+`VerifyGreenProject` を Green DB へ到達させるため VPC 内へ置く場合も、**外部への egress は要らない**（S3・CloudWatch Logs・RDS API へは VPC endpoint で到達できる）。
 
 > イメージが提供する managed runtime の Go バージョンは AWS の更新で変わる。`runtime-versions: golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブをイメージが提供するバージョンへ下げる。
 
@@ -212,7 +242,7 @@ VerifyGreen の artifact と CloudWatch・アプリケーション検証の結�
 - この Pipeline は Step 3・4・5 を対象にする。切替後の観測・旧 Blue の削除は別手順で管理する。
 - `ManualApproval` は CodePipeline の承認であり、構成リポジトリの Pull Request 承認を置き換えない。`actions.switchover: approved` は構成変更レビューで管理する。
 - RDS への変更権限は CodeBuild 実行ロールに集約し、通常の作業者に RDS API の直接変更権限を付与しない。
-- `PrivilegedMode` はどのプロジェクトにも設定しない。Go レポート生成器は Docker ではなく `runtime-versions: golang` でビルドする。
+- `PrivilegedMode` はどのプロジェクトにも設定しない。Go レポート生成器は Docker ではなく `runtime-versions: golang` でビルドし、Ruby は `rbenv local` で選ぶ。
 - Step 4 の MySQL 実効値は YAML や `Source=user` と比較して合否を出す対象ではない。RDS の計算値・上限調整を含むため、人がレポートで判断する。
 
 ## 参考

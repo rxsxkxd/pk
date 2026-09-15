@@ -2,11 +2,10 @@
 
 [codepipeline-all-in-one.yml](../examples/rds-blue-green-deployment/codepipeline-all-in-one.yml) が作る構成を、デプロイせずに確認するための資料である。本書の内容はテンプレートの定義から起こしており、**テンプレートを変更したら本書も更新する。**
 
-作成されるリソースは 17 個である。
+作成されるリソースは 15 個である。アーティファクト用 S3 バケットは既存のものをパラメータで受け取り、このスタックでは作成・変更しない。
 
 | 種別 | 数 |
 |---|---|
-| `AWS::S3::Bucket` / `BucketPolicy` | 1 / 1 |
 | `AWS::IAM::ManagedPolicy` | 1 |
 | `AWS::IAM::Role` | 7（CodeBuild 6 + CodePipeline 1） |
 | `AWS::CodeBuild::Project` | 6 |
@@ -26,12 +25,12 @@
    │                                                                          │
    ▼                                                                          ▼
 ┌─────────────────────────────────────────┐                    ┌──────────────────────┐
-│ 1. Source                               │                    │ S3 アーティファクト  │
-│    CodeStarSourceConnection (GitHub)    │───► SourceOutput ─►│ <prefix>-<env>-      │
-│    DetectChanges: false（push で起動せず）│                    │ artifacts-<acct>-... │
-└─────────────────────────────────────────┘                    │  暗号化 / 版管理 /   │
-   │                                                            │  公開ブロック /      │
-   ▼                                                            │  TLS 強制 / 365 日   │
+│ 1. Source                               │                    │ 既存 S3 アーティファクト │
+│    CodeStarSourceConnection (GitHub)    │───► SourceOutput ─►│ ArtifactBucketName   │
+│    DetectChanges: false（push で起動せず）│                    │ （既存バケット名）   │
+└─────────────────────────────────────────┘                    │ 組織の既存設定を利用 │
+   │                                                            │ （同一リージョン）   │
+   ▼                                                            │                     │
 ┌─────────────────────────────────────────┐                    └──────────────────────┘
 │ 2. ReadApprovals        Namespace: Approvals                 │
 │    config の actions を読み、変数として公開                    │
@@ -52,7 +51,7 @@
    ▼
 ┌─────────────────────────────────────────┐
 │ 5. VerifyGreen              [Step 4]     │  Green 構成 + ReplicaLag の検証
-│    Go は runtime-versions でビルド        │  切替後は「対象なし」で成功
+│    Go は BuildReportTool が事前ビルド     │  切替後は「対象なし」で成功
 └─────────────────────────────────────────┘
    │
    ▼
@@ -128,7 +127,8 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 | `ReadApprovalsProject` | `read-approvals.yml` | `read_action_approvals.sh` | AWS API を呼ばない |
 | `PrecheckProject` | `precheck-target-parameter-group.yml` | `check_target_parameter_group.sh` | 読み取りのみ |
 | `BuildGreenProject` | `build-green.yml` | `build_green.sh` | **timeout 120 分**（Green の作成待ち） |
-| `VerifyGreenProject` | `verify-green.yml` | `verify_green.sh` | Go レポート生成器を `runtime-versions: golang` で同一イメージ内ビルド（`PrivilegedMode` 不要） |
+| `BuildReportToolProject` | `build-report-tool.yml` | — | Go レポート生成器をビルドし artifact へ出す。AWS API を呼ばない。**外部ネットワークへ出るのはここだけ** |
+| `VerifyGreenProject` | `verify-green.yml` | `verify_green.sh` | artifact のバイナリを使うだけ。**Go も外部ネットワークも不要**（`PrivilegedMode` も不要） |
 | `SwitchoverProject` | `switchover.yml` | `switchover.sh` | **timeout 60 分**（切替完了待ち） |
 | `CleanupProject` | `cleanup.yml` | `cleanup.sh` | 既定 60 分 |
 
@@ -152,7 +152,7 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 | `PrecheckRole` | なし |
 | `BuildGreenRole` | `rds:CreateDBSnapshot` / `rds:CreateBlueGreenDeployment` / `rds:AddTagsToResource` |
 | `VerifyGreenRole` | `ssm:GetParameter` / `ssm:GetParameters`（`MySqlCredentialsParameterArns` 指定時のみ付与） |
-| `SwitchoverRole` | `rds:SwitchoverBlueGreenDeployment` |
+| `SwitchoverRole` | `rds:SwitchoverBlueGreenDeployment`（`deployment:*`）、`rds:ModifyDBInstance`／`rds:PromoteReadReplica`（`db:*`） |
 | **`CleanupRole`** | **`rds:DeleteDBInstance` / `rds:DeleteBlueGreenDeployment` / `rds:ModifyDBInstance`** / `rds:CreateDBSnapshot` / `rds:AddTagsToResource` |
 
 **破壊的権限は `CleanupRole` にのみ存在する。** 他のロールでは旧 Blue を削除できない。
@@ -174,20 +174,9 @@ arn:aws:rds:<region>:<account>:snapshot:<DbInstanceIdentifierPrefix>*
 
 ## S3 アーティファクト
 
-```
-<PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>
-```
+`ArtifactBucketName` に、CodePipeline と同一リージョンにある既存 S3 バケット名を指定する。このテンプレートは `AWS::S3::Bucket` と `AWS::S3::BucketPolicy` を作成せず、既存バケットの暗号化、パブリックアクセスブロック、ライフサイクル、バケットポリシーを変更しない。組織のバケットポリシーで明示許可している場合は、作成される `CodePipelineRole` と各 CodeBuild ロールからの読み書きを許可しておく。
 
-| 設定 | 値 |
-|---|---|
-| 暗号化 | SSE-S3（AES256） |
-| パブリックアクセス | 4 項目すべてブロック |
-| バージョニング | 有効 |
-| バケットポリシー | 非 TLS 通信を `Deny` |
-| ライフサイクル | 365 日で失効、旧版は 90 日、未完了マルチパートは 7 日 |
-| 削除時 | **`DeletionPolicy: Retain`**（移行の証跡が残るためスタック削除でも消えない） |
-
-各 CodeBuild は `artifacts/` 配下の応答 JSON と検証レポートを出力し、次ステージへは渡さず S3 に蓄積する。
+各 CodeBuild は `artifacts/` 配下の応答 JSON と検証レポートを出力し、次ステージへは渡さず既存バケットに蓄積する。
 
 ## デプロイ前の確認方法
 

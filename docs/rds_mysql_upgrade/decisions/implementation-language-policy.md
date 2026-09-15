@@ -38,6 +38,8 @@
 | リモート（CodeBuild／GitHub Actions） | しない | `--runtime-values` を渡さない | `未収集` |
 | ローカル | する | `--runtime-values <収集結果 JSON>` | 収集した実効値 |
 
+**CodeBuild ではビルドと実行を別ステージに分けている。**`BuildReportTool` が Go でビルドして artifact へ出し、`VerifyGreen` はそれを受け取って実行する。VerifyGreen は Green DB へ到達するため VPC 内へ置く可能性があるので、**外部ネットワークへの依存をそこへ持ち込まない**ためである。
+
 **実効値の有無で変わるのはこの列だけである。**パラメータグループのドリフト判定・Green の構成確認・レプリカ同期の判定はいずれも AWS API から取得した値で行うため、リモートでも判定内容は変わらない。この性質は `scripts/lib/cfn_shorthand_test.sh` が両形態のレポートを突き合わせて固定している。
 
 ## この方針に沿って実施したこと

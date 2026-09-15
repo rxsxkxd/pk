@@ -66,6 +66,25 @@ Resources:
             Type: PLAINTEXT
             Value: !Ref ServiceName
 
+  # Step 4 の Go レポート生成器をビルドするだけのプロジェクト。
+  # **外部ネットワーク（Go module の取得）へ出るのはここだけである。**
+  # AWS API を呼ばないため VPC の外で動かせる。
+  BuildReportToolProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-${ServiceName}-build-report-tool'
+      Description: RDS Blue/Green Step 4 - build the report generator
+      ServiceRole: !Ref CodeBuildServiceRoleArn
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: ci/codebuild/build-report-tool.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+
   # Step 4: AWS API 検証を常に行い、MySQL 接続はパラメータが true の場合だけ行う。
   VerifyGreenProject:
     Type: AWS::CodeBuild::Project
@@ -81,8 +100,8 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        # Go レポート生成器は buildspec の runtime-versions で同一イメージ内をビルドする。
-        # Docker を使わないため PrivilegedMode は不要である。
+        # レポート生成器は BuildReportTool の artifact から受け取るため、
+        # このプロジェクトは Go も Go module の取得も必要としない。
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - Name: CONFIG_FILE
@@ -146,6 +165,23 @@ Resources:
               OutputArtifacts:
                 - Name: SourceOutput
               RunOrder: 1
+        # Step 4 で使う Go レポート生成器を先にビルドし、artifact で後段へ渡す。
+        # VerifyGreen を VPC 内へ置く構成でも、外部ネットワークが要るのはこのステージだけになる。
+        - Name: BuildReportTool
+          Actions:
+            - Name: BuildReportTool
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BuildReportToolProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: ReportToolOutput
+              RunOrder: 1
         - Name: BuildGreen
           Actions:
             - Name: BuildGreen
@@ -171,8 +207,13 @@ Resources:
                 Version: '1'
               Configuration:
                 ProjectName: !Ref VerifyGreenProject
+                # 入力が複数あるため、どれをソースとして展開するかを明示する。
+                # 2 つ目は CODEBUILD_SRC_DIR_ReportToolOutput に展開され、
+                # buildspec がそこからレポート生成器を受け取る。
+                PrimarySource: SourceOutput
               InputArtifacts:
                 - Name: SourceOutput
+                - Name: ReportToolOutput
               OutputArtifacts:
                 - Name: VerifyGreenOutput
               RunOrder: 1

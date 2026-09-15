@@ -4,7 +4,7 @@ AWS SAM で実際の AWS アカウントに構築する手順。
 定義は [`template.yml`](../template.yml)、設定は [`samconfig.toml`](../samconfig.toml)。
 
 ```
-make test → make validate → make deploy → 確認メールのリンクを押す → 原本を S3 に置く → aws lambda invoke → 出力を S3 から取り出して確認
+make test → make validate → make deploy → 確認メールのリンクを押す → 原本を S3 に置く → API に POST → 出力を S3 から取り出して確認
 ```
 
 **デプロイの前に、ローカルで確認しておくとつまずきが減る。**
@@ -27,7 +27,10 @@ make test → make validate → make deploy → 確認メールのリンクを�
 | AWS SAM CLI | `sam --version` |
 | Go 1.24 以降 | `go version` |
 
-デプロイする IAM 主体には、Lambda / S3 / KMS / SNS / CloudWatch / IAM ロール作成の権限が要る。
+デプロイする IAM 主体には、Lambda / API Gateway / SNS / CloudWatch / IAM ロール作成の権限が要る。
+
+**原本とマスク済みを置く S3 バケットは既存のものを使う。** このテンプレートはバケットを作らない。
+バケットは Lambda と**同じ AWS アカウント**にある前提（別アカウントの場合は §8 を参照）。
 
 ---
 
@@ -54,6 +57,29 @@ resolve_s3 = true                 # デプロイ用バケットは SAM に任せ
 parameter_overrides = "Env=\"dev\""
 ```
 
+### 既存のバケットを指定する（必須）
+
+`samconfig.toml` の `BucketName` を、実際に使うバケット名に書き換える。
+
+```toml
+parameter_overrides = "Env=\"dev\" BucketName=\"REPLACE_WITH_EXISTING_BUCKET\""
+#                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ここ
+```
+
+書き換えないままデプロイすると、名前の形式チェックで止まる（誤ったバケットへ向けないため）。
+
+```
+Parameter BucketName failed to satisfy constraint: 既存の S3 バケット名を指定してください
+```
+
+バケットがカスタマー管理の KMS キーで暗号化されている場合は、`BucketKmsKeyArn` も足す。
+
+```toml
+parameter_overrides = "Env=\"dev\" BucketName=\"my-bucket\" BucketKmsKeyArn=\"arn:aws:kms:ap-northeast-1:123456789012:key/xxxx\""
+```
+
+SSE-S3 や AWS 管理キー（`aws/s3`）で暗号化されている場合は不要。
+
 環境は `dev`（既定）・`stg`・`prod` の 3 つを用意してある。
 
 ```bash
@@ -74,13 +100,14 @@ sam deploy --parameter-overrides 'Env="dev" AlertEmail="you@example.com"'
 
 | | |
 |---|---|
-| S3 バケット | `image-mask-<Env>-<アカウントID>`（原本とマスク済みを同じバケットに置く） |
 | Lambda 関数 | `image-mask-<Env>` |
-| KMS キー | バケットの暗号化用 |
+| API Gateway（HTTP API） | `POST /mask`。IAM 認証 |
 | SNS トピック | アラートの通知先 |
 | CloudWatch アラーム | 4 種 |
 
-デプロイが終わると Outputs に `ImageBucketName` / `FunctionName` / `OriginalKeyPattern` などが出る。
+**S3 バケットと KMS キーは作られない。** 既存のバケットを `BucketName` で指定する。
+
+デプロイが終わると Outputs に `ApiEndpoint` / `BucketName` / `FunctionName` などが出る。
 
 ---
 
@@ -108,9 +135,9 @@ aws sns list-subscriptions-by-topic --topic-arn "$TOPIC" \
 ```bash
 STACK=image-mask-dev
 BUCKET=$(aws cloudformation describe-stacks --stack-name $STACK \
-  --query 'Stacks[0].Outputs[?OutputKey==`ImageBucketName`].OutputValue' --output text)
-FUNC=$(aws cloudformation describe-stacks --stack-name $STACK \
-  --query 'Stacks[0].Outputs[?OutputKey==`FunctionName`].OutputValue' --output text)
+  --query 'Stacks[0].Outputs[?OutputKey==`BucketName`].OutputValue' --output text)
+API=$(aws cloudformation describe-stacks --stack-name $STACK \
+  --query 'Stacks[0].Outputs[?OutputKey==`ApiEndpoint`].OutputValue' --output text)
 
 # テスト用の画像（実写真を使わなくてよい）
 make sample
@@ -119,15 +146,20 @@ make sample
 aws s3 cp testdata/idcard.jpg \
   "s3://$BUCKET/t-001/no-masked/2026-09-14/loc-12/e-98765"
 
-# 変数を渡して起動
-aws lambda invoke --function-name "$FUNC" --payload '{
-  "tenant_id": "t-001", "date": "2026-09-14",
-  "location_id": "loc-12", "entry_id": "e-98765"
-}' --cli-binary-format raw-in-base64-out tmp/out.json && cat tmp/out.json
+# API に POST する（IAM 認証なので SigV4 で署名する）
+eval "$(aws configure export-credentials --format env)"   # SSO/プロファイルでも環境変数に出す
+curl -sS -X POST "$API" \
+  --aws-sigv4 "aws:amz:$(aws configure get region):execute-api" \
+  --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+  -H "x-amz-security-token: $AWS_SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d @events/request.json
 
 # 結果を取り出して目で見る
 aws s3 cp "s3://$BUCKET/t-001/masked/2026-09-14/loc-12/e-98765" tmp/masked.jpg
 ```
+
+`curl` の `--aws-sigv4` は curl 7.75 以降で使える。署名しないと **403** が返る。
 
 期待する応答:
 
@@ -138,6 +170,42 @@ aws s3 cp "s3://$BUCKET/t-001/masked/2026-09-14/loc-12/e-98765" tmp/masked.jpg
 ```
 
 もう一度同じ呼び出しをすると `"skipped":true` が返る（冪等）。
+
+### 応答の HTTP ステータス
+
+| ステータス | 意味 |
+|---|---|
+| 200 | 処理した、または処理済みだった |
+| 400 | 本文が JSON でない、変数が不正 |
+| 403 | 署名していない、または `execute-api:Invoke` の権限がない |
+| 404 | 原本が存在しない |
+| 500 | サーバー側の問題（強度検査の不合格、S3 の一時エラーなど）。CloudWatch アラームからメールが届く |
+
+API Gateway 経由は同期呼び出しなので、**Lambda による自動リトライはない**。
+
+### 呼び出し側に権限を与える
+
+別の IAM ロールやユーザーから呼ばせる場合、次のポリシーを付ける。
+`Resource` は Outputs の `ApiInvokeArn` の値。
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "execute-api:Invoke",
+  "Resource": "arn:aws:execute-api:ap-northeast-1:<アカウントID>:<api-id>/*/POST/mask"
+}
+```
+
+### Lambda を直接呼ぶ場合
+
+API Gateway を通さずに確認したいとき。
+
+```bash
+FUNC=$(aws cloudformation describe-stacks --stack-name $STACK \
+  --query 'Stacks[0].Outputs[?OutputKey==`FunctionName`].OutputValue' --output text)
+aws lambda invoke --function-name "$FUNC" --payload file://events/request.json \
+  --cli-binary-format raw-in-base64-out tmp/out.json && cat tmp/out.json
+```
 
 ### ログを見る
 
@@ -179,26 +247,32 @@ sam deploy --parameter-overrides BlurRatio=0.06 MaskingPolicyVersion=v2
 
 ### S3 イベント通知で起動したい場合
 
+既存のバケットはこのスタックの管理外なので、**イベント通知の設定はテンプレートでは行えない。**
+次の 2 段階になる。
+
+**1. S3 から Lambda を呼ぶ許可を作る**
+
 ```bash
-sam deploy --parameter-overrides 'Env="dev" EnableS3Trigger="true"'
+sam deploy --parameter-overrides 'Env="dev" BucketName="my-bucket" EnableS3Trigger="true"'
 ```
 
-原本を置くだけで処理が走るようになる。
+**2. バケット側でイベント通知を設定する**
 
-**この更新は 1 回目が失敗することがある。**
+コンソールの「プロパティ → イベント通知」から追加するのが安全。
 
-```
-Unable to validate the following destination configurations
-```
+| 項目 | 値 |
+|---|---|
+| イベントタイプ | `s3:ObjectCreated:*` |
+| プレフィックス | `KeyPrefix` を指定していれば `<KeyPrefix>/`、なければ空 |
+| 送信先 | Lambda 関数 `image-mask-<Env>` |
 
-S3 はイベント通知の設定を受け付けるときに Lambda を呼べるか検証するが、その許可
-（`AWS::Lambda::Permission`）も同じ更新で新規作成されるため、順序によっては
-検証が先に走ってしまう。**もう一度同じコマンドを実行すれば通る**（許可は作成済みになる）。
+> **`aws s3api put-bucket-notification-configuration` を使う場合は注意。** このコマンドは
+> バケットのイベント通知設定を**丸ごと置き換える**。共有バケットで他の通知が
+> 設定されていると消えてしまう。先に `get-bucket-notification-configuration` で
+> 既存の設定を取得し、そこに追記したものを渡すこと。
 
-許可リソースは `EnableS3Trigger=true` のときだけ作られる。無効な間は、S3 がこの関数を
-呼ぶ権限そのものが存在しない。注意点は設計書 §6.1.1 と §8.2 を参照。
-
----
+マスク済みの書き込みでもイベント通知は飛ぶが、Lambda が infix を見て無視するため
+無限ループにはならない。
 
 ## 7. 削除
 
@@ -206,12 +280,9 @@ S3 はイベント通知の設定を受け付けるときに Lambda を呼べる
 sam delete --stack-name image-mask-dev
 ```
 
-**バケットの中身が残っていると削除に失敗する。** 先に空にする。
-
-```bash
-aws s3 rm "s3://$BUCKET" --recursive
-# バージョニングを有効にしているため、古いバージョンも消す必要がある
-```
+**バケットと中の画像は消えない。** バケットはこのスタックの管理外のため。
+S3 イベント通知をバケット側に設定していた場合は、先にそちらを外しておく
+（送信先の Lambda が無くなり、アップロード時にエラーになるわけではないが、無効な設定が残る）。
 
 ---
 
@@ -220,14 +291,15 @@ aws s3 rm "s3://$BUCKET" --recursive
 | 症状 | 原因と対処 |
 |---|---|
 | `CAPABILITY_IAM` を求められる | Lambda の実行ロールを作るため。`--capabilities CAPABILITY_IAM` を付けるか、guided で `y` |
+| API が 403 を返す | SigV4 で署名していない、または呼び出し側に `execute-api:Invoke` の権限がない |
+| API が 503 / タイムアウトする | HTTP API の統合タイムアウトは 30 秒が上限。巨大な画像で超えることがある |
 | CloudWatch アラームは鳴るがメールが来ない | Amazon SNS のサブスクリプションが未確認（→ 3.） |
-| 原本を置いても何も起きない | `EnableS3Trigger` の既定は `false`。リクエスト起動で呼ぶか、`true` にする |
-| `EnableS3Trigger=true` にしたら `Unable to validate the following destination configurations` | S3 からの起動許可が同じ更新で作られるため、順序によっては検証が先に走る。**もう一度デプロイすれば通る** |
+| デプロイが `Parameter BucketName failed to satisfy constraint` で止まる | `samconfig.toml` の `BucketName` がプレースホルダーのまま（→ 2.） |
+| 処理が `AccessDenied` で失敗する（S3 の権限は付いている） | バケットがカスタマー管理の KMS キーで暗号化されている。`BucketKmsKeyArn` を指定する。キーポリシーが IAM での許可を委任していない場合は、キーポリシー側に Lambda の実行ロールを足す |
+| 処理が `AccessDenied` で失敗する（KMS も問題ない） | 既存のバケットポリシーに、Lambda に当てはまる明示的な `Deny`（特定の VPC エンドポイント以外を拒否、など）がある。バケットの管理者に確認する |
+| バケットが別の AWS アカウントにある | IAM ポリシーだけでは足りない。**バケット側のバケットポリシーで Lambda の実行ロールを許可する**必要がある（KMS キーも同様） |
+| 原本を置いても何も起きない | `EnableS3Trigger` の既定は `false`。API か直接呼び出しで処理する。S3 イベント通知を使うなら §6 の 2 段階を行う |
 | 処理されず「レイアウトに合わない」とログに出る | キーの形が `[<prefix>/]<tid>/<infix>/<date>/<lid>/<eid>` と一致していない。`KeyPrefix` の設定と実際のキーを突き合わせる |
-| バケット名が衝突する | 名前に AWS アカウント ID が入るので通常は衝突しない。同一アカウントで複数環境なら `Env` を変える |
-| 既存のバケットを使いたい | **現在のテンプレートはバケットを新規作成する。** 既存バケットを使う構成には未対応で、テンプレートの修正が要る |
-| `Circular dependency between resources` と言われる | バケットのイベント通知設定が Lambda を参照し、Lambda の IAM がバケットを参照すると閉路になる。**解消済み**（IAM とアクセス許可の ARN はバケット名から組み立てている）。テンプレートを編集して `!GetAtt ImageBucket.Arn` を Lambda 側に書くと再発する |
-| バケット名を変えたい | 名前は `BucketName` のほか、Lambda の環境変数と IAM の ARN にも同じ式で書いてある（循環参照を避けるため）。`image-mask-${Env}-${AWS::AccountId}` を検索して全箇所を直す |
 
 ---
 

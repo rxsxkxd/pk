@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"image"
@@ -18,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 
 	"github.com/rxsxkxd/lim/internal/config"
 	"github.com/rxsxkxd/lim/internal/imaging"
@@ -31,6 +33,10 @@ type fakeS3 struct {
 	puts    int
 	gets    int
 	getErr  error
+
+	// listBucket が true なら、存在しないキーに 404 を返す（s3:ListBucket を持つ場合の S3 の挙動）。
+	// 既定の false は 403 を返す（持たない場合の挙動）。
+	listBucket bool
 }
 
 func newFakeS3() *fakeS3 {
@@ -45,7 +51,12 @@ func (f *fakeS3) put(bucket, key string, body []byte, meta map[string]string) {
 func (f *fakeS3) HeadObject(_ context.Context, in *s3.HeadObjectInput, _ ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
 	id := *in.Bucket + "/" + *in.Key
 	if _, ok := f.objects[id]; !ok {
-		return nil, &types.NotFound{}
+		if f.listBucket {
+			return nil, &types.NotFound{}
+		}
+		// 実際の S3 は、s3:ListBucket を持たない主体に対して存在しないキーを 403 で返す。
+		// Lambda には ListBucket を付けていないので、既定はこちらに合わせる。
+		return nil, &smithy.GenericAPIError{Code: "Forbidden", Message: "Forbidden"}
 	}
 	return &s3.HeadObjectOutput{Metadata: f.meta[id]}, nil
 }
@@ -827,9 +838,9 @@ func TestHandleRequestRejectsMissingObject(t *testing.T) {
 	h := newHandler(f)
 
 	_, err := h.Handle(context.Background(), request("t-001", "2026-09-14", "loc-12", "missing.jpg"))
-	var ve *ValidationError
-	if !errors.As(err, &ve) {
-		t.Fatalf("error = %v, want ValidationError", err)
+	var nf *NotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("error = %v, want NotFoundError", err)
 	}
 	if f.puts != 0 {
 		t.Errorf("PutObject called %d times, want 0", f.puts)
@@ -892,5 +903,220 @@ func TestHandleSkipsKeysOutsideTheLayout(t *testing.T) {
 	}
 	if f.gets != 0 || f.puts != 0 {
 		t.Errorf("S3 was touched: gets=%d puts=%d", f.gets, f.puts)
+	}
+}
+
+// --- API Gateway（HTTP API）経由 ---
+
+// apiEvent は HTTP API（ペイロード形式 2.0）のイベントを作る。
+func apiEvent(body string, base64Encoded bool) json.RawMessage {
+	return payload(events.APIGatewayV2HTTPRequest{
+		Version:         "2.0",
+		RouteKey:        "POST /mask",
+		RawPath:         "/mask",
+		Body:            body,
+		IsBase64Encoded: base64Encoded,
+		RequestContext: events.APIGatewayV2HTTPRequestContext{
+			HTTP: events.APIGatewayV2HTTPRequestContextHTTPDescription{Method: "POST", Path: "/mask"},
+		},
+	})
+}
+
+func apiBody(tid, date, lid, eid string) string {
+	return string(request(tid, date, lid, eid))
+}
+
+func invokeAPI(t *testing.T, h *Handler, ev json.RawMessage) (events.APIGatewayV2HTTPResponse, error) {
+	t.Helper()
+	out, err := h.Invoke(context.Background(), ev)
+	if err != nil {
+		return events.APIGatewayV2HTTPResponse{}, err
+	}
+	res, ok := out.(events.APIGatewayV2HTTPResponse)
+	if !ok {
+		t.Fatalf("response type = %T, want APIGatewayV2HTTPResponse", out)
+	}
+	return res, nil
+}
+
+func TestAPIMasksAndReturns200(t *testing.T) {
+	f := newFakeS3()
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "e-1"), detailedJPEG(t, 400, 300), nil)
+	h := newHandler(f)
+
+	res, err := invokeAPI(t, h, apiEvent(apiBody("t-001", "2026-09-14", "loc-12", "e-1"), false))
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if res.StatusCode != 200 {
+		t.Fatalf("status = %d, body = %s", res.StatusCode, res.Body)
+	}
+	if res.Headers["Content-Type"] != "application/json" {
+		t.Errorf("Content-Type = %q", res.Headers["Content-Type"])
+	}
+	var body Response
+	if err := json.Unmarshal([]byte(res.Body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.OutputKey != maskedKey("t-001", "2026-09-14", "loc-12", "e-1") {
+		t.Errorf("outputKey = %q", body.OutputKey)
+	}
+	if _, ok := f.objects["shared/"+maskedKey("t-001", "2026-09-14", "loc-12", "e-1")]; !ok {
+		t.Error("output not written")
+	}
+}
+
+func TestAPIAcceptsBase64Body(t *testing.T) {
+	// API Gateway は本文を base64 で渡すことがある。
+	f := newFakeS3()
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "e-1"), detailedJPEG(t, 200, 200), nil)
+	h := newHandler(f)
+
+	enc := base64.StdEncoding.EncodeToString([]byte(apiBody("t-001", "2026-09-14", "loc-12", "e-1")))
+	res, err := invokeAPI(t, h, apiEvent(enc, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 {
+		t.Errorf("status = %d, body = %s", res.StatusCode, res.Body)
+	}
+}
+
+func TestAPIReturnsSkippedOnSecondCall(t *testing.T) {
+	f := newFakeS3()
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "e-1"), detailedJPEG(t, 200, 200), nil)
+	h := newHandler(f)
+	ev := apiEvent(apiBody("t-001", "2026-09-14", "loc-12", "e-1"), false)
+
+	if _, err := invokeAPI(t, h, ev); err != nil {
+		t.Fatal(err)
+	}
+	res, err := invokeAPI(t, h, ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != 200 || !strings.Contains(res.Body, `"skipped":true`) {
+		t.Errorf("status = %d, body = %s", res.StatusCode, res.Body)
+	}
+}
+
+func TestAPIClientErrorsBecome4xx(t *testing.T) {
+	tests := []struct {
+		name   string
+		body   string
+		status int
+	}{
+		{"JSON でない", "not json", 400},
+		{"変数が空", apiBody("", "2026-09-14", "loc-12", "e-1"), 400},
+		{"スラッシュで階層を増やす", apiBody("a/b", "2026-09-14", "loc-12", "e-1"), 400},
+		{"原本がない", apiBody("t-001", "2026-09-14", "loc-12", "missing"), 404},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeS3()
+			h := newHandler(f)
+			res, err := invokeAPI(t, h, apiEvent(tt.body, false))
+			if err != nil {
+				t.Fatalf("Invoke returned an error (would be 500): %v", err)
+			}
+			if res.StatusCode != tt.status {
+				t.Errorf("status = %d, want %d (body %s)", res.StatusCode, tt.status, res.Body)
+			}
+			if !strings.Contains(res.Body, `"error"`) {
+				t.Errorf("body has no error field: %s", res.Body)
+			}
+			if f.puts != 0 {
+				t.Errorf("PutObject called %d times", f.puts)
+			}
+		})
+	}
+}
+
+func TestAPIServerErrorsReturnGoError(t *testing.T) {
+	// サーバー側の失敗は Go のエラーとして返し、API Gateway に 500 を返させる。
+	// Lambda の Errors メトリクスが立ち、既存の CloudWatch アラームでメールが届く。
+	f := newFakeS3()
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "e-1"), detailedJPEG(t, 200, 200), nil)
+	f.getErr = errors.New("SlowDown")
+	h := newHandler(f)
+
+	if _, err := h.Invoke(context.Background(), apiEvent(apiBody("t-001", "2026-09-14", "loc-12", "e-1"), false)); err == nil {
+		t.Error("expected an error for a transient S3 failure")
+	}
+}
+
+func TestAPIStrengthFailureReturnsGoError(t *testing.T) {
+	// 強度検査の不合格は呼び出し側の責任ではない（設定の問題）ので 4xx にしない。
+	f := newFakeS3()
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "e-1"), detailedJPEG(t, 400, 300), nil)
+	h := newHandler(f, func(c *config.Config) {
+		c.BlurRatio = 0.0001
+		c.MinBlurRadiusPx = 0.1
+		c.DownscaleFactor = 1
+		c.MaxLaplacianVar = 0.01
+	})
+
+	_, err := h.Invoke(context.Background(), apiEvent(apiBody("t-001", "2026-09-14", "loc-12", "e-1"), false))
+	var se *StrengthError
+	if !errors.As(err, &se) {
+		t.Errorf("error = %v, want StrengthError", err)
+	}
+	if f.puts != 0 {
+		t.Errorf("PutObject called %d times", f.puts)
+	}
+}
+
+func TestInvokeStillRoutesDirectAndS3Events(t *testing.T) {
+	// Invoke を入口にしても、直接呼び出しと S3 イベント通知は従来どおり動く。
+	f := newFakeS3()
+	body := detailedJPEG(t, 200, 200)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "e-1"), body, nil)
+	f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "e-2"), body, nil)
+	h := newHandler(f)
+
+	out, err := h.Invoke(context.Background(), request("t-001", "2026-09-14", "loc-12", "e-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := out.(*Response); !ok {
+		t.Errorf("direct invoke response type = %T, want *Response", out)
+	}
+	if _, err := h.Invoke(context.Background(), s3Event("shared", origKey("t-001", "2026-09-14", "loc-12", "e-2"), int64(len(body)), "e2")); err != nil {
+		t.Fatal(err)
+	}
+	if f.puts != 2 {
+		t.Errorf("PutObject called %d times, want 2", f.puts)
+	}
+}
+
+func TestMissingObjectsAreRecognisedWithAndWithoutListBucket(t *testing.T) {
+	// s3:ListBucket の有無で S3 は 404 / 403 を返し分ける。
+	// どちらでも「無い」と判断できること（初回処理と、原本なしの 404 応答）。
+	for _, listBucket := range []bool{false, true} {
+		name := "ListBucket なし（403）"
+		if listBucket {
+			name = "ListBucket あり（404）"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFakeS3()
+			f.listBucket = listBucket
+			f.put("shared", origKey("t-001", "2026-09-14", "loc-12", "e-1"), detailedJPEG(t, 200, 200), nil)
+			h := newHandler(f)
+
+			// 初回処理: マスク済みがまだ無い → 処理して書き込む
+			if _, err := h.Handle(context.Background(), request("t-001", "2026-09-14", "loc-12", "e-1")); err != nil {
+				t.Fatalf("first run failed: %v", err)
+			}
+			if f.puts != 1 {
+				t.Errorf("PutObject called %d times, want 1", f.puts)
+			}
+
+			// 原本が無い → NotFoundError（API なら 404）
+			_, err := h.Handle(context.Background(), request("t-001", "2026-09-14", "loc-12", "missing"))
+			var nf *NotFoundError
+			if !errors.As(err, &nf) {
+				t.Errorf("error = %v, want NotFoundError", err)
+			}
+		})
 	}
 }

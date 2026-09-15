@@ -1,11 +1,10 @@
 // Command mask は S3 上の画像にガウスぼかしを適用して S3 に保存する Lambda。
 //
-// 起動方法は 2 つ。
+// 起動方法は 3 つ。ペイロードの形で判別する（internal/handler.Invoke）。
 //
-//	S3 の ObjectCreated 通知
-//	キーの変数部分を渡すリクエスト: {"x":"...","y":"...","z":"...","n":"..."}
-//
-// どちらもペイロードの形で判別する（internal/handler.Handle）。
+//	API Gateway（HTTP API）: POST /mask に変数の JSON を送る
+//	直接呼び出し: {"tenant_id":"...","date":"...","location_id":"...","entry_id":"..."}
+//	Amazon S3 イベント通知（s3:ObjectCreated:*、既定では無効）
 package main
 
 import (
@@ -42,7 +41,7 @@ func main() {
 		Cfg: cfg,
 		Log: log,
 	}
-	lambda.Start(h.Handle)
+	lambda.Start(h.Invoke)
 }
 
 func logLevel() slog.Level {

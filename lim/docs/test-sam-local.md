@@ -9,7 +9,7 @@ make build → events/env.json のバケット名を書き換え → 原本を S
 
 | 確認できること | イベントの解釈、環境変数の読み込み、ハンドラの分岐、S3 との実通信、応答の形 |
 |---|---|
-| **確認できないこと** | S3 イベント通知の配線、IAM の最小権限、リトライ、CloudWatch アラーム（→ [deploy.md](deploy.md)） |
+| **確認できないこと** | S3 イベント通知の配線、API の IAM 認証、**Lambda の実行ロールの権限**、リトライ、CloudWatch アラーム（→ [deploy.md](deploy.md)） |
 
 ---
 
@@ -25,9 +25,11 @@ make build → events/env.json のバケット名を書き換え → 原本を S
 
 - **Docker が起動していること**（`docker info` が通る）
 - **AWS 認証情報**（`aws sts get-caller-identity` が通る）
-- **実在する S3 バケットと、その中に置いた原本**
+- **既存の S3 バケットと、その中に置いた原本**
+- ローカルの認証情報に、そのバケットの読み書き権限（暗号化が KMS なら KMS の権限も）
 
-バケットがまだ無いなら、先に [deploy.md](deploy.md) でデプロイするのが早い。
+`sam local` はローカルの認証情報で S3 にアクセスする。**Lambda の実行ロールの権限は使われない**
+ので、AWS 上で権限が足りているかはここでは確認できない。
 S3 を触らずに画像処理だけ見たい場合は [test-local.md](test-local.md) で足りる。
 
 ---
@@ -49,14 +51,15 @@ make build                                  # .aws-sam/build を作る
 | ファイル | 内容 |
 |---|---|
 | `events/env.json` | 関数に渡す環境変数。**`INPUT_BUCKET` を自分のバケット名に書き換える** |
-| `events/request.json` | リクエスト起動のペイロード |
+| `events/request.json` | 直接呼び出しのペイロード（API の本文と同じ） |
+| `events/api-gateway.json` | API Gateway（HTTP API、形式 2.0）経由のイベント |
 | `events/s3-notification.json` | S3 イベント通知のペイロード |
 
 `env.json` の `INPUT_BUCKET` / `OUTPUT_BUCKET` と、イベント側のバケット名・キーは
 揃っている必要がある。揃っていないと「バケットが違う」「レイアウトに合わない」で弾かれる。
 
 ```bash
-BUCKET=image-mask-dev-$(aws sts get-caller-identity --query Account --output text)
+BUCKET=my-existing-bucket   # 実際に使う既存のバケット名
 sed -i '' "s/image-mask-dev-000000000000/$BUCKET/g" events/env.json events/s3-notification.json
 ```
 
@@ -92,7 +95,39 @@ sam local invoke MaskFunction \
 aws s3 cp "s3://$BUCKET/t-001/masked/2026-09-14/loc-12/e-98765" tmp/from-sam.jpg
 ```
 
-## 5. S3 イベント通知の形を試す
+## 5. API Gateway 経由の形を試す
+
+API Gateway のイベント形式で呼ぶと、HTTP の応答（ステータスコードと本文）が返る。
+
+```bash
+sam local invoke MaskFunction \
+  --env-vars events/env.json \
+  -e events/api-gateway.json
+```
+
+```json
+{"statusCode":200,"headers":{"Content-Type":"application/json"},
+ "body":"{\"sourceKey\":\"t-001/no-masked/...\",\"skipped\":false,...}"}
+```
+
+実際に HTTP で叩きたい場合は API をローカルに立てる。
+
+```bash
+sam local start-api --env-vars events/env.json
+```
+
+別のターミナルから:
+
+```bash
+curl -sS -X POST http://127.0.0.1:3000/mask \
+  -H "Content-Type: application/json" \
+  -d @events/request.json
+```
+
+**ローカルでは IAM 認証が効かない。** 署名なしで通るので、認証の確認は AWS 上で行う
+（→ [deploy.md](deploy.md)）。
+
+## 6. S3 イベント通知の形を試す
 
 イベント通知そのものは配線していなくても、**ペイロードの解釈だけ**は確認できる。
 
@@ -108,7 +143,7 @@ S3 イベント通知経由では応答が `null` になる（戻り値を返さ
 キーの `infix` を `masked` に書き換えて実行すると、`skip: not an original` が出て
 何もしない（再帰ループ防止の確認）。
 
-## 6. HTTP で繰り返し叩きたい場合
+## 7. Lambda API 形式で繰り返し叩きたい場合
 
 ```bash
 sam local start-lambda --env-vars events/env.json
@@ -134,7 +169,8 @@ aws lambda invoke --function-name MaskFunction \
 | `bucket ... is not the configured input bucket` | `events/env.json` の `INPUT_BUCKET` とイベントのバケット名が違う |
 | `key ... has N segments, want 5` | キーの形が `[<prefix>/]<tid>/<infix>/<date>/<lid>/<eid>` と一致していない。`KEY_PREFIX` の設定と突き合わせる |
 | `object not found` | S3 に原本を置いていない（→ 3.） |
-| 応答が `null` | S3 イベント通知のペイロードを渡した場合は正常。リクエスト起動なら JSON が返る |
+| 応答が `null` | S3 イベント通知のペイロードを渡した場合は正常。直接呼び出しなら JSON、API Gateway 形式なら `statusCode` 付きの応答が返る |
+| `start-api` で 403 にならない | 正常。ローカルでは IAM 認証が効かない |
 | 初回が遅い | ランタイムのコンテナイメージを取得している。2 回目以降は速い |
 
 ---

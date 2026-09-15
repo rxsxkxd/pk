@@ -1,0 +1,20 @@
+{
+  "version": "2.0",
+  "routeKey": "POST /mask",
+  "rawPath": "/mask",
+  "rawQueryString": "",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "requestContext": {
+    "http": {
+      "method": "POST",
+      "path": "/mask",
+      "protocol": "HTTP/1.1"
+    },
+    "routeKey": "POST /mask",
+    "stage": "$default"
+  },
+  "body": "{\"tenant_id\":\"t-001\",\"date\":\"2026-09-14\",\"location_id\":\"loc-12\",\"entry_id\":\"e-98765\"}",
+  "isBase64Encoded": false
+}

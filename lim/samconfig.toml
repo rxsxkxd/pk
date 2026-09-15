@@ -31,11 +31,16 @@ confirm_changeset = true
 resolve_s3 = true
 # パラメータの既定値は template.yml 側にある。ここでは環境ごとに変わるものだけ指定する。
 #
+# BucketName は既存のバケット名に書き換える（必須）。
+# 書き換えないままだと、名前の形式チェックでデプロイが止まる（誤ったバケットへ向けないため）。
+#
+# バケットがカスタマー管理の KMS キーで暗号化されている場合は BucketKmsKeyArn も足す。
+#
 # 通知メールを受け取るには AlertEmail を足す。コマンドラインで渡してもよい:
 #   sam deploy --parameter-overrides 'Env="dev" AlertEmail="you@example.com"'
 #
 # S3 通知でも起動したい場合は EnableS3Trigger="true" を足す。
-parameter_overrides = "Env=\"dev\""
+parameter_overrides = "Env=\"dev\" BucketName=\"REPLACE_WITH_EXISTING_BUCKET\""
 
 # ---------------- stg ----------------
 
@@ -55,7 +60,7 @@ region = "ap-northeast-1"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Env=\"stg\""
+parameter_overrides = "Env=\"stg\" BucketName=\"REPLACE_WITH_EXISTING_BUCKET\""
 
 # ---------------- prod ----------------
 
@@ -75,4 +80,4 @@ region = "ap-northeast-1"
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = true
 resolve_s3 = true
-parameter_overrides = "Env=\"prod\""
+parameter_overrides = "Env=\"prod\" BucketName=\"REPLACE_WITH_EXISTING_BUCKET\""

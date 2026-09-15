@@ -2,6 +2,9 @@
 
 S3 に置かれた画像の**上半分にガウスぼかしを適用**して、同じバケットの別階層へ保存する Lambda。
 
+**バケットは既存のものを使う。** デプロイ時に `BucketName` で名前を指定する（`samconfig.toml`）。
+同じ AWS アカウントのバケットなら、バケットポリシーの追加は不要。
+
 - 言語: Go 1.24 / `provided.al2023` / arm64
 - IaC: AWS SAM（`template.yml` + `samconfig.toml`）
 | 文書 | 内容 |
@@ -50,7 +53,7 @@ S3 に置かれた画像の**上半分にガウスぼかしを適用**して、�
 | `internal/s3key` | キー構造の組み立てと解釈、変数の検証 |
 | `internal/config` | 環境変数の読み込み |
 | `internal/metrics` | EMF によるカスタムメトリクス出力 |
-| `template.yml` | バケット・KMS・Lambda・SNS・CloudWatch アラーム |
+| `template.yml` | Lambda・API Gateway・SNS・CloudWatch アラーム（**バケットは既存のものを指定**） |
 | `samconfig.toml` | スタック名・リージョン・環境ごとのパラメータ |
 
 ## 必要なもの
@@ -200,14 +203,29 @@ aws sns list-subscriptions-by-topic --topic-arn "$ALERT_TOPIC_ARN" \
 
 ### 起動方法
 
-実装は 2 通りに対応しているが、**既定では S3 イベント通知は無効**で、リクエスト起動だけが有効。
+実装は 3 通りに対応している。**既定では S3 イベント通知は無効**。
 
 | 起動方法 | 実装 | 既定 |
 |---|---|---|
-| リクエスト | 対応 | **有効** |
+| API Gateway（HTTP API） `POST /mask` | 対応 | **有効**（IAM 認証） |
+| Lambda の直接呼び出し | 対応 | 有効 |
 | Amazon S3 イベント通知（`s3:ObjectCreated:*`） | 対応 | 無効（`EnableS3Trigger=true` で有効化） |
 
-**変数を渡して呼ぶ**
+**API に POST する**（標準の入口。IAM 認証）
+
+```bash
+curl -sS -X POST "$API_ENDPOINT" \
+  --aws-sigv4 "aws:amz:ap-northeast-1:execute-api" \
+  --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+  -H "x-amz-security-token: $AWS_SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id":"t-001","date":"2026-09-14","location_id":"loc-12","entry_id":"e-98765"}'
+```
+
+200（処理した／処理済み）、400（変数が不正）、404（原本なし）、500（サーバー側の問題）を返す。
+詳細は [docs/deploy.md](docs/deploy.md)。
+
+**Lambda を直接呼ぶ**
 
 ```bash
 aws lambda invoke --function-name image-mask-dev --payload '{
@@ -349,7 +367,7 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 
 ## 要件外の追加について
 
-依頼になかったが設計側の判断で入れた構成（KMS カスタマー管理キー、バージョニングなど）は、
+依頼になかったが設計側の判断で入れた構成は、
 理由と外した場合の影響を
 [設計書 §15.4](docs/image-blur-lambda-design.md) に一覧してある。
 いずれも `template.yml` から削るだけで外せる（コード変更は不要）。
@@ -379,9 +397,9 @@ S3 イベント通知は at-least-once。出力キーは入力キーとポリシ
 | 項目 | 確認方法 |
 |---|---|
 | S3 イベントの発火・プレフィックスフィルタ | dev 環境へデプロイして実際に PUT |
-| IAM 最小権限（出力バケットを読めないこと等） | dev 環境で当該操作が拒否されることを確認 |
+| IAM 最小権限（原本に書けない、マスク済みを消せない等） | dev 環境で当該操作が拒否されることを確認 |
 | リトライと CloudWatch アラームの発火 | dev 環境で意図的に失敗させる |
-| KMS の暗号化・復号 | dev 環境で PUT / GET |
+| 既存バケットへの実アクセス（KMS・既存のバケットポリシーを含む） | dev 環境で API を呼んで処理が通ることを確認 |
 | CloudWatch アラームの発火 | 意図的に失敗させる |
 | 冪等性・fail-closed・領域・メタデータ除去 | ユニットテストで代替済み |
 

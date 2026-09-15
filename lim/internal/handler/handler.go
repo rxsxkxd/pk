@@ -4,6 +4,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +42,16 @@ type (
 	StrengthError = masking.StrengthError
 )
 
+// NotFoundError は指定された原本が存在しないことを示す。呼び出し側の指定ミスとして扱う。
+type NotFoundError struct {
+	Bucket string
+	Key    string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("object not found: s3://%s/%s", e.Bucket, e.Key)
+}
+
 func invalid(format string, a ...any) error {
 	return &ValidationError{Reason: fmt.Sprintf(format, a...)}
 }
@@ -65,6 +76,82 @@ type Response struct {
 	Skipped   bool    `json:"skipped"`
 	RadiusPx  float64 `json:"radiusPx,omitempty"`
 	Score     float64 `json:"strengthScore,omitempty"`
+}
+
+// Invoke は Lambda のエントリポイント。
+//
+// API Gateway（HTTP API、ペイロード形式 2.0）経由の呼び出しを判別して HTTP の応答に
+// 変換し、それ以外（直接呼び出し・S3 イベント通知）は Handle に渡す。
+func (h *Handler) Invoke(ctx context.Context, payload json.RawMessage) (any, error) {
+	var probe struct {
+		RouteKey       string `json:"routeKey"`
+		RequestContext struct {
+			HTTP struct {
+				Method string `json:"method"`
+			} `json:"http"`
+		} `json:"requestContext"`
+	}
+	if err := json.Unmarshal(payload, &probe); err == nil &&
+		(probe.RouteKey != "" || probe.RequestContext.HTTP.Method != "") {
+		return h.handleHTTP(ctx, payload)
+	}
+	return h.Handle(ctx, payload)
+}
+
+// handleHTTP は API Gateway からの呼び出しを処理する。
+//
+// 呼び出し側の指定ミス（変数の不正、原本なし）は 4xx の応答に変換する。
+// それ以外の失敗は Go のエラーとして返す。API Gateway は 500 を返し、Lambda の
+// Errors メトリクスが立つので、既存の CloudWatch アラームでメールが届く。
+// 同期呼び出しなので Lambda による自動リトライはない（再試行は呼び出し側の責任）。
+func (h *Handler) handleHTTP(ctx context.Context, payload json.RawMessage) (any, error) {
+	var req events.APIGatewayV2HTTPRequest
+	if err := json.Unmarshal(payload, &req); err != nil {
+		return httpError(400, "cannot parse the API Gateway event"), nil
+	}
+
+	body := []byte(req.Body)
+	if req.IsBase64Encoded {
+		decoded, err := base64.StdEncoding.DecodeString(req.Body)
+		if err != nil {
+			return httpError(400, "request body is not valid base64"), nil
+		}
+		body = decoded
+	}
+
+	var probe struct {
+		TenantID string `json:"tenant_id"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return httpError(400, "request body must be JSON"), nil
+	}
+
+	res, err := h.handleRequest(ctx, body)
+	if err != nil {
+		var ve *ValidationError
+		if errors.As(err, &ve) {
+			return httpError(400, err.Error()), nil
+		}
+		var nf *NotFoundError
+		if errors.As(err, &nf) {
+			return httpError(404, err.Error()), nil
+		}
+		return nil, err
+	}
+	return httpJSON(200, res), nil
+}
+
+func httpJSON(status int, v any) events.APIGatewayV2HTTPResponse {
+	b, _ := json.Marshal(v)
+	return events.APIGatewayV2HTTPResponse{
+		StatusCode: status,
+		Headers:    map[string]string{"Content-Type": "application/json"},
+		Body:       string(b),
+	}
+}
+
+func httpError(status int, message string) events.APIGatewayV2HTTPResponse {
+	return httpJSON(status, map[string]string{"error": message})
 }
 
 // Handle は S3 通知とリクエストの両方を受ける。
@@ -126,8 +213,13 @@ func (h *Handler) handleRequest(ctx context.Context, payload json.RawMessage) (*
 		Key:    aws.String(srcKey),
 	})
 	if err != nil {
-		if isNotFound(err) {
-			return nil, invalid("object not found: s3://%s/%s", h.Cfg.InputBucket, srcKey)
+		// ListBucket を持たないため、原本が無いときも 403 が返る（alreadyProcessed の注記参照）。
+		// キーは検証済みの変数から原本の階層に組み立てており、その階層の読み取りは
+		// 許可してあるので、ここでの 403 は実質「存在しない」を意味する。
+		if isMissing(err) {
+			nf := &NotFoundError{Bucket: h.Cfg.InputBucket, Key: srcKey}
+			emitFailureMetric(nf)
+			return nil, nf
 		}
 		return nil, fmt.Errorf("head source object: %w", err)
 	}
@@ -277,7 +369,8 @@ func emitFailureMetric(err error) {
 		return
 	}
 	var ve *ValidationError
-	if errors.As(err, &ve) {
+	var nf *NotFoundError
+	if errors.As(err, &ve) || errors.As(err, &nf) {
 		metrics.Emit(metrics.Count("ValidationErrors", 1))
 		return
 	}
@@ -290,10 +383,13 @@ func (h *Handler) alreadyProcessed(ctx context.Context, dstKey, srcETag string) 
 		Key:    aws.String(dstKey),
 	})
 	if err != nil {
-		if isNotFound(err) {
+		// 存在しない場合、s3:ListBucket を持たないと S3 は 404 ではなく 403 を返す。
+		// Lambda には ListBucket を付けていない（共有バケット全体を一覧できてしまうため）ので、
+		// 403 も「まだ処理していない」として扱う。仮に本当に権限不足でも、
+		// 続く GetObject / PutObject で失敗するので見逃しにはならない。
+		if isMissing(err) {
 			return false, nil
 		}
-		// 404 相当以外は一時エラーの可能性があるためリトライさせる。
 		return false, fmt.Errorf("head output object: %w", err)
 	}
 	return out.Metadata["source-etag"] == srcETag &&
@@ -312,6 +408,24 @@ func isNotFound(err error) bool {
 	}
 	var apiErr interface{ ErrorCode() string }
 	return errors.As(err, &apiErr) && apiErr.ErrorCode() == "NotFound"
+}
+
+// isMissing は HeadObject の失敗が「オブジェクトが無い」ことを示すかを判定する。
+// s3:ListBucket を持たない主体には、S3 は存在しないキーに対して 403 を返すため、
+// 404 に加えて 403 も含める。
+func isMissing(err error) bool {
+	if isNotFound(err) {
+		return true
+	}
+	var apiErr interface{ ErrorCode() string }
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "Forbidden", "AccessDenied":
+			return true
+		}
+	}
+	var httpErr interface{ HTTPStatusCode() int }
+	return errors.As(err, &httpErr) && httpErr.HTTPStatusCode() == 403
 }
 
 func (h *Handler) fetch(ctx context.Context, bucket, key, etag string) ([]byte, error) {

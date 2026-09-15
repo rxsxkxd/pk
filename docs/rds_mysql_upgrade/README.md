@@ -16,6 +16,8 @@ Step の詳細を掘り下げる際に参照する:
 - [config-blue-green-generation-design.md](config-blue-green-generation-design.md) — RDS インベントリと人が管理する対応表から Blue/Green 設定 YAML を生成する支援ツールの最小設計
 - [migration-catalog-er.md](migration-catalog-er.md) — 移行カタログ(アプリケーション、接続、環境、パラメータグループ)の ER 図。YAML 構造の正本
 - [direct-blue-green-execution.md](direct-blue-green-execution.md) — `scripts/*.sh` を直接実行する場合の、パラメータグループ事前確認から後始末までの一連手順
+- [ci/verify-green-vpc-architecture.md](ci/verify-green-vpc-architecture.md) — Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だけを RDS のある VPC 内へ置く構成（図つき）
+- [ci/verify-green-security-group-setup.md](ci/verify-green-security-group-setup.md) — 上記構成で必要なセキュリティグループの設定手順（テンプレートは SG を作らない）
 
 エージェント向けの作業ガイドは [CLAUDE.md](CLAUDE.md)。
 

@@ -8,6 +8,10 @@ AWS 側に用意するリソース、IAM、ネットワーク、Secrets、デプ
 
 AWS 上の CodeBuild 実行時に限った外部接続先、接続条件、認証の解決方法は [CodeBuild 実環境の外部接続先と認証](codebuild-remote-external-access.md) を参照する。
 
+Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だけを RDS のある VPC 内へ置く構成の理由と要件は [Step 4 の分離と VPC 配置](verify-green-vpc-architecture.md) を参照する。図で追えるようにしてある。
+
+その構成で必要になるセキュリティグループの具体的な設定は [VerifyGreen の セキュリティグループ設定](verify-green-security-group-setup.md) を参照する。**テンプレートは SG を作らない。**
+
 各 CodeBuild buildspec を CodePipeline なしでローカル確認する手順は [CodeBuild 各フローの単体ローカル検証](codebuild-local-verification.md) を参照する。
 
 ```text
@@ -88,7 +92,7 @@ Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERAT
 
 | 実行基盤 | ビルド方法 |
 |---|---|
-| CodeBuild | **ビルドと実行を別ステージに分けている。**`BuildReportTool` が `go build ./scripts` を行い、バイナリを artifact（`ReportToolOutput`）として出す。`VerifyGreen` はそれを 2 つ目の input artifact として受け取り、`CODEBUILD_SRC_DIR_ReportToolOutput` から実行する。**VerifyGreen は Go も外部ネットワークも必要としない。**Docker を使わないため `PrivilegedMode` も不要 |
+| CodeBuild | **ビルドと実行を別ステージに分けている。**`BuildReportTool` が `go build ./scripts` を行い、バイナリを artifact（`ReportToolOutput`）として出す。`VerifyGreen` はそれを 2 つ目の input artifact として受け取り、`CODEBUILD_SRC_DIR_ReportToolOutput` から実行する。**VerifyGreen は Go も外部ネットワークも必要としない。**2 つのプロジェクトは同一 VPC に置き、**レポート実行だけを専用 subnet へ隔離**する（`VpcId` / `BuildSubnetIds` / `VerifyGreenSubnetIds` を指定する）。外部へ出るのはビルド用 subnet だけである。Docker を使わないため `PrivilegedMode` も不要 |
 | GitHub Actions | ランナー同梱の Go で `go build ./scripts`（CodeBuild と同じ手順。Docker は使わない） |
 
 CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定）が必要なツールチェーンを取得する。VPC 内で実行する場合は、その取得経路も確保する。Ruby ランタイムは CodeBuild に不要である。

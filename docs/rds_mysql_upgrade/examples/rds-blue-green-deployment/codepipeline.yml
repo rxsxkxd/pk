@@ -41,6 +41,44 @@ Parameters:
     Default: 'false'
     Description: true の場合だけ Step 4 で Green DB へ MySQL 接続して実効値を収集する。
 
+  # Step 4 の 2 つのプロジェクトを配置する VPC。**両方とも同一 VPC 内に置く。**
+  # レポート実行（VerifyGreen）は専用のサブネットへ隔離し、そこには外部経路を置かない。
+  # VpcConfig は CodeBuild プロジェクトのプロパティなので、実行時には切り替えられない。
+  VpcId:
+    Type: String
+    Default: ''
+    Description: BuildReportTool と VerifyGreen を配置する VPC。空なら両方とも VPC 外で実行する
+  BuildSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      BuildReportTool（Go ビルド）を置く subnet。Go module を取得するため
+      外部へ出られる経路（NAT gateway など）が必要。既存の subnet を流用してよい。
+  BuildSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: BuildReportTool に付けるセキュリティグループ。外向き 443/tcp を許可する
+  VerifyGreenSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      **レポート実行（VerifyGreen）専用の private subnet。**RDS へ到達できること。
+      外部 egress は持たせない。s3／logs／rds／monitoring／ssm の VPC endpoint を用意する。
+  VerifyGreenSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: VerifyGreen に付けるセキュリティグループ。RDS 側の inbound で 3306/tcp を許可する
+  VerifyGreenImage:
+    Type: String
+    Default: aws/codebuild/standard:7.0
+    Description: >-
+      VerifyGreen のビルドイメージ。MySQL 実効値を収集する場合は、MySQL クライアントを
+      同梱したカスタムイメージを指定する（private subnet では apt による導入ができない）。
+
+Conditions:
+  HasVpc: !Not [!Equals [!Ref VpcId, '']]
+  HasCustomVerifyGreenImage: !Not [!Equals [!Ref VerifyGreenImage, 'aws/codebuild/standard:7.0']]
+
 Resources:
   # Step 3: actions.build が approved の場合だけ、保護スナップショットと Green を作成する。
   BuildGreenProject:
@@ -71,6 +109,11 @@ Resources:
   # AWS API を呼ばないため VPC の外で動かせる。
   BuildReportToolProject:
     Type: AWS::CodeBuild::Project
+    # subnet / SG の既定値は空だが、VpcConfig は条件が真のときだけ展開される。
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [W1030]
     Properties:
       Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-${ServiceName}-build-report-tool'
       Description: RDS Blue/Green Step 4 - build the report generator
@@ -84,10 +127,23 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
+      # Go module を取得するため、外部へ出られる経路がある subnet を指定する。
+      # Elastic Network Interface 作成権限は CodeBuildServiceRoleArn のロール側で付与する。
+      VpcConfig: !If
+        - HasVpc
+        - VpcId: !Ref VpcId
+          Subnets: !Ref BuildSubnetIds
+          SecurityGroupIds: !Ref BuildSecurityGroupIds
+        - !Ref 'AWS::NoValue'
 
   # Step 4: AWS API 検証を常に行い、MySQL 接続はパラメータが true の場合だけ行う。
   VerifyGreenProject:
     Type: AWS::CodeBuild::Project
+    # subnet / SG の既定値は空だが、VpcConfig は条件が真のときだけ展開される。
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [W1030]
     Properties:
       Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-${ServiceName}-verify-green'
       Description: RDS Blue/Green Step 4 - verify Green
@@ -102,7 +158,9 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         # レポート生成器は BuildReportTool の artifact から受け取るため、
         # このプロジェクトは Go も Go module の取得も必要としない。
-        Image: aws/codebuild/standard:7.0
+        # MySQL 実効値を収集する場合は MySQL クライアント入りのイメージを指定する。
+        Image: !Ref VerifyGreenImage
+        ImagePullCredentialsType: !If [HasCustomVerifyGreenImage, SERVICE_ROLE, CODEBUILD]
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT
@@ -115,6 +173,17 @@ Resources:
             Value: !Ref CollectMySqlRuntimeValues
 
   # Step 5: CodePipeline の手動承認後でも、設定ファイルの actions.switchover が approved でなければ変更しない。
+      # BuildReportTool と同一 VPC の、**レポート実行専用**の private subnet で実行する。
+      # **この subnet に外部 egress は要らない。**未指定なら VPC 外で動く。
+      # このテンプレートは CodeBuildServiceRoleArn を外部から受け取るため、
+      # Elastic Network Interface 作成権限（ec2:CreateNetworkInterface など）はそのロール側で付与する。
+      VpcConfig: !If
+        - HasVpc
+        - VpcId: !Ref VpcId
+          Subnets: !Ref VerifyGreenSubnetIds
+          SecurityGroupIds: !Ref VerifyGreenSecurityGroupIds
+        - !Ref 'AWS::NoValue'
+
   SwitchoverProject:
     Type: AWS::CodeBuild::Project
     Properties:

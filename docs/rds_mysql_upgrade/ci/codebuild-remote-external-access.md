@@ -31,7 +31,7 @@ CodeBuild サービス連携
 |---|---|---|---|
 | Amazon RDS control plane | AWS CLI で DB インスタンス、Blue/Green deployment、DB パラメータグループ、スナップショットを参照し、Step 3／5 では snapshot 作成、Blue/Green 作成、切替も行う | Step 3〜5 で常時。変更 API は `actions` の承認状態により実行を抑止 | CodeBuild サービスロールの一時 AWS 認証情報。AWS CLI の標準 credential provider chain が自動取得する |
 | Amazon CloudWatch | `AWS/RDS` の `ReplicaLag` を VerifyGreen で読む | VerifyGreen で常時 | CodeBuild サービスロールの一時 AWS 認証情報 |
-| AWS Secrets Manager | MySQL の `username`／`password` を `GetSecretValue` で読む | `CollectMySqlRuntimeValues=true` の場合だけ | CodeBuild サービスロールの一時 AWS 認証情報。secret が CMK 暗号化なら KMS の復号権限も必要 |
+| AWS Secrets Manager | MySQL の `username`／`password` を `GetSecretValue` で読む | `CollectMySqlRuntimeValues=true` の場合だけ | CodeBuild サービスロールの一時 AWS 認証情報。secret が カスタマー管理キーで暗号化なら KMS の復号権限も必要 |
 | RDS for MySQL data plane | `mysql` クライアントで `performance_schema.global_variables` を読む | `CollectMySqlRuntimeValues=true` の場合だけ | Secrets Manager から取得した DB ユーザー名／パスワード。AWS IAM 認証ではない |
 | Go module proxy | BuildReportTool が Go レポート生成器をビルドする | **BuildReportTool のみ**（VerifyGreen は artifact で受け取るため到達不要） | 既定は `proxy.golang.org` への TLS 接続で、アプリケーション認証なし。`GOPROXY` で組織のプロキシへ向けた場合はその認証方式に従う。**設定 YAML の読み取りは Ruby 標準ライブラリで行うため、PyPI への到達は不要である。** |
 | Docker Hub、Go module 配布元 | `golang:1.25` を取得し、`gopkg.in/yaml.v3` をダウンロードして Go レポート生成器をビルドする | VerifyGreen で常時 | 既定は公開イメージ・公開 module のためアプリケーション認証なし。Docker Hub のレート制限・組織プロキシを使う場合は別途 Docker registry 認証を設定 |
@@ -65,7 +65,7 @@ AWS CLI を使う buildspec やシェルスクリプトは、`aws configure`、n
 2. 各 CodeBuild project に設定済みの `ServiceRole` が、この IAM role を参照する。
 3. CodeBuild サービスが実行開始時に当該ロールを引き受け、短期の AWS 認証情報を実行コンテナへ提供する。
 4. 実行コンテナ内の AWS CLI は標準 credential provider chain により、その一時認証情報を使って RDS、CloudWatch、必要時の SSM Parameter Store を SigV4 署名付きで呼び出す。
-5. IAM ポリシーは API ごとに認可を判断する。SecureString を CMK で暗号化している場合は、Parameter Store の認可に加えて KMS の `Decrypt` も必要になる。
+5. IAM ポリシーは API ごとに認可を判断する。SecureString を カスタマー管理キーで暗号化している場合は、Parameter Store の認可に加えて KMS の `Decrypt` も必要になる。
 
 このため、CodeBuild 実環境用の `CONFIG_FILE` と `SERVICE_NAME` は認証情報ではない。いずれも通常の環境変数であり、AWS API を呼べるかどうかは CodeBuild サービスロールで決まる。接続情報そのものは config の `mysql_verification` が指す SSM パラメータ側にあり、CodeBuild の環境変数には現れない。
 
@@ -77,7 +77,7 @@ AWS CLI を使う buildspec やシェルスクリプトは、`aws configure`、n
 
 | 接続先 | 用途 | 認証主体 |
 |---|---|---|
-| Amazon S3 | CodePipeline が渡す source artifact の取得、各 build の artifact の受け渡し | CodePipeline 実行ロールと CodeBuild サービスロール。CMK 使用時は KMS 権限も必要 |
+| Amazon S3 | CodePipeline が渡す source artifact の取得、各 build の artifact の受け渡し | CodePipeline 実行ロールと CodeBuild サービスロール。カスタマー管理キー使用時は KMS 権限も必要 |
 | AWS KMS | S3 artifact または Secrets Manager secret がカスタマー管理キーで暗号化されている場合の復号・暗号化 | 利用するロールに対象キーの `kms:Decrypt`、用途により `kms:Encrypt`／`kms:GenerateDataKey` |
 | Amazon CloudWatch Logs | CodeBuild の標準 build log 出力 | CodeBuild サービスロールに Logs 出力権限。CodeBuild サービスがログ配送を管理 |
 
@@ -86,7 +86,9 @@ CodeConnections による GitHub 接続は CodePipeline の Source ステージ�
 ## 5. ネットワーク設計時の確認事項
 
 - RDS、CloudWatch、Secrets Manager、S3、KMS、CloudWatch Logs は、CodeBuild の実行リージョンに対応する AWS service endpoint へ到達できることを確認する。
-- Go module 配布元へ到達する必要があるのは `BuildReportToolProject` だけである。`VerifyGreenProject` はビルド済みバイナリを artifact で受け取るため、**外部への到達を必要としない**（MySQL client の動的導入が発生する環境では apt repository だけが例外）。**PyPI への到達は不要になった**（設定 YAML の読み取りが Ruby 標準ライブラリになったため）。
+- Go module 配布元へ到達する必要があるのは `BuildReportToolProject` だけである。同一 VPC 内の**外部へ出られる subnet**に置き、その subnet のルートテーブルにだけ NAT gateway を向ける。`VerifyGreenProject` はビルド済みバイナリを artifact で受け取るため、**外部への到達を必要としない**。**PyPI への到達も不要である**（設定 YAML の読み取りが Ruby 標準ライブラリになったため）。
+- **MySQL クライアントもイメージへ同梱するため、apt repository への到達は不要である**（[Dockerfile.verify-green](Dockerfile.verify-green)）。buildspec は `apt-get` を呼ばない。
+- `VerifyGreenProject` は同じ VPC の**レポート実行専用 subnet**（外部へ出ない）へ置く。その場合は、`s3`（Gateway）と `logs` / `rds` / `monitoring` / `ssm`（Interface）の VPC endpoint を用意する。カスタマー管理キーを使うなら `kms` も要る。設定手順は [CodeBuild / CodePipeline セットアップ手順](codebuild-codepipeline-setup.md) にある。
 - CodeBuild を VPC 内に置く場合、RDS MySQL への private 接続に加え、上記の AWS service endpoint と公開配布元への egress を NAT gateway、HTTPS proxy、VPC endpoint、組織ミラーの方針に沿って設計する。
 - Docker Hub／PyPI／apt／Go module への通信を許可しない方針なら、依存物を含むカスタム CodeBuild image と、組織内 registry・package mirror を用意して buildspec の取得元を置き換える。
 
@@ -103,7 +105,7 @@ CodeConnections による GitHub 接続は CodePipeline の Source ステージ�
 
 構築の流れは次のとおりである。
 
-1. CodePipeline artifact 用の S3 bucket、CodePipeline 実行ロール、CodeBuild サービスロールを組織の方針に従って用意する。CMK を使う場合は、両ロールに対象キーの利用権限を付与する。
+1. CodePipeline artifact 用の S3 bucket、CodePipeline 実行ロール、CodeBuild サービスロールを組織の方針に従って用意する。カスタマー管理キーを使う場合は、両ロールに対象キーの利用権限を付与する。
 2. GitHub repository と CodeConnections 接続を作成し、GitHub 側の認可を完了して接続を `AVAILABLE` にする。
 3. Step 2 で、対象サービスの MySQL 8.4 DB パラメータグループを CloudFormation で作成し、`config/blue-green/<environment>.deployment.yml` の `target_db_parameter_group_name` と一致させる。
 4. [codepipeline.yml](../examples/rds-blue-green-deployment/codepipeline.yml) を CloudFormation で deploy する。このテンプレートは BuildGreen、VerifyGreen、Switchover の三つの CodeBuild project と、それらを順に呼び出す CodePipeline を作成する。

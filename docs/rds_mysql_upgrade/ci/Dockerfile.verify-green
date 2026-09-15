@@ -1,0 +1,44 @@
+# VerifyGreen（Step 4）を RDS のある private subnet で実行するためのビルドイメージ。
+#
+# **このイメージが必要なのは mysql_verification.enabled: true のときだけである。**
+# 既定（false）なら AWS API による検証だけなので、aws/codebuild/standard:7.0 で足りる。
+#
+# private subnet では apt リポジトリへ到達できないため、実行時に導入せず
+# ここへ同梱する。buildspec 側も apt-get を呼ばない（ci/codebuild/verify-green.yml）。
+#
+# 含めるもの:
+#   - MySQL クライアント … Green DB の実効値収集（collect_green_runtime_values.sh）
+#   - Ruby            … 設定 YAML の読み取り（scripts/lib/deployment_config.sh）
+#   - jq              … JSON の読み取り
+#   - AWS CLI v2      … RDS / CloudWatch / SSM の読み取り
+#
+# 含めないもの:
+#   - Go … レポート生成器は BuildReportTool がビルドし、artifact で渡す
+#
+# 使い方:
+#   docker build -f ci/Dockerfile.verify-green -t <account>.dkr.ecr.<region>.amazonaws.com/rds-bg-verify-green:<tag> .
+#   docker push  <同じタグ>
+#   CloudFormation の VerifyGreenImage へそのタグを渡す
+#   （ImagePullCredentialsType: SERVICE_ROLE で引くため、ECR 読み取り権限は
+#     テンプレートが VerifyGreenRole へ条件付きで付与する）
+FROM public.ecr.aws/aws-cli/aws-cli:2.36.37 AS aws-cli
+
+# 設定 YAML の読み取りに使う Ruby。compose.yaml と同じ版で固定する。
+# YAML / JSON はどちらも標準ライブラリなので gem の追加導入は要らない。
+FROM ruby:3.4.10-slim-bookworm
+
+# シェルスクリプトの実行、JSON 読み取り（jq）、MySQL 接続、TLS に必要な最小パッケージ。
+# default-mysql-client は MariaDB 由来だが、performance_schema の参照と
+# --batch 出力という用途では差が出ない。
+RUN apt-get update \
+  && apt-get install --no-install-recommends -y \
+       bash ca-certificates default-mysql-client jq \
+  && rm -rf /var/lib/apt/lists/*
+
+# AWS CLI v2 は公式イメージから取り込む。
+COPY --from=aws-cli /usr/local/aws-cli /usr/local/aws-cli
+# AWS 公式 image の /usr/local/bin/aws はシンボリックリンクである。COPY で実体だけを
+# 取り出すと AWS CLI 同梱の libpython を見つけられないため、コピー済みの配下へリンクする。
+RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws
+
+WORKDIR /workspace

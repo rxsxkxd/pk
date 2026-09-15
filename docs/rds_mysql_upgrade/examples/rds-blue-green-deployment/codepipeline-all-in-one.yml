@@ -22,6 +22,14 @@ Metadata:
         Parameters: [CodeStarConnectionArn, RepositoryId, BranchName]
       - Label: { default: Step 4 の MySQL 実効値収集（任意） }
         Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterArns]
+      - Label: { default: Step 4 の VPC 配置（任意。ビルドと検証で subnet を分ける） }
+        Parameters:
+          - VpcId
+          - BuildSubnetIds
+          - BuildSecurityGroupIds
+          - VerifyGreenSubnetIds
+          - VerifyGreenSecurityGroupIds
+          - VerifyGreenImage
       - Label: { default: 承認通知（任意） }
         Parameters: [ApprovalNotificationTopicArn]
       - Label: { default: 保護対象の RDS リソース }
@@ -75,8 +83,59 @@ Parameters:
     Default: 'false'
     Description: >-
       Step 4 で Green DB へ MySQL 接続し実効値を収集するか。
-      true にする場合は VerifyGreen プロジェクトを RDS へ到達できる VPC に配置する必要がある
-      （本テンプレートは VpcConfig を含まない）。
+      true にする場合は VpcId 以下を指定して VerifyGreen を RDS へ到達できる
+      subnet へ配置し、MySQL クライアント入りの VerifyGreenImage を指定する。
+
+  # Step 4 の 2 つのプロジェクトを配置する VPC。**両方とも同一 VPC 内に置く。**
+  # レポート実行（VerifyGreen）は専用のサブネットへ隔離し、そこには外部経路を置かない。
+  # ビルドは外部へ出られる既存のサブネットでよい。
+  # VpcConfig は CodeBuild プロジェクトのプロパティなので、実行時には切り替えられない。
+  # 空のままなら両方とも VPC 外で実行する（AWS API による検証だけ。現状の既定）。
+  VpcId:
+    Type: String
+    Default: ''
+    Description: >-
+      BuildReportTool と VerifyGreen を配置する VPC。空なら両方とも VPC 外で実行する
+      （その場合 Green DB へは接続できない）。
+
+  BuildSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      BuildReportTool（Go ビルド）を置く subnet。**外部へ出られる経路が必要**
+      （NAT gateway または組織のプロキシ）。Go module を取得するためである。
+      専用に用意する必要はなく、既に外部へ出られる subnet を流用してよい。
+
+  BuildSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      BuildReportTool に付けるセキュリティグループ。外向き 443/tcp を許可する。
+      RDS へは到達しないため、RDS 側 SG への登録は不要である。
+
+  VerifyGreenSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      **レポート実行（VerifyGreen）専用の private subnet。**RDS へ到達できること。
+      外部経路を持たせないため、他の用途と共有せず専用に用意する。
+      障害耐性のため 2 アベイラビリティゾーン以上を推奨する。**外部 egress は不要**で、その場合は
+      s3／logs／rds／monitoring／ssm の VPC endpoint を用意する。
+
+  VerifyGreenSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      VerifyGreen に付けるセキュリティグループ。RDS 側の inbound でこの SG からの
+      3306/tcp を許可する。
+
+  VerifyGreenImage:
+    Type: String
+    Default: aws/codebuild/standard:7.0
+    Description: >-
+      VerifyGreen のビルドイメージ。MySQL 実効値を収集する場合は、
+      MySQL クライアントを同梱したカスタムイメージ（例: ECR の image）を指定する。
+      private subnet では apt による実行時導入ができないため、イメージ側に含める。
 
   MySqlCredentialsParameterArns:
     Type: CommaDelimitedList
@@ -102,6 +161,11 @@ Parameters:
 
 Conditions:
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
+  # Step 4 の 2 プロジェクトを VPC 内で実行するか。
+  # VpcConfig と Elastic Network Interface 権限をまとめて切り替える。
+  HasVpc: !Not [!Equals [!Ref VpcId, '']]
+  # 既定イメージ以外を指定した場合は ECR からの pull を許可する。
+  HasCustomVerifyGreenImage: !Not [!Equals [!Ref VerifyGreenImage, 'aws/codebuild/standard:7.0']]
   # config の mysql_verification.auth_method は parameter_store 固定である。
   HasMySqlCredentials: !Not [!Equals [!Join ['', !Ref MySqlCredentialsParameterArns], '']]
 
@@ -192,6 +256,34 @@ Resources:
             Principal: { Service: codebuild.amazonaws.com }
             Action: 'sts:AssumeRole'
       ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
+      Policies:
+        # VPC 内で動かす場合は Elastic Network Interface を作る。VerifyGreen と同じ権限が要る。
+        - !If
+          - HasVpc
+          - PolicyName: vpc-network-interface
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Sid: DescribeVpcResources
+                  Effect: Allow
+                  Action:
+                    - 'ec2:CreateNetworkInterface'
+                    - 'ec2:DescribeNetworkInterfaces'
+                    - 'ec2:DeleteNetworkInterface'
+                    - 'ec2:DescribeSubnets'
+                    - 'ec2:DescribeSecurityGroups'
+                    - 'ec2:DescribeDhcpOptions'
+                    - 'ec2:DescribeVpcs'
+                  # これらの Describe / Create は個別リソースを指定できない。
+                  Resource: '*'
+                - Sid: CreateNetworkInterfacePermissionForCodeBuild
+                  Effect: Allow
+                  Action: 'ec2:CreateNetworkInterfacePermission'
+                  Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
+                  Condition:
+                    StringEquals:
+                      'ec2:AuthorizedService': codebuild.amazonaws.com
+          - !Ref 'AWS::NoValue'
 
   # Step 2 事前確認: 読み取りのみ。
   PrecheckRole:
@@ -257,10 +349,11 @@ Resources:
             Principal: { Service: codebuild.amazonaws.com }
             Action: 'sts:AssumeRole'
       ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
-      # パラメータ ARN が未指定なら Policies ごと省く（空リストは IAM に渡さない）。
-      Policies: !If
-        - HasMySqlCredentials
-        - - PolicyName: read-mysql-credentials
+      Policies:
+        # パラメータ ARN が未指定ならこのポリシーを省く。
+        - !If
+          - HasMySqlCredentials
+          - PolicyName: read-mysql-credentials
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
@@ -271,7 +364,52 @@ Resources:
                     - 'ssm:GetParameter'
                     - 'ssm:GetParameters'
                   Resource: !Ref MySqlCredentialsParameterArns
-        - !Ref 'AWS::NoValue'
+          - !Ref 'AWS::NoValue'
+        # VPC 内で動く CodeBuild は実行ごとに Elastic Network Interface を作る。この権限が無いと起動に失敗する。
+        - !If
+          - HasVpc
+          - PolicyName: vpc-network-interface
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Sid: DescribeVpcResources
+                  Effect: Allow
+                  Action:
+                    - 'ec2:CreateNetworkInterface'
+                    - 'ec2:DescribeNetworkInterfaces'
+                    - 'ec2:DeleteNetworkInterface'
+                    - 'ec2:DescribeSubnets'
+                    - 'ec2:DescribeSecurityGroups'
+                    - 'ec2:DescribeDhcpOptions'
+                    - 'ec2:DescribeVpcs'
+                  # これらの Describe / Create は個別リソースを指定できない。
+                  Resource: '*'
+                # Elastic Network Interface を CodeBuild へ渡す許可。サービス指定で絞る。
+                # さらに絞るなら Condition へ ec2:Subnet（subnet の ARN）も加える。
+                - Sid: CreateNetworkInterfacePermissionForCodeBuild
+                  Effect: Allow
+                  Action: 'ec2:CreateNetworkInterfacePermission'
+                  Resource: !Sub 'arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*'
+                  Condition:
+                    StringEquals:
+                      'ec2:AuthorizedService': codebuild.amazonaws.com
+          - !Ref 'AWS::NoValue'
+        # カスタムイメージを ECR から引く場合に必要。
+        - !If
+          - HasCustomVerifyGreenImage
+          - PolicyName: pull-verify-green-image
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Sid: PullBuildImage
+                  Effect: Allow
+                  Action:
+                    - 'ecr:GetAuthorizationToken'
+                    - 'ecr:BatchCheckLayerAvailability'
+                    - 'ecr:GetDownloadUrlForLayer'
+                    - 'ecr:BatchGetImage'
+                  Resource: '*'
+          - !Ref 'AWS::NoValue'
 
   # Step 5: 切替に必要な変更だけを許可する。作成・削除の権限は持たせない。
   SwitchoverRole:
@@ -453,9 +591,17 @@ Resources:
 
   # Go レポート生成器をビルドするだけのプロジェクト。
   # **外部ネットワーク（Go module の取得）へ出るのはここだけである。**
-  # VPC 設定は与えない。AWS API も呼ばないため、VPC の外で動かせる。
+  # VerifyGreen と同一 VPC のまま、外部へ出られる subnet に置く。
+  # AWS API は呼ばない。
   BuildReportToolProject:
     Type: AWS::CodeBuild::Project
+    # BuildSubnetIds / BuildSecurityGroupIds の既定値は空である。
+    # VpcConfig は HasVpc が真のときだけ展開されるため空値は渡らないが、
+    # cfn-lint は既定値をそのまま型検査して W1030 を出すので、ここだけ抑止する。
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [W1030]
     Properties:
       Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-build-report-tool'
       Description: Step 4 - Go レポート生成器のビルド（AWS API は呼ばない）
@@ -469,9 +615,23 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         # buildspec の runtime-versions で Go を用意し、go.mod / go.sum でビルドする。
         Image: aws/codebuild/standard:7.0
+      # Go module を取得するため、外部へ出られる経路がある subnet を指定する。
+      VpcConfig: !If
+        - HasVpc
+        - VpcId: !Ref VpcId
+          Subnets: !Ref BuildSubnetIds
+          SecurityGroupIds: !Ref BuildSecurityGroupIds
+        - !Ref 'AWS::NoValue'
 
   VerifyGreenProject:
     Type: AWS::CodeBuild::Project
+    # VerifyGreenSubnetIds / VerifyGreenSecurityGroupIds の既定値は空である。
+    # VpcConfig は HasVpc が真のときだけ展開されるため空値は渡らないが、
+    # cfn-lint は既定値をそのまま型検査して W1030 を出すので、ここだけ抑止する。
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks: [W1030]
     Properties:
       Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-verify-green'
       Description: Step 4 - Green 構成とレプリカ遅延の検証
@@ -485,12 +645,24 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         # レポート生成器は BuildReportTool の artifact から受け取るため、
         # このプロジェクトは Go も Go module の取得も必要としない。
-        # Green DB へ到達するため VpcConfig を与える場合も、外部への egress は要らない。
-        Image: aws/codebuild/standard:7.0
+        # MySQL 実効値を収集する場合は、MySQL クライアント入りのイメージを指定する
+        # （private subnet では apt による実行時導入ができない）。
+        Image: !Ref VerifyGreenImage
+        # 既定イメージ以外（ECR など）はサービスロールの権限で引く。
+        ImagePullCredentialsType: !If [HasCustomVerifyGreenImage, SERVICE_ROLE, CODEBUILD]
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
           - { Name: COLLECT_MYSQL_RUNTIME_VALUES, Type: PLAINTEXT, Value: !Ref CollectMySqlRuntimeValues }
+      # BuildReportTool と同一 VPC の、**レポート実行専用**の private subnet で実行する。
+      # VpcConfig はプロジェクトのプロパティなので実行ごとの切り替えはできない。
+      # 未指定なら VPC 外で動く。**この subnet に外部 egress は要らない。**
+      VpcConfig: !If
+        - HasVpc
+        - VpcId: !Ref VpcId
+          Subnets: !Ref VerifyGreenSubnetIds
+          SecurityGroupIds: !Ref VerifyGreenSecurityGroupIds
+        - !Ref 'AWS::NoValue'
 
   SwitchoverProject:
     Type: AWS::CodeBuild::Project

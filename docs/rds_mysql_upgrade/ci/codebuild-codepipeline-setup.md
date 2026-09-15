@@ -91,7 +91,54 @@ CodePipeline は `BuildReportTool` ステージの出力 artifact（`ReportToolO
 
 **Go module の取得先（`proxy.golang.org`）へ到達する必要があるのは `BuildReportToolProject` だけである。**イメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定。buildspec で明示している）が必要なツールチェーンを取得するため、その経路も要る。このプロジェクトは VPC 設定を与えないので、VPC 内の経路整備は不要である。
 
-`VerifyGreenProject` を Green DB へ到達させるため VPC 内へ置く場合も、**外部への egress は要らない**（S3・CloudWatch Logs・RDS API へは VPC endpoint で到達できる）。
+### VerifyGreen を RDS のある VPC 内で実行する
+
+> 構成の全体像と、どこで落ちるかの一覧は [Step 4 の分離と VPC 配置](verify-green-vpc-architecture.md) に図でまとめてある。SG の具体的な設定手順は [VerifyGreen の セキュリティグループ設定](verify-green-security-group-setup.md) にある（**テンプレートは SG を作らない**）。
+
+`VpcConfig` は **CodeBuild プロジェクトのプロパティ**なので、パイプライン実行ごとに切り替えられない。**設定するのは CloudFormation でスタックを作成／更新するときだけ**である。
+
+```text
+CollectMySqlRuntimeValues=true
+VpcId=vpc-xxxxxxxx
+BuildSubnetIds=subnet-build1,subnet-build2          # 外部へ出られる subnet（既存のものを流用してよい）
+BuildSecurityGroupIds=sg-build                      # 外向き 443/tcp を許可
+VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb        # レポート実行専用。RDS へ到達でき、外部へは出ない
+VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティグループ設定」で作る SG
+VerifyGreenImage=<account>.dkr.ecr.<region>.amazonaws.com/rds-bg-verify-green:<tag>
+```
+
+`VpcId` が空なら両プロジェクトとも VPC 外で動き、AWS API による検証だけを行う（既定）。
+
+**2 つのプロジェクトは同一 VPC に置き、subnet だけを用途で分ける。**
+
+| プロジェクト | subnet | 外部への経路 | 用途 |
+|---|---|---|---|
+| `BuildReportToolProject` | `BuildSubnetIds` | **必要**（NAT gateway など） | Go module を取得してビルドする |
+| `VerifyGreenProject` | `VerifyGreenSubnetIds` | **不要** | RDS へ到達して検証する |
+
+外部への経路はビルド用 subnet のルートテーブルにだけ置き、**レポート実行専用 subnet には置かない**。ビルド用は専用に用意する必要はなく、既に外部へ出られる subnet を流用してよい。
+
+テンプレートは `VpcId` の指定を条件に、**両プロジェクトのロール**へ Elastic Network Interface（VPC 内のリソースに割り当てられる仮想ネットワークインターフェイス）の作成権限（`ec2:CreateNetworkInterface` など）を追加する。**この権限が無いと VPC 内の CodeBuild は起動に失敗する。**さらに絞るなら `ec2:CreateNetworkInterfacePermission` の `Condition` に `ec2:Subnet`（subnet の ARN）を加える。
+
+#### 外部 egress を持たない場合に必要な VPC endpoint
+
+`verify_green.sh` が呼ぶ API は次のとおりで、NAT を置かないなら endpoint が必要である。
+
+| endpoint | 用途 | 種別 |
+|---|---|---|
+| `com.amazonaws.<region>.s3` | artifact の入出力 | Gateway |
+| `com.amazonaws.<region>.logs` | ビルドログ | Interface |
+| `com.amazonaws.<region>.rds` | `rds describe-db-instances` / `describe-blue-green-deployments` / `describe-db-parameters` | Interface |
+| `com.amazonaws.<region>.monitoring` | `cloudwatch get-metric-statistics`（ReplicaLag） | Interface |
+| `com.amazonaws.<region>.ssm` | 接続情報（SecureString）の取得 | Interface |
+
+カスタマー管理キーで暗号化した SecureString を使う場合は `kms` も追加する。
+
+#### MySQL クライアントはイメージへ同梱する
+
+private subnet では apt リポジトリへ到達できないため、**buildspec は `apt-get` を呼ばない。**`mysql_verification.enabled: true` なのに MySQL クライアントが無い場合は、理由を出して停止する。
+
+イメージ定義は [Dockerfile.verify-green](Dockerfile.verify-green) にある（MySQL クライアント・Ruby・jq・AWS CLI を含み、Go は含まない）。ECR へ push して `VerifyGreenImage` に指定する。既定イメージ以外を指定すると、テンプレートは `ImagePullCredentialsType: SERVICE_ROLE` へ切り替え、`VerifyGreenRole` へ ECR 読み取り権限を条件付きで付与する。
 
 > イメージが提供する managed runtime の Go バージョンは AWS の更新で変わる。`runtime-versions: golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブをイメージが提供するバージョンへ下げる。
 
@@ -135,7 +182,7 @@ artifact bucket は CodePipeline 実行リージョンに作成し、組織の�
 - artifact bucket に対する `s3:GetObject`、`s3:GetObjectVersion`、`s3:PutObject`、`s3:GetBucketVersioning`
 - `codeconnections:UseConnection`（指定した Connection ARN のみ）
 - 3 つの対象 CodeBuild project に対する `codebuild:StartBuild`、`codebuild:BatchGetBuilds`
-- KMS CMK を artifact bucket に使う場合の `kms:Decrypt`、`kms:Encrypt`、`kms:GenerateDataKey`
+- KMS のカスタマー管理キー を artifact bucket に使う場合の `kms:Decrypt`、`kms:Encrypt`、`kms:GenerateDataKey`
 
 ### CodeBuild 実行ロール
 
@@ -159,7 +206,7 @@ Step ごとの変更権限は次のとおりである。
 
 1. SSM Parameter Store に SecureString パラメータを 2 本作成する。パスワード用（`parameter_name`）とユーザー名用（`user_parameter_name`）で、どちらも必須である。
 2. `MySqlCredentialsParameterArns` にその 2 本の ARN をカンマ区切りで渡し、`CollectMySqlRuntimeValues=true` でスタックを更新する。
-3. CodeBuild 実行ロールに、そのパラメータだけの `ssm:GetParameter` を許可する。CMK で暗号化した SecureString は `kms:Decrypt` も許可する。
+3. CodeBuild 実行ロールに、そのパラメータだけの `ssm:GetParameter` を許可する。カスタマー管理キーで暗号化した SecureString は `kms:Decrypt` も許可する。
 4. `VerifyGreenProject` に、Green DB へ到達できる `VpcConfig`（VPC、private subnet、security group）を追加する。
 5. MySQL ユーザーに `performance_schema.global_variables` を参照できる最小限の権限を与える。
 

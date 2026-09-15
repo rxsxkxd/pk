@@ -6,7 +6,8 @@
 #
 # **このプロジェクトは VPC 外へ出ない前提である。**Green DB へ到達するため VPC 内へ
 # 配置する可能性があるので、Go module の取得（proxy.golang.org）も含め、
-# 外部ネットワークへの依存をここへ持ち込まない。ビルドしないので Go も要らない。
+# 外部ネットワークへの依存をここへ持ち込まない。ビルドしないので Go も要らず、
+# MySQL クライアントも apt で入れずイメージ側に含める。
 #
 # コマンドは意図的に細かく分けている。CodeBuild は 1 つの `- ` を 1 コマンドとして
 # ログに出すため、まとめて書くとどこで落ちたのか分からなくなる。
@@ -85,8 +86,14 @@ phases:
             MYSQL_ENABLED: (if ($svc.mysql_verification.enabled // false) then "true" else "false" end),
           } | shellvars')"
         echo "mysql_verification.enabled=${MYSQL_ENABLED}"
-        if [ "$MYSQL_ENABLED" = "true" ]; then
-          command -v mysql >/dev/null 2>&1 || { sudo apt-get update && sudo apt-get install -y mysql-client; }
+        # MySQL クライアントはイメージ側に含める。**ここでは導入しない。**
+        # このプロジェクトは RDS のある private subnet で動かす想定で、
+        # apt リポジトリへ到達できないためである（ci/Dockerfile.verify-green を参照）。
+        if [ "$MYSQL_ENABLED" = "true" ] && ! command -v mysql >/dev/null 2>&1; then
+          echo 'mysql_verification is enabled but the MySQL client is absent.' >&2
+          echo 'Use a build image that bundles it (see ci/Dockerfile.verify-green)' >&2
+          echo 'and set it as VerifyGreenImage, or disable mysql_verification.' >&2
+          exit 1
         fi
       # 5. 検証本体。Step 4 の判定はこのスクリプトが行う。
       - scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts

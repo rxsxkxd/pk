@@ -50,33 +50,53 @@ phases:
       #    単体実行では、あらかじめ置いた .tools/green-report/ を使う。
       - |
         set -eu
-        tool_relative_path=.tools/green-report/generate_green_verification_report
-        if [ -n "${GREEN_REPORT_GENERATOR:-}" ] && [ -f "$GREEN_REPORT_GENERATOR" ]; then
-          echo "Using GREEN_REPORT_GENERATOR given by the caller."
-        elif [ -n "${CODEBUILD_SRC_DIR_ReportToolOutput:-}" ] \
-             && [ -f "$CODEBUILD_SRC_DIR_ReportToolOutput/$tool_relative_path" ]; then
-          GREEN_REPORT_GENERATOR="$CODEBUILD_SRC_DIR_ReportToolOutput/$tool_relative_path"
-          echo 'Using the report generator from the BuildReportTool artifact.'
-        elif [ -f "$CODEBUILD_SRC_DIR/$tool_relative_path" ]; then
-          GREEN_REPORT_GENERATOR="$CODEBUILD_SRC_DIR/$tool_relative_path"
-          echo 'Using the report generator found in the source tree.'
-        else
-          echo 'Report generator is absent. This project does not build it on purpose' >&2
+        tool_dir_relative=.tools/green-report
+        # 2 本とも BuildReportTool が作る。**ここではビルドしない。**
+        #   generate_green_verification_report … レポートの組み立て
+        #   collect_green_runtime_values       … Green DB の実効値収集（mysql クライアントの代替）
+        resolve_tool() {
+          variable=$1
+          basename=$2
+          label=$3
+          eval "given=\${$variable:-}"
+          if [ -n "$given" ] && [ -f "$given" ]; then
+            echo "Using $variable given by the caller."
+            eval "$variable=\$given"
+            return 0
+          fi
+          if [ -n "${CODEBUILD_SRC_DIR_ReportToolOutput:-}" ] \
+             && [ -f "$CODEBUILD_SRC_DIR_ReportToolOutput/$tool_dir_relative/$basename" ]; then
+            eval "$variable=\"\$CODEBUILD_SRC_DIR_ReportToolOutput/\$tool_dir_relative/\$basename\""
+            echo "Using the $label from the BuildReportTool artifact."
+            return 0
+          fi
+          if [ -f "$CODEBUILD_SRC_DIR/$tool_dir_relative/$basename" ]; then
+            eval "$variable=\"\$CODEBUILD_SRC_DIR/\$tool_dir_relative/\$basename\""
+            echo "Using the $label found in the source tree."
+            return 0
+          fi
+          echo "The $label is absent. This project does not build it on purpose" >&2
           echo '(it must run without reaching the network outside the VPC).' >&2
           echo 'Run ci/codebuild/build-report-tool.yml and pass its artifact,' >&2
-          echo 'or set GREEN_REPORT_GENERATOR to a prebuilt binary.' >&2
-          exit 1
-        fi
-        export GREEN_REPORT_GENERATOR
+          echo "or set $variable to a prebuilt binary." >&2
+          return 1
+        }
+        resolve_tool GREEN_REPORT_GENERATOR generate_green_verification_report 'report generator'
+        resolve_tool GREEN_RUNTIME_COLLECTOR collect_green_runtime_values 'runtime value collector'
+        export GREEN_REPORT_GENERATOR GREEN_RUNTIME_COLLECTOR
       # 2. 実行できることを確認する。CodePipeline の artifact では実行ビットが落ちうる。
-      - chmod +x "$GREEN_REPORT_GENERATOR"
-      - ls -l "$GREEN_REPORT_GENERATOR"
+      - chmod +x "$GREEN_REPORT_GENERATOR" "$GREEN_RUNTIME_COLLECTOR"
+      - ls -l "$GREEN_REPORT_GENERATOR" "$GREEN_RUNTIME_COLLECTOR"
 
   build:
     commands:
-      # 4. 設定ファイルが MySQL 実効値収集を要求している場合だけクライアントを入れる。
+      # 4. 実効値収集の有効・無効を記録する。
       #    接続方式（parameter_store / plaintext / prompt）は
       #    config の mysql_verification が決め、verify_green.sh が解決する。
+      #
+      #    **MySQL クライアントは要らない。**収集は collect_green_runtime_values
+      #    （静的リンクの Go バイナリ）が行い、RDS のトラストストアも焼き込んである。
+      #    そのため apt-get も、MySQL 入りのカスタムイメージも不要である。
       - |
         set -eu
         # 設定の読み取りはスクリプト本体と同じ経路を使う（Ruby で YAML→JSON、jq で取り出し）。
@@ -86,15 +106,6 @@ phases:
             MYSQL_ENABLED: (if ($svc.mysql_verification.enabled // false) then "true" else "false" end),
           } | shellvars')"
         echo "mysql_verification.enabled=${MYSQL_ENABLED}"
-        # MySQL クライアントはイメージ側に含める。**ここでは導入しない。**
-        # このプロジェクトは RDS のある private subnet で動かす想定で、
-        # apt リポジトリへ到達できないためである（ci/Dockerfile.verify-green を参照）。
-        if [ "$MYSQL_ENABLED" = "true" ] && ! command -v mysql >/dev/null 2>&1; then
-          echo 'mysql_verification is enabled but the MySQL client is absent.' >&2
-          echo 'Use a build image that bundles it (see ci/Dockerfile.verify-green)' >&2
-          echo 'and set it as VerifyGreenImage, or disable mysql_verification.' >&2
-          exit 1
-        fi
       # 5. 検証本体。Step 4 の判定はこのスクリプトが行う。
       - scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
 

@@ -74,7 +74,21 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
 - `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。
 
-`collect_green_runtime_values.sh`（Step 4 の実効値収集）は、対象パラメータ名を**同じレポート生成器バイナリの `--list-parameter-names`** で得る（`scripts/internal/cfn` 経由）。`verify_green.sh` が `--report-generator` でそのバイナリを渡すため、**収集側も Go を必要としない**。値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
+**Step 4 の実効値収集は MySQL クライアントを使わない。**`scripts/collect_green_runtime_values/`（Go）が `performance_schema.global_variables` を直接読む。理由は次の 2 つで、どちらも「実行時に mysql クライアントを導入できない」ことに帰着する。
+
+- VerifyGreen は RDS のある VPC 内で動かす場合があり、そこから apt リポジトリへ到達できない
+- `aws/codebuild/standard:7.0` は mysql クライアントを含まない（`libmysqlclient-dev` は開発用ライブラリである）
+
+収集対象のパラメータ名は、このバイナリが CloudFormation テンプレートから直接読む（`scripts/internal/cfn` の `ParameterNames`）。値が組み込み関数の項目は実値が決まらないため、比較対象から外して「比較不能」と表示し、ドリフト判定にも含めない。fixture とテストは `examples/cfn-shorthand/` にある。
+
+**TLS は VERIFY_CA 相当である。**証明書チェーンは検証し、**ホスト名は検証しない**（MySQL クライアントの `--ssl-mode=VERIFY_CA` と同じ挙動）。RDS のトラストストア（`scripts/collect_green_runtime_values/rds-global-bundle.pem`、AWS が公開する 165KB の公開情報）を `go:embed` でバイナリへ焼き込んであるため、**実行時に CA ファイルを用意する必要がない**。config の `ssl_ca` を指定した場合だけそのバンドルへ差し替える。バンドルの更新はこれだけである。
+
+```bash
+curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+```
+
+`scripts/collect_green_runtime_values.sh` はバイナリの場所を決めてパスワードを環境変数で渡すだけの薄いラッパーである。パスワードはコマンド引数・成果物に出さない。`auth_method: prompt` のときはここで対話入力を促す（エコーしない）。
 
 **Step 4 は同じ Go プログラムで 2 つの実行形態を賄う。**MySQL 実効値の収集は Green DB への到達が必要で、リモート（CodeBuild）では VPC 構成が別途要るため成立しない場合がある。そのときは MySQL 接続を伴う確認をローカルから行い、レポート出力までローカルで完結させる。
 
@@ -85,7 +99,14 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 
 **実効値の有無で変わるのはこの列だけで、判定は AWS API から取得した値で行う。**リモートでも判定内容は変わらない。この性質は `tests/cfn_shorthand_test.sh` が両形態を突き合わせて固定しているので、**レポート生成器を変更したら両形態のテストを通すこと。**
 
-レポート生成器は **Go 版だけ**である（`generate_green_verification_report.go`）。CodeBuild と GitHub Actions はどちらも `go build ./scripts` でビルドし、`GREEN_REPORT_GENERATOR` で `verify_green.sh` へ渡す。未指定なら `verify_green.sh` が一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
+**Step 4 が使う Go バイナリは 2 本で、どちらも `BuildReportTool` が作って artifact で渡す。**
+
+| バイナリ | ソース | 役割 | 受け取る環境変数 |
+|---|---|---|---|
+| `generate_green_verification_report` | `scripts/`（package main） | レポート（`.md`）の組み立て | `GREEN_REPORT_GENERATOR` |
+| `collect_green_runtime_values` | `scripts/collect_green_runtime_values/` | Green DB の実効値収集 | `GREEN_RUNTIME_COLLECTOR` |
+
+**VerifyGreen はどちらもビルドしない。**片方でも欠けていれば理由を出して停止する（Go も外部ネットワークも持たない前提のため、自動復旧しない）。未指定なら `verify_green.sh` が一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
 
 **CloudFormation テンプレートの読み取りは `internal/cfn` が担う。**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化し、値が組み込み関数の項目は「比較不能」として比較対象から外す。レポート生成器の `--list-parameter-names` が `scripts/internal/cfn` を、`tools/generate_blue_green_config_report` が `tools/internal/cfn` を使う。**この 2 本は同一内容の複製なので、短縮記法の扱いを変えるときは両方を直す**（`tests/cfn_shorthand_test.sh` が一致を検査する）。
 

@@ -1,5 +1,14 @@
 # VerifyGreen（Step 4）を RDS のある private subnet で実行するためのビルドイメージ。
 #
+# **【2026-09-16 追記】このイメージは現在不要である。未使用として残している。**
+# 実効値の収集を MySQL クライアントから Go のバイナリ
+# （scripts/collect_green_runtime_values/。BuildReportTool がビルドし artifact で渡す）
+# へ置き換えたため、mysql_verification.enabled: true でも
+# aws/codebuild/standard:7.0 で足りるようになった。同イメージは jq・rbenv
+# （Ruby 3.4.10 を含む）・AWS CLI v2 を持ち、欠けていたのは mysql クライアントだけだった。
+# 以下は「MySQL クライアントを実行環境に置く」方式を採る場合の参考として残す。
+#
+# 以前の前提:
 # **このイメージが必要なのは mysql_verification.enabled: true のときだけである。**
 # 既定（false）なら AWS API による検証だけなので、aws/codebuild/standard:7.0 で足りる。
 #

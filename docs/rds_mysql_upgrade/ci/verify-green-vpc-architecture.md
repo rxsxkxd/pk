@@ -154,25 +154,32 @@ flowchart TB
 
 **Interface endpoint にはそれぞれ SG が付く。**CodeBuild 側の SG からの 443/tcp を許可しないと、上の API 呼び出しはタイムアウトする。設定手順は [セキュリティグループ設定](verify-green-security-group-setup.md) にある。
 
-**不要になったもの**: `proxy.golang.org`（ビルドを分離）、`PyPI`（設定 YAML の読み取りが Ruby 標準ライブラリ）、`apt リポジトリ`（MySQL クライアントをイメージへ同梱）。
+**不要になったもの**: `proxy.golang.org`（ビルドを分離）、`PyPI`（設定 YAML の読み取りが Ruby 標準ライブラリ）、`apt リポジトリ`（MySQL クライアントを Go バイナリで置き換え）。
 
-## 5. MySQL クライアントをイメージへ同梱する理由
+## 5. MySQL クライアントを使わない理由
 
-private subnet では apt リポジトリへ到達できない。そのため **buildspec から実行時導入（`apt-get install mysql-client`）を削除**し、イメージ側に含めることにした。
+private subnet では apt リポジトリへ到達できないため、実行時に mysql クライアントを導入できない。**さらに `aws/codebuild/standard:7.0` は mysql クライアントを含まない**（`libmysqlclient-dev` は開発用ライブラリである）。
+
+そこで実効値の収集を Go のバイナリに置き換えた。`BuildReportTool` がレポート生成器と一緒にビルドし、artifact で渡す。
 
 ```mermaid
 flowchart LR
-    subgraph img["ci/Dockerfile.verify-green"]
-        RB["Ruby 3.4.10<br/>設定 YAML の読み取り"]
-        JQ["jq<br/>JSON の読み取り"]
-        MY["MySQL クライアント<br/>実効値の収集"]
-        AWSCLI["AWS CLI v2<br/>RDS / CloudWatch / SSM"]
+    subgraph brt["BuildReportTool（VPC 外）"]
+        B1["generate_green_verification_report<br/>レポートの組み立て"]
+        B2["collect_green_runtime_values<br/>実効値の収集<br/>RDS のトラストストアを go:embed"]
     end
-    img -->|"ECR へ push"| ECR[("ECR")]
-    ECR -->|"VerifyGreenImage に指定"| VG["VerifyGreenProject"]
+    brt -->|"artifact: ReportToolOutput"| VG["VerifyGreenProject<br/>検証専用 subnet"]
+    VG -->|"3306/tcp<br/>TLS（VERIFY_CA 相当）"| DB[("Green DB")]
 
-    GO["Go"] -.->|"含めない<br/>（BuildReportTool が担当）"| img
+    classDef outside fill:#e8f4ff,stroke:#3178c6
+    classDef inside fill:#fff4e6,stroke:#d97706
+    class B1,B2 outside
+    class VG inside
 ```
+
+**これで VerifyGreen 側に必要なものが既定イメージだけで揃う。**`aws/codebuild/standard:7.0` は jq・rbenv（Ruby 3.4.10 を含む）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。
+
+TLS は **VERIFY_CA 相当**である。証明書チェーンは検証し、ホスト名は検証しない（mysql クライアントの `--ssl-mode=VERIFY_CA` と同じ）。RDS のトラストストアはバイナリへ焼き込んであるので、**実行側に CA ファイルを置く必要がない**。
 
 `mysql_verification.enabled: true` なのに MySQL クライアントが無い場合、buildspec は**理由と対処を出して停止**する。黙って検証項目を落とさない。
 

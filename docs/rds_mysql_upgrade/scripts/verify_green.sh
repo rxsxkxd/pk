@@ -125,22 +125,28 @@ if [[ -z "$report_generator" ]]; then
   go -C "$repository_root" build -o "$report_generator" ./scripts
 fi
 
+# 実効値の収集も Go のバイナリで行う（MySQL クライアントを使わない）。
+# CI は BuildReportTool が作ったものを GREEN_RUNTIME_COLLECTOR で受け取る。
+runtime_collector=${GREEN_RUNTIME_COLLECTOR:-}
+
 if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then
   green_endpoint=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$target_id" \
     --query 'DBInstances[0].Endpoint.Address' --output text)
   collect_args=(
     --template "$target_parameter_group_template_path"
     --host "$green_endpoint"
+    --port "$MYSQL_VERIFY_PORT"
     --user "$MYSQL_VERIFY_USER"
     --password-env MYSQL_VERIFY_PASSWORD
     --output "$output_dir/green-runtime-values.json"
   )
-  # CA バンドルを指定した場合だけ TLS を検証する。パスワードを平文で流さないため推奨する。
+  # TLS は常に検証する（証明書チェーンのみ。ホスト名は検証しない = VERIFY_CA 相当）。
+  # 既定では収集バイナリへ焼き込んだ RDS のトラストストアを使うため、設定は要らない。
+  # config の ssl_ca を指定した場合だけ、そのバンドルへ差し替える。
   [[ -n "$MYSQL_VERIFY_SSL_CA" ]] && collect_args+=(--ssl-ca "$MYSQL_VERIFY_SSL_CA")
+  [[ -n "$runtime_collector" ]] && collect_args+=(--collector "$runtime_collector")
   export MYSQL_VERIFY_PASSWORD
-  # パラメータ名の抽出も同じバイナリが行う。収集側で Go を使わせない。
-  "$(dirname "$0")/collect_green_runtime_values.sh" "${collect_args[@]}" \
-    --report-generator "$report_generator"
+  "$(dirname "$0")/collect_green_runtime_values.sh" "${collect_args[@]}"
   unset MYSQL_VERIFY_PASSWORD
   runtime_values_file="$output_dir/green-runtime-values.json"
 fi

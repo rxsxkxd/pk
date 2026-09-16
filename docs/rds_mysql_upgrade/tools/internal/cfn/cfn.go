@@ -13,6 +13,8 @@ package cfn
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -131,4 +133,39 @@ func untaggedToAny(node *yaml.Node) any {
 	default:
 		return node.Value
 	}
+}
+
+// safeParameterName は SQL へ埋め込める識別子だけを通す。
+var safeParameterName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
+// ParameterNames はテンプレートが宣言しているパラメータ名を昇順で返す。
+//
+// 値が組み込み関数の項目（Unresolved）も含める。実値は決まらないが、
+// **実効値の収集対象ではある**ためである（収集した値は「比較不能」として表示し、
+// ドリフト判定には使わない）。
+//
+// 名前は SQL の IN リストへ入るため、識別子として安全な文字だけに限る。
+// 値は SQL に含めないので、ここを通れば埋め込みは安全である。
+func ParameterNames(path string) ([]string, error) {
+	group, err := ReadDBParameterGroup(path)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(group.Declared)+len(group.Unresolved))
+	for name := range group.Declared {
+		names = append(names, name)
+	}
+	for name := range group.Unresolved {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("%s: パラメータが 1 つも宣言されていません。", path)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if !safeParameterName.MatchString(name) {
+			return nil, fmt.Errorf("%s: パラメータ名として扱えない文字が含まれます: %q", path, name)
+		}
+	}
+	return names, nil
 }

@@ -78,9 +78,9 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 |---|---|---|---|
 | `parameter_store` | SSM Parameter Store の SecureString | **必須。** `user_parameter_name` に別パラメータを指定する | **CI で使う方式。** カタログからの生成はこれに固定される |
 | `plaintext` | 設定ファイルに直書き | 不可（config の `user` が必要） | **テスト環境専用**。`environment: production` では拒否される |
-| `prompt` | MySQL クライアントの対話入力 | 不可（config の `user` が必要） | ローカル実行専用。CI では成立しない |
+| `prompt` | シェルの対話入力（エコーしない） | 不可（config の `user` が必要） | ローカル実行専用。CI では成立しない |
 
-解決は `scripts/lib/mysql_credentials.sh` が行い、値はログ・コマンド引数・成果物へ出さず、`MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。上表以外の値（`secrets_manager`、`iam` など）は不正な `auth_method` として拒否する。
+解決は `scripts/lib/mysql_credentials.sh` が行い、値はログ・コマンド引数・成果物へ出さず、環境変数で実効値収集バイナリのプロセスにだけ渡す。上表以外の値（`secrets_manager`、`iam` など）は不正な `auth_method` として拒否する。
 
 **`parameter_store` ではユーザー名も必ず秘匿側へ置く。** `parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` は秘匿側を持たないため config の `user` が必須である。
 

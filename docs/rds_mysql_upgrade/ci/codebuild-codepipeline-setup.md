@@ -132,24 +132,19 @@ VerifyGreenImage=<account>.dkr.ecr.<region>.amazonaws.com/rds-bg-verify-green:<t
 
 カスタマー管理キーで暗号化した SecureString を使う場合は `kms` も追加する。
 
-#### MySQL クライアントはイメージへ同梱する
+#### MySQL クライアントは使わない
 
-private subnet では apt リポジトリへ到達できないため、**buildspec は `apt-get` を呼ばない。**`mysql_verification.enabled: true` なのに MySQL クライアントが無い場合は、理由を出して停止する。
+private subnet では apt リポジトリへ到達できないため、**buildspec は `apt-get` を呼ばない。**実効値の収集は `collect_green_runtime_values`（静的リンクの Go バイナリ）が行う。`BuildReportTool` がレポート生成器と一緒にビルドし、artifact で渡す。
 
-イメージ定義は [Dockerfile.verify-green](Dockerfile.verify-green) にある（MySQL クライアント・Ruby・jq・AWS CLI を含み、Go は含まない）。ECR へ push して `VerifyGreenImage` に指定する。既定イメージ以外を指定すると、テンプレートは `ImagePullCredentialsType: SERVICE_ROLE` へ切り替え、`VerifyGreenRole` へ ECR 読み取り権限を条件付きで付与する。
+**そのため `VerifyGreenImage` に既定以外を指定する必要は無い。**`aws/codebuild/standard:7.0` は jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。既定イメージ以外を指定した場合だけ、テンプレートは `ImagePullCredentialsType: SERVICE_ROLE` へ切り替え、`VerifyGreenRole` へ ECR 読み取り権限を条件付きで付与する。
 
 > イメージが提供する managed runtime の Go バージョンは AWS の更新で変わる。`runtime-versions: golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブをイメージが提供するバージョンへ下げる。
 
 ### 任意の MySQL 実効値収集時だけ追加されるもの
 
-`CollectMySqlRuntimeValues=true` の場合だけ、VerifyGreen は Secrets Manager から接続情報を取得し、`mysql` コマンドが見つからなければ次を実行する。
+`CollectMySqlRuntimeValues=true` の場合だけ、VerifyGreen は SSM Parameter Store から接続情報を取得し、Green DB へ 3306/tcp で接続する。**パッケージの導入は発生しない。**収集は事前ビルド済みの Go バイナリが行い、TLS の CA もそこへ焼き込んである。
 
-```bash
-sudo apt-get update
-sudo apt-get install -y mysql-client
-```
-
-したがって MySQL 接続をしない通常の Step 4 では、MySQL クライアントの導入も Green DB への接続も発生しない。ここで導入する `mysql-client` は Ubuntu の apt repository が提供するパッケージであり、現時点ではバージョン固定していない。MySQL クライアントの厳密なバージョン固定が必要になった場合は、`mysql:8.4.11` 等の固定イメージで実効値収集を行う方式へ変更してから有効化する。
+したがって MySQL 接続をしない通常の Step 4 では、Green DB への接続そのものが発生しない。
 
 ## 1. 事前条件
 

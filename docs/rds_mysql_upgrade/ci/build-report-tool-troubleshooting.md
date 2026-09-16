@@ -14,7 +14,7 @@ flowchart TD
     Q0 -->|"ある"| Q1{"install フェーズで<br/>go version が出たか"}
     Q1 -->|"出ていない"| I["I: install より前で落ちた<br/>（buildspec / image / 起動）"]
     Q1 -->|"出た"| Q2{"MODULE_DIR= の行が<br/>出たか"}
-    Q2 -->|"出ていない"| P["P: go.mod を見つけられない"]
+    Q2 -->|"構成が… で落ちた"| P["P: 構成の検査で弾かれた"]
     Q2 -->|"出た"| B["B: go build 本体で落ちた"]
 ```
 
@@ -22,7 +22,7 @@ flowchart TD
 |---|---|---|
 | **S** | CodeBuild が起動する前（CodePipeline 側） | [1](#1-s-ビルドが起動しない) |
 | **I** | install フェーズ（コマンドが 1 つも走らない） | [2](#2-i-install-フェーズで落ちる) |
-| **P** | pre_build フェーズ（`go.mod` の解決） | [3](#3-p-gomod-を見つけられない) |
+| **P** | pre_build フェーズ（構成の検査） | [3](#3-p-構成の検査で落ちる) |
 | **B** | build フェーズ（`go build` 本体） | [4](#4-b-go-build-が失敗する) |
 | **R** | ビルド成功後（artifact の受け渡し） | [5](#5-r-ビルドは成功したのに後段で失敗する) |
 
@@ -115,7 +115,7 @@ Source:
 
 このプロジェクトがリポジトリのサブディレクトリに置かれている場合、`ci/...` ではなく `<サブディレクトリ>/ci/...` でなければならない。
 
-> **ここから逆に分かること**：`go.mod` と `ci/` はこのプロジェクトの直下に並んでいる。つまり **buildspec が読めた（= `go version` が出た）なら、同じソースルートに `go.mod` もある。**したがって I2 を通過していれば [P1](#p1-gomod-が見つからない) は起きにくい。P1 が出たなら、`go.mod` がリポジトリに入っていない可能性を先に疑う。
+> **ここから逆に分かること**：`go.mod` と `ci/` はこのプロジェクトの直下に並んでいる。つまり **buildspec が読めた（= `go version` が出た）なら、同じソースルートに `go.mod` もある。**したがって I2 を通過していれば「`go.mod` が無い」は起きにくい。それが出たなら、`go.mod` がリポジトリに入っていない可能性を先に疑う。
 
 ### I3: イメージを取得できない
 
@@ -142,9 +142,22 @@ CLIENT_ERROR: ... unable to create ENI ... / is not authorized to perform: ec2:C
 
 このファイルは `env.shell: bash` を指定しているが、**コマンド自体は POSIX シェル互換で書いてある**（`[[ ]]` / `<<<` / `-o pipefail` を使わない）。`/bin/sh` で動いても壊れない。新しくコマンドを足すときもこの方針を守る。
 
-## 3. P: go.mod を見つけられない
+## 3. P: 構成の検査で落ちる
 
-### なぜこの解決処理が要るか
+### 期待する構成
+
+`pre_build` は**この形を期待し、外れていたら別のものをビルドせずに落とす。**
+
+```
+<モジュールルート>/go.mod        module rds-mysql-upgrade
+<モジュールルート>/go.sum        依存は gopkg.in/yaml.v3 v3.0.1 だけ
+<モジュールルート>/scripts/      package main（ビルド対象）
+<モジュールルート>/tools/        人が実行するコマンド
+```
+
+**Go のモジュールはプロジェクト直下の 1 つだけである。**
+
+### なぜ構成として落とすのか
 
 Go の module モードには**相対 import が存在しない**。モジュール内の import はすべて `go.mod` の `module` 行を接頭辞に持つ。
 
@@ -153,36 +166,36 @@ import "rds-mysql-upgrade/scripts/internal/cfn"
 //      ^^^^^^^^^^^^^^^^^ go.mod の `module rds-mysql-upgrade` と一致していなければならない
 ```
 
-そのため **`go.mod` が効いていない場所で `go build` すると、Go は `rds-mysql-upgrade/...` を「外部から取ってくるモジュール」と解釈して失敗する。**このときエラー文にモジュール名が出るので「モジュール名が悪い」ように見えるが、**モジュール名は原因ではない。**`rds-mysql-upgrade` は（リモート取得しないローカルモジュールとして）正当なパスで、名前を変えても import を全部書き換えるだけで結果は変わらない。
+そのため `go.mod` の位置がずれると、Go は `rds-mysql-upgrade/...` を「外部から取ってくるモジュール」と解釈して失敗する。**このときエラー文にモジュール名が出るので原因がモジュール名に見えるが、モジュール名は原因ではない。**`rds-mysql-upgrade` は正当なパスで、名前を変えても import を全部書き換えるだけで結果は変わらない。
 
-buildspec は `pre_build` で `module` 行を照合して `go.mod` の位置を突き止め、その結果を `MODULE_DIR=` として出す。
+だから buildspec は `go build` に到達する前に構成として指摘する。**すべてのメッセージが `構成が` で始まる。**
 
-### P1: `go.mod` が見つからない
+### メッセージ別の対処
+
+| メッセージ | 意味 | やること |
+|---|---|---|
+| `構成が古い: go.mod が scripts/ 配下にある。` | 旧レイアウトをビルドしている | **ビルド対象のブランチ／コミットを確認する。**`go.mod` と `go.sum` はプロジェクト直下へ移してある |
+| `構成が期待と違う: module rds-mysql-upgrade の go.mod が無い。` | `go.mod` がソースに入っていない、または探索が届かない | `git ls-files go.mod go.sum` で追跡を確認する。5 階層以上深い配置なら `-maxdepth` を増やす |
+| `構成が期待と違う: module rds-mysql-upgrade の go.mod が複数ある。` | 二重チェックアウト、または `scripts/go.mod` が残っている | 出力された一覧を見て、余分な方を取り除く |
+| `構成が期待と違う: scripts/go.mod が残っている。` | 旧構成の残骸 | `scripts/go.mod` を削除する |
+| `構成が期待と違う: scripts/generate_green_verification_report.go が無い。` | ビルド対象のソースが無い | モジュールルートの `ls` 出力が併せて出る。ソースの取得範囲を確認する |
+| `構成が期待と違う: go.sum が無い。` | 依存が固定されていない | ローカルで `go mod tidy` し、`go.mod` と `go.sum` の両方を commit する |
+
+**`scripts/go.mod` を名指しで拒否している理由**：この形だと `scripts/` から親の `internal/` が見えず、ビルド対象の指定も変わる。動いてしまうより落ちた方がよい。
+
+> **`CODEBUILD_SRC_DIR` はシンボリックリンクである。**`/codebuild/output/srcNNN/src -> /codebuild/output/srcDownload/src` という構造で、これは AWS 上でも CodeBuild Local Agent でも同じである。**`find` は起点がシンボリックリンクのとき既定で辿らない**ため、探索の前に `pwd -P` で実体へ解決している。ここを外すと `go.mod` が 1 件も見つからず「`go.mod` が無い」で落ちる。実体ディレクトリを渡すローカル試験では再現しないので、**この行は消さないこと。**
+
+### 検査を通過したときの出力
 
 ```
-module rds-mysql-upgrade の go.mod が /codebuild/output/src.../ 配下に見つからない。
-見つかった go.mod:
-/codebuild/output/src.../examples/mysql-timezone-replication/probe/go.mod
+MODULE_DIR=/codebuild/output/src123456789/src/.../rds_mysql_upgrade
+rds-mysql-upgrade                      ← go list -m
+rds-mysql-upgrade/scripts (main)       ← go list（ビルド対象が main であること）
 ```
 
-「見つかった go.mod」の一覧で分岐する。
+`go list -m` が `rds-mysql-upgrade` 以外を返したら、掴んでいる `go.mod` が想定と違う。
 
-| 一覧の様子 | 原因 | 対処 |
-|---|---|---|
-| 1 件も出ない | `go.mod` がリポジトリに入っていない | `git ls-files go.mod go.sum` で追跡を確認し、未追跡なら commit する |
-| `probe/go.mod` だけ出る | 探索が届いていない | 探索は `-maxdepth 4`。プロジェクトが 5 階層以上深いなら buildspec の `-maxdepth` を増やす |
-| 目的の `go.mod` は出ているのに選ばれない | `module` 行が `rds-mysql-upgrade` でない | `go.mod` の 1 行目を確認する。**`module` 行を変えるなら buildspec の `grep` パターンも同時に直す** |
-
-### P2: 別の `go.mod` を掴んだ（`go list -m` が `rds-mysql-upgrade` 以外）
-
-このリポジトリには `go.mod` が 2 つある。`probe` 側は `module tzprobe` なので照合で除外される設計である。
-
-| `go.mod` | `module` 行 | 扱い |
-|---|---|---|
-| `go.mod`（プロジェクト直下） | `rds-mysql-upgrade` | **これを使う** |
-| `examples/mysql-timezone-replication/probe/go.mod` | `tzprobe` | 除外される |
-
-**やること**：同じ `CODEBUILD_SRC_DIR` にプロジェクトが二重にチェックアウトされていないか確認する。
+> このリポジトリには `go.mod` が 2 つある。`examples/mysql-timezone-replication/probe/go.mod` は `module tzprobe` なので、`module` 行の照合で除外される。
 
 ## 4. B: go build が失敗する
 
@@ -289,7 +302,7 @@ out_dir=${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report
 
 ### 正常時のログ
 
-この 6 点が揃っていれば `BuildReportTool` は成功している。
+この 7 点が揃っていれば `BuildReportTool` は成功している。
 
 ```
 go version go1.25.x linux/amd64                                        ← ❶ install
@@ -303,19 +316,21 @@ on                                   ← ❸ go env（GO111MODULE）
 auto                                 ←    GOTOOLCHAIN
 
 rds-mysql-upgrade                    ← ❹ go list -m
+rds-mysql-upgrade/scripts (main)     ← ❺ go list ./scripts
 
--rwxr-xr-x 1 root root 3002706 ... generate_green_verification_report  ← ❺ build
-Usage of /codebuild/.../generate_green_verification_report:            ← ❻
+-rwxr-xr-x 1 root root 3002706 ... generate_green_verification_report  ← ❻ build
+Usage of /codebuild/.../generate_green_verification_report:            ← ❼
 ```
 
 | # | 見るもの | 期待 |
 |---|---|---|
 | ❶ | `go version` | `go1.25` 以上 |
-| ❷ | `MODULE_DIR=` | 1 行だけ。末尾がこのプロジェクトのディレクトリ |
+| ❷ | `MODULE_DIR=` | 1 行だけ。末尾がこのプロジェクトのディレクトリ（`scripts` で終わっていたら旧構成） |
 | ❸ | `GO111MODULE` | `on` または空。**`off` は異常** |
 | ❹ | `go list -m` | **`rds-mysql-upgrade`**。これ以外は掴んでいる `go.mod` が違う |
-| ❺ | `ls -l` | バイナリが存在し、サイズが数 MB |
-| ❻ | `Usage of ...` | 引数不足の usage。ここまで出れば動くバイナリである |
+| ❺ | `go list ./scripts` | **`rds-mysql-upgrade/scripts (main)`**。ビルド対象が main パッケージであること |
+| ❻ | `ls -l` | バイナリが存在し、サイズが数 MB |
+| ❼ | `Usage of ...` | 引数不足の usage。ここまで出れば動くバイナリである |
 
 ### R1: VerifyGreen が `Report generator is absent` で止まる
 

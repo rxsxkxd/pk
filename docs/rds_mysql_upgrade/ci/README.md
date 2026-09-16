@@ -12,7 +12,7 @@ Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だ�
 
 その構成で必要になるセキュリティグループの具体的な設定は [VerifyGreen の セキュリティグループ設定](verify-green-security-group-setup.md) を参照する。**テンプレートは SG を作らない。**
 
-Go のビルド（`BuildReportTool`）が失敗したときは [BuildReportTool の失敗切り分け](build-report-tool-troubleshooting.md) を参照する。**ログに何が出ていたら何をするか**を症状別にまとめてある。
+Go のビルド（`BuildReportTool`）が失敗したときは [BuildReportTool の失敗切り分け](build-report-tool-troubleshooting.md) を参照する。**ログに何が出ていたら何をするか**を症状別にまとめてある。ローカルで実際に走らせて確かめる手順は [BuildReportTool のローカル検証手順](build-report-tool-local-verification.md) にある（新しい image は不要）。
 
 各 CodeBuild buildspec を CodePipeline なしでローカル確認する手順は [CodeBuild 各フローの単体ローカル検証](codebuild-local-verification.md) を参照する。
 

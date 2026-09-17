@@ -147,7 +147,7 @@ printf '{"source_parameter_group":"%s","collected_at":"%s"}\n' "$source_pg" "$(d
 
 さらに同日、**設定 YAML の読み取り自体も 1 箇所へ統合した。**各スクリプトが持っていたインライン Python（9 箇所・206 行）を、`scripts/lib/deployment_config.sh` の「YAML を JSON にする 1 行」と、同ファイルの共通関数を使った宣言的な jq フィルタへ置き換えた。各スクリプトは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを書く。置き換えは、変換前後で `eval` 後のシェル変数が一致することを 9 箇所 × 3 パターンで確認したうえで行った。
 
-さらに同日、**設定 YAML の読み取り自体を Python から Ruby へ切り替えた。**Ruby は YAML（psych）と JSON をどちらも標準ライブラリで持つため、`PyYAML` のような追加パッケージの導入が不要になり、**CI から PyPI への到達要件が消えた**。CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う。`pip install` は全廃）。ローカル Local Agent 用の `ci/Dockerfile.codebuild-runner` も、ベースイメージを `python:3.14.7-slim` から `ruby:3.4.10-slim` へ差し替えた。
+さらに同日、**設定 YAML の読み取り自体を Python から Ruby へ切り替えた。**Ruby は YAML（psych）と JSON をどちらも標準ライブラリで持つため、`PyYAML` のような追加パッケージの導入が不要になり、**CI から PyPI への到達要件が消えた**。CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う。`pip install` は全廃）。ローカル Local Agent 用の `ci/Dockerfile.codebuild-runner` も、ベースイメージを `python:3.14.7-slim` から `ruby:3.4.10-slim-bookworm` へ差し替えた（当初は `-slim-bookworm` で固定していたが、後に全箇所を `ruby:3.4.10-slim-bookworm` へ統一した）。
 
 同日、`tests/test_generate_blue_green_config.sh` のアサーションも Ruby へ移した。**これで移行フローの実行経路とテストから Python が消えた。**
 

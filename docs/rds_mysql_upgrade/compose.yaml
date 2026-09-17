@@ -58,7 +58,7 @@ services:
 
   # Ruby スクリプト実行専用。AWS credential や RDS 証明書はマウントしない。
   ruby:
-    image: ruby:3.4.10
+    image: ruby:3.4.10-slim-bookworm
     working_dir: /workspace
     entrypoint: ["ruby"]
     volumes:

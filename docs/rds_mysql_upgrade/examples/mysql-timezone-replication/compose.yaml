@@ -123,7 +123,7 @@ services:
       # ライブラリの開発パッケージが必要になる。実行のたびに導入すると遅いので
       # イメージへ焼き込む。
       dockerfile_inline: |
-        FROM ruby:3.4.10
+        FROM ruby:3.4.10-slim-bookworm
         RUN apt-get update \
           && apt-get install --no-install-recommends -y build-essential libmariadb-dev \
           && rm -rf /var/lib/apt/lists/*
@@ -178,7 +178,7 @@ services:
   # DB へ接続しないため、素の Ruby イメージで足りる（mysql2 のビルドは不要）。
   probe-report:
     profiles: ["probe"]
-    image: ruby:3.4
+    image: ruby:3.4.10-slim-bookworm
     working_dir: /probe
     command: ["ruby", "generate_report.rb"]
     volumes:

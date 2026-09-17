@@ -221,4 +221,4 @@ act workflow_dispatch -W .github/workflows/verify-green.yml \
 
 - `.env`、`ci/.act.env`、`aws-config/*`、`global-bundle.pem` は `.gitignore` 済み。`my.cnf` は空プレースホルダとして例外的に追跡しており、実接続情報を書き込んで commit しないよう手順に明記する（必要なら `.env` の `MYSQL_CLIENT_CONFIG_FILE` でリポジトリ外の絶対パスを指す）。ここへ実値を置く手順を書くときは Git 管理しない旨を明記する。
 - ドキュメント間の相互参照が密である。Step の分割や実行形態を変えたら `upgrade-flow-steps.md`・`ci/README.md`・`examples/*/README.md`・該当 `phase-*.md` を揃えて更新する。
-- コンテナイメージは `latest` を使わない。AWS CLI と MySQL はパッチバージョンまで、Ruby と Go はマイナーまで固定する。
+- コンテナイメージは `latest` を使わない。AWS CLI・MySQL・Ruby はパッチバージョンまで、Go はマイナーまで固定する。**Ruby は `ruby:3.4.10-slim-bookworm` に統一する**（`slim` 以外のバリアントや、パッチを省いた `ruby:3.4` を使わない）。

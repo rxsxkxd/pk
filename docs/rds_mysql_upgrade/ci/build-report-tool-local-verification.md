@@ -106,7 +106,8 @@ docker run --rm \
 go version go1.25.x linux/<arch>          ← install
 MODULE_DIR=/codebuild/output/src.../      ← pre_build（構成検査を通過）
 rds-mysql-upgrade                         ← go list -m
-rds-mysql-upgrade/scripts (main)          ← go list ./scripts
+rds-mysql-upgrade/scripts/generate_green_verification_report (main)   ← go list
+rds-mysql-upgrade/scripts/collect_green_runtime_values (main)
 -rwxr-xr-x ... generate_green_verification_report   ← build
 Usage of .../generate_green_verification_report:    ← 動くバイナリである
 ```

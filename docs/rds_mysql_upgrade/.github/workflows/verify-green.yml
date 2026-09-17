@@ -53,15 +53,23 @@ jobs:
         # GitHub のランナーには Ruby が同梱されているため導入は不要で、
         # 欠けている場合にここで早く落とすための確認である。
         run: ruby --version
-      - name: Build Green verification report binary
+      - name: Build Step 4 binaries
         # CodeBuild と同じ手順でビルドする（Docker は使わない）。依存は go.sum に固定済み。
+        # 2 本とも必要である。
+        #   generate_green_verification_report … レポート（.md）の組み立て
+        #   collect_green_runtime_values       … Green DB の実効値収集
         run: |
           CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
-            -o .tools/green-report/generate_green_verification_report ./scripts
+            -o .tools/green-report/generate_green_verification_report ./scripts/generate_green_verification_report
+          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+            -o .tools/green-report/collect_green_runtime_values ./scripts/collect_green_runtime_values
       # MySQL 実効値収集を行うかは config の mysql_verification.enabled が決める。
       # 接続方式（parameter_store / plaintext / prompt）も config が持ち、
       # verify_green.sh が解決する。prompt は対話入力のため CI では成立しない。
-      - name: Install MySQL client when the config requires runtime collection
+      #
+      # **MySQL クライアントは導入しない。**収集は上でビルドした Go バイナリが行う
+      # （RDS のトラストストアも go:embed で内蔵している）。
+      - name: Report whether runtime collection is enabled
         run: |
           # 設定の読み取りはスクリプト本体と同じ経路を使う（Ruby で YAML→JSON、jq で取り出し）。
           . scripts/lib/deployment_config.sh
@@ -70,11 +78,11 @@ jobs:
               enabled: (if ($svc.mysql_verification.enabled // false) then "true" else "false" end),
             } | shellvars')"
           echo "mysql_verification.enabled=$enabled"
-          if [ "$enabled" = "true" ]; then
-            sudo apt-get update && sudo apt-get install -y mysql-client
-          fi
       - name: Step 4 — verify Green configuration and replication lag
-        run: GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" scripts/verify_green.sh --config 'config/blue-green/${{ inputs.environment }}.deployment.yml' --service '${{ inputs.service }}' --output-dir artifacts
+        env:
+          GREEN_REPORT_GENERATOR: ${{ github.workspace }}/.tools/green-report/generate_green_verification_report
+          GREEN_RUNTIME_COLLECTOR: ${{ github.workspace }}/.tools/green-report/collect_green_runtime_values
+        run: scripts/verify_green.sh --config 'config/blue-green/${{ inputs.environment }}.deployment.yml' --service '${{ inputs.service }}' --output-dir artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

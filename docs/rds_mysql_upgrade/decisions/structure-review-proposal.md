@@ -40,7 +40,7 @@
 |---|---|
 | インライン `python3 -c` | 8 ファイル・計 38 箇所（`verify_green.sh` だけで 12） |
 | Ruby | `evaluate_blue_green_prereqs.rb` 106 行、`generate_mysql84_parameter_group.rb` 307 行、`generate_green_verification_report.rb` 114 行（**このうちレポート生成器は 2026-09-14 に削除し Go へ一本化**。残り 2 本の扱いは [implementation-language-policy.md](implementation-language-policy.md)） |
-| Go | `generate_green_verification_report.go` 259 行（Ruby 版と同一機能） |
+| Go | `generate_green_verification_report` 259 行（当時。Ruby 版と同一機能） |
 | bash | 9 ファイル。各々が同じ `--config/--service/--region/--profile/--output-dir` のパースを持つ |
 
 とくに次の 2 点が構造的な負債である。

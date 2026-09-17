@@ -4,9 +4,49 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 
 ## まず読むもの
 
-作業の背骨は次の1本。他のドキュメントはすべてこれの詳細リファレンスか、周辺の技術メモ・記録である。
+**実際に移行を動かすための手順は次の 2 本である。**この 2 本で完結する。
+
+1. **[operations-environment-setup.md](operations-environment-setup.md)** — オペレーション編 1／2: 環境構築。CloudFormation でパイプラインを作るまでの事前作業と手順。**一度だけ**
+2. **[operations-migration-run.md](operations-migration-run.md)** — オペレーション編 2／2: 移行の実行。事前チェック・設定生成から、パイプラインでの Blue/Green 移行まで。**移行対象ごとに繰り返す**
+
+設計・分類の背骨は次の1本。他のドキュメントはすべてこれらの詳細リファレンスか、周辺の技術メモ・記録である。
 
 - **[upgrade-flow-steps.md](upgrade-flow-steps.md)** — Step 1〜7 の分割、実装状況、実行形態(ローカル/CI)、設定ファイルによるアクション管理。**現在レビュー中のため内容・番号体系は変更しない。**
+
+## 移行判断の流れ（3 つのレビューゲート）
+
+Step の並びとは別に、**「人が何を見て何を決めるか」**という軸がある。移行はレポートを起点に 3 回判断する。
+
+```text
+Step 1 成立条件チェック ─┐
+                          ├─► ① 移行できるか／どれを対象にするか
+Step 2 パラメータ変換 ───┘        │
+                                   ▼
+                          対象インスタンスの設定 YAML を生成
+                          （同時に設定レビューレポートも出る）
+                                   │
+                                   ▼
+                          ② この移行設定でよいか  → actions.build: approved
+                                   │
+                                   ▼
+                          Step 3 Blue/Green 構築 → Step 4 Green 検証レポート
+                                   │
+                                   ▼
+                          ③ 切り替えてよいか      → actions.switchover: approved
+                                   │
+                                   ▼
+                          Step 5 切替
+```
+
+| ゲート | 何を決めるか | 材料 |
+|---|---|---|
+| ① | 移行可否と**対象インスタンスの選定** | Step 1 の成立条件チェックレポートと Step 2 のパラメータレポート |
+| ② | **移行設定の妥当性** | 設定 YAML と同時に生成されるレビューレポート |
+| ③ | **切り替えの可否** | Green 検証レポート（宣言値・適用値・実効値の突き合わせ） |
+
+**レポートは作って終わりではなく、次のアクションを承認するための入力である。**承認は設定ファイルの `actions`（`pending` / `approved`）で表明し、CI はその宣言と AWS の実状態を突き合わせて動く。
+
+各レポートの入力・実行形態・実装言語は [report-generation-flows.md](report-generation-flows.md) にまとめてある。
 
 Step の詳細を掘り下げる際に参照する:
 
@@ -14,6 +54,7 @@ Step の詳細を掘り下げる際に参照する:
 - [phase-0-precheck.md](phase-0-precheck.md) — Step 1 の詳細。Blue/Green 成立条件チェックリスト(0-1-01〜14)
 - [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md) — Step 2 の詳細。CloudFormation による DB パラメータグループ管理
 - [config-blue-green-generation-design.md](config-blue-green-generation-design.md) — RDS インベントリと人が管理する対応表から Blue/Green 設定 YAML を生成する支援ツールの最小設計
+- [report-generation-flows.md](report-generation-flows.md) — **レポート生成の全体像**。3 つの生成器（設定レビュー / パラメータ変換 / Green 検証）の役割・入力・実行タイミングを図で整理
 - [migration-catalog-er.md](migration-catalog-er.md) — 移行カタログ(アプリケーション、接続、環境、パラメータグループ)の ER 図。YAML 構造の正本
 - [direct-blue-green-execution.md](direct-blue-green-execution.md) — `scripts/*.sh` を直接実行する場合の、パラメータグループ事前確認から後始末までの一連手順
 - [ci/verify-green-vpc-architecture.md](ci/verify-green-vpc-architecture.md) — Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だけを RDS のある VPC 内へ置く構成（図つき）
@@ -48,7 +89,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 | `config/` | 環境別設定ファイル(`blue-green/{staging,production}.yml`)とパラメータ変換ルール |
 | `ci/` | GitHub Actions / CodeBuild・CodePipeline の実行定義。[ci/README.md](ci/README.md) |
 | (ルート直下) | ローカル実行用コンテナ定義。`compose.yaml`、`aws-config/`、`global-bundle.pem`、`my.cnf`。[local-execution.md](local-execution.md) |
-| `examples/` | サンプル入出力・CLI 実行例・ローカル検証環境 |
+| `examples/` | サンプル入出力・CLI 実行例・ローカル検証環境。ゴールデンファイルによる回帰確認に使う |
 | `reference/` | 判断に使う技術リファレンス(手順書ではない) |
 | `decisions/` | 結論→理由→代替案評価の意思決定記録(ADR)。未採択の検討中メモも含む |
 | `reports/` | 完了した作業の実施記録 |

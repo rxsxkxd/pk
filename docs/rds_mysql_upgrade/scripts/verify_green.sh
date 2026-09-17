@@ -122,7 +122,7 @@ if [[ -z "$report_generator" ]]; then
   repository_root=$(cd "$(dirname "$0")/.." && pwd)
   report_generator=$(mktemp "${TMPDIR:-/tmp}/green-verification-report.XXXXXX")
   trap 'rm -f "$report_generator"' EXIT
-  go -C "$repository_root" build -o "$report_generator" ./scripts
+  go -C "$repository_root" build -o "$report_generator" ./scripts/generate_green_verification_report
 fi
 
 # 実効値の収集も Go のバイナリで行う（MySQL クライアントを使わない）。

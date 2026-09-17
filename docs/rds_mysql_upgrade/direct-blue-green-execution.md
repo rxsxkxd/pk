@@ -133,7 +133,7 @@ scripts/verify_green.sh \
 繰り返し実行するなら、CI と同じようにバイナリを作って渡す方が速い。
 
 ```bash
-go build -o .tools/green-report/generate_green_verification_report ./scripts
+go build -o .tools/green-report/generate_green_verification_report ./scripts/generate_green_verification_report
 
 GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" \
   scripts/verify_green.sh \

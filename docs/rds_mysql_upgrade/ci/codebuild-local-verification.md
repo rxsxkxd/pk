@@ -211,7 +211,7 @@ mkdir -p .local
 
 ## 3. VerifyGreen 単体検証
 
-対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.sh` である。VerifyGreen は Go レポート生成器を同一イメージ内でビルドする（Docker は使わない）。**Local Agent のランナー image は `runtime-versions` を解決しない**ため、Go を含む image を使うか、あらかじめホストで `go build -o .tools/green-report/generate_green_verification_report ./scripts` したバイナリを `GREEN_REPORT_GENERATOR` で渡す。
+対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.sh` である。VerifyGreen は Go レポート生成器を同一イメージ内でビルドする（Docker は使わない）。**Local Agent のランナー image は `runtime-versions` を解決しない**ため、Go を含む image を使うか、あらかじめホストで `go build -o .tools/green-report/generate_green_verification_report ./scripts/generate_green_verification_report` したバイナリを `GREEN_REPORT_GENERATOR` で渡す。
 
 ```bash
 ./ci/codebuild_build.sh \

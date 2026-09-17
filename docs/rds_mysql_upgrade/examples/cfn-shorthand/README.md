@@ -2,7 +2,7 @@
 
 Step 2 が生成する DB パラメータグループのテンプレートは**長形式**（`Ref: Xxx`）で出力されるが、Step 2 のレビューで人が CFn 慣用の**短縮記法**（`!Ref` / `!Sub`）へ書き換えることがある。
 
-テンプレートの読み取りは `internal/cfn` が担う。レポート生成器（`generate_green_verification_report.go`。パラメータ名の列挙 `--list-parameter-names` を含む）が `scripts/internal/cfn` を、レビューレポート生成（`tools/generate_blue_green_config_report`）が `tools/internal/cfn` を使う。**この 2 本は同一内容の複製で、`tests/cfn_shorthand_test.sh` が一致を検査する。**
+テンプレートの読み取りは `internal/cfn` が担う。レポート生成器（`scripts/generate_green_verification_report/`。パラメータ名の列挙 `--list-parameter-names` を含む）が `scripts/internal/cfn` を、レビューレポート生成（`tools/generate_blue_green_config_report`）が `tools/internal/cfn` を使う。**この 2 本は同一内容の複製で、`tests/cfn_shorthand_test.sh` が一致を検査する。**
 
 以前は読み取り実装が 3 つに分かれており、いずれも短縮記法を正しく扱えなかった。
 
@@ -10,7 +10,7 @@ Step 2 が生成する DB パラメータグループのテンプレートは**�
 |---|---|
 | `collect_green_runtime_values.sh`（Python / `yaml.safe_load`） | **即座に失敗**（`could not determine a constructor for the tag '!Ref'`） |
 | `generate_green_verification_report.rb`（Ruby / Psych） | **黙って通るが、タグを捨てて引数の文字列だけを残す** |
-| `generate_green_verification_report.go`（Go / yaml.v3。自前実装） | 同上 |
+| `scripts/generate_green_verification_report/`（Go / yaml.v3。自前実装） | 同上 |
 
 Ruby / Go は `replica_parallel_workers: !Ref Workers` を `"Workers"` という値として読み、RDS の実値と比較して**存在しないドリフトを報告**していた。
 

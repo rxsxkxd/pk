@@ -12,6 +12,8 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 
 ### Step 1〜7 の分割
 
+**実運用の手順は 2 本に集約してある。**`operations-environment-setup.md`（環境構築。CloudFormation でパイプラインを作るまで。一度だけ）と `operations-migration-run.md`（移行の実行。事前チェック・設定生成からパイプラインでの移行まで。対象ごとに繰り返す）である。**オペレーション手順を書き足すときは、まずこの 2 本のどちらかに属するかを考える。**個々のチェックの中身や背景は補足ドキュメント側に置き、2 本からはリンクする。
+
 `upgrade-flow-steps.md` が中心的な設計ドキュメントで、移行手順書の Phase 0〜5 を再実行可能な 7 ステップへ割り直している。**新しいスクリプトや CI ジョブを追加するときは、まずこのファイルの分類（実行形態・ワンストップ実行・承認要否）に照らす。**
 
 | Step | 内容 | 実行形態 | エントリポイント |
@@ -64,7 +66,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 
 **`upgrade-flow-steps.md` の Step 1・2 の実装リンクだけが `scripts/` の旧パスのまま残っている。**同ファイルはレビュー中につき内容を変更しない方針のため、意図的に更新していない。**レビューが終わったら `tools/` へ直すこと**（対象は 20 行目と 30 行目の 4 リンク）。それ以外のドキュメントは `tools/` を指すよう更新済みである。
 
-コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `tools/internal/` 側とその単体テストを直す。**生成結果の `source_db_parameters` は Blue のパラメータグループから採取した実値（パラメータ名をキーにした `value` / `source`。採取対象は `tools/internal/collect` の `CollectedParameters` で決め、現在は `time_zone` のみ）で、**切替前の人のレビュー専用**——実行スクリプトは読まない。レポートはこれと移行先テンプレートの宣言値を突き合わせて `一致` / `差異` / `比較不能` を示す。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。
+コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `tools/internal/` 側とその単体テストを直す。**生成結果の `source_db_parameters` は Blue のパラメータグループから採取した実値（パラメータ名をキーにした `value` / `source`。採取対象は `tools/internal/collect` の `CollectedParameters` で決め、現在は `time_zone` のみ）で、**切替前の人のレビュー専用**——実行スクリプトは読まない。レポートはこれと移行先テンプレートの宣言値を突き合わせて `一致` / `差異` / `比較不能` を示す。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。**レポート生成器は全部で 3 つあり**（①設定レビュー / ②Step 2 のパラメータ変換 `generate_mysql84_parameter_group.rb` / ③Step 4 の Green 検証）、いずれも **AWS を呼ばず収集済みファイルだけを読む**。全体像は `report-generation-flows.md` にある。
 
 `config/mysql80-to-84-parameter-rules.yml` は 8.0 → 8.4 のパラメータ変換ルール（`copy` / `force` / `omit` / `target_only`）を持ち、`generate_mysql84_parameter_group.rb` の唯一のルールソースである。パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。
 
@@ -159,8 +161,9 @@ docker compose --env-file .env run --rm ruby tools/generate_mysql84_parameter_gr
 
 ```bash
 # Step 1: 収集 → 判定（STOP が残る間は先へ進まない）
+# --output でゲート①の判断材料レポート（観測値と取得元つき）も出せる。
 tools/collect_blue_green_prereqs.sh --db-instance-id <blue-id> --region <region> --profile <profile>
-ruby tools/evaluate_blue_green_prereqs.rb --input-dir <収集先>
+ruby tools/evaluate_blue_green_prereqs.rb --input-dir <収集先> --output <収集先>/prereqs-evaluation-report.md
 
 # Step 2: 収集 → ルール突合 → レポートと CFn テンプレート生成
 tools/collect_mysql84_parameter_inputs.sh --source-parameter-group <8.0-pg-name>

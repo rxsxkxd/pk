@@ -47,10 +47,11 @@ else
   failed=$((failed + 1))
 fi
 
-# レポート生成器は scripts/ 直下の package main で、scripts/internal/cfn を import する。
+# レポート生成器は scripts/generate_green_verification_report/ の package main で、
+# scripts/internal/cfn を import する。
 # リポジトリからそのままビルドする（依存は go.sum に固定済み）。
 build_go() {
-  go build -o "$work/gen" ./scripts >"$work/go.err" 2>&1
+  go build -o "$work/gen" ./scripts/generate_green_verification_report >"$work/go.err" 2>&1
 }
 
 if command -v go >/dev/null 2>&1 && build_go; then

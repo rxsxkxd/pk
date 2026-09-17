@@ -67,7 +67,7 @@ VerifyGreen だけは Go バイナリを使う。**Docker は使わず、ビル�
 ```text
 ci/codebuild/build-report-tool.yml   ← ビルドだけ。AWS を呼ばない
   ├─ install:  runtime-versions: golang: 1.25
-  └─ build:    CGO_ENABLED=0 go build ... -o .tools/green-report/... ./scripts
+  └─ build:    CGO_ENABLED=0 go build ... -o .tools/green-report/... ./scripts/<コマンド名>
                → artifact: .tools/green-report/generate_green_verification_report
 
 ci/codebuild/verify-green.yml        ← 実行だけ。Go を使わない

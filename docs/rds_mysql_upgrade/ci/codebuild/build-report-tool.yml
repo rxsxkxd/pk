@@ -42,7 +42,8 @@ phases:
       # その直下の scripts/ にある main パッケージである。
       #
       #   <モジュールルート>/go.mod                       module rds-mysql-upgrade
-      #   <モジュールルート>/scripts/                     package main（ビルド対象）
+      #   <モジュールルート>/scripts/generate_green_verification_report/  package main
+      #   <モジュールルート>/scripts/collect_green_runtime_values/        package main
       #   <モジュールルート>/tools/                       人が実行するコマンド
       #
       # **この形から外れていたら、黙って別のものをビルドせずに落とす。**
@@ -104,7 +105,7 @@ phases:
         fi
 
         # ビルド対象のソースがあること（2 本とも）。
-        for required in scripts/generate_green_verification_report.go \
+        for required in scripts/generate_green_verification_report/main.go \
                         scripts/collect_green_runtime_values/main.go \
                         scripts/collect_green_runtime_values/rds-global-bundle.pem; do
           if [ ! -f "$MODULE_DIR/$required" ]; then
@@ -133,7 +134,7 @@ phases:
       # 掴んだモジュールと、ビルド対象が main パッケージであることを確認する。
       # 期待は `rds-mysql-upgrade` と、2 本の main パッケージである。
       - cd "$(cat /tmp/module_dir)" && go list -m
-      - cd "$(cat /tmp/module_dir)" && go list -f '{{.ImportPath}} ({{.Name}})' ./scripts ./scripts/collect_green_runtime_values
+      - cd "$(cat /tmp/module_dir)" && go list -f '{{.ImportPath}} ({{.Name}})' ./scripts/generate_green_verification_report ./scripts/collect_green_runtime_values
 
   build:
     commands:
@@ -148,7 +149,7 @@ phases:
         mkdir -p "$out_dir"
         cd "$(cat /tmp/module_dir)"
         CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
-          -o "$out_dir/generate_green_verification_report" ./scripts
+          -o "$out_dir/generate_green_verification_report" ./scripts/generate_green_verification_report
         # RDS のトラストストアは go:embed でこのバイナリへ焼き込まれる。
         # 実行側は VPC 内から外部へ出られないため、実行時に取得する選択肢が無い。
         CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \

@@ -1,6 +1,6 @@
 # BuildReportTool（Go ビルド）の失敗切り分け
 
-`ci/codebuild/build-report-tool.yml` が失敗したときに、**ログのどこを見て、何が出ていたら何をするか**をまとめたもの。対象は Step 4 のレポート生成器（`scripts/generate_green_verification_report.go`）のビルドだけである。
+`ci/codebuild/build-report-tool.yml` が失敗したときに、**ログのどこを見て、何が出ていたら何をするか**をまとめたもの。対象は Step 4 のレポート生成器（`scripts/generate_green_verification_report/main.go`）のビルドだけである。
 
 VerifyGreen（検証の実行）へ進む前の段階を厚く扱う。構成の背景は [Step 4 の分離と VPC 配置](verify-green-vpc-architecture.md) にある。
 
@@ -151,7 +151,8 @@ CLIENT_ERROR: ... unable to create ENI ... / is not authorized to perform: ec2:C
 ```
 <モジュールルート>/go.mod        module rds-mysql-upgrade
 <モジュールルート>/go.sum        依存は gopkg.in/yaml.v3 v3.0.1 だけ
-<モジュールルート>/scripts/      package main（ビルド対象）
+<モジュールルート>/scripts/generate_green_verification_report/   package main
+<モジュールルート>/scripts/collect_green_runtime_values/         package main
 <モジュールルート>/tools/        人が実行するコマンド
 ```
 
@@ -178,7 +179,7 @@ import "rds-mysql-upgrade/scripts/internal/cfn"
 | `構成が期待と違う: module rds-mysql-upgrade の go.mod が無い。` | `go.mod` がソースに入っていない、または探索が届かない | `git ls-files go.mod go.sum` で追跡を確認する。5 階層以上深い配置なら `-maxdepth` を増やす |
 | `構成が期待と違う: module rds-mysql-upgrade の go.mod が複数ある。` | 二重チェックアウト、または `scripts/go.mod` が残っている | 出力された一覧を見て、余分な方を取り除く |
 | `構成が期待と違う: scripts/go.mod が残っている。` | 旧構成の残骸 | `scripts/go.mod` を削除する |
-| `構成が期待と違う: scripts/generate_green_verification_report.go が無い。` | ビルド対象のソースが無い | モジュールルートの `ls` 出力が併せて出る。ソースの取得範囲を確認する |
+| `構成が期待と違う: scripts/generate_green_verification_report/main.go が無い。` | ビルド対象のソースが無い | モジュールルートの `ls` 出力が併せて出る。ソースの取得範囲を確認する |
 | `構成が期待と違う: go.sum が無い。` | 依存が固定されていない | ローカルで `go mod tidy` し、`go.mod` と `go.sum` の両方を commit する |
 
 **`scripts/go.mod` を名指しで拒否している理由**：この形だと `scripts/` から親の `internal/` が見えず、ビルド対象の指定も変わる。動いてしまうより落ちた方がよい。
@@ -316,7 +317,8 @@ on                                   ← ❸ go env（GO111MODULE）
 auto                                 ←    GOTOOLCHAIN
 
 rds-mysql-upgrade                    ← ❹ go list -m
-rds-mysql-upgrade/scripts (main)     ← ❺ go list ./scripts
+rds-mysql-upgrade/scripts/generate_green_verification_report (main)  ← ❺ go list
+rds-mysql-upgrade/scripts/collect_green_runtime_values (main)
 
 -rwxr-xr-x 1 root root 3002706 ... generate_green_verification_report  ← ❻ build
 Usage of /codebuild/.../generate_green_verification_report:            ← ❼
@@ -328,7 +330,7 @@ Usage of /codebuild/.../generate_green_verification_report:            ← ❼
 | ❷ | `MODULE_DIR=` | 1 行だけ。末尾がこのプロジェクトのディレクトリ（`scripts` で終わっていたら旧構成） |
 | ❸ | `GO111MODULE` | `on` または空。**`off` は異常** |
 | ❹ | `go list -m` | **`rds-mysql-upgrade`**。これ以外は掴んでいる `go.mod` が違う |
-| ❺ | `go list ./scripts` | **`rds-mysql-upgrade/scripts (main)`**。ビルド対象が main パッケージであること |
+| ❺ | `go list` | ビルド対象 **2 本**がどちらも `(main)` であること |
 | ❻ | `ls -l` | バイナリが存在し、サイズが数 MB |
 | ❼ | `Usage of ...` | 引数不足の usage。ここまで出れば動くバイナリである |
 

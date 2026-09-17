@@ -46,7 +46,7 @@
 
 - **`generate_green_verification_report.rb`（161 行）を削除し、Go 版に一本化した。**`verify_green.sh` は `GREEN_REPORT_GENERATOR` 未指定なら一時ファイルへ自分でビルドする。削除前に、Ruby 版と Go 版のレポートが全文一致することを確認している
 - **`tests/test_generate_blue_green_config.sh` のアサーションを Python から Ruby へ移した。**これで**移行フローの実行経路とテストから Python が消えた**（残る Python は下記の対象外のものだけ）。移した後、意図的に壊した入力でアサーションが実際に落ちることを 4 パターン確認している
-- **CloudFormation 短縮記法の実装を `internal/cfn` へ集約した。**Go 版レポート生成器が自前実装を持っていたのは、GitHub Actions が `.go` 1 ファイルだけを Docker でビルドしていたためである。GitHub Actions も CodeBuild と同じ `go build ./scripts` に変えたことで制約が消え、**`ci/Dockerfile.green-verification-report` も削除した**（3 箇所 → 1 箇所）
+- **CloudFormation 短縮記法の実装を `internal/cfn` へ集約した。**Go 版レポート生成器が自前実装を持っていたのは、GitHub Actions が `.go` 1 ファイルだけを Docker でビルドしていたためである。GitHub Actions も CodeBuild と同じ `go build` に変えたことで制約が消え、**`ci/Dockerfile.green-verification-report` も削除した**（3 箇所 → 1 箇所）
   - 追記（2026-09-15）: **`scripts/` と `tools/` で Go のライブラリを共有しない**方針に変えたため、`internal/cfn` は `scripts/internal/cfn` と `tools/internal/cfn` の 2 本になった（1 箇所 → 2 箇所）。CI から到達する側と人が実行する側を独立させることを優先した判断である。同一内容の複製なので、**片方を直したらもう片方へ同じ変更を入れる**。ずれると `tests/cfn_shorthand_test.sh` が落ちる
 
 ## 残っている Ruby プログラムの扱い

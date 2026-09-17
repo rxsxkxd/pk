@@ -38,7 +38,7 @@ flowchart LR
 ```mermaid
 flowchart TD
     S["Source<br/>GitHub"] --> RA["ReadApprovals<br/>承認宣言を読む"]
-    RA --> BRT["BuildReportTool<br/>go build ./scripts"]
+    RA --> BRT["BuildReportTool<br/>go build（2 本）"]
     BRT --> PC["PrecheckParameterGroup<br/>8.4 PG の事前確認"]
     PC --> BG["BuildGreen<br/>スナップショット + Green 作成"]
     BG --> VG["VerifyGreen<br/>構成・レプリカ・実効値の検証"]
@@ -72,7 +72,7 @@ sequenceDiagram
     participant V as VerifyGreen
 
     P->>B: SourceOutput を渡して起動
-    B->>B: go build ./scripts
+    B->>B: go build（レポート生成器と実効値収集の 2 本）
     B->>S3: ReportToolOutput として保存<br/>(.tools/green-report/generate_green_verification_report)
     P->>V: SourceOutput（primary）+ ReportToolOutput を渡して起動
     S3-->>V: CODEBUILD_SRC_DIR_ReportToolOutput へ展開

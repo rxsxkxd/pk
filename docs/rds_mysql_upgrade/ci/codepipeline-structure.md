@@ -161,11 +161,12 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 
 ### リソースの絞り込み
 
-RDS の変更権限は `DbInstanceIdentifierPrefix` で ARN を絞る。
+RDS の変更権限は `ProtectedRdsResourceArns` で ARN を絞る（カンマ区切りで複数指定できる）。
 
 ```
-arn:aws:rds:<region>:<account>:db:<DbInstanceIdentifierPrefix>*
-arn:aws:rds:<region>:<account>:snapshot:<DbInstanceIdentifierPrefix>*
+arn:aws:rds:<region>:<account>:db:<識別子の接頭辞>*
+arn:aws:rds:<region>:<account>:snapshot:<識別子の接頭辞>*
+（db と snapshot の両方が必要。未指定なら db:* と snapshot:* へ落ちる）
 ```
 
 **既定値は `*` である。** そのままだとアカウント内の全 DB インスタンスが対象になるため、実運用では必ず指定する（例: `example-service-production`）。

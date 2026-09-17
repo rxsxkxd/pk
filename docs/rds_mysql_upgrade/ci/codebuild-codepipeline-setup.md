@@ -131,7 +131,7 @@ VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティ
 | `com.amazonaws.<region>.monitoring` | `cloudwatch get-metric-statistics`（ReplicaLag） | Interface |
 | `com.amazonaws.<region>.ssm` | 接続情報（SecureString）の取得 | Interface |
 
-カスタマー管理キーで暗号化した SecureString を使う場合は `kms` も追加する。
+> **SecureString の復号のために `kms` endpoint を足す必要はない。**カスタマー管理キーを使う場合でも、`ssm get-parameter --with-decryption` の復号は **SSM の側で行われる**ため、ビルドコンテナが KMS を直接呼ぶことはない。必要になるのは IAM 権限（`kms:Decrypt`）だけで、通信経路は `ssm` endpoint のみである。
 
 #### MySQL クライアントは使わない
 
@@ -281,15 +281,136 @@ aws rds describe-db-instances --db-instance-identifier <blue-id> \
 
 `CollectMySqlRuntimeValues` の既定値は `false` である。このままなら VerifyGreen は Green DB へ MySQL 接続せず、AWS API による検証だけを行う。
 
-実効値もレポートへ載せる場合だけ、次を追加する。
+### 接続情報の取得元 — 2 層に分かれている
 
-1. SSM Parameter Store に SecureString パラメータを 2 本作成する。パスワード用（`parameter_name`）とユーザー名用（`user_parameter_name`）で、どちらも必須である。
-2. `MySqlCredentialsParameterArns` にその 2 本の ARN をカンマ区切りで渡し、`CollectMySqlRuntimeValues=true` でスタックを更新する。
-3. CodeBuild 実行ロールに、そのパラメータだけの `ssm:GetParameter` を許可する。カスタマー管理キーで暗号化した SecureString は `kms:Decrypt` も許可する。
-4. `VerifyGreenProject` に、Green DB へ到達できる `VpcConfig`（VPC、private subnet、security group）を追加する。
-5. MySQL ユーザーに `performance_schema.global_variables` を参照できる最小限の権限を与える。
+**「どのパラメータを読むか」は設定 YAML が決める。CloudFormation のパラメータは IAM の許可リストにすぎない。**この 2 つを混同しやすいので先に整理する。
 
-VPC 内の CodeBuild から Go モジュール（`proxy.golang.org`）、S3、CloudWatch Logs、AWS API に到達できるよう、NAT gateway または必要な VPC endpoint を用意する。これは `CollectMySqlRuntimeValues=false` でも Go のビルドを行うため必要である。イメージの Go が `go.mod` の要求より古い場合は `GOTOOLCHAIN=auto` がツールチェーンを取得するため、その経路も同様に必要である。
+| | 決めるもの | 場所 | 粒度 |
+|---|---|---|---|
+| 設定 YAML | **読むパラメータ名** | `config/blue-green/<env>.deployment.yml` の `services.<name>.mysql_verification` | **サービス（= 移行対象 DB）ごと** |
+| CloudFormation | `ssm:GetParameter` を許す**対象 ARN** | `MySqlCredentialsParameterArns` | スタック（= 環境）単位 |
+
+実際の取得は `scripts/lib/mysql_credentials.sh` が行う。config から解決した名前をそのまま使い、**CloudFormation から名前を受け取ることはしない。**
+
+```bash
+aws ssm get-parameter --name "<parameter_name>"      --with-decryption   # パスワード
+aws ssm get-parameter --name "<user_parameter_name>" --with-decryption   # ユーザー名
+```
+
+### ターゲット DB ごとに変えられる
+
+パラメータ名は `services.<name>` 配下なので、DB ごとに別のパラメータを指せる。一方 **パイプラインは環境ごとに 1 本**で、サービスは実行時のパイプライン変数 `ServiceName` で切り替える。`VerifyGreenRole` も全サービスで共有する。
+
+したがって **`MySqlCredentialsParameterArns` には、その環境で扱う全サービス分の ARN を列挙する。**1 サービスあたり 2 本（パスワード・ユーザー名）である。
+
+設定例。`staging` に 2 サービスある場合を示す。
+
+```yaml
+# config/blue-green/staging.deployment.yml
+services:
+  example-service:
+    mysql_verification:
+      enabled: true
+      auth_method: parameter_store
+      parameter_name: /rds-bg/staging/example-service/mysql/password
+      user_parameter_name: /rds-bg/staging/example-service/mysql/user
+      port: 3306
+  another-service:
+    mysql_verification:
+      enabled: true
+      auth_method: parameter_store
+      parameter_name: /rds-bg/staging/another-service/mysql/password
+      user_parameter_name: /rds-bg/staging/another-service/mysql/user
+      port: 3306
+```
+
+これに対して渡す CloudFormation パラメータは **4 本**になる。
+
+```text
+CollectMySqlRuntimeValues=true
+MySqlCredentialsParameterArns=arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/password,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/user,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/another-service/mysql/password,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/another-service/mysql/user
+```
+
+`aws cloudformation deploy` でカンマ区切りの値を渡すときは、シェルに分割されないよう引用符で囲む。
+
+```bash
+aws cloudformation deploy \
+  --template-file examples/rds-blue-green-deployment/codepipeline-all-in-one.yml \
+  --stack-name rds-bg-staging \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    CollectMySqlRuntimeValues=true \
+    "MySqlCredentialsParameterArns=arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/password,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/user" \
+    VpcId=vpc-xxxxxxxx \
+    VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb \
+    VerifyGreenSecurityGroupIds=sg-xxxxxxxx
+```
+
+**パラメータ名の階層で ARN をまとめることもできる。**サービスを増やすたびにスタックを更新したくない場合は、ワイルドカードを 1 本渡す。ただし許可範囲は広くなる。
+
+```text
+MySqlCredentialsParameterArns=arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/*
+```
+
+DB ごとに権限を完全に分離したいなら、`EnvironmentName` を分けてスタックを別に作る。
+
+**ARN の形に注意する。**パラメータ名が `/` で始まる場合、ARN は `parameter` の直後にスラッシュを重ねない。
+
+```
+名前: /rds-bg/staging/example-service/mysql/password
+ARN : arn:aws:ssm:<region>:<account>:parameter/rds-bg/staging/example-service/mysql/password
+```
+
+### 手順
+
+1. SSM Parameter Store に SecureString パラメータを、**サービスごとに 2 本**作成する。パスワード用（`parameter_name`）とユーザー名用（`user_parameter_name`）で、`auth_method: parameter_store` ではどちらも必須である
+2. config の該当サービスへ `enabled: true`、`auth_method: parameter_store`、2 つのパラメータ名を書く
+3. `MySqlCredentialsParameterArns` に**全サービス分の ARN**を渡し、`CollectMySqlRuntimeValues=true` でスタックを更新する
+4. `VpcId` / `VerifyGreenSubnetIds` / `VerifyGreenSecurityGroupIds` を指定し、VerifyGreen を Green DB へ到達できる subnet へ置く（[セキュリティグループ設定](verify-green-security-group-setup.md)）
+5. MySQL ユーザーに `performance_schema.global_variables` を参照できる最小限の権限を与える
+
+#### 暗号化キーが CMK の場合
+
+**AWS 管理キー（`alias/aws/ssm`）なら何もしなくてよい。**この場合 SSM が代理で復号するため、呼び出し側に `kms:Decrypt` は要らない。
+
+カスタマー管理キー（CMK）で暗号化している場合は `MySqlCredentialsKmsKeyArn` にそのキーの ARN を渡す。
+
+```text
+MySqlCredentialsKmsKeyArn=arn:aws:kms:ap-northeast-1:123456789012:key/00000000-0000-0000-0000-000000000000
+```
+
+どちらのキーかは次で確認できる。`alias/aws/ssm` なら AWS 管理キー、キー ID や ARN が返れば CMK である。
+
+```bash
+aws ssm describe-parameters \
+  --parameter-filters "Key=Name,Values=/rds-bg/staging/example-service/mysql/password" \
+  --query 'Parameters[0].KeyId'
+```
+
+指定すると `VerifyGreenRole` へ次のステートメントが付く。
+
+```yaml
+- Sid: DecryptMySqlCredentials
+  Effect: Allow
+  Action: 'kms:Decrypt'
+  Resource: <指定した CMK の ARN>     # このキー 1 つに限る
+  Condition:
+    StringEquals:
+      'kms:ViaService': ssm.<region>.amazonaws.com
+```
+
+**`kms:ViaService` が要点である。**これが無いと、このロールはそのキーで暗号化された**あらゆる暗号文**を自力で復号できてしまう。付けることで、できるのは Parameter Store のパラメータを読むことだけになる。
+
+**KMS は IAM ポリシーとキーポリシーの両方で許可されて初めて通る。**キーはこのスタックの外にあるため、キーポリシー側はテンプレートでは設定できない。
+
+| キーポリシーの形 | 追加作業 |
+|---|---|
+| アカウントのルートへ委任する標準の形（`Principal: {"AWS": "arn:aws:iam::<account>:root"}` に `kms:*` を許可） | **不要。**上の指定だけで足りる |
+| principal を絞っている | **`VerifyGreenRole` の ARN をキーポリシーへ手で追記する** |
+
+ロール ARN はスタックの出力からは取れないので、名前から組む（`<PipelineNamePrefix>-<EnvironmentName>-verify-green`）。
+
+**VerifyGreen 側に外部ネットワークは要らない。**Go のビルドは `BuildReportTool`（VPC 外）が担い、MySQL クライアントも使わないため、この subnet に NAT gateway を置く必要はない。VPC 内から呼ぶ AWS API 用の VPC endpoint は [Step 4 の分離と VPC 配置](verify-green-vpc-architecture.md) にまとめてある。
 
 ## 4. CloudFormation での作成
 

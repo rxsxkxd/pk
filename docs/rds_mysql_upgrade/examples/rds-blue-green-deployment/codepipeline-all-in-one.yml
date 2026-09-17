@@ -22,7 +22,7 @@ Metadata:
       - Label: { default: ソース（GitHub または CodeCommit） }
         Parameters: [SourceProvider, CodeStarConnectionArn, RepositoryId, CodeCommitRepositoryName, BranchName]
       - Label: { default: Step 4 の MySQL 実効値収集（任意） }
-        Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterArns]
+        Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterArns, MySqlCredentialsKmsKeyArn]
       - Label: { default: Step 4 検証の VPC 配置（任意。VerifyGreen だけが対象） }
         Parameters:
           - VpcId
@@ -33,7 +33,7 @@ Metadata:
       - Label: { default: 拡張モニタリング（移行元で有効なときだけ） }
         Parameters: [RdsMonitoringRoleName]
       - Label: { default: 保護対象の RDS リソース }
-        Parameters: [DbInstanceIdentifierPrefix]
+        Parameters: [ProtectedRdsResourceArns]
 
 Parameters:
   PipelineNamePrefix:
@@ -104,6 +104,25 @@ Parameters:
     Description: >-
       CodeCommit のリポジトリ名。SourceProvider=CodeCommit のときは必須である。
 
+  MySqlCredentialsKmsKeyArn:
+    Type: String
+    Default: ''
+    Description: >-
+      上記 SecureString を暗号化しているカスタマー管理キー（CMK）の ARN。
+      **AWS 管理キー（alias/aws/ssm）なら空のままでよい**
+      （SSM が代理で復号するため、呼び出し側に kms:Decrypt は要らない）。
+      CMK の場合は指定する。指定すると VerifyGreen のロールへ、そのキーに限った
+      kms:Decrypt を kms:ViaService=ssm.<region>.amazonaws.com 条件付きで付与する。
+      どちらのキーを使っているかは次で確認できる。
+      aws ssm describe-parameters --parameter-filters
+      "Key=Name,Values=<パラメータ名>" --query 'Parameters[0].KeyId'
+      （alias/aws/ssm なら AWS 管理キー、キー ID / ARN が返れば CMK）
+      **注意: KMS は IAM ポリシーとキーポリシーの両方で許可されて初めて通る。**
+      キーはこのスタックの外にあるため、キーポリシー側の許可はテンプレートでは
+      設定できない。キーポリシーがアカウントのルートへ委任する標準の形なら
+      この指定だけで足りるが、principal を絞っている場合は VerifyGreen の
+      ロールをキーポリシーへ手で追記する必要がある。
+
   RdsMonitoringRoleName:
     Type: String
     Default: rds-monitoring-role
@@ -165,23 +184,37 @@ Parameters:
     Type: CommaDelimitedList
     Default: ''
     Description: >-
-      CollectMySqlRuntimeValues=true のときだけ使う SSM パラメータ（SecureString）の ARN。
-      パスワード用（parameter_name）とユーザー名用（user_parameter_name）の
-      2 本をカンマ区切りで指定する。
+      VerifyGreen へ ssm:GetParameter を許可する SSM パラメータ（SecureString）の ARN。
+      **これは IAM の許可リストであり、読むパラメータ名を決めるものではない。**
+      どのパラメータを読むかは config/blue-green/<env>.deployment.yml の
+      services.<name>.mysql_verification（parameter_name / user_parameter_name）が決める。
+      1 サービスにつきパスワード用とユーザー名用の 2 本を使うため、
+      **このパイプラインが扱う全サービス分の ARN を列挙する**
+      （3 サービスなら 6 本）。パイプラインは環境ごとに 1 本で、サービスは実行時の
+      パイプライン変数 ServiceName で切り替えるため、ロールは全サービスで共有する。
       空なら Parameter Store の読み取り権限を付与しない。
+      暗号化がカスタマー管理キー（CMK）の場合は MySqlCredentialsKmsKeyArn も渡す。
 
   ApprovalNotificationTopicArn:
     Type: String
     Default: ''
     Description: 手動承認の通知先 SNS トピック ARN。空なら通知しない。
 
-  DbInstanceIdentifierPrefix:
-    Type: String
-    # 仮置き。IAM の Resource を絞るために使う。
-    Default: '*'
+  ProtectedRdsResourceArns:
+    Type: CommaDelimitedList
+    Default: ''
     Description: >-
-      権限を付与する DB インスタンス識別子の接頭辞（例: example-service-production）。
-      '*' のままだとアカウント内の全 DB インスタンスが対象になる。実運用では必ず絞る。
+      RDS の変更権限（スナップショット作成・旧 Blue の削除）の対象を絞る ARN。
+      **複数指定できる。**移行対象が複数ある場合は全部を列挙する。
+      対象は db と snapshot の 2 種類で、**両方を入れること**
+      （snapshot を忘れると保護スナップショットの作成が AccessDenied で失敗する）。
+      例（1 サービス分。カンマ区切りで続けて書く）:
+      arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging*,
+      arn:aws:rds:ap-northeast-1:123456789012:snapshot:example-service-staging*
+      空にすると、このアカウント・このリージョンの db:* と snapshot:* になる
+      （種類とアカウントとリージョンでは絞られるが、識別子では絞られない）。
+      '*' 1 つだけを渡すこともできる——動作はするが**全リソースが対象になるため
+      推奨しない**。実運用では識別子まで絞る。
 
 Conditions:
   # ソースの取得元を切り替える。Source アクションと、CodePipeline ロールへ
@@ -192,12 +225,18 @@ Conditions:
   HasRdsMonitoringRole: !Not [!Equals [!Ref RdsMonitoringRoleName, '']]
   # ArtifactBucketName が空ならバケットをこのスタックで作る。
   CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, '']
+  # 保護対象の ARN を明示したか。空ならアカウント・リージョン内の db / snapshot 全体を
+  # 対象にする（種類では絞るが識別子では絞らない）。
+  HasProtectedRdsResourceArns: !Not [!Equals [!Join ['', !Ref ProtectedRdsResourceArns], '']]
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
   # Step 4 の 2 プロジェクトを VPC 内で実行するか。
   # VpcConfig と Elastic Network Interface 権限をまとめて切り替える。
   HasVpc: !Not [!Equals [!Ref VpcId, '']]
   # config の mysql_verification.auth_method は parameter_store 固定である。
   HasMySqlCredentials: !Not [!Equals [!Join ['', !Ref MySqlCredentialsParameterArns], '']]
+  # SecureString がカスタマー管理キーで暗号化されている場合だけ kms:Decrypt を付ける。
+  # AWS 管理キー（alias/aws/ssm）なら不要である（SSM が代理で復号する）。
+  HasMySqlCredentialsKmsKey: !Not [!Equals [!Ref MySqlCredentialsKmsKeyArn, '']]
 
 Resources:
 
@@ -394,9 +433,14 @@ Resources:
                 Action:
                   - 'rds:CreateDBSnapshot'
                   - 'rds:AddTagsToResource'
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:${DbInstanceIdentifierPrefix}*'
-                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:${DbInstanceIdentifierPrefix}*'
+                # ProtectedRdsResourceArns をそのまま使う。IAM の Resource は
+                # リストを取れるため、複数の移行対象をそのまま列挙できる。
+                # 空のときだけ、このアカウント・リージョンの db / snapshot 全体へ落とす。
+                Resource: !If
+                  - HasProtectedRdsResourceArns
+                  - !Ref ProtectedRdsResourceArns
+                  - - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:*'
+                    - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:*'
               # 移行元が拡張モニタリング（Enhanced Monitoring）を使っている場合、
               # RDS は Green へその設定をコピーするため、呼び出し側に
               # そのロールを渡す権限を要求する。これが無いと
@@ -447,13 +491,50 @@ Resources:
             PolicyDocument:
               Version: '2012-10-17'
               Statement:
-                # auth_method: parameter_store（SecureString の復号に KMS も要る）
+                # auth_method: parameter_store で使う 2 本（パスワード・ユーザー名）を
+                # サービスごとに読む。対象は MySqlCredentialsParameterArns に列挙した
+                # ARN だけに限る。
+                #
+                # 暗号化は AWS 管理キー（alias/aws/ssm）を前提とする。この場合
+                # SSM が代理で復号するため kms:Decrypt は要らない。
+                # カスタマー管理キーは運用想定外のため対応しない。
                 - Sid: GetMySqlParameter
                   Effect: Allow
                   Action:
                     - 'ssm:GetParameter'
                     - 'ssm:GetParameters'
                   Resource: !Ref MySqlCredentialsParameterArns
+          - !Ref 'AWS::NoValue'
+        # SecureString がカスタマー管理キー（CMK）で暗号化されている場合だけ必要。
+        #
+        # **AWS 管理キー（alias/aws/ssm）なら不要である。**その場合は SSM が
+        # 代理で復号し、呼び出し側に kms:Decrypt を要求しない。
+        #
+        # kms:ViaService で「SSM 経由でのみ使える」ように縛る。これが無いと、
+        # このロールはこのキーで暗号化された**あらゆる暗号文**を自力で復号できて
+        # しまう。付ければできるのは Parameter Store のパラメータを読むことだけになる。
+        #
+        # **ネットワークは増えない。**復号は SSM の側で行われ、ビルドコンテナが
+        # KMS を直接呼ぶことはない。したがって kms の VPC endpoint は要らない。
+        #
+        # **KMS は IAM ポリシーとキーポリシーの両方で許可されて初めて通る。**
+        # キーはこのスタックの外にあるため、キーポリシー側はここでは設定できない。
+        # キーポリシーがアカウントのルートへ委任する標準の形ならこれで足りるが、
+        # principal を絞っている場合は VerifyGreenRole をキーポリシーへ手で追記する。
+        - !If
+          - HasMySqlCredentialsKmsKey
+          - PolicyName: decrypt-mysql-credentials
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Sid: DecryptMySqlCredentials
+                  Effect: Allow
+                  Action: 'kms:Decrypt'
+                  # 対象はこのキー 1 つに限る。
+                  Resource: !Ref MySqlCredentialsKmsKeyArn
+                  Condition:
+                    StringEquals:
+                      'kms:ViaService': !Sub 'ssm.${AWS::Region}.amazonaws.com'
           - !Ref 'AWS::NoValue'
         # VPC 内で動く CodeBuild は実行ごとに Elastic Network Interface を作る。この権限が無いと起動に失敗する。
         - !If
@@ -545,9 +626,14 @@ Resources:
                   - 'rds:ModifyDBInstance'
                   - 'rds:CreateDBSnapshot'
                   - 'rds:AddTagsToResource'
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:${DbInstanceIdentifierPrefix}*'
-                  - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:${DbInstanceIdentifierPrefix}*'
+                # ProtectedRdsResourceArns をそのまま使う。IAM の Resource は
+                # リストを取れるため、複数の移行対象をそのまま列挙できる。
+                # 空のときだけ、このアカウント・リージョンの db / snapshot 全体へ落とす。
+                Resource: !If
+                  - HasProtectedRdsResourceArns
+                  - !Ref ProtectedRdsResourceArns
+                  - - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:*'
+                    - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:*'
 
   # --- CodePipeline ロール ----------------------------------------------------
   CodePipelineRole:

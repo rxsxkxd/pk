@@ -150,7 +150,7 @@ flowchart TB
 | `cloudwatch get-metric-statistics`（ReplicaLag） | `com.amazonaws.<region>.monitoring` | Interface |
 | `ssm get-parameter`（接続情報の SecureString） | `com.amazonaws.<region>.ssm` | Interface |
 
-カスタマー管理キーで暗号化した SecureString を使う場合は `kms` も追加する。
+> **SecureString の復号のために `kms` endpoint を足す必要はない。**カスタマー管理キーを使う場合でも、`ssm get-parameter --with-decryption` の復号は **SSM の側で行われる**ため、ビルドコンテナが KMS を直接呼ぶことはない。必要になるのは IAM 権限（`kms:Decrypt`）だけで、通信経路は `ssm` endpoint のみである。
 
 **Interface endpoint にはそれぞれ SG が付く。**CodeBuild 側の SG からの 443/tcp を許可しないと、上の API 呼び出しはタイムアウトする。設定手順は [セキュリティグループ設定](verify-green-security-group-setup.md) にある。
 

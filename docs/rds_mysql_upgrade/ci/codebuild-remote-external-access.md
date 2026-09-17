@@ -31,10 +31,9 @@ CodeBuild サービス連携
 |---|---|---|---|
 | Amazon RDS control plane | AWS CLI で DB インスタンス、Blue/Green deployment、DB パラメータグループ、スナップショットを参照し、Step 3／5 では snapshot 作成、Blue/Green 作成、切替も行う | Step 3〜5 で常時。変更 API は `actions` の承認状態により実行を抑止 | CodeBuild サービスロールの一時 AWS 認証情報。AWS CLI の標準 credential provider chain が自動取得する |
 | Amazon CloudWatch | `AWS/RDS` の `ReplicaLag` を VerifyGreen で読む | VerifyGreen で常時 | CodeBuild サービスロールの一時 AWS 認証情報 |
-| AWS Secrets Manager | MySQL の `username`／`password` を `GetSecretValue` で読む | `CollectMySqlRuntimeValues=true` の場合だけ | CodeBuild サービスロールの一時 AWS 認証情報。secret が カスタマー管理キーで暗号化なら KMS の復号権限も必要 |
-| RDS for MySQL data plane | `mysql` クライアントで `performance_schema.global_variables` を読む | `CollectMySqlRuntimeValues=true` の場合だけ | Secrets Manager から取得した DB ユーザー名／パスワード。AWS IAM 認証ではない |
+| AWS Systems Manager Parameter Store | MySQL の**ユーザー名とパスワード**を `GetParameter --with-decryption` で読む（2 本。名前は config の `mysql_verification` が決める） | `CollectMySqlRuntimeValues=true` の場合だけ | CodeBuild サービスロールの一時 AWS 認証情報。AWS 管理キー（`alias/aws/ssm`）なら KMS の追加権限は要らない。CMK の場合は `kms:Decrypt`（`kms:ViaService=ssm.<region>.amazonaws.com` 条件付き）が要る |
+| RDS for MySQL data plane | **Go バイナリ**（`collect_green_runtime_values`）で `performance_schema.global_variables` を読む | `CollectMySqlRuntimeValues=true` の場合だけ | Parameter Store から取得した DB ユーザー名／パスワード。AWS IAM 認証ではない。TLS は VERIFY_CA 相当（CA はバイナリに内蔵） |
 | Go module proxy | BuildReportTool が Go レポート生成器をビルドする | **BuildReportTool のみ**（VerifyGreen は artifact で受け取るため到達不要） | 既定は `proxy.golang.org` への TLS 接続で、アプリケーション認証なし。`GOPROXY` で組織のプロキシへ向けた場合はその認証方式に従う。**設定 YAML の読み取りは Ruby 標準ライブラリで行うため、PyPI への到達は不要である。** |
-| Docker Hub、Go module 配布元 | `golang:1.25` を取得し、`gopkg.in/yaml.v3` をダウンロードして Go レポート生成器をビルドする | VerifyGreen で常時 | 既定は公開イメージ・公開 module のためアプリケーション認証なし。Docker Hub のレート制限・組織プロキシを使う場合は別途 Docker registry 認証を設定 |
 | ~~Ubuntu apt repository~~ | ~~`mysql-client` の導入~~ | **到達不要。**実効値の収集は事前ビルド済みの Go バイナリが行う | — |
 
 ### 2-1. RDS control plane の API 範囲
@@ -65,7 +64,7 @@ AWS CLI を使う buildspec やシェルスクリプトは、`aws configure`、n
 2. 各 CodeBuild project に設定済みの `ServiceRole` が、この IAM role を参照する。
 3. CodeBuild サービスが実行開始時に当該ロールを引き受け、短期の AWS 認証情報を実行コンテナへ提供する。
 4. 実行コンテナ内の AWS CLI は標準 credential provider chain により、その一時認証情報を使って RDS、CloudWatch、必要時の SSM Parameter Store を SigV4 署名付きで呼び出す。
-5. IAM ポリシーは API ごとに認可を判断する。SecureString を カスタマー管理キーで暗号化している場合は、Parameter Store の認可に加えて KMS の `Decrypt` も必要になる。
+5. IAM ポリシーは API ごとに認可を判断する。AWS 管理キー（`alias/aws/ssm`）で暗号化した SecureString は SSM が代理で復号するため KMS の追加権限は要らない。カスタマー管理キーの場合は Parameter Store の認可に加えて `kms:Decrypt` も必要になる（`MySqlCredentialsKmsKeyArn` で付与する）。**復号は SSM 側で行われるため、`kms` の VPC endpoint は要らない。**
 
 このため、CodeBuild 実環境用の `CONFIG_FILE` と `SERVICE_NAME` は認証情報ではない。いずれも通常の環境変数であり、AWS API を呼べるかどうかは CodeBuild サービスロールで決まる。接続情報そのものは config の `mysql_verification` が指す SSM パラメータ側にあり、CodeBuild の環境変数には現れない。
 

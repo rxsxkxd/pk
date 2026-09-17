@@ -12,6 +12,8 @@ Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だ�
 
 その構成で必要になるセキュリティグループの具体的な設定は [VerifyGreen の セキュリティグループ設定](verify-green-security-group-setup.md) を参照する。**テンプレートは SG を作らない。**
 
+CloudFormation の登録コマンドとパラメータの一覧は [codepipeline-all-in-one のデプロイとパラメータ一覧](codepipeline-all-in-one-parameters.md) にまとめてある。
+
 Go のビルド（`BuildReportTool`）が失敗したときは [BuildReportTool の失敗切り分け](build-report-tool-troubleshooting.md) を参照する。**ログに何が出ていたら何をするか**を症状別にまとめてある。ローカルで実際に走らせて確かめる手順は [BuildReportTool のローカル検証手順](build-report-tool-local-verification.md) にある（新しい image は不要）。
 
 各 CodeBuild buildspec を CodePipeline なしでローカル確認する手順は [CodeBuild 各フローの単体ローカル検証](codebuild-local-verification.md) を参照する。
@@ -103,7 +105,9 @@ CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`�
 
 データの読み取りは `jq` に一本化している。設定 YAML は `scripts/lib/deployment_config.sh` が **Ruby の標準ライブラリ**で JSON へ変換し、そこから先の取り出しと検証は jq が行う。CodeBuild の managed image と GitHub Actions のランナーには jq が同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
 
-実効値収集を有効にする場合は、CodeBuild プロジェクトを RDS に到達できるネットワークに配置する必要がある。テンプレートには VPC・サブネット・セキュリティグループを組み込んでいないため、組織の既存ネットワーク方針に従い `VerifyGreenProject` に `VpcConfig` を追加する。あわせて CodeBuild 実行ロールに対象 SSM パラメータの `ssm:GetParameter` と、KMS カスタマー管理キーを使う場合は `kms:Decrypt` を許可する。
+実効値収集を有効にする場合は、`VerifyGreenProject` を RDS に到達できるネットワークへ配置する。**テンプレートは `VpcId` / `VerifyGreenSubnetIds` / `VerifyGreenSecurityGroupIds` を受け取って `VpcConfig` を組む**（セキュリティグループは作らないので別途用意する。[設定手順](verify-green-security-group-setup.md)）。
+
+接続情報は **SSM Parameter Store の 2 本**（パスワードとユーザー名）から取る。**どのパラメータを読むかは config の `mysql_verification`（`parameter_name` / `user_parameter_name`）が決め、サービスごとに変えられる。**CloudFormation の `MySqlCredentialsParameterArns` は `ssm:GetParameter` を許す ARN の列挙であって、読む名前を決めるものではない。SecureString をカスタマー管理キーで暗号化している場合は `MySqlCredentialsKmsKeyArn` も渡す（AWS 管理キーなら不要）。パイプラインは環境ごとに 1 本なので、**その環境で扱う全サービス分の ARN を渡す**。詳細と設定例は [セットアップ手順](codebuild-codepipeline-setup.md) にある。
 
 ## 2 つのテンプレート
 
@@ -133,7 +137,7 @@ aws cloudformation deploy \
     DefaultServiceName=example-service \
     CodeStarConnectionArn=arn:aws:codeconnections:ap-northeast-1:123456789012:connection/xxxxxxxx \
     RepositoryId=your-org/your-repository \
-    DbInstanceIdentifierPrefix=example-service-staging
+    "ProtectedRdsResourceArns=arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging*,arn:aws:rds:ap-northeast-1:123456789012:snapshot:example-service-staging*"
 ```
 
 IAM ロールを名前付きで作成するため `--capabilities CAPABILITY_NAMED_IAM` が必要である。
@@ -148,7 +152,7 @@ aws codepipeline start-pipeline-execution \
 
 `--variables` を省略すると `DefaultServiceName` が使われる。
 
-`DbInstanceIdentifierPrefix` は IAM の `Resource` を絞るために使う。既定の `*` のままだとアカウント内の全 DB インスタンスが変更権限の対象になるため、**実運用では必ず対象を絞る**。
+`ProtectedRdsResourceArns` は RDS の変更権限（スナップショット作成・旧 Blue 削除）の `Resource` を絞るために使う。**カンマ区切りで複数指定でき**、`db` と `snapshot` の両方を入れる必要がある。空のままだとアカウント・リージョン内の全 DB インスタンスとスナップショットが対象になるため、**実運用では必ず対象を絞る**。`*` 1 つでも動作するが推奨しない。
 
 ## デプロイ例（既存ロールを使う版）
 

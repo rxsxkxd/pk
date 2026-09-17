@@ -26,7 +26,7 @@
    ▼                                                                          ▼
 ┌─────────────────────────────────────────┐                    ┌──────────────────────┐
 │ 1. Source                               │                    │ 既存 S3 アーティファクト │
-│    CodeStarSourceConnection (GitHub)    │───► SourceOutput ─►│ ArtifactBucketName   │
+│  Source: GitHub または CodeCommit       │───► SourceOutput ─►│ ArtifactBucketName   │
 │    DetectChanges: false（push で起動せず）│                    │ （既存バケット名）   │
 └─────────────────────────────────────────┘                    │ 組織の既存設定を利用 │
    │                                                            │ （同一リージョン）   │
@@ -79,7 +79,7 @@
 
 | # | ステージ | アクション | 入場条件 | 変更操作 |
 |---|---|---|---|---|
-| 1 | `Source` | `SourceFromGitHub` | なし | なし |
+| 1 | `Source` | `SourceFromGitHub` または `SourceFromCodeCommit`（`SourceProvider` で切り替え） | なし | なし |
 | 2 | `ReadApprovals` | `ReadApprovals` | なし | なし（config を読むだけ） |
 | 3 | `PrecheckParameterGroup` | `PrecheckParameterGroup` | なし | なし（読み取り API のみ） |
 | 4 | `BuildGreen` | `BuildGreen` | なし | **あり**（`actions.build` が `approved` のときのみ） |

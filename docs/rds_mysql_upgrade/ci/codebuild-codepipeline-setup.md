@@ -152,15 +152,35 @@ private subnet では apt リポジトリへ到達できないため、**buildsp
 
 | 項目 | 必要な情報または状態 | 用途 |
 |---|---|---|
-| ソースリポジトリ | GitHub の `owner/repository`、対象ブランチ | CodePipeline が buildspec・スクリプト・環境設定を取得する |
-| CodeConnections 接続 | GitHub 接続済み・`AVAILABLE` の Connection ARN | Source ステージが GitHub を読む |
+| ソースリポジトリ | **GitHub** なら `owner/repository`、**CodeCommit** ならリポジトリ名。いずれも対象ブランチ | CodePipeline が buildspec・スクリプト・環境設定を取得する |
+| CodeConnections 接続 | GitHub 接続済み・`AVAILABLE` の Connection ARN | Source ステージが GitHub を読む。**CodeCommit を使う場合は不要** |
 | S3 artifact bucket | 同一リージョンの既存バケット、暗号化・ライフサイクルを設定 | ソースと各 Step の成果物を保存する |
 | CodePipeline 実行ロール | 既存 IAM role ARN | Pipeline が CodeConnections、S3、CodeBuild を利用する |
 | CodeBuild 実行ロール | 既存 IAM role ARN | RDS・CloudWatch API と成果物を扱う |
 | 環境設定 | `config/blue-green/<environment>.deployment.yml` の対象サービス定義 | Blue DB、8.4 PG、DB クラス、承認状態を決める |
 | Step 2 完了 | MySQL 8.4 パラメータグループが CloudFormation で作成済み | Step 3 が `target_db_parameter_group_name` を RDS API へ渡す |
 
-CodeConnections は、接続作成後に GitHub 側で認可を完了させる必要がある。Connection ARN は CloudFormation パラメータ `CodeStarConnectionArn` に渡す。[CodeConnections の GitHub 接続手順](https://docs.aws.amazon.com/dtconsole/latest/userguide/connections-create-github.html)を参照する。
+#### ソースの取得元を選ぶ
+
+`SourceProvider` パラメータで切り替える。**後続ステージはどちらの場合も `SourceOutput` を受け取るため、Source ステージ以外は一切変わらない。**
+
+| `SourceProvider` | 使うパラメータ | Source アクション |
+|---|---|---|
+| `CodeConnections`（既定） | `CodeStarConnectionArn`、`RepositoryId` | `SourceFromGitHub`（Provider: `CodeStarSourceConnection`） |
+| `CodeCommit` | `CodeCommitRepositoryName` | `SourceFromCodeCommit`（Provider: `CodeCommit`） |
+
+選ばなかった側のパラメータは無視される。**CodePipeline 実行ロールへ付く権限も、選んだ側だけになる**（all-in-one テンプレートはロールを作るので自動、`codepipeline.yml` は外部ロールなので下表の権限を自分で付ける）。
+
+| `SourceProvider` | ロールに必要な権限 |
+|---|---|
+| `CodeConnections` | `codestar-connections:UseConnection` と `codeconnections:UseConnection`（接続はどちらの名前空間でも作られうるため両方）。対象は指定した接続 1 つ |
+| `CodeCommit` | `codecommit:GetBranch` / `GetCommit` / `GetRepository` / `UploadArchive` / `GetUploadArchiveStatus` / `CancelUploadArchive`。対象はそのリポジトリ 1 つ |
+
+**どちらも push では自動開始しない。**`CodeConnections` は `DetectChanges: 'false'`、`CodeCommit` は `PollForSourceChanges: 'false'`（EventBridge ルールも作らない）で、作業者が明示的に開始する設計である。
+
+CodeConnections を使う場合は、接続作成後に GitHub 側で認可を完了させる必要がある。Connection ARN は CloudFormation パラメータ `CodeStarConnectionArn` に渡す。[CodeConnections の GitHub 接続手順](https://docs.aws.amazon.com/dtconsole/latest/userguide/connections-create-github.html)を参照する。
+
+> **CodeCommit は新規利用が制限されている。**AWS は 2024-07-25 以降、CodeCommit を使ったことのないアカウントでの新規リポジトリ作成を受け付けていない。既に CodeCommit を使っているアカウントでは引き続き利用できる。新規に選ぶなら `CodeConnections` 側を推奨する。
 
 artifact bucket は CodePipeline 実行リージョンに作成し、組織の要件に従い S3 バケット暗号化、パブリックアクセスブロック、保存期間を設定する。KMS カスタマー管理キーを使う場合は、後述の両 IAM ロールにそのキーの利用権限も必要となる。
 
@@ -217,6 +237,7 @@ aws cloudformation deploy \
     PipelineNamePrefix=rds-bg \
     EnvironmentName=staging \
     ServiceName=example-service \
+    SourceProvider=CodeConnections \
     CodeStarConnectionArn=arn:aws:codeconnections:ap-northeast-1:123456789012:connection/xxxxxxxx \
     RepositoryId=your-org/your-repository \
     BranchName=main \
@@ -230,6 +251,14 @@ aws cloudformation deploy \
 ```text
 CollectMySqlRuntimeValues=true
 MySqlCredentialsParameterArns=<パスワード用 ARN>,<ユーザー名用 ARN>
+```
+
+CodeCommit から取る場合は、`SourceProvider` と `CodeCommitRepositoryName` に差し替える（`CodeStarConnectionArn` と `RepositoryId` は渡さなくてよい）。
+
+```text
+SourceProvider=CodeCommit
+CodeCommitRepositoryName=your-repository
+BranchName=main
 ```
 
 CloudFormation の `CodeStarConnectionArn`、artifact bucket、両実行ロールはスタック外で管理する。テンプレートを削除しても、これら既存リソースは削除されない。

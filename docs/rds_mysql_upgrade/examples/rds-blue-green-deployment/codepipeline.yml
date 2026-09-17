@@ -14,12 +14,30 @@ Parameters:
   ServiceName:
     Type: String
     Description: config/blue-green/{EnvironmentName}.deployment.yml の services キー。
+  SourceProvider:
+    Type: String
+    Default: CodeConnections
+    AllowedValues: [CodeConnections, CodeCommit]
+    Description: >-
+      ソースの取得元。CodeConnections なら GitHub、CodeCommit なら
+      CodeCommitRepositoryName を使う。選ばなかった側のパラメータは無視される。
   CodeStarConnectionArn:
     Type: String
-    Description: GitHub リポジトリへ接続済みの CodeConnections ARN。
+    Default: ''
+    Description: >-
+      GitHub リポジトリへ接続済みの CodeConnections ARN。
+      SourceProvider=CodeConnections のときだけ使う。
   RepositoryId:
     Type: String
-    Description: GitHub の owner/repository 形式のリポジトリ識別子。
+    Default: ''
+    Description: >-
+      GitHub の owner/repository 形式のリポジトリ識別子。
+      SourceProvider=CodeConnections のときだけ使う。
+  CodeCommitRepositoryName:
+    Type: String
+    Default: ''
+    Description: >-
+      CodeCommit のリポジトリ名。SourceProvider=CodeCommit のときは必須である。
   BranchName:
     Type: String
     Default: main
@@ -29,7 +47,12 @@ Parameters:
     Description: CodePipeline がソースと各 Step の成果物を保存する既存 S3 バケット名。
   CodePipelineServiceRoleArn:
     Type: String
-    Description: CodePipeline 用の既存 IAM ロール ARN。S3、CodeBuild、CodeConnections 利用権限が必要。
+    Description: >-
+      CodePipeline 用の既存 IAM ロール ARN。S3 と CodeBuild に加え、
+      SourceProvider に応じた権限が必要。CodeConnections なら
+      codestar-connections:UseConnection（および codeconnections:UseConnection）、
+      CodeCommit なら codecommit の GetBranch / GetCommit / GetRepository /
+      UploadArchive / GetUploadArchiveStatus / CancelUploadArchive。
   CodeBuildServiceRoleArn:
     Type: String
     Description: >-
@@ -68,6 +91,9 @@ Parameters:
       同梱したカスタムイメージを指定する（private subnet では apt による導入ができない）。
 
 Conditions:
+  # ソースの取得元を切り替える。Source アクションを差し替えるだけで、
+  # 後続ステージは SourceOutput を受け取る点が変わらない。
+  UseCodeConnections: !Equals [!Ref SourceProvider, CodeConnections]
   HasVpc: !Not [!Equals [!Ref VpcId, '']]
   HasCustomVerifyGreenImage: !Not [!Equals [!Ref VerifyGreenImage, 'aws/codebuild/standard:7.0']]
 
@@ -204,22 +230,40 @@ Resources:
         Type: S3
         Location: !Ref ArtifactBucketName
       Stages:
+        # SourceProvider でどちらか一方だけを展開する。後続ステージは
+        # どちらの場合も SourceOutput を受け取る。
         - Name: Source
           Actions:
-            - Name: SourceFromGitHub
-              ActionTypeId:
-                Category: Source
-                Owner: AWS
-                Provider: CodeStarSourceConnection
-                Version: '1'
-              Configuration:
-                ConnectionArn: !Ref CodeStarConnectionArn
-                FullRepositoryId: !Ref RepositoryId
-                BranchName: !Ref BranchName
-                DetectChanges: 'false'
-              OutputArtifacts:
-                - Name: SourceOutput
-              RunOrder: 1
+            - !If
+              - UseCodeConnections
+              - Name: SourceFromGitHub
+                ActionTypeId:
+                  Category: Source
+                  Owner: AWS
+                  Provider: CodeStarSourceConnection
+                  Version: '1'
+                Configuration:
+                  ConnectionArn: !Ref CodeStarConnectionArn
+                  FullRepositoryId: !Ref RepositoryId
+                  BranchName: !Ref BranchName
+                  DetectChanges: 'false'
+                OutputArtifacts:
+                  - Name: SourceOutput
+                RunOrder: 1
+              - Name: SourceFromCodeCommit
+                ActionTypeId:
+                  Category: Source
+                  Owner: AWS
+                  Provider: CodeCommit
+                  Version: '1'
+                Configuration:
+                  RepositoryName: !Ref CodeCommitRepositoryName
+                  BranchName: !Ref BranchName
+                  # push では起動しない。DetectChanges: 'false' と同じ意図である。
+                  PollForSourceChanges: 'false'
+                OutputArtifacts:
+                  - Name: SourceOutput
+                RunOrder: 1
         # Step 4 で使う Go レポート生成器を先にビルドし、artifact で後段へ渡す。
         # VerifyGreen を VPC 内へ置く構成でも、外部ネットワークが要るのはこのステージだけになる。
         - Name: BuildReportTool

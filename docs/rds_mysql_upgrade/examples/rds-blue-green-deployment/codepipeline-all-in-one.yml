@@ -18,8 +18,8 @@ Metadata:
     ParameterGroups:
       - Label: { default: パイプライン }
         Parameters: [PipelineNamePrefix, EnvironmentName, DefaultServiceName, ArtifactBucketName]
-      - Label: { default: ソース（GitHub） }
-        Parameters: [CodeStarConnectionArn, RepositoryId, BranchName]
+      - Label: { default: ソース（GitHub または CodeCommit） }
+        Parameters: [SourceProvider, CodeStarConnectionArn, RepositoryId, CodeCommitRepositoryName, BranchName]
       - Label: { default: Step 4 の MySQL 実効値収集（任意） }
         Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterArns]
       - Label: { default: Step 4 検証の VPC 配置（任意。VerifyGreen だけが対象） }
@@ -58,17 +58,35 @@ Parameters:
       CodePipeline のソースおよび各 Step の成果物を保存する、同一リージョンの既存 S3 バケット名。
       このスタックはバケットおよびバケットポリシーを作成・変更・削除しない。
 
+  SourceProvider:
+    Type: String
+    Default: CodeConnections
+    AllowedValues: [CodeConnections, CodeCommit]
+    Description: >-
+      ソースの取得元。CodeConnections なら GitHub（CodeStarConnectionArn と
+      RepositoryId を使う）、CodeCommit なら CodeCommitRepositoryName を使う。
+      選ばなかった側のパラメータは無視される。
+
   CodeStarConnectionArn:
     Type: String
     # 仮置き。事前に GitHub と接続して AVAILABLE にした接続の ARN へ置き換える。
     Default: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/00000000-0000-0000-0000-000000000000
-    Description: CodeConnections（GitHub）の接続 ARN。事前に AVAILABLE にしておく。
+    Description: >-
+      CodeConnections（GitHub）の接続 ARN。事前に AVAILABLE にしておく。
+      SourceProvider=CodeConnections のときだけ使う。
 
   RepositoryId:
     Type: String
     # 仮置き。
     Default: your-org/your-repository
-    Description: GitHub リポジトリ（owner/repo）。
+    Description: >-
+      GitHub リポジトリ（owner/repo）。SourceProvider=CodeConnections のときだけ使う。
+
+  CodeCommitRepositoryName:
+    Type: String
+    Default: ''
+    Description: >-
+      CodeCommit のリポジトリ名。SourceProvider=CodeCommit のときは必須である。
 
   BranchName:
     Type: String
@@ -145,6 +163,10 @@ Parameters:
       '*' のままだとアカウント内の全 DB インスタンスが対象になる。実運用では必ず絞る。
 
 Conditions:
+  # ソースの取得元を切り替える。Source アクションと、CodePipeline ロールへ
+  # 付与する権限（接続の利用 / CodeCommit の読み取り）をまとめて差し替える。
+  UseCodeConnections: !Equals [!Ref SourceProvider, CodeConnections]
+  UseCodeCommit: !Equals [!Ref SourceProvider, CodeCommit]
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
   # Step 4 の 2 プロジェクトを VPC 内で実行するか。
   # VpcConfig と Elastic Network Interface 権限をまとめて切り替える。
@@ -474,10 +496,33 @@ Resources:
                   - !GetAtt VerifyGreenProject.Arn
                   - !GetAtt SwitchoverProject.Arn
                   - !GetAtt CleanupProject.Arn
-              - Sid: UseSourceConnection
-                Effect: Allow
-                Action: 'codestar-connections:UseConnection'
-                Resource: !Ref CodeStarConnectionArn
+              # ソースの取得に必要な権限。SourceProvider で一方だけを付ける。
+              - !If
+                - UseCodeConnections
+                - Sid: UseSourceConnection
+                  Effect: Allow
+                  # 接続は codestar-connections / codeconnections のどちらの名前空間でも
+                  # 作られうるため、両方を許可する。対象は指定した接続 1 つに限る。
+                  Action:
+                    - 'codestar-connections:UseConnection'
+                    - 'codeconnections:UseConnection'
+                  Resource: !Ref CodeStarConnectionArn
+                - !Ref 'AWS::NoValue'
+              - !If
+                - UseCodeCommit
+                - Sid: ReadSourceFromCodeCommit
+                  Effect: Allow
+                  # CodePipeline が CodeCommit から取得するのに要る最小の読み取り。
+                  # UploadArchive 系は CodePipeline が成果物を S3 へ渡すために使う。
+                  Action:
+                    - 'codecommit:GetBranch'
+                    - 'codecommit:GetCommit'
+                    - 'codecommit:GetRepository'
+                    - 'codecommit:UploadArchive'
+                    - 'codecommit:GetUploadArchiveStatus'
+                    - 'codecommit:CancelUploadArchive'
+                  Resource: !Sub 'arn:${AWS::Partition}:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitRepositoryName}'
+                - !Ref 'AWS::NoValue'
               - !If
                 - HasApprovalTopic
                 - Sid: NotifyApproval
@@ -668,18 +713,32 @@ Resources:
           DefaultValue: !Ref DefaultServiceName
           Description: 対象サービス名（config の services 配下のキー）
       Stages:
+        # SourceProvider でどちらか一方だけを展開する。後続ステージは
+        # どちらの場合も SourceOutput を受け取るので、変更の影響はここに閉じる。
         - Name: Source
           Actions:
-            - Name: SourceFromGitHub
-              ActionTypeId: { Category: Source, Owner: AWS, Provider: CodeStarSourceConnection, Version: '1' }
-              Configuration:
-                ConnectionArn: !Ref CodeStarConnectionArn
-                FullRepositoryId: !Ref RepositoryId
-                BranchName: !Ref BranchName
-                # push では起動しない。作業者が明示的に開始する。
-                DetectChanges: 'false'
-              OutputArtifacts: [{ Name: SourceOutput }]
-              RunOrder: 1
+            - !If
+              - UseCodeConnections
+              - Name: SourceFromGitHub
+                ActionTypeId: { Category: Source, Owner: AWS, Provider: CodeStarSourceConnection, Version: '1' }
+                Configuration:
+                  ConnectionArn: !Ref CodeStarConnectionArn
+                  FullRepositoryId: !Ref RepositoryId
+                  BranchName: !Ref BranchName
+                  # push では起動しない。作業者が明示的に開始する。
+                  DetectChanges: 'false'
+                OutputArtifacts: [{ Name: SourceOutput }]
+                RunOrder: 1
+              - Name: SourceFromCodeCommit
+                ActionTypeId: { Category: Source, Owner: AWS, Provider: CodeCommit, Version: '1' }
+                Configuration:
+                  RepositoryName: !Ref CodeCommitRepositoryName
+                  BranchName: !Ref BranchName
+                  # push では起動しない（EventBridge ルールも作らない）。
+                  # DetectChanges: 'false' と同じ意図である。
+                  PollForSourceChanges: 'false'
+                OutputArtifacts: [{ Name: SourceOutput }]
+                RunOrder: 1
 
         # config の actions を読み、後続ステージの条件で使う変数として公開する。
         # Namespace を付けることで #{Approvals.SWITCHOVER_APPROVED} の形で参照できる。

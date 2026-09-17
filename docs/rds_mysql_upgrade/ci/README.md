@@ -18,11 +18,11 @@ Go のビルド（`BuildReportTool`）が失敗したときは [BuildReportTool 
 
 ```text
 codepipeline.yml:
-  CodeConnections (GitHub) → BuildGreen → VerifyGreen → ManualApproval → Switchover
+  Source (GitHub / CodeCommit) → BuildGreen → VerifyGreen → ManualApproval → Switchover
                                Step 3       Step 4          人の承認        Step 5
 
 codepipeline-all-in-one.yml:
-  CodeConnections (GitHub) → ReadApprovals → PrecheckPG → BuildGreen → VerifyGreen
+  Source (GitHub / CodeCommit) → ReadApprovals → PrecheckPG → BuildGreen → VerifyGreen
                              config を読む    Step 2 確認    Step 3       Step 4
     → [Switchover]  承認 → 切替          ※ actions.switchover が approved のときだけ入る
     → [Cleanup]     承認 → 削除          ※ actions.cleanup が approved のときだけ入る
@@ -42,7 +42,7 @@ codepipeline-all-in-one.yml:
 
 > ステージ条件（`BeforeEntry` の `Result: SKIP`）は比較的新しい CodePipeline の機能である。利用できない場合は `BeforeEntry` ブロックを削除すればよい。その場合、承認は毎回表示されるが、`pending` のアクションは CodeBuild 側で no-op するため動作自体は変わらない。
 
-CodePipeline は `DetectChanges: false` のため、GitHub への push で自動開始しない。作業者は CloudFormation でスタックを作成後、`aws codepipeline start-pipeline-execution` または AWS Console から明示的に開始する。実行するスクリプトと buildspec は 2 つのテンプレートで共通である。
+ソースの取得元は `SourceProvider` パラメータで `CodeConnections`（GitHub。既定）と `CodeCommit` を切り替える。**Source ステージのアクションと、CodePipeline ロールへ付く権限だけが入れ替わり、後続ステージはどちらも `SourceOutput` を受け取る。**CodePipeline は `DetectChanges: false`（CodeCommit では `PollForSourceChanges: false`）のため、push で自動開始しない。作業者は CloudFormation でスタックを作成後、`aws codepipeline start-pipeline-execution` または AWS Console から明示的に開始する。実行するスクリプトと buildspec は 2 つのテンプレートで共通である。
 
 ## Step 3〜5 の三つの実行方式
 

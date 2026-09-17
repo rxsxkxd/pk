@@ -72,7 +72,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 同じ `scripts/*.sh` を GitHub Actions と CodeBuild/CodePipeline の両方から実行する。**スクリプトを変更したら両方の呼び出し側を確認する。**
 
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
-- `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。
+- `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。**ソースの取得元は `SourceProvider` パラメータで `CodeConnections`（GitHub。既定）と `CodeCommit` を切り替える。**Source ステージのアクションと CodePipeline ロールの権限だけが入れ替わり、後続ステージはどちらも `SourceOutput` を受け取るので、切り替えの影響は Source ステージに閉じている。
 
 **Step 4 の実効値収集は MySQL クライアントを使わない。**`scripts/collect_green_runtime_values/`（Go）が `performance_schema.global_variables` を直接読む。理由は次の 2 つで、どちらも「実行時に mysql クライアントを導入できない」ことに帰着する。
 

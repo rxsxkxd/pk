@@ -121,7 +121,7 @@ Source:
 
 `CLIENT_ERROR: Unable to pull customer's container image` など。
 
-**やること**：`BuildReportToolProject` の `Image` は `aws/docker/standard` 系のマネージドイメージである。ECR のカスタムイメージを指定した場合は、実行ロールに ECR 読み取り権限が要る（このテンプレートでは `VerifyGreenImage` にだけカスタムイメージ用の条件付きポリシーがある）。
+**やること**：テンプレートは全プロジェクトで `aws/codebuild/standard:7.0`（マネージドイメージ）を固定しており、**カスタムイメージを指定する経路は無い**。この症状が出るならイメージ名が書き換えられているので、テンプレートを確認する。
 
 ### I4: 起動時に Elastic Network Interface を作れない
 

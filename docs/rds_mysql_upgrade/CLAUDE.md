@@ -73,7 +73,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 同じ `scripts/*.sh` を GitHub Actions と CodeBuild/CodePipeline の両方から実行する。**スクリプトを変更したら両方の呼び出し側を確認する。**
 
 - `.github/workflows/{build-green,verify-green,switchover}.yml` — `workflow_dispatch` のみ。OIDC で `vars.AWS_ROLE_ARN` を引き受ける。`env.ACT` が真のとき（nektos/act）は OIDC ステップを飛ばし、ローカル配置の AWS CLI zip を入れる分岐が入っている。
-- `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。`DetectChanges: false` で push では起動しない。**ソースの取得元は `SourceProvider` パラメータで `CodeConnections`（GitHub。既定）と `CodeCommit` を切り替える。**Source ステージのアクションと CodePipeline ロールの権限だけが入れ替わり、後続ステージはどちらも `SourceOutput` を受け取るので、切り替えの影響は Source ステージに閉じている。
+- `ci/codebuild/*.yml` + `examples/rds-blue-green-deployment/codepipeline.yml` — `BuildGreen → VerifyGreen → ManualApproval → Switchover`。**アーティファクト用 S3 バケットは `codepipeline-all-in-one.yml` だけが作れる**（`ArtifactBucketName` を空にすると新規作成。バージョニング必須なので有効化し、`DeletionPolicy: Retain` でスタック削除時も残す——中身があると S3 は削除できずスタック削除が失敗するため）。`DetectChanges: false` で push では起動しない。**ソースの取得元は `SourceProvider` パラメータで `CodeConnections`（GitHub。既定）と `CodeCommit` を切り替える。**Source ステージのアクションと CodePipeline ロールの権限だけが入れ替わり、後続ステージはどちらも `SourceOutput` を受け取るので、切り替えの影響は Source ステージに閉じている。
 
 **Step 4 の実効値収集は MySQL クライアントを使わない。**`scripts/collect_green_runtime_values/`（Go）が `performance_schema.global_variables` を直接読む。理由は次の 2 つで、どちらも「実行時に mysql クライアントを導入できない」ことに帰着する。
 
@@ -107,7 +107,9 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 | `generate_green_verification_report` | `scripts/`（package main） | レポート（`.md`）の組み立て | `GREEN_REPORT_GENERATOR` |
 | `collect_green_runtime_values` | `scripts/collect_green_runtime_values/` | Green DB の実効値収集 | `GREEN_RUNTIME_COLLECTOR` |
 
-**VerifyGreen はどちらもビルドしない。**片方でも欠けていれば理由を出して停止する（Go も外部ネットワークも持たない前提のため、自動復旧しない）。未指定なら `verify_green.sh` が一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
+**VerifyGreen はどちらもビルドしない。**片方でも欠けていれば理由を出して停止する（Go も外部ネットワークも持たない前提のため、自動復旧しない）。ローカル実行で環境変数を指定しなかった場合だけ、各スクリプトが一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
+
+**CodeBuild のイメージは全プロジェクトで `aws/codebuild/standard:7.0` 固定である。**カスタムイメージを指定する経路はテンプレートから削除してある（`VerifyGreenImage` パラメータ・`ImagePullCredentialsType`・ECR 読み取り権限を撤去）。同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持ち、欠けていた mysql クライアントは Go バイナリで置き換えたためである。旧方式の `ci/Dockerfile.verify-green` は**未使用のまま参考として残している**（冒頭にその旨を明記）。
 
 **CloudFormation テンプレートの読み取りは `internal/cfn` が担う。**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化し、値が組み込み関数の項目は「比較不能」として比較対象から外す。レポート生成器の `--list-parameter-names` が `scripts/internal/cfn` を、`tools/generate_blue_green_config_report` が `tools/internal/cfn` を使う。**この 2 本は同一内容の複製なので、短縮記法の扱いを変えるときは両方を直す**（`tests/cfn_shorthand_test.sh` が一致を検査する）。
 

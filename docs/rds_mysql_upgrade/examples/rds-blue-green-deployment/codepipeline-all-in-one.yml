@@ -1,13 +1,14 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   RDS for MySQL 8.0 -> 8.4 Blue/Green 移行パイプライン（IAM・CI 作成版）。
-  既存のアーティファクト用 S3 バケットを利用し、IAM ロール、CodeBuild プロジェクト、
-  CodePipeline を 1 つのスタックで作成する。対象サービスは実行時に SERVICE_NAME で指定する。
+  IAM ロール、CodeBuild プロジェクト、CodePipeline を 1 つのスタックで作成する。
+  アーティファクト用 S3 バケットは、ArtifactBucketName が空なら新規作成し、
+  指定があれば既存バケットを使う。対象サービスは実行時に SERVICE_NAME で指定する。
 
 # 既存の codepipeline.yml との違い:
 #   codepipeline.yml         … S3 バケットと IAM ロールを既存リソースとして受け取る。
 #                              組織側でロールを一元管理している場合はこちらを使う。
-#   codepipeline-all-in-one  … 本ファイル。既存 S3 バケットを受け取り、IAM と CI リソースを作成する。
+#   codepipeline-all-in-one  … 本ファイル。S3 バケット（省略時は新規作成）、IAM、CI リソースを作成する。
 #                              検証環境や、スタック単位で権限を閉じたい場合に使う。
 #
 # 環境（staging / production）ごとに 1 スタックを作成する。サービスはパイプライン変数で
@@ -17,7 +18,7 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: パイプライン }
-        Parameters: [PipelineNamePrefix, EnvironmentName, DefaultServiceName, ArtifactBucketName]
+        Parameters: [PipelineNamePrefix, EnvironmentName, DefaultServiceName, ArtifactBucketName, ArtifactRetentionDays]
       - Label: { default: ソース（GitHub または CodeCommit） }
         Parameters: [SourceProvider, CodeStarConnectionArn, RepositoryId, CodeCommitRepositoryName, BranchName]
       - Label: { default: Step 4 の MySQL 実効値収集（任意） }
@@ -27,7 +28,6 @@ Metadata:
           - VpcId
           - VerifyGreenSubnetIds
           - VerifyGreenSecurityGroupIds
-          - VerifyGreenImage
       - Label: { default: 承認通知（任意） }
         Parameters: [ApprovalNotificationTopicArn]
       - Label: { default: 拡張モニタリング（移行元で有効なときだけ） }
@@ -56,9 +56,23 @@ Parameters:
 
   ArtifactBucketName:
     Type: String
+    Default: ''
     Description: >-
-      CodePipeline のソースおよび各 Step の成果物を保存する、同一リージョンの既存 S3 バケット名。
-      このスタックはバケットおよびバケットポリシーを作成・変更・削除しない。
+      CodePipeline のソースおよび各 Step の成果物を保存する S3 バケット名。
+      **空にするとこのスタックが新規作成する**（名前は
+      <PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>）。
+      既存バケット名を指定した場合は、このスタックはバケットおよび
+      バケットポリシーを作成・変更・削除しない。同一リージョンであること。
+
+  ArtifactRetentionDays:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 3650
+    Description: >-
+      新規作成するバケットで、アーティファクトを保持する日数。経過後は失効させる。
+      アーティファクトは使い捨てだが、移行作業の記録（レポート、収集した JSON）が
+      入るため短くしすぎない。ArtifactBucketName を指定した場合は使わない。
 
   SourceProvider:
     Type: String
@@ -114,7 +128,8 @@ Parameters:
     Description: >-
       Step 4 で Green DB へ MySQL 接続し実効値を収集するか。
       true にする場合は VpcId 以下を指定して VerifyGreen を RDS へ到達できる
-      subnet へ配置し、MySQL クライアント入りの VerifyGreenImage を指定する。
+      subnet へ配置する。**カスタムイメージは要らない。**収集は BuildReportTool が
+      ビルドする静的リンクの Go バイナリが行い、MySQL クライアントを使わない。
 
   # Step 4 の 2 つのプロジェクトを配置する VPC。**両方とも同一 VPC 内に置く。**
   # レポート実行（VerifyGreen）は専用のサブネットへ隔離し、そこには外部経路を置かない。
@@ -146,14 +161,6 @@ Parameters:
       VerifyGreen に付けるセキュリティグループ。RDS 側の inbound でこの SG からの
       3306/tcp を許可する。
 
-  VerifyGreenImage:
-    Type: String
-    Default: aws/codebuild/standard:7.0
-    Description: >-
-      VerifyGreen のビルドイメージ。MySQL 実効値を収集する場合は、
-      MySQL クライアントを同梱したカスタムイメージ（例: ECR の image）を指定する。
-      private subnet では apt による実行時導入ができないため、イメージ側に含める。
-
   MySqlCredentialsParameterArns:
     Type: CommaDelimitedList
     Default: ''
@@ -183,16 +190,82 @@ Conditions:
   UseCodeCommit: !Equals [!Ref SourceProvider, CodeCommit]
   # 移行元が拡張モニタリングを使っている場合だけ iam:PassRole を付ける。
   HasRdsMonitoringRole: !Not [!Equals [!Ref RdsMonitoringRoleName, '']]
+  # ArtifactBucketName が空ならバケットをこのスタックで作る。
+  CreateArtifactBucket: !Equals [!Ref ArtifactBucketName, '']
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
   # Step 4 の 2 プロジェクトを VPC 内で実行するか。
   # VpcConfig と Elastic Network Interface 権限をまとめて切り替える。
   HasVpc: !Not [!Equals [!Ref VpcId, '']]
-  # 既定イメージ以外を指定した場合は ECR からの pull を許可する。
-  HasCustomVerifyGreenImage: !Not [!Equals [!Ref VerifyGreenImage, 'aws/codebuild/standard:7.0']]
   # config の mysql_verification.auth_method は parameter_store 固定である。
   HasMySqlCredentials: !Not [!Equals [!Join ['', !Ref MySqlCredentialsParameterArns], '']]
 
 Resources:
+
+  # --- アーティファクト用 S3 バケット -----------------------------------------
+  # ArtifactBucketName が空のときだけ作る。指定があればそのバケットを使い、
+  # このスタックは一切触らない。
+  #
+  # **DeletionPolicy: Retain にしてある。**S3 は中身が残っているとバケットを
+  # 削除できず、スタック削除が DELETE_FAILED で止まる。アーティファクトには
+  # 移行作業の記録（検証レポート、収集した JSON）が入るため、スタックを消しても
+  # 残す方が安全である。不要になったら手で削除する。ライフサイクルで
+  # ArtifactRetentionDays 後には空になるので、放置してもコストは増え続けない。
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateArtifactBucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      # グローバルに一意である必要があるため、アカウント ID とリージョンを含める。
+      BucketName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-artifacts-${AWS::AccountId}-${AWS::Region}'
+      # **CodePipeline のアーティファクトバケットはバージョニングが必須である。**
+      VersioningConfiguration:
+        Status: Enabled
+      # SSE-S3。カスタマー管理キーを使う場合は、両実行ロールへ鍵の利用権限も要る。
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # ACL を無効化する。アクセス制御は IAM とバケットポリシーだけで行う。
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      # バージョニングが有効なので、明示的に失効させないと版が無限に積む。
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireArtifacts
+            Status: Enabled
+            ExpirationInDays: !Ref ArtifactRetentionDays
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 7
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  # 非 TLS のアクセスを拒否する。バケットを作る場合だけ付ける。
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: CreateArtifactBucket
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub '${ArtifactBucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
 
   # --- CodeBuild 共通権限 -----------------------------------------------------
   # ログ出力、アーティファクトの読み書き、RDS の読み取り。
@@ -221,11 +294,15 @@ Resources:
               - 's3:GetObjectVersion'
               - 's3:PutObject'
               - 's3:GetBucketLocation'
-            Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucketName}/*'
+            Resource: !Sub
+              - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+              - Bucket: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
           - Sid: ArtifactBucketList
             Effect: Allow
             Action: 's3:ListBucket'
-            Resource: !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucketName}'
+            Resource: !Sub
+              - 'arn:${AWS::Partition}:s3:::${Bucket}'
+              - Bucket: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
           - Sid: RdsReadOnly
             Effect: Allow
             # Describe 系はリソースレベルの制御に対応しないものがあるため * とする。
@@ -407,22 +484,6 @@ Resources:
                     StringEquals:
                       'ec2:AuthorizedService': codebuild.amazonaws.com
           - !Ref 'AWS::NoValue'
-        # カスタムイメージを ECR から引く場合に必要。
-        - !If
-          - HasCustomVerifyGreenImage
-          - PolicyName: pull-verify-green-image
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Sid: PullBuildImage
-                  Effect: Allow
-                  Action:
-                    - 'ecr:GetAuthorizationToken'
-                    - 'ecr:BatchCheckLayerAvailability'
-                    - 'ecr:GetDownloadUrlForLayer'
-                    - 'ecr:BatchGetImage'
-                  Resource: '*'
-          - !Ref 'AWS::NoValue'
 
   # Step 5: 切替に必要な変更だけを許可する。作成・削除の権限は持たせない。
   SwitchoverRole:
@@ -512,8 +573,12 @@ Resources:
                   - 's3:PutObject'
                   - 's3:GetBucketVersioning'
                 Resource:
-                  - !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucketName}'
-                  - !Sub 'arn:${AWS::Partition}:s3:::${ArtifactBucketName}/*'
+                  - !Sub
+                    - 'arn:${AWS::Partition}:s3:::${Bucket}'
+                    - Bucket: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
+                  - !Sub
+                    - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                    - Bucket: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
               - Sid: StartBuilds
                 Effect: Allow
                 Action:
@@ -669,13 +734,12 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        # レポート生成器は BuildReportTool の artifact から受け取るため、
-        # このプロジェクトは Go も Go module の取得も必要としない。
-        # MySQL 実効値を収集する場合は、MySQL クライアント入りのイメージを指定する
-        # （private subnet では apt による実行時導入ができない）。
-        Image: !Ref VerifyGreenImage
-        # 既定イメージ以外（ECR など）はサービスロールの権限で引く。
-        ImagePullCredentialsType: !If [HasCustomVerifyGreenImage, SERVICE_ROLE, CODEBUILD]
+        # **既定イメージで足りる。**必要なものはすべて揃っている。
+        #   jq / rbenv（Ruby 3.4.10）/ AWS CLI v2 … このイメージに同梱
+        #   レポート生成器と実効値収集バイナリ … BuildReportTool の artifact から受け取る
+        # MySQL クライアントは使わない（収集は静的リンクの Go バイナリが行う）ため、
+        # カスタムイメージも ECR からの pull も要らない。
+        Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
@@ -738,7 +802,7 @@ Resources:
       RoleArn: !GetAtt CodePipelineRole.Arn
       ArtifactStore:
         Type: S3
-        Location: !Ref ArtifactBucketName
+        Location: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
       # 実行時に指定する変数。start-pipeline-execution の --variables で上書きする。
       Variables:
         - Name: ServiceName
@@ -901,6 +965,12 @@ Resources:
               RunOrder: 2
 
 Outputs:
+  ArtifactBucket:
+    Description: >-
+      使用しているアーティファクト用 S3 バケット。このスタックが作った場合は
+      DeletionPolicy: Retain のため、スタックを削除しても残る
+    Value: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
+
   PipelineName:
     Description: 作成した CodePipeline 名
     Value: !Ref BlueGreenPipeline

@@ -174,7 +174,9 @@ arn:aws:rds:<region>:<account>:snapshot:<DbInstanceIdentifierPrefix>*
 
 ## S3 アーティファクト
 
-`ArtifactBucketName` に、CodePipeline と同一リージョンにある既存 S3 バケット名を指定する。このテンプレートは `AWS::S3::Bucket` と `AWS::S3::BucketPolicy` を作成せず、既存バケットの暗号化、パブリックアクセスブロック、ライフサイクル、バケットポリシーを変更しない。組織のバケットポリシーで明示許可している場合は、作成される `CodePipelineRole` と各 CodeBuild ロールからの読み書きを許可しておく。
+`codepipeline-all-in-one.yml` は **`ArtifactBucketName` を空にすると S3 バケットを新規作成する**（バージョニング有効、SSE-S3、パブリックアクセス全ブロック、非 TLS 拒否、保持日数経過で失効。`DeletionPolicy: Retain`）。名前は `<PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>` で、スタックの出力 `ArtifactBucket` に出る。
+
+既存バケットを使う場合は `ArtifactBucketName` に、CodePipeline と同一リージョンにあるバケット名を指定する。このときテンプレートは `AWS::S3::Bucket` と `AWS::S3::BucketPolicy` を作成せず、既存バケットの暗号化、パブリックアクセスブロック、ライフサイクル、バケットポリシーを変更しない。組織のバケットポリシーで明示許可している場合は、作成される `CodePipelineRole` と各 CodeBuild ロールからの読み書きを許可しておく。`codepipeline.yml`（役割分担の都合でバケットを作らない版）は常に既存バケットが必須である。
 
 各 CodeBuild は `artifacts/` 配下の応答 JSON と検証レポートを出力し、次ステージへは渡さず既存バケットに蓄積する。
 

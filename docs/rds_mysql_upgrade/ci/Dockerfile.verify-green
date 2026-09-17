@@ -1,14 +1,29 @@
+# ============================================================================
+# 【旧方式・現在は未使用】VerifyGreen 用のカスタムビルドイメージ
+#
+# このイメージは **以前の方式** の資材である。**現在どこからも使われていない。**
+# CloudFormation テンプレートからカスタムイメージを指定する経路は削除済みで
+# （VerifyGreenImage パラメータ・ImagePullCredentialsType・ECR 読み取り権限を撤去）、
+# VerifyGreen は aws/codebuild/standard:7.0 固定で動く。
+#
+# 旧方式: MySQL クライアントを同梱したイメージを ECR へ置き、VerifyGreen に指定する
+# 現方式: 実効値の収集を静的リンクの Go バイナリで行う
+#         （scripts/collect_green_runtime_values/。BuildReportTool がビルドし artifact で渡す。
+#          RDS のトラストストアも go:embed で内蔵する）
+#
+# 不要になった理由: aws/codebuild/standard:7.0 は jq・rbenv（Ruby 3.4.10 を含む）・
+# AWS CLI v2 を持っており、**欠けていたのは mysql クライアントだけだった。**
+# それを Go に置き換えたことで、カスタムイメージも ECR も NAT も要らなくなった。
+#
+# 残している理由: 「MySQL クライアントを実行環境へ置く」方式へ戻す判断をした場合の
+# 参考として。**このまま使っても現在のテンプレートからは指定できない。**
+# 以下の記述は旧方式の前提のままである（当時の内容を保存している）。
+# ============================================================================
+#
+# ---- 以下、旧方式の説明（当時のまま）----
+#
 # VerifyGreen（Step 4）を RDS のある private subnet で実行するためのビルドイメージ。
 #
-# **【2026-09-16 追記】このイメージは現在不要である。未使用として残している。**
-# 実効値の収集を MySQL クライアントから Go のバイナリ
-# （scripts/collect_green_runtime_values/。BuildReportTool がビルドし artifact で渡す）
-# へ置き換えたため、mysql_verification.enabled: true でも
-# aws/codebuild/standard:7.0 で足りるようになった。同イメージは jq・rbenv
-# （Ruby 3.4.10 を含む）・AWS CLI v2 を持ち、欠けていたのは mysql クライアントだけだった。
-# 以下は「MySQL クライアントを実行環境に置く」方式を採る場合の参考として残す。
-#
-# 以前の前提:
 # **このイメージが必要なのは mysql_verification.enabled: true のときだけである。**
 # 既定（false）なら AWS API による検証だけなので、aws/codebuild/standard:7.0 で足りる。
 #

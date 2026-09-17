@@ -88,19 +88,12 @@ Parameters:
     Type: CommaDelimitedList
     Default: ''
     Description: VerifyGreen に付けるセキュリティグループ。RDS 側の inbound で 3306/tcp を許可する
-  VerifyGreenImage:
-    Type: String
-    Default: aws/codebuild/standard:7.0
-    Description: >-
-      VerifyGreen のビルドイメージ。MySQL 実効値を収集する場合は、MySQL クライアントを
-      同梱したカスタムイメージを指定する（private subnet では apt による導入ができない）。
 
 Conditions:
   # ソースの取得元を切り替える。Source アクションを差し替えるだけで、
   # 後続ステージは SourceOutput を受け取る点が変わらない。
   UseCodeConnections: !Equals [!Ref SourceProvider, CodeConnections]
   HasVpc: !Not [!Equals [!Ref VpcId, '']]
-  HasCustomVerifyGreenImage: !Not [!Equals [!Ref VerifyGreenImage, 'aws/codebuild/standard:7.0']]
 
 Resources:
   # Step 3: actions.build が approved の場合だけ、保護スナップショットと Green を作成する。
@@ -173,11 +166,10 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        # レポート生成器は BuildReportTool の artifact から受け取るため、
-        # このプロジェクトは Go も Go module の取得も必要としない。
-        # MySQL 実効値を収集する場合は MySQL クライアント入りのイメージを指定する。
-        Image: !Ref VerifyGreenImage
-        ImagePullCredentialsType: !If [HasCustomVerifyGreenImage, SERVICE_ROLE, CODEBUILD]
+        # **既定イメージで足りる。**レポート生成器と実効値収集バイナリは
+        # BuildReportTool の artifact から受け取り、MySQL クライアントは使わない。
+        # そのため Go も Go module の取得もカスタムイメージも要らない。
+        Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT

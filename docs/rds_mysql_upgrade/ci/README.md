@@ -131,7 +131,6 @@ aws cloudformation deploy \
     PipelineNamePrefix=rds-bg \
     EnvironmentName=staging \
     DefaultServiceName=example-service \
-    ArtifactBucketName=your-existing-codepipeline-artifact-bucket \
     CodeStarConnectionArn=arn:aws:codeconnections:ap-northeast-1:123456789012:connection/xxxxxxxx \
     RepositoryId=your-org/your-repository \
     DbInstanceIdentifierPrefix=example-service-staging

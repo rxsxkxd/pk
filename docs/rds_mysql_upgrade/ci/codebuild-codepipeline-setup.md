@@ -102,8 +102,9 @@ CollectMySqlRuntimeValues=true
 VpcId=vpc-xxxxxxxx
 VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb        # 検証専用。RDS へ到達でき、外部へは出ない
 VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティグループ設定」で作る SG
-VerifyGreenImage=<account>.dkr.ecr.<region>.amazonaws.com/rds-bg-verify-green:<tag>
 ```
+
+**イメージの指定は要らない。**`VerifyGreen` は `aws/codebuild/standard:7.0` 固定で、テンプレートはカスタムイメージを受け付けない。
 
 `VpcId` が空なら `VerifyGreen` も VPC 外で動き、AWS API による検証だけを行う（既定）。
 
@@ -136,7 +137,9 @@ VerifyGreenImage=<account>.dkr.ecr.<region>.amazonaws.com/rds-bg-verify-green:<t
 
 private subnet では apt リポジトリへ到達できないため、**buildspec は `apt-get` を呼ばない。**実効値の収集は `collect_green_runtime_values`（静的リンクの Go バイナリ）が行う。`BuildReportTool` がレポート生成器と一緒にビルドし、artifact で渡す。
 
-**そのため `VerifyGreenImage` に既定以外を指定する必要は無い。**`aws/codebuild/standard:7.0` は jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。既定イメージ以外を指定した場合だけ、テンプレートは `ImagePullCredentialsType: SERVICE_ROLE` へ切り替え、`VerifyGreenRole` へ ECR 読み取り権限を条件付きで付与する。
+**そのため `VerifyGreen` のイメージは `aws/codebuild/standard:7.0` 固定である。**同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。**テンプレートからはカスタムイメージの指定（`VerifyGreenImage` パラメータ、`ImagePullCredentialsType`、ECR 読み取り権限）を削除した。**
+
+> 以前の方式（MySQL クライアント入りのイメージを ECR へ置く）で使っていた [Dockerfile.verify-green](Dockerfile.verify-green) は、**参考として残してあるが未使用である。**テンプレートから指定する経路は無い。
 
 > イメージが提供する managed runtime の Go バージョンは AWS の更新で変わる。`runtime-versions: golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブをイメージが提供するバージョンへ下げる。
 
@@ -154,7 +157,7 @@ private subnet では apt リポジトリへ到達できないため、**buildsp
 |---|---|---|
 | ソースリポジトリ | **GitHub** なら `owner/repository`、**CodeCommit** ならリポジトリ名。いずれも対象ブランチ | CodePipeline が buildspec・スクリプト・環境設定を取得する |
 | CodeConnections 接続 | GitHub 接続済み・`AVAILABLE` の Connection ARN | Source ステージが GitHub を読む。**CodeCommit を使う場合は不要** |
-| S3 artifact bucket | 同一リージョンの既存バケット、暗号化・ライフサイクルを設定 | ソースと各 Step の成果物を保存する |
+| S3 artifact bucket | **`codepipeline-all-in-one.yml` は省略可**（空なら新規作成する）。`codepipeline.yml` は同一リージョンの既存バケットが必須 | ソースと各 Step の成果物を保存する |
 | CodePipeline 実行ロール | 既存 IAM role ARN | Pipeline が CodeConnections、S3、CodeBuild を利用する |
 | CodeBuild 実行ロール | 既存 IAM role ARN | RDS・CloudWatch API と成果物を扱う |
 | 環境設定 | `config/blue-green/<environment>.deployment.yml` の対象サービス定義 | Blue DB、8.4 PG、DB クラス、承認状態を決める |
@@ -182,7 +185,37 @@ CodeConnections を使う場合は、接続作成後に GitHub 側で認可を�
 
 > **CodeCommit は新規利用が制限されている。**AWS は 2024-07-25 以降、CodeCommit を使ったことのないアカウントでの新規リポジトリ作成を受け付けていない。既に CodeCommit を使っているアカウントでは引き続き利用できる。新規に選ぶなら `CodeConnections` 側を推奨する。
 
-artifact bucket は CodePipeline 実行リージョンに作成し、組織の要件に従い S3 バケット暗号化、パブリックアクセスブロック、保存期間を設定する。KMS カスタマー管理キーを使う場合は、後述の両 IAM ロールにそのキーの利用権限も必要となる。
+#### artifact bucket を作らせる場合
+
+`codepipeline-all-in-one.yml` は **`ArtifactBucketName` を空にすると自分で作る**。名前は次の形で、グローバルな一意性を満たすようアカウント ID とリージョンを含める。
+
+```
+<PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>
+```
+
+作られるバケットの設定は次のとおりである。
+
+| 設定 | 値 | 理由 |
+|---|---|---|
+| バージョニング | `Enabled` | **CodePipeline のアーティファクトバケットは必須** |
+| 暗号化 | SSE-S3（`AES256`、バケットキー有効） | 既定で追加費用が無い |
+| パブリックアクセス | 4 項目すべてブロック | — |
+| Object Ownership | `BucketOwnerEnforced` | ACL を無効化し、IAM とバケットポリシーだけで制御する |
+| ライフサイクル | 現行版は `ArtifactRetentionDays`（既定 90 日）で失効、非現行版 7 日、不完全マルチパートを 7 日で中止 | バージョニングが有効なので、明示的に失効させないと版が積み続ける |
+| バケットポリシー | 非 TLS（`aws:SecureTransport: false`）を `Deny` | — |
+
+**`DeletionPolicy: Retain` にしてある。**S3 は中身が残っているとバケットを削除できず、スタック削除が `DELETE_FAILED` で止まる。アーティファクトには移行作業の記録（検証レポート、収集した JSON）が入るため、スタックを消しても残す方を選んだ。不要になったら手で削除する。ライフサイクルで保持日数を過ぎれば空になるので、放置してもコストは増え続けない。
+
+使ったバケット名はスタックの出力 `ArtifactBucket` で確認できる。
+
+```bash
+aws cloudformation describe-stacks --stack-name <名前> \
+  --query 'Stacks[0].Outputs[?OutputKey==`ArtifactBucket`].OutputValue' --output text
+```
+
+#### 既存バケットを使う場合
+
+`ArtifactBucketName` に名前を渡す。この場合スタックは `AWS::S3::Bucket` も `AWS::S3::BucketPolicy` も作らず、既存バケットの暗号化・パブリックアクセスブロック・ライフサイクル・バケットポリシーを変更しない。CodePipeline 実行リージョンに作成し、組織の要件に従って設定する。**バージョニングは有効にしておく**（CodePipeline の要件である）。KMS カスタマー管理キーを使う場合は、両 IAM ロールにそのキーの利用権限も必要となる。
 
 ## 2. IAM ロールと最小権限
 
@@ -294,7 +327,7 @@ CodeCommitRepositoryName=your-repository
 BranchName=main
 ```
 
-CloudFormation の `CodeStarConnectionArn`、artifact bucket、両実行ロールはスタック外で管理する。テンプレートを削除しても、これら既存リソースは削除されない。
+`codepipeline.yml` では `CodeStarConnectionArn`、artifact bucket、両実行ロールをスタック外で管理する。テンプレートを削除しても、これら既存リソースは削除されない。`codepipeline-all-in-one.yml` が作ったバケットも `DeletionPolicy: Retain` のため削除されない。
 
 ## 5. 実行手順
 

@@ -196,13 +196,9 @@ flowchart TD
     IN --> R["VerifyGreenRole へ<br/>Elastic Network Interface 作成権限を条件付きで追加"]
     R --> P2{"mysql_verification<br/>を有効にするか"}
     P2 -->|いいえ| IN2["VPC 内だが DB へは接続しない"]
-    P2 -->|はい| P3{"VerifyGreenImage に<br/>MySQL 入りを指定したか"}
-    P3 -->|はい| OK["実効値まで収集できる"]
-    P3 -->|いいえ| NG["buildspec が停止<br/>（対処を出力）"]
+    P2 -->|はい| OK["実効値まで収集できる<br/>（イメージの用意は不要）"]
 
-    classDef ng fill:#ffe8e8,stroke:#c0392b
     classDef ok fill:#eef7ee,stroke:#2e7d32
-    class NG ng
     class OK ok
 ```
 
@@ -211,7 +207,6 @@ flowchart TD
 | `VpcId` | `VerifyGreen` も VPC 外（Green DB へは接続できない） | **`VerifyGreen` だけ VPC 内で実行。`VerifyGreenRole` に Elastic Network Interface 作成権限が自動で付く。`BuildReportTool` は影響を受けない** |
 | `VerifyGreenSubnetIds` | — | **検証専用の private subnet。**RDS へ到達できること。**外部経路は置かない** |
 | `VerifyGreenSecurityGroupIds` | — | RDS 側 inbound で 3306/tcp を許可する SG。**テンプレートは SG を作らない**ので別途用意する（[セキュリティグループ設定](verify-green-security-group-setup.md)） |
-| `VerifyGreenImage` | `aws/codebuild/standard:7.0` | **ECR のカスタムイメージ**。`ImagePullCredentialsType` が `SERVICE_ROLE` へ切り替わり、ECR 読み取り権限が自動で付く |
 | `CollectMySqlRuntimeValues` | AWS API の検証だけ | Green DB へ接続して実効値も収集 |
 
 ## 7. どこで落ちるか
@@ -222,7 +217,7 @@ flowchart TD
 |---|---|---|
 | `VerifyGreen` が起動時に失敗する | Elastic Network Interface 作成権限が無い | `VpcId` を指定してテンプレートを更新する（`VerifyGreenRole` へ条件付きで付く） |
 | `Report generator is absent` で停止 | artifact を受け取れていない | `BuildReportTool` ステージの成否と `PrimarySource` の指定を確認する |
-| `mysql_verification is enabled but the MySQL client is absent` | 既定イメージのまま実効値収集を有効にした | `VerifyGreenImage` に MySQL 入りイメージを指定する |
+| `The runtime value collector is absent` で停止 | 実効値収集バイナリの artifact を受け取れていない | `BuildReportTool` が 2 本ビルドできているか、`InputArtifacts` に `ReportToolOutput` があるかを確認する |
 | AWS API 呼び出しがタイムアウトする | VPC endpoint が足りない | 上の表の 5 種（+ `kms`）を確認する |
 | Green DB へ接続できない | SG / subnet のルーティング | [セキュリティグループ設定](verify-green-security-group-setup.md) の「よくある失敗」を見る |
 | `BuildReportTool` が Go module を取得できない | VPC 外で動くはずのプロジェクトに `VpcConfig` が付いている | `BuildReportToolProject` に `VpcConfig` が無いことを確認する。詳しい切り分けは [BuildReportTool の失敗切り分け](build-report-tool-troubleshooting.md) |

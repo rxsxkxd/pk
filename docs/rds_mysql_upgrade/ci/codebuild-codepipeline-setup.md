@@ -205,9 +205,42 @@ Step ごとの変更権限は次のとおりである。
 
 | Project | 追加権限 | 用途 |
 |---|---|---|
-| BuildGreen | `rds:CreateDBSnapshot`、`rds:CreateBlueGreenDeployment` | 保護スナップショットと Green の作成 |
+| BuildGreen | `rds:CreateDBSnapshot`、`rds:CreateBlueGreenDeployment`、`rds:CreateDBInstanceReadReplica`、`rds:AddTagsToResource` | 保護スナップショットと Green の作成。Green のレプリカ作成とタグ付与は RDS が従属操作として行う |
+| BuildGreen（条件付き） | **`iam:PassRole`** | **移行元が拡張モニタリングを使っている場合に必須。**下記を参照 |
 | VerifyGreen | なし | AWS API と RDS パラメータの読み取りだけ |
 | Switchover | `rds:SwitchoverBlueGreenDeployment`、`rds:ModifyDBInstance`、`rds:PromoteReadReplica` | 承認後の切替。RDS が Green DB を変更し、read replica を昇格するため三つとも必要 |
+
+#### 拡張モニタリングを使っている場合の `iam:PassRole`
+
+移行元 DB で拡張モニタリング（Enhanced Monitoring）が有効だと、**RDS は Green へその設定をコピーする。**このとき呼び出し側にモニタリングロールを渡す権限が要る。無いと Step 3 がこの形で失敗する。
+
+```
+User: arn:aws:sts::<account>:assumed-role/<build-green-role>/... is not authorized to
+perform: iam:PassRole on resource: arn:aws:iam::<account>:role/rds-monitoring-role
+```
+
+移行元の設定はこれで確認できる。`MonitoringInterval` が `0` 以外なら有効である。
+
+```bash
+aws rds describe-db-instances --db-instance-identifier <blue-id> \
+  --query 'DBInstances[0].[MonitoringInterval,MonitoringRoleArn]'
+```
+
+`codepipeline-all-in-one.yml` は **`RdsMonitoringRoleName` パラメータ**（既定 `rds-monitoring-role`）でこの権限を付ける。移行元が別名のロールを使っているならその名前に変え、拡張モニタリングを使っていないなら空文字にする（空なら権限自体が付かない）。
+
+付与される内容は次のとおりで、**渡し先のサービスを Condition で固定**してある。他用途への流用を防ぐためである。
+
+```yaml
+- Sid: PassRdsMonitoringRole
+  Effect: Allow
+  Action: 'iam:PassRole'
+  Resource: arn:aws:iam::<account>:role/<RdsMonitoringRoleName>
+  Condition:
+    StringEquals:
+      'iam:PassedToService': monitoring.rds.amazonaws.com
+```
+
+外部ロールを渡す `codepipeline.yml` を使う場合は、同じ内容を `CodeBuildServiceRoleArn` のロールへ自分で付ける。
 
 さらに CodeBuild の標準的な運用権限として、CloudWatch Logs のログ出力、artifact bucket の読み書き、KMS を使う場合の復号・暗号化を対象リソースに限定して許可する。RDS の変更 API は可能な範囲で対象 DB instance・snapshot・Blue/Green deployment の ARN に限定する。切替用ロールは `deployment:*`（切替）と `db:*`（RDS が行う DB instance の変更・昇格）に分ける。`Describe*` 系 API はリソースレベル制御ができない場合があるため、AWS IAM のサービス認可リファレンスで確認する。
 

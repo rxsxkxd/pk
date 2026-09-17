@@ -30,6 +30,8 @@ Metadata:
           - VerifyGreenImage
       - Label: { default: 承認通知（任意） }
         Parameters: [ApprovalNotificationTopicArn]
+      - Label: { default: 拡張モニタリング（移行元で有効なときだけ） }
+        Parameters: [RdsMonitoringRoleName]
       - Label: { default: 保護対象の RDS リソース }
         Parameters: [DbInstanceIdentifierPrefix]
 
@@ -43,7 +45,7 @@ Parameters:
     Type: String
     AllowedValues: [staging, production]
     Description: >-
-      対象環境。config/blue-green/<環境>.deployment.yml を CONFIG_FILE として使う。
+      対象環境。config/blue-green/<環境>.yml を CONFIG_FILE として使う。
 
   DefaultServiceName:
     Type: String
@@ -87,6 +89,18 @@ Parameters:
     Default: ''
     Description: >-
       CodeCommit のリポジトリ名。SourceProvider=CodeCommit のときは必須である。
+
+  RdsMonitoringRoleName:
+    Type: String
+    Default: rds-monitoring-role
+    Description: >-
+      移行元 DB の拡張モニタリング（Enhanced Monitoring）が使っている IAM ロール名。
+      Blue/Green 作成時に RDS が Green へこの設定をコピーするため、BuildGreen の
+      実行ロールに iam:PassRole が必要になる。移行元で拡張モニタリングを使って
+      いない場合は空文字にしてよい（その場合この権限は付かない）。
+      移行元の設定は次で確認できる。
+      aws rds describe-db-instances --db-instance-identifier <blue-id>
+      --query 'DBInstances[0].[MonitoringInterval,MonitoringRoleArn]'
 
   BranchName:
     Type: String
@@ -167,6 +181,8 @@ Conditions:
   # 付与する権限（接続の利用 / CodeCommit の読み取り）をまとめて差し替える。
   UseCodeConnections: !Equals [!Ref SourceProvider, CodeConnections]
   UseCodeCommit: !Equals [!Ref SourceProvider, CodeCommit]
+  # 移行元が拡張モニタリングを使っている場合だけ iam:PassRole を付ける。
+  HasRdsMonitoringRole: !Not [!Equals [!Ref RdsMonitoringRoleName, '']]
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalNotificationTopicArn, '']]
   # Step 4 の 2 プロジェクトを VPC 内で実行するか。
   # VpcConfig と Elastic Network Interface 権限をまとめて切り替える。
@@ -304,6 +320,22 @@ Resources:
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:${DbInstanceIdentifierPrefix}*'
                   - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:${DbInstanceIdentifierPrefix}*'
+              # 移行元が拡張モニタリング（Enhanced Monitoring）を使っている場合、
+              # RDS は Green へその設定をコピーするため、呼び出し側に
+              # そのロールを渡す権限を要求する。これが無いと
+              # create-blue-green-deployment が iam:PassRole の
+              # AccessDenied で失敗する。
+              # 渡し先のサービスを Condition で固定し、他用途への流用を防ぐ。
+              - !If
+                - HasRdsMonitoringRole
+                - Sid: PassRdsMonitoringRole
+                  Effect: Allow
+                  Action: 'iam:PassRole'
+                  Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${RdsMonitoringRoleName}'
+                  Condition:
+                    StringEquals:
+                      'iam:PassedToService': monitoring.rds.amazonaws.com
+                - !Ref 'AWS::NoValue'
               - Sid: CreateBlueGreenDeployment
                 Effect: Allow
                 # Blue/Green の Green DB、関連する DB parameter group／OptionGroup は RDS が
@@ -553,7 +585,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   PrecheckProject:
@@ -571,7 +603,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   BuildGreenProject:
@@ -591,7 +623,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   # Go レポート生成器をビルドするだけのプロジェクト。
@@ -645,7 +677,7 @@ Resources:
         # 既定イメージ以外（ECR など）はサービスロールの権限で引く。
         ImagePullCredentialsType: !If [HasCustomVerifyGreenImage, SERVICE_ROLE, CODEBUILD]
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
           - { Name: COLLECT_MYSQL_RUNTIME_VALUES, Type: PLAINTEXT, Value: !Ref CollectMySqlRuntimeValues }
       # BuildReportTool と同一 VPC の、**レポート実行専用**の private subnet で実行する。
@@ -675,7 +707,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   CleanupProject:
@@ -693,7 +725,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   # --- CodePipeline -----------------------------------------------------------

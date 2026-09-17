@@ -58,6 +58,11 @@ Parameters:
     Description: >-
       CodeBuild 用の既存 IAM ロール ARN。RDS/CloudWatch 読取に加え、Step 5 には
       rds:SwitchoverBlueGreenDeployment、rds:ModifyDBInstance、rds:PromoteReadReplica が必要。
+      移行元が拡張モニタリング（Enhanced Monitoring）を使っている場合は、
+      Step 3 に iam:PassRole（対象は移行元の MonitoringRoleArn、Condition は
+      iam:PassedToService=monitoring.rds.amazonaws.com）も必要である。
+      RDS が Green へ拡張モニタリングの設定をコピーするためで、無いと
+      create-blue-green-deployment が AccessDenied で失敗する。
   CollectMySqlRuntimeValues:
     Type: String
     AllowedValues: ['false', 'true']

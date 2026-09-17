@@ -58,7 +58,7 @@ BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、�
 
 VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT_GENERATOR` を指定しなければ Ruby を使う。一方、CodeBuild Local Agent、AWS CodeBuild、GitHub Actions は Docker Buildx で Go バイナリを作成して指定する。この違いはレポート生成器の実装・実行環境上の補足であり、検証対象・判定内容を変えるものではない。
 
-スクリプト直接実行の全体フローは [直接実行による Blue/Green 移行フロー](../direct-blue-green-execution.md)、Local Agent の具体的な起動方法は [CodeBuild 各フローの単体ローカル検証](codebuild-local-verification.md) を参照する。
+スクリプト直接実行の全体フローは [直接実行による Blue/Green 移行フロー](../docs/direct-blue-green-execution.md)、Local Agent の具体的な起動方法は [CodeBuild 各フローの単体ローカル検証](codebuild-local-verification.md) を参照する。
 
 ## 実行内容
 
@@ -90,7 +90,7 @@ CFn の `MySqlCredentialsParameterArns` に、パスワード用とユーザー�
 
 Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。
 
-**リモートでは MySQL へ接続しない構成を前提にできる。**Green DB へ到達するには CodeBuild を VPC 内へ配置する必要があり、それが運用上難しい場合は `mysql_verification.enabled: false` のまま AWS API による検証だけを行う。MySQL 実効値を含めた確認はローカルから実施する。**同じレポート生成器が両方を賄い**、実効値が無い場合はレポートの該当列が `未収集` になるだけである（判定は AWS API の値で行うため内容は変わらない）。方針は [decisions/implementation-language-policy.md](../decisions/implementation-language-policy.md) にある。
+**リモートでは MySQL へ接続しない構成を前提にできる。**Green DB へ到達するには CodeBuild を VPC 内へ配置する必要があり、それが運用上難しい場合は `mysql_verification.enabled: false` のまま AWS API による検証だけを行う。MySQL 実効値を含めた確認はローカルから実施する。**同じレポート生成器が両方を賄い**、実効値が無い場合はレポートの該当列が `未収集` になるだけである（判定は AWS API の値で行うため内容は変わらない）。方針は [decisions/implementation-language-policy.md](../docs/decisions/implementation-language-policy.md) にある。
 
 ビルド方法は実行基盤で異なる。
 
@@ -174,4 +174,4 @@ aws codepipeline start-pipeline-execution \
   --name rds-bg-staging-example-service
 ```
 
-`CodeStarConnectionArn` は事前に GitHub と接続して `AVAILABLE` にした CodeConnections 接続を指定する。ロールはテンプレート外で管理し、最小権限で作成する。CodeBuild 実行ロールに必要な RDS 権限は [upgrade-flow-steps.md](../upgrade-flow-steps.md) の「CI 実行ロールに必要な権限」を参照する。
+`CodeStarConnectionArn` は事前に GitHub と接続して `AVAILABLE` にした CodeConnections 接続を指定する。ロールはテンプレート外で管理し、最小権限で作成する。CodeBuild 実行ロールに必要な RDS 権限は [upgrade-flow-steps.md](../docs/upgrade-flow-steps.md) の「CI 実行ロールに必要な権限」を参照する。

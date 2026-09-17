@@ -79,7 +79,7 @@ services:
         target: /work
         read_only: true
 
-  # --- ドライバ検証（reference/mysql-timezone-replication-verification.md の手順 6）---
+  # --- ドライバ検証（docs/references/mysql-timezone-replication-verification.md の手順 6）---
   # profiles を付けているため docker compose up -d では起動しない。
   # 実行例: docker compose run --rm probe-go
   #

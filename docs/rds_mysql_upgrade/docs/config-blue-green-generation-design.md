@@ -133,7 +133,7 @@ mysql_verification:
 
 そのインスタンスに載るスキーマは、切替の影響範囲を辿るために持つ。実行スクリプトは参照しないが、生成結果の `schemas` に反映される。
 
-**`source_db_parameters` は切替前の確認専用である。** 8.0 → 8.4 では `time_zone` の扱いが論点になる（`DEFAULT CURRENT_TIMESTAMP` の `datetime` 列への影響。詳細は [reference/mysql-timezone-problem-summary.md](reference/mysql-timezone-problem-summary.md)）。Blue のパラメータグループの実値を生成結果へ載せておき、Step 2 で作る 8.4 パラメータグループが同じ値になっているかを人がレビューする。実行スクリプトはこの項目を読まず、判定にも使わない。
+**`source_db_parameters` は切替前の確認専用である。** 8.0 → 8.4 では `time_zone` の扱いが論点になる（`DEFAULT CURRENT_TIMESTAMP` の `datetime` 列への影響。詳細は [references/mysql-timezone-problem-summary.md](references/mysql-timezone-problem-summary.md)）。Blue のパラメータグループの実値を生成結果へ載せておき、Step 2 で作る 8.4 パラメータグループが同じ値になっているかを人がレビューする。実行スクリプトはこの項目を読まず、判定にも使わない。
 
 ```yaml
     source_db_parameters:
@@ -242,9 +242,9 @@ git diff -- config/blue-green/production.deployment.yml
   - development で 2 接続が 1 インスタンスを共有し、1 deployment へまとめられること
   - production で 2 アプリが 1 インスタンスを共有すること
   - `target` の省略（`engine_version` は共通ターゲットへ、`db_instance_class` は Blue を踏襲）
-- [migration-catalog.test.yml](examples/config-blue-green-generation/migration-catalog.test.yml) と [rds-instance-inventory.test.json](examples/config-blue-green-generation/rds-instance-inventory.test.json) をダミー入力として使う。
+- [migration-catalog.test.yml](../examples/config-blue-green-generation/migration-catalog.test.yml) と [rds-instance-inventory.test.json](../examples/config-blue-green-generation/rds-instance-inventory.test.json) をダミー入力として使う。
 - `blue-green.<environment>.expected.yml` を生成結果の期待値とし、生成 YAML を構文ではなくデータ構造として比較する。
-- 実行済みの結果は [test-result.md](examples/config-blue-green-generation/test-result.md) に残す。
+- 実行済みの結果は [test-result.md](../examples/config-blue-green-generation/test-result.md) に残す。
 - ロジックの単体テストは `tools/internal/*/[a-z]*_test.go` にある。リポジトリ直下で `go test ./...` を実行し、AWS へは接続しない（`tools/internal/collect` は PATH 上の `aws` をダミーへ差し替えて引数の組み立てを検証する）。
 - `tests/test_generate_blue_green_config.sh` はコマンドを通した E2E である。AWS CLI をダミーコマンドに差し替え、実 AWS API は呼び出さない。ダミーは `describe-db-instances` と `describe-db-parameters` を fixture から返し分け、それ以外を呼んだら失敗する。
 - **`go.mod` はリポジトリ直下にある。**`go run ./scripts/<コマンド名>` の形で呼べば go コマンドが作業ディレクトリを変えないため、`--output` などの相対パスは実行時のカレントディレクトリ基準で解決される。

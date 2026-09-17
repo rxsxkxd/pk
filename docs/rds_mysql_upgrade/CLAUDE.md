@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するための、**手順書（Markdown）と実行スクリプトと CI 定義が一体になったリポジトリ**である。アプリケーションコードではなく、テストスイートやビルド成果物も持たない。ドキュメントは日本語で書かれており、追記・修正も日本語で行う。
 
-期限は MySQL 8.0 の標準サポート終了（2026-07-31、8/1 以降は Extended Support が自動課金）であり、`rds-mysql-84-migration-guide.md` が全体の親ドキュメントである。
+期限は MySQL 8.0 の標準サポート終了（2026-07-31、8/1 以降は Extended Support が自動課金）であり、`docs/rds-mysql-84-migration-guide.md` が全体の親ドキュメントである。
 
 ## 全体アーキテクチャ
 
@@ -14,7 +14,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 
 **実運用の手順は 2 本に集約してある。**`operations-environment-setup.md`（環境構築。CloudFormation でパイプラインを作るまで。一度だけ）と `operations-migration-run.md`（移行の実行。事前チェック・設定生成からパイプラインでの移行まで。対象ごとに繰り返す）である。**オペレーション手順を書き足すときは、まずこの 2 本のどちらかに属するかを考える。**個々のチェックの中身や背景は補足ドキュメント側に置き、2 本からはリンクする。
 
-`upgrade-flow-steps.md` が中心的な設計ドキュメントで、移行手順書の Phase 0〜5 を再実行可能な 7 ステップへ割り直している。**新しいスクリプトや CI ジョブを追加するときは、まずこのファイルの分類（実行形態・ワンストップ実行・承認要否）に照らす。**
+`docs/upgrade-flow-steps.md` が中心的な設計ドキュメントで、移行手順書の Phase 0〜5 を再実行可能な 7 ステップへ割り直している。**新しいスクリプトや CI ジョブを追加するときは、まずこのファイルの分類（実行形態・ワンストップ実行・承認要否）に照らす。**
 
 | Step | 内容 | 実行形態 | エントリポイント |
 |---|---|---|---|
@@ -64,9 +64,9 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 
 **`scripts/internal/` と `tools/internal/` は共有しない。**CI から到達する側と人が実行する側を独立させるための方針で、Go の `internal/` 可視性がそれを強制する。唯一内容が重なる `cfn` は両方に複製して置いており、**片方を直したらもう片方へ同じ変更を入れる**（`tests/cfn_shorthand_test.sh` が 2 本の一致を検査するので、ずれるとテストが落ちる）。
 
-**`upgrade-flow-steps.md` の Step 1・2 の実装リンクだけが `scripts/` の旧パスのまま残っている。**同ファイルはレビュー中につき内容を変更しない方針のため、意図的に更新していない。**レビューが終わったら `tools/` へ直すこと**（対象は 20 行目と 30 行目の 4 リンク）。それ以外のドキュメントは `tools/` を指すよう更新済みである。
+`docs/upgrade-flow-steps.md` の Step 1・2 の実装リンクも `tools/` を指すよう更新済みである（`docs/` への移動で相対パスを書き換える必要があったため、併せて解消した）。**同ファイルはレビュー中につき、内容と Step の番号体系は変更しない。**
 
-コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `tools/internal/` 側とその単体テストを直す。**生成結果の `source_db_parameters` は Blue のパラメータグループから採取した実値（パラメータ名をキーにした `value` / `source`。採取対象は `tools/internal/collect` の `CollectedParameters` で決め、現在は `time_zone` のみ）で、**切替前の人のレビュー専用**——実行スクリプトは読まない。レポートはこれと移行先テンプレートの宣言値を突き合わせて `一致` / `差異` / `比較不能` を示す。設計は `config-blue-green-generation-design.md`、カタログの構造は `migration-catalog-er.md` を正とする。**レポート生成器は全部で 3 つあり**（①設定レビュー / ②Step 2 のパラメータ変換 `generate_mysql84_parameter_group.rb` / ③Step 4 の Green 検証）、いずれも **AWS を呼ばず収集済みファイルだけを読む**。全体像は `report-generation-flows.md` にある。
+コマンドは 3 つに分かれており、`collect_rds_instance_inventory/`・`generate_blue_green_config/`・`generate_blue_green_config_report/` はいずれも CLI の配線だけを持つ薄い `main` である。**レポートは設定ファイルを書き換えず、`.md` だけを出す**（生成物の `connected_by` を持たない代わりに、アプリと接続の対応はレポートで示す）。**判定ロジックを変えるときは `tools/internal/` 側とその単体テストを直す。**生成結果の `source_db_parameters` は Blue のパラメータグループから採取した実値（パラメータ名をキーにした `value` / `source`。採取対象は `tools/internal/collect` の `CollectedParameters` で決め、現在は `time_zone` のみ）で、**切替前の人のレビュー専用**——実行スクリプトは読まない。レポートはこれと移行先テンプレートの宣言値を突き合わせて `一致` / `差異` / `比較不能` を示す。設計は `docs/config-blue-green-generation-design.md`、カタログの構造は `docs/migration-catalog-er.md` を正とする。**レポート生成器は全部で 3 つあり**（①設定レビュー / ②Step 2 のパラメータ変換 `generate_mysql84_parameter_group.rb` / ③Step 4 の Green 検証）、いずれも **AWS を呼ばず収集済みファイルだけを読む**。全体像は `report-generation-flows.md` にある。
 
 `config/mysql80-to-84-parameter-rules.yml` は 8.0 → 8.4 のパラメータ変換ルール（`copy` / `force` / `omit` / `target_only`）を持ち、`generate_mysql84_parameter_group.rb` の唯一のルールソースである。パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。
 
@@ -148,7 +148,7 @@ Blue/Green 設定の収集・生成コマンドは Go である。**`go.mod` と
 go build -o /tmp/collect-rds-inventory ./tools/collect_rds_instance_inventory
 ```
 
-AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`local-execution.md`）。実接続時だけ `.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。**ファイルはすべて `read_only` マウント**である。
+AWS CLI・MySQL クライアント・Ruby・Go はローカルインストールせず、`compose.yaml` のコンテナで実行できる（`docs/local-execution.md`）。実接続時だけ `.env` を作り、ホストの `~/.aws`・RDS CA bundle・`my.cnf` を絶対パスで指す。**ファイルはすべて `read_only` マウント**である。
 
 STS の一時認証情報（`AWS_ACCESS_KEY_ID`／`AWS_SECRET_ACCESS_KEY`／`AWS_SESSION_TOKEN`）だけは環境変数で転送する。ファイルを書き換えないため `read_only` 方針と両立する。`.env` には書かない。**`AWS_REGION` は転送しない**——空文字がプロファイルの `region` 設定を上書きしてリージョン未指定エラーになるため。リージョンは各スクリプトの `--region` で指定する。
 
@@ -223,5 +223,5 @@ act workflow_dispatch -W .github/workflows/verify-green.yml \
 ## 編集時の注意
 
 - `.env`、`ci/.act.env`、`aws-config/*`、`global-bundle.pem` は `.gitignore` 済み。`my.cnf` は空プレースホルダとして例外的に追跡しており、実接続情報を書き込んで commit しないよう手順に明記する（必要なら `.env` の `MYSQL_CLIENT_CONFIG_FILE` でリポジトリ外の絶対パスを指す）。ここへ実値を置く手順を書くときは Git 管理しない旨を明記する。
-- ドキュメント間の相互参照が密である。Step の分割や実行形態を変えたら `upgrade-flow-steps.md`・`ci/README.md`・`examples/*/README.md`・該当 `phase-*.md` を揃えて更新する。
+- ドキュメント間の相互参照が密である。Step の分割や実行形態を変えたら `docs/upgrade-flow-steps.md`・`ci/README.md`・`examples/*/README.md`・該当 `docs/phase-*.md` を揃えて更新する。
 - コンテナイメージは `latest` を使わない。AWS CLI・MySQL・Ruby はパッチバージョンまで、Go はマイナーまで固定する。**Ruby は `ruby:3.4.10-slim-bookworm` に統一する**（`slim` 以外のバリアントや、パッチを省いた `ruby:3.4` を使わない）。

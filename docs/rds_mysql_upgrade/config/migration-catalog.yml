@@ -2,7 +2,7 @@
 # RDS API では取得できない「アプリケーションの接続定義」と、8.4 側の移行判断を管理する。
 # 認証情報、パスワード、Secret の値は記載しない。
 #
-# 構造は migration-catalog-er.md を正とする。
+# 構造は docs/migration-catalog-er.md を正とする。
 #   applications          … アプリごとの接続名と、各環境での実接続定義
 #   database_environments … DB を配置している環境（＝ AWS アカウント／プロファイル）の一覧
 #   parameter_groups      … 8.4 用パラメータグループと生成元テンプレート

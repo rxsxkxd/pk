@@ -95,7 +95,7 @@ ruby tools/generate_mysql84_parameter_group.rb \
   --environment <environment>
 ```
 
-生成時に使用するルールは [mysql80-to-84-parameter-rules.yml](config/mysql80-to-84-parameter-rules.yml) で管理する。出力は次の 2 ファイルである。
+生成時に使用するルールは [mysql80-to-84-parameter-rules.yml](../config/mysql80-to-84-parameter-rules.yml) で管理する。出力は次の 2 ファイルである。
 
 - `mysql80-to-mysql84-parameter-report.md`: 8.0 の `Source=user`・`Source=system`・8.0／8.4 の engine default・ルール・生成可否を区別して一覧化したレビュー報告
 - `mysql84-parameter-group.yaml`: `AWS::RDS::DBParameterGroup` のみを含む CloudFormation テンプレート

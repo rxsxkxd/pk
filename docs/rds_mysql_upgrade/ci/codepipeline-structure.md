@@ -214,5 +214,5 @@ AWS 環境がないため、以下は `cfn-lint` とドキュメントの確認�
 
 - [README.md](README.md) — 2 つのテンプレートの使い分けとデプロイ例
 - [codebuild-codepipeline-setup.md](codebuild-codepipeline-setup.md) — AWS 側の事前準備
-- [upgrade-flow-steps.md](../upgrade-flow-steps.md) — Step 1〜7 の分割と承認モデル
-- [decisions/idempotency-strategy.md](../decisions/idempotency-strategy.md) — 各ステージが再実行安全である根拠
+- [upgrade-flow-steps.md](../docs/upgrade-flow-steps.md) — Step 1〜7 の分割と承認モデル
+- [decisions/idempotency-strategy.md](../docs/decisions/idempotency-strategy.md) — 各ステージが再実行安全である根拠

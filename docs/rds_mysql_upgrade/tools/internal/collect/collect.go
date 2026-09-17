@@ -24,7 +24,7 @@ import (
 // CollectedParameters は、確認用に採取するパラメータグループのパラメータ名である。
 //
 // time_zone は 8.0 → 8.4 で挙動差の論点になるため採取する
-// （DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: reference/mysql-timezone*.md）。
+// （DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: docs/references/mysql-timezone*.md）。
 // 対象を増やすときはここへ足す。インベントリの構造は変わらない。
 var CollectedParameters = []string{"time_zone"}
 

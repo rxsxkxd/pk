@@ -39,7 +39,7 @@ storage = read_json(dir, 'free-storage-space.json').fetch('Datapoints')
 
 results = []
 # status … PASS / REVIEW / STOP
-# item   … チェック項目（phase-0-precheck.md の採番に対応）
+# item   … チェック項目（docs/phase-0-precheck.md の採番に対応）
 # detail … 判定の根拠になった観測値
 # source … その値をどの収集ファイルから読んだか（証跡として残す）
 def add(results, status, item, detail, source)
@@ -176,7 +176,7 @@ def render_report(instance, metadata, results, stops, reviews, passes)
   lines << '- **REVIEW は自動判定では決められない項目である。**人が確認して可否を決める'
   lines << '- このレポートは収集済み JSON だけから作る。**AWS へは接続していない**ため、'
   lines << '  収集時点（上記の収集日時）の状態を示す。時間が空いたら再収集する'
-  lines << '- 項目の採番は `phase-0-precheck.md` のチェックリストに対応する'
+  lines << '- 項目の採番は `docs/phase-0-precheck.md` のチェックリストに対応する'
   lines << ''
   lines << 'この結果をもとに、**移行できるか・どのインスタンスを対象にするか**を判断する。'
   lines << '対象を決めたら次は移行設定の生成とそのレビューへ進む（`report-generation-flows.md`）。'

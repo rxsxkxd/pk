@@ -2,7 +2,7 @@
 
 本書は、CodeBuild Local Agent を使わずに `scripts/*.sh` を直接実行して、RDS for MySQL 8.0 から 8.4 への Blue/Green 移行を進める手順である。
 
-CodeBuild Local Agent の buildspec 互換性確認は [ci/codebuild-local-verification.md](ci/codebuild-local-verification.md) を参照する。本書は実運用の直接実行に必要な順序・安全ゲート・コマンドを対象とする。
+CodeBuild Local Agent の buildspec 互換性確認は [ci/codebuild-local-verification.md](../ci/codebuild-local-verification.md) を参照する。本書は実運用の直接実行に必要な順序・安全ゲート・コマンドを対象とする。
 
 ## 1. 対象範囲と実行順序
 
@@ -263,7 +263,7 @@ unset MYSQL_PASSWORD
 
 | スクリプト | 直接実行する場面 |
 | --- | --- |
-| `collect_blue_green_prereqs.sh` | Step 1 の事前棚卸し。一括収集や個別の読み取り確認は [tools/README.md](tools/README.md) を参照。 |
+| `collect_blue_green_prereqs.sh` | Step 1 の事前棚卸し。一括収集や個別の読み取り確認は [tools/README.md](../tools/README.md) を参照。 |
 | `collect_mysql84_parameter_inputs.sh` | Step 2 のパラメータグループ生成入力の収集。Phase 1 手順書を参照。 |
 | `check_target_parameter_group.sh` | 本書の Step 1。BuildGreen の直前に実行。 |
 | `build_green.sh` | 本書の Step 2 の入口。内部で `create_blue_green_deployment.sh` を呼ぶ。 |

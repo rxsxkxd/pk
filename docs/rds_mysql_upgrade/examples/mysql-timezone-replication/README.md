@@ -1,6 +1,6 @@
 # タイムゾーン差異のレプリケーション検証（ローカル擬似環境）
 
-[reference/mysql-timezone-replication-verification.md](../../reference/mysql-timezone-replication-verification.md) と同じ検証を、**AWS を使わずローカルの Docker だけで**行うための構成である。
+[reference/mysql-timezone-replication-verification.md](../../docs/references/mysql-timezone-replication-verification.md) と同じ検証を、**AWS を使わずローカルの Docker だけで**行うための構成である。
 
 ソースとレプリカで `time_zone` が異なる場合に、保存データが一致すること・表現とクエリ解釈だけが変わることを確認する。RDS 版と違い、課金もインスタンス作成待ちも発生しない。
 
@@ -78,7 +78,7 @@ docker compose up -d
 
 ## 検証手順
 
-検証内容は RDS 版と同一である。[reference/mysql-timezone-replication-verification.md](../../reference/mysql-timezone-replication-verification.md) の**手順 2 以降**をそのまま実施できる（手順 1 の構成作成は `docker compose up -d` と `setup.sh` が代替する）。
+検証内容は RDS 版と同一である。[reference/mysql-timezone-replication-verification.md](../../docs/references/mysql-timezone-replication-verification.md) の**手順 2 以降**をそのまま実施できる（手順 1 の構成作成は `docker compose up -d` と `setup.sh` が代替する）。
 
 ### SQL での検証（手順 2〜5）
 
@@ -254,7 +254,7 @@ export MYSQL_PWD=<.env に設定した値>
 
 ## `DEFAULT CURRENT_TIMESTAMP` の混在検証
 
-[reference/mysql-timezone.md](../../reference/mysql-timezone.md) の「6. スキーマ定義に埋め込まれるもの」で述べた、**`TIMESTAMP` 列は安全で `DATETIME` 列は危険**という違いを実証する。
+[reference/mysql-timezone.md](../../docs/references/mysql-timezone.md) の「6. スキーマ定義に埋め込まれるもの」で述べた、**`TIMESTAMP` 列は安全で `DATETIME` 列は危険**という違いを実証する。
 
 **この検証に Rails は不要である。** 危険の本体は MySQL サーバー側の挙動であり、素の SQL で完全に再現できる。Rails 側の確認項目（`ActiveRecord::Base.default_timezone` が `:utc` であること等）は既存アプリの `rails console` で別途確認する。
 

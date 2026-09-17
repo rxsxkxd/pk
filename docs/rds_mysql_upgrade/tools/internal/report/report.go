@@ -398,7 +398,7 @@ func timeZoneNote(parameterName string) string {
 		return ""
 	}
 	return "（DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: " +
-		"reference/mysql-timezone-problem-summary.md）"
+		"docs/references/mysql-timezone-problem-summary.md）"
 }
 
 func sortedNames(values map[string]bool) []string {

@@ -40,7 +40,7 @@ type Service struct {
 //
 // **確認用である。実行スクリプトは参照せず、判定にも使わない。**
 // 切替の前後で値が変わらないことを人がレビューするために載せる
-// （time_zone の論点は reference/mysql-timezone-problem-summary.md）。
+// （time_zone の論点は docs/references/mysql-timezone-problem-summary.md）。
 // Source が engine-default ならパラメータグループでは未設定である。
 type SourceParameter struct {
 	Value  string `yaml:"value"`

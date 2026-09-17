@@ -10,8 +10,8 @@
 |---|---|
 | [migration-catalog.test.yml](migration-catalog.test.yml) | 2 アプリ。development で 2 接続が 1 インスタンスに同居、production の audit だけ `mysql_verification` を個別上書き、`target` の一部省略を含む |
 | [rds-instance-inventory.test.json](rds-instance-inventory.test.json) | `describe-db-instances` のダミー応答（6 インスタンス、すべてダミー RDS ID） |
-| [describe-db-parameters/](describe-db-parameters/) | パラメータグループごとの `describe-db-parameters` ダミー応答（6 件）。`time_zone` は `engine-default` と `user` の両ケース |
-| [target-parameter-groups/](target-parameter-groups/) | 移行先（8.4）パラメータグループの CloudFormation テンプレート 5 件。`time_zone` の適用予定値として **一致・差異・`!Ref`（比較不能）** の 3 パターンを含む |
+| [describe-db-parameters/](describe-db-parameters) | パラメータグループごとの `describe-db-parameters` ダミー応答（6 件）。`time_zone` は `engine-default` と `user` の両ケース |
+| [target-parameter-groups/](target-parameter-groups) | 移行先（8.4）パラメータグループの CloudFormation テンプレート 5 件。`time_zone` の適用予定値として **一致・差異・`!Ref`（比較不能）** の 3 パターンを含む |
 
 ## ① 収集: `collect_rds_instance_inventory`
 

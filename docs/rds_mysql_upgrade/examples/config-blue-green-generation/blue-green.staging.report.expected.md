@@ -56,6 +56,6 @@
 
 ## 要確認事項
 
-- [ ] `example-service-test-staging-audit-mysql80` の `time_zone` が切替で `Asia/Tokyo` から `UTC` へ変わる。意図した変更かを確認する（DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: reference/mysql-timezone-problem-summary.md）。
+- [ ] `example-service-test-staging-audit-mysql80` の `time_zone` が切替で `Asia/Tokyo` から `UTC` へ変わる。意図した変更かを確認する（DEFAULT CURRENT_TIMESTAMP の datetime 列への影響: docs/references/mysql-timezone-problem-summary.md）。
 - [ ] `actions` は生成時点ですべて `pending` である。実行を許可する操作だけを `approved` へ書き換える（CI は設定ファイルへ書き戻さない）。
 - [ ] アプリケーションと接続先の対応、目標インスタンスクラス、パラメータグループの内容は自動判定していない。人がレビューする。

@@ -6,7 +6,7 @@
 
 `Asia/Tokyo` へ変更すると、`DEFAULT CURRENT_TIMESTAMP` を持つ `datetime` 列に、**UTC の壁時計と JST の壁時計が混在する**。データ不整合として検知されないまま蓄積するため、発見が遅れる。
 
-本書は判断材料としての要約である。網羅的な整理は [mysql-timezone.md](mysql-timezone.md)、実機での再現手順は [examples/mysql-timezone-replication/](../examples/mysql-timezone-replication/) にある。
+本書は判断材料としての要約である。網羅的な整理は [mysql-timezone.md](mysql-timezone.md)、実機での再現手順は [examples/mysql-timezone-replication/](../../examples/mysql-timezone-replication) にある。
 
 ## 対象となる構成
 
@@ -169,4 +169,4 @@ grep -rn "CURRENT_TIMESTAMP" db/schema.rb db/structure.sql
 
 - [mysql-timezone.md](mysql-timezone.md) — タイムゾーン関連パラメータと影響範囲の網羅的な整理
 - [mysql-timezone-replication-verification.md](mysql-timezone-replication-verification.md) — AWS 上での検証手順
-- [examples/mysql-timezone-replication/](../examples/mysql-timezone-replication/) — ローカル Docker での再現環境（`DEFAULT CURRENT_TIMESTAMP` の混在検証を含む）
+- [examples/mysql-timezone-replication/](../../examples/mysql-timezone-replication) — ローカル Docker での再現環境（`DEFAULT CURRENT_TIMESTAMP` の混在検証を含む）

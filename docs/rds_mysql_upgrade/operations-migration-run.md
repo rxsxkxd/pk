@@ -64,7 +64,7 @@ ruby tools/evaluate_blue_green_prereqs.rb \
 
 レポートには判定だけでなく**観測値と取得元**が載る。「なぜ移行可能と判断したか」を後から辿れる。
 
-> チェック項目の詳細は [phase-0-precheck.md](phase-0-precheck.md)。
+> チェック項目の詳細は [phase-0-precheck.md](docs/phase-0-precheck.md)。
 
 ### A-2. パラメータグループの生成と適用
 
@@ -88,7 +88,7 @@ ruby tools/generate_mysql84_parameter_group.rb \
 
 生成したテンプレートを CloudFormation で適用し、8.4 のパラメータグループを作る。
 
-> 変換ルールの正本は `config/mysql80-to-84-parameter-rules.yml` である。**パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。**詳細は [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md)。
+> 変換ルールの正本は `config/mysql80-to-84-parameter-rules.yml` である。**パラメータの扱いを変えるときはスクリプトではなくこの YAML を編集する。**詳細は [phase-1-parameter-group-cloudformation.md](docs/phase-1-parameter-group-cloudformation.md)。
 
 ### A-3. 移行設定 YAML の生成
 
@@ -118,7 +118,7 @@ go run ./tools/generate_blue_green_config_report \
 
 手で書く場合も、`config/blue-green/<environment>.deployment.yml` の形が満たせていればよい。
 
-> カタログの構造は [migration-catalog-er.md](migration-catalog-er.md)、生成の設計は [config-blue-green-generation-design.md](config-blue-green-generation-design.md)。
+> カタログの構造は [migration-catalog-er.md](docs/migration-catalog-er.md)、生成の設計は [config-blue-green-generation-design.md](docs/config-blue-green-generation-design.md)。
 
 ### A-4. 承認を宣言する
 
@@ -225,7 +225,7 @@ Deployment ID は設定ファイルに持たず、**毎回 AWS から引き当�
 
 切替時に Blue が `-old1` へリネームされるため、`source_db_instance_identifier` が指す実体は切替の前後で変わる。この判定は Deployment が cleanup で削除された後も機能する。
 
-> 設計の背景は [decisions/idempotency-strategy.md](decisions/idempotency-strategy.md)。
+> 設計の背景は [decisions/idempotency-strategy.md](docs/decisions/idempotency-strategy.md)。
 
 ## 5. パイプラインを使わない実行
 
@@ -239,7 +239,7 @@ scripts/switchover.sh   --config config/blue-green/staging.deployment.yml --serv
 
 **承認の宣言（`actions`）は同じように効く。**設定が `pending` なら何もせず正常終了する。
 
-手順の詳細は [direct-blue-green-execution.md](direct-blue-green-execution.md)。
+手順の詳細は [direct-blue-green-execution.md](docs/direct-blue-green-execution.md)。
 
 ## 6. 補足リファレンス
 
@@ -248,11 +248,11 @@ scripts/switchover.sh   --config config/blue-green/staging.deployment.yml --serv
 | 知りたいこと | ドキュメント |
 |---|---|
 | **レポートの中身と生成元** | [report-generation-flows.md](report-generation-flows.md) |
-| Step 1 のチェック項目（0-1-01〜14） | [phase-0-precheck.md](phase-0-precheck.md) |
-| Step 2 のパラメータグループ管理 | [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md) |
-| 設定 YAML の生成とカタログ | [config-blue-green-generation-design.md](config-blue-green-generation-design.md) / [migration-catalog-er.md](migration-catalog-er.md) |
-| Step の分割と実装状況 | [upgrade-flow-steps.md](upgrade-flow-steps.md) |
-| 移行手順の詳細（Phase 0〜5） | [rds-mysql-84-migration-guide.md](rds-mysql-84-migration-guide.md) |
-| ローカル直接実行の手順 | [direct-blue-green-execution.md](direct-blue-green-execution.md) |
+| Step 1 のチェック項目（0-1-01〜14） | [phase-0-precheck.md](docs/phase-0-precheck.md) |
+| Step 2 のパラメータグループ管理 | [phase-1-parameter-group-cloudformation.md](docs/phase-1-parameter-group-cloudformation.md) |
+| 設定 YAML の生成とカタログ | [config-blue-green-generation-design.md](docs/config-blue-green-generation-design.md) / [migration-catalog-er.md](docs/migration-catalog-er.md) |
+| Step の分割と実装状況 | [upgrade-flow-steps.md](docs/upgrade-flow-steps.md) |
+| 移行手順の詳細（Phase 0〜5） | [rds-mysql-84-migration-guide.md](docs/rds-mysql-84-migration-guide.md) |
+| ローカル直接実行の手順 | [direct-blue-green-execution.md](docs/direct-blue-green-execution.md) |
 | CI の構成・buildspec | [ci/README.md](ci/README.md) |
-| 冪等性の設計 | [decisions/idempotency-strategy.md](decisions/idempotency-strategy.md) |
+| 冪等性の設計 | [decisions/idempotency-strategy.md](docs/decisions/idempotency-strategy.md) |

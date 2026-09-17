@@ -197,7 +197,7 @@ flowchart LR
     class NOTE warn
 ```
 
-ただし default SG は VPC 内の他のリソースにも広く付いていることが多く、**本番 DB へ到達できる範囲が意図せず広がる**。本リポジトリは本番データを扱うため（`reference/shared-instance-upgrade-verification.md` でも「緩いサブネット・セキュリティグループに置かない」としている）、専用 SG を作る 3 章の手順を勧める。
+ただし default SG は VPC 内の他のリソースにも広く付いていることが多く、**本番 DB へ到達できる範囲が意図せず広がる**。本リポジトリは本番データを扱うため（`docs/references/shared-instance-upgrade-verification.md` でも「緩いサブネット・セキュリティグループに置かない」としている）、専用 SG を作る 3 章の手順を勧める。
 
 ## 6. 設定後の確認
 

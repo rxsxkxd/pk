@@ -184,7 +184,7 @@ func TestMarkdownRaisesReviewPoints(t *testing.T) {
 		// 現状と適用予定値が食い違えば、意図した変更かを問う。
 		"`time_zone` が切替で `Asia/Tokyo` から `UTC` へ変わる。意図した変更かを確認する",
 		// time_zone には datetime 列への影響の参照先を添える。
-		"reference/mysql-timezone-problem-summary.md",
+		"docs/references/mysql-timezone-problem-summary.md",
 		// 承認は人が書く。
 		"`actions` は生成時点ですべて `pending` である",
 		// 判定しない範囲を明示する。

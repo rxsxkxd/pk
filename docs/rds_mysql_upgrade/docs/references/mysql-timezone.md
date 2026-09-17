@@ -213,7 +213,7 @@ RDS のリードレプリカは読み取り専用のため書き込みは発生�
 - DB 側の `DEFAULT` に頼らず、アプリケーション側で常に値を入れる
 - パラメータグループで `time_zone` を UTC に固定し、全接続のタイムゾーンを揃える
 
-> この混在は **Rails なしで、素の SQL だけで再現できる**。実機での確認手順は [examples/mysql-timezone-replication/](../examples/mysql-timezone-replication/) の「`DEFAULT CURRENT_TIMESTAMP` の混在検証」にある。
+> この混在は **Rails なしで、素の SQL だけで再現できる**。実機での確認手順は [examples/mysql-timezone-replication/](../../examples/mysql-timezone-replication) の「`DEFAULT CURRENT_TIMESTAMP` の混在検証」にある。
 
 #### 7. アプリケーションのドライバ設定で吸収できる範囲
 

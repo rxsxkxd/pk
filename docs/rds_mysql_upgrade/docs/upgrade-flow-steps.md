@@ -17,7 +17,7 @@
 自動バックアップ、オプショングループ、パラメータ適用状態、インスタンスクラスの世代、レプリカ構成、空きストレージなどを収集し、`STOP`／`REVIEW` で判定する。
 `STOP` が 1 件でも残る間は後続ステップへ進まない。CI では PR 単位ではなく、対象環境ごとの手動トリガージョブとして回す。
 
-- 実装: [`scripts/collect_blue_green_prereqs.sh`](scripts/collect_blue_green_prereqs.sh) → [`scripts/evaluate_blue_green_prereqs.rb`](scripts/evaluate_blue_green_prereqs.rb)
+- 実装: [`scripts/collect_blue_green_prereqs.sh`](../tools/collect_blue_green_prereqs.sh) → [`scripts/evaluate_blue_green_prereqs.rb`](../tools/evaluate_blue_green_prereqs.rb)
 - 詳細: [phase-0-precheck.md](phase-0-precheck.md)
 - 補足: 外部 binlog レプリカの確認（0-1-06）だけは AWS API では判定できないため、DB へ接続して `SHOW REPLICA STATUS\G` の結果を証跡に残す。MyISAM 棚卸しと MySQL Shell の互換性チェックも、このステップと並行してスナップショット復元機に対して実施する。
 
@@ -27,8 +27,8 @@
 判定結果はレビュー用の Markdown レポートと、`AWS::RDS::DBParameterGroup` のみを含む CloudFormation テンプレートとして出力する。
 生成物を PR レビュー → Change Set レビューの二段で承認し、CloudFormation を唯一の変更経路としてパラメータグループを作成する。
 
-- 実装: [`scripts/collect_mysql84_parameter_inputs.sh`](scripts/collect_mysql84_parameter_inputs.sh) → [`scripts/generate_mysql84_parameter_group.rb`](scripts/generate_mysql84_parameter_group.rb)
-- ルール: [config/mysql80-to-84-parameter-rules.yml](config/mysql80-to-84-parameter-rules.yml) ／ 詳細: [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md)
+- 実装: [`scripts/collect_mysql84_parameter_inputs.sh`](../tools/collect_mysql84_parameter_inputs.sh) → [`scripts/generate_mysql84_parameter_group.rb`](../tools/generate_mysql84_parameter_group.rb)
+- ルール: [config/mysql80-to-84-parameter-rules.yml](../config/mysql80-to-84-parameter-rules.yml) ／ 詳細: [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md)
 - 補足: 「要レビュー」「生成不可」が残ると Ruby スクリプトは終了コード `1` を返すため、ルール追加か個別判断の記録なしには CI を通せない。`innodb_buffer_pool_size` などインスタンス依存で 8.4 が自動算出する値は、原則テンプレートに固定しない。
 
 ## Step 3. スナップショット取得と Blue/Green 構成の作成
@@ -37,8 +37,8 @@
 作成前に移行元が MySQL 8.0 であること、指定パラメータグループが `mysql8.4` ファミリーであることを読み取り API で検証してから変更操作に入る。
 作成後は Deployment が `AVAILABLE` になるまで待機して終了し、切替は行わない。
 
-- 実装: [`scripts/build_green.sh`](scripts/build_green.sh) → [`scripts/create_blue_green_deployment.sh`](scripts/create_blue_green_deployment.sh)
-- 設定: [config/blue-green/production.deployment.yml](config/blue-green/production.deployment.yml) ／ [config/blue-green/staging.deployment.yml](config/blue-green/staging.deployment.yml)
+- 実装: [`scripts/build_green.sh`](../scripts/build_green.sh) → [`scripts/create_blue_green_deployment.sh`](../scripts/create_blue_green_deployment.sh)
+- 設定: [config/blue-green/production.deployment.yml](../config/blue-green/production.deployment.yml) ／ [config/blue-green/staging.deployment.yml](../config/blue-green/staging.deployment.yml)
 - 補足: 現行スクリプトは `--target-engine-version 8.4.x` を作成時に一括指定するワンショット方式。作成に失敗すると Deployment ごと作り直しになるため、同一 8.0 で作成 → Green のみ手動昇格する二段方式を選ぶ場合はスクリプトを分割する。
 
 ## Step 4. Blue/Green 構成の設定チェックとレプリカ同期チェック
@@ -47,7 +47,7 @@
 あわせて Blue → Green のレプリケーション状態を確認し、`ReplicaLag` がほぼゼロで IO／SQL スレッドが動作していることを切替の前提条件とする。
 ここが切替可否を決める最後のゲートであり、不一致・遅延がある間は Step 5 を起動できないようにする。
 
-- 実装: [`scripts/verify_green.sh`](scripts/verify_green.sh)
+- 実装: [`scripts/verify_green.sh`](../scripts/verify_green.sh)
 - 参照: [rds-mysql-84-migration-guide.md](rds-mysql-84-migration-guide.md) の「3-1. Phase 3: Green の検証」「3-3. Phase 4: スイッチオーバー直前」
 - 補足: AWS 側の構成確認（`describe-db-instances`／`describe-db-parameters`）は CI で自動化できるが、重いクエリの実行計画比較とアプリのドライバ接続試験は人手の検証として残す。切り戻し経路（binlog 保持 24 時間以上、逆レプリの準備）もこのステップで確認する。
 
@@ -57,7 +57,7 @@
 本番トラフィックに影響する唯一の変更操作であるため、設定ファイルで `switchover: approved` が宣言されていることを必須とし、直前に `AVAILABLE` 状態であることを再確認してから実行する。
 CI では自動実行せず、承認ステップ付きの手動ジョブとし、実行時刻・タイムアウト値・応答 JSON を証跡として保存する。
 
-- 実装: [`scripts/switchover.sh`](scripts/switchover.sh) → [`scripts/switchover_blue_green_deployment.sh`](scripts/switchover_blue_green_deployment.sh)
+- 実装: [`scripts/switchover.sh`](../scripts/switchover.sh) → [`scripts/switchover_blue_green_deployment.sh`](../scripts/switchover_blue_green_deployment.sh)
 - 補足: `--switchover-timeout`（既定 300 秒、最大 60 分）の間、既存コネクションは切断される。ALB／nginx のアイドルタイムアウトより短く収まるかを事前に確認しておく。
 
 ## Step 6. Green のヘルスチェック
@@ -240,7 +240,7 @@ Step 4 と Step 6 は読み取りのみで環境を変更しないため、対�
 | `healthcheck-green-aws` | `switchover` 成功後に自動、以降は観測期間中に定期実行 | 不要 |
 | `cleanup` | 手動トリガー | 必須（`cleanup: approved` の PR ＋ ジョブ承認） |
 
-GitHub Actions に加え、CodePipeline / CodeBuild を実行基盤にする場合は、[ci/README.md](ci/README.md) の定義を使用する。CodePipeline 版は `BuildGreen → VerifyGreen → ManualApproval → Switchover` を一つの手動開始パイプラインにし、同じ `scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` を実行する。
+GitHub Actions に加え、CodePipeline / CodeBuild を実行基盤にする場合は、[ci/README.md](../ci/README.md) の定義を使用する。CodePipeline 版は `BuildGreen → VerifyGreen → ManualApproval → Switchover` を一つの手動開始パイプラインにし、同じ `scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` を実行する。
 
 Step 1、Step 2（生成・適用とも）、Step 6 の DB 接続部分は CI ジョブにせず、作業手順としてローカルから実行し、結果を作業チケットへ証跡として残す。
 

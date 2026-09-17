@@ -358,7 +358,7 @@ ADR での評価は次のとおり。
 
 ## 関連ドキュメント
 
-- [config-blue-green-generation-design.md](config-blue-green-generation-design.md) — ①の設計と、設定 YAML 生成との関係
-- [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md) — ②の詳細（Step 2）
+- [config-blue-green-generation-design.md](docs/config-blue-green-generation-design.md) — ①の設計と、設定 YAML 生成との関係
+- [phase-1-parameter-group-cloudformation.md](docs/phase-1-parameter-group-cloudformation.md) — ②の詳細（Step 2）
 - [ci/verify-green-vpc-architecture.md](ci/verify-green-vpc-architecture.md) — ③を CI で動かす構成
-- [decisions/implementation-language-policy.md](decisions/implementation-language-policy.md) — 言語の使い分け（採択済み）
+- [decisions/implementation-language-policy.md](docs/decisions/implementation-language-policy.md) — 言語の使い分け（採択済み）

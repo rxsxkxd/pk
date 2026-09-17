@@ -367,7 +367,7 @@ Resources:
             Resource: '*'
 
   # --- CodeBuild ロール（Step ごとに変更権限を分ける）-------------------------
-  # upgrade-flow-steps.md「CI 実行ロールに必要な権限」の分割に対応する。
+  # docs/upgrade-flow-steps.md「CI 実行ロールに必要な権限」の分割に対応する。
 
   # config の承認宣言を読み出すだけ。AWS API は呼び出さない。
   ReadApprovalsRole:

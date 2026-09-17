@@ -68,7 +68,7 @@ ruby -ryaml -rjson -e 'print JSON.generate(YAML.safe_load(File.read(ARGV[0])))' 
 
 取り出しと検証は jq が行い、各スクリプトは必要な項目だけを宣言する（共通関数 `required` / `optional` / `service` / `shellvars` も同ファイルにある）。
 
-経緯は次のとおりである。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込み、2026-09-14 に 1 箇所へ統合したうえで Ruby へ切り替えた。
+経緯は次のとおりである。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込み、2026-09-14 に 1 箇所へ統合したうえで Ruby へ切り替えた。
 
 **Ruby を選んだ理由は、YAML と JSON がどちらも標準ライブラリ（psych / json）だからである。**PyYAML のような追加パッケージの導入が不要になり、CI から **PyPI への到達要件が消えた**。CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う）。
 

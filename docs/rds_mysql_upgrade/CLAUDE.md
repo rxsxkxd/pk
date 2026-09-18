@@ -139,6 +139,8 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 **プログラムは Go、シェルからの設定 YAML 読み取りだけ Ruby、JSON の取り出しは jq。**理由と適用範囲は `decisions/implementation-language-policy.md`（採択済み）にある。
 
 - **新しいプログラムは Go で書く。**
+- **`scripts/` 配下のうち、buildspec から直接呼ばれない 3 本は Ruby へ置き換えた。**`create_blue_green_deployment` / `switchover_blue_green_deployment` / `collect_green_runtime_values` である。**シェル版（`.sh`）も同じ内容で残してあり、呼び出し側が `.rb` を指している。**どちらを変えてももう一方へ同じ変更を入れる（`tests/sh_rb_parity_test.sh` が両者の終了コード・AWS CLI の呼び出し引数・保存する JSON の一致を検査する）。Ruby 版は設定 YAML を psych で直接読むため **jq を必要としない**（`scripts/lib/deployment_config.rb`）。AWS は SDK ではなく **AWS CLI を exec する**ので、権限・プロファイル・リージョンの解決はシェル版と完全に同じである（`scripts/lib/aws_cli.rb`）
+- **buildspec から直接呼ばれる 6 本と `resolve_go_module_root.sh` はシェルのまま。**`scripts/lib/*.sh` は `source` されて呼び出し元のシェル変数を作るため、呼び出し側がシェルである限り Ruby にできない
 - 既存の Ruby（`evaluate_blue_green_prereqs.rb`、`generate_mysql84_parameter_group.rb`）は**一律には移行しない。**テスト可能性が問題になったものから順に移す。`.rb` を全廃しても、設定 YAML の読み取りが Ruby ランタイムを要求し続けるため依存は消えない
 - `examples/mysql-timezone-replication/probe/` の Go / Ruby / Python は**移行対象外**である。ドライバごとの `time_zone` の扱いの違いを示すことが目的で、3 実装が並ぶこと自体が結論の根拠になっている
 

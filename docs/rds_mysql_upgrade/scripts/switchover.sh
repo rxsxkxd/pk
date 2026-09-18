@@ -146,7 +146,7 @@ case "$deployment_status" in
     args=(--config "$config" --blue-green-deployment-id "$deployment_id" --approve
           --switchover-timeout "$timeout" --region "$region" --output-dir "$output_dir/result")
     [[ -n "$profile" ]] && args+=(--profile "$profile")
-    "$(dirname "$0")/switchover_blue_green_deployment.sh" "${args[@]}"
+    "$(dirname "$0")/switchover_blue_green_deployment.rb" "${args[@]}"
     wait_for_switchover
     ;;
   SWITCHOVER_IN_PROGRESS)

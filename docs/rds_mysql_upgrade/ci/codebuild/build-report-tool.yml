@@ -37,95 +37,25 @@ phases:
 
   pre_build:
     commands:
-      # --- 期待する構成を検査する ------------------------------------------
-      # Go のモジュールはプロジェクト直下の go.mod ただ 1 つで、レポート生成器は
-      # その直下の scripts/ にある main パッケージである。
+      # --- 期待する構成を検査し、モジュールルートを決める --------------------
+      # 検査の中身は scripts/resolve_go_module_root.sh にある（構成の期待も
+      # そこにコメントで書いてある）。buildspec からも、ローカルからも同じものを使う。
       #
-      #   <モジュールルート>/go.mod                       module rds-mysql-upgrade
-      #   <モジュールルート>/scripts/generate_green_verification_report/  package main
-      #   <モジュールルート>/scripts/collect_green_runtime_values/        package main
-      #   <モジュールルート>/tools/                       人が実行するコマンド
+      # 標準出力にはモジュールルートだけが載る。診断は標準エラーへ出る。
+      # 構成が期待と違えば `構成が…` で始まるメッセージを出して終了コード 1 を返す。
       #
-      # **この形から外れていたら、黙って別のものをビルドせずに落とす。**
-      # module モードには相対 import が無く、モジュール内の import はすべて
-      # go.mod の module 行を接頭辞に持つ。そのため go.mod の位置がずれると
-      # Go は rds-mysql-upgrade/... を外部モジュール扱いして失敗し、
-      # エラー文にモジュール名が出るため原因がモジュール名に見えてしまう。
-      # 実際の原因は構成のずれなので、ここで構成として指摘する。
+      # **代入の形で受ける。**`$(...)` の失敗は代入文なら set -e が拾うが、
+      # `eval "$(...)"` の形にすると終了コードが eval のものに化けてすり抜ける。
       #
-      # CODEBUILD_SRC_DIR がリポジトリのどこを指すかは source の設定次第なので、
-      # cwd には依存せずモジュールルートを自力で突き止める。
+      # 実行ビットは CodePipeline の artifact で落ちることがあるため、
+      # chmod に頼らず bash へ明示的に渡す。
       - |
         set -e
-        # CODEBUILD_SRC_DIR はシンボリックリンクである
-        # （/codebuild/output/srcNNN/src -> /codebuild/output/srcDownload/src）。
-        # find は起点がシンボリックリンクのとき既定で辿らないため、
-        # 実体のパスへ解決してから探索する。これを忘れると go.mod が
-        # 1 件も見つからず「構成が期待と違う」で落ちる。
-        search_root=$(cd "${CODEBUILD_SRC_DIR:-$(pwd)}" && pwd -P)
-
-        # module 行で選ぶ。examples 配下の probe は別モジュール（module tzprobe）
-        # なので拾わない。
-        found=$(find "$search_root" -maxdepth 4 -name go.mod -type f 2>/dev/null \
-                | while IFS= read -r f; do
-                    if grep -q '^module[[:space:]]\+rds-mysql-upgrade$' "$f"; then echo "$f"; fi
-                  done)
-
-        count=$(printf '%s\n' "$found" | grep -c . || true)
-        if [ "$count" -eq 0 ]; then
-          echo '構成が期待と違う: module rds-mysql-upgrade の go.mod が無い。' >&2
-          echo "探索した場所: ${search_root}（maxdepth 4）" >&2
-          echo '見つかった go.mod:' >&2
-          find "$search_root" -maxdepth 4 -name go.mod -type f 2>/dev/null >&2 || echo '  （1 件も無い）' >&2
-          echo 'go.mod と go.sum がリポジトリに入っているか確認する（git ls-files go.mod go.sum）。' >&2
-          exit 1
-        fi
-        if [ "$count" -gt 1 ]; then
-          echo '構成が期待と違う: module rds-mysql-upgrade の go.mod が複数ある。' >&2
-          printf '%s\n' "$found" >&2
-          echo 'モジュールはプロジェクト直下の 1 つだけである。重複したチェックアウトを取り除く。' >&2
-          exit 1
-        fi
-
-        MODULE_DIR=$(cd "$(dirname "$found")" && pwd)
-
-        # 旧構成（go.mod が scripts/ 配下）を名指しで拒否する。この形だと
-        # scripts/ から親の internal/ が見えず、ビルド対象の指定も変わる。
-        if [ "$(basename "$MODULE_DIR")" = scripts ]; then
-          echo '構成が古い: go.mod が scripts/ 配下にある。' >&2
-          echo "  見つかった go.mod: $found" >&2
-          echo 'go.mod と go.sum はプロジェクト直下へ置く構成に変わっている。' >&2
-          echo 'ビルド対象のブランチ／コミットが古い可能性が高い。' >&2
-          exit 1
-        fi
-        if [ -f "$MODULE_DIR/scripts/go.mod" ]; then
-          echo '構成が期待と違う: scripts/go.mod が残っている。' >&2
-          echo 'モジュールはプロジェクト直下の go.mod だけである。scripts/go.mod は削除する。' >&2
-          exit 1
-        fi
-
-        # ビルド対象のソースがあること（2 本とも）。
-        for required in scripts/generate_green_verification_report/main.go \
-                        scripts/collect_green_runtime_values/main.go \
-                        scripts/collect_green_runtime_values/rds-global-bundle.pem; do
-          if [ ! -f "$MODULE_DIR/$required" ]; then
-            echo "構成が期待と違う: $required が無い。" >&2
-            echo "モジュールルート: $MODULE_DIR" >&2
-            ls -la "$MODULE_DIR" >&2 || true
-            exit 1
-          fi
-        done
-        # 依存は go.sum で固定する前提である（CI では go mod tidy をしない）。
-        if [ ! -f "$MODULE_DIR/go.sum" ]; then
-          echo '構成が期待と違う: go.sum が無い。' >&2
-          echo 'ローカルで go mod tidy を実行し、go.mod と go.sum の両方を commit する。' >&2
-          exit 1
-        fi
-
-        echo "MODULE_DIR=$MODULE_DIR"
+        module_dir=$(bash scripts/resolve_go_module_root.sh)
+        echo "MODULE_DIR=$module_dir"
         # build フェーズへ渡す。シェル変数や cwd がフェーズをまたいで残るかは
         # 保証されないため、ファイル経由という確実な方法にしておく。
-        echo "$MODULE_DIR" > /tmp/module_dir
+        echo "$module_dir" > /tmp/module_dir
 
       # --- 失敗したときに原因を一目で分かるようにする診断 --------------------
       # GO111MODULE が off なら GOPATH モード（go.mod が無視される）。

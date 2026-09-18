@@ -82,6 +82,8 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 | `plaintext` | 設定ファイルに直書き | 不可（config の `user` が必要） | **テスト環境専用**。`environment: production` では拒否される |
 | `prompt` | シェルの対話入力（エコーしない） | 不可（config の `user` が必要） | ローカル実行専用。CI では成立しない |
 
+`BuildReportTool` は `scripts/resolve_go_module_root.sh` で Go モジュールルートを突き止め、**期待する構成になっているかを先に検査する**（`go.mod` の位置・重複・ビルド対象のソースと `go.sum` の有無）。外れていれば `構成が…` で始まるメッセージを出して停止し、黙って別のものをビルドしない。
+
 Step 4 が使うビルド済みバイナリ 2 本（レポート生成器と実効値収集）の場所は `scripts/lib/resolve_green_tools.rb` が決める。呼び出し側の指定 → `BuildReportTool` の artifact → ソースツリー の順に探し、見つからなければ理由と探索先を出して停止する（**ビルドはしない**）。
 
 解決は `scripts/lib/mysql_credentials.sh` が行い、値はログ・コマンド引数・成果物へ出さず、環境変数で実効値収集バイナリのプロセスにだけ渡す。上表以外の値（`secrets_manager`、`iam` など）は不正な `auth_method` として拒否する。

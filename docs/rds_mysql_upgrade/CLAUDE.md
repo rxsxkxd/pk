@@ -58,7 +58,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 
 | ディレクトリ | 中身 |
 |---|---|
-| `scripts/` | CI から到達する実行スクリプトと、その共有ライブラリ（`lib/` / `internal/`）、Step 4 のレポート生成器 |
+| `scripts/` | CI から到達する実行スクリプトと、その共有ライブラリ（`lib/` / `internal/`）、Step 4 の Go コマンド 2 本。ビルド時の構成検査 `resolve_go_module_root.sh` もここ |
 | `tools/` | **人が手で実行するもの一式。**Step 1・2 の収集・判定（`collect_blue_green_prereqs.sh` / `evaluate_blue_green_prereqs.rb` / `collect_mysql84_parameter_inputs.sh` / `generate_mysql84_parameter_group.rb`）、Blue/Green 設定の Go コマンド（`collect_rds_instance_inventory` / `generate_blue_green_config` / `generate_blue_green_config_report`）と、そのライブラリ（`internal/`）。個別実行手順は `tools/README.md` |
 | `tests/` | テスト一式 |
 

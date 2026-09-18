@@ -169,7 +169,12 @@ import "rds-mysql-upgrade/scripts/internal/cfn"
 
 そのため `go.mod` の位置がずれると、Go は `rds-mysql-upgrade/...` を「外部から取ってくるモジュール」と解釈して失敗する。**このときエラー文にモジュール名が出るので原因がモジュール名に見えるが、モジュール名は原因ではない。**`rds-mysql-upgrade` は正当なパスで、名前を変えても import を全部書き換えるだけで結果は変わらない。
 
-だから buildspec は `go build` に到達する前に構成として指摘する。**すべてのメッセージが `構成が` で始まる。**
+だから `go build` に到達する前に構成として指摘する。**すべてのメッセージが `構成が` で始まる。**検査の実体は `scripts/resolve_go_module_root.sh` にあり、buildspec からもローカルからも同じものを実行できる。
+
+```bash
+bash scripts/resolve_go_module_root.sh          # 成功するとモジュールルートを 1 行返す
+CODEBUILD_SRC_DIR=<パス> bash scripts/resolve_go_module_root.sh
+```
 
 ### メッセージ別の対処
 

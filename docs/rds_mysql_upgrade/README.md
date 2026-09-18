@@ -117,6 +117,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 ### `reports/`
 
 - [inline-python-reduction-report.md](reports/inline-python-reduction-report.md) — `scripts/*.sh` のインライン `python3 -c` 削減対応記録(38→8箇所)
+- [verify-green-vpc-current-state.md](reports/verify-green-vpc-current-state.md) — VerifyGreen の VPC 設定の現状整理。既存 VPC に載せる方式であること、設定の粒度がスタック単位であること、VPC なしでも検証の結論が変わらないこと
 
 ## 現在の既知の未決事項
 

@@ -193,6 +193,18 @@ flowchart LR
 
 `VerifyGreen` が出すレポートを確認する。artifact（`VerifyGreenOutput`）に `green-verification-report.md` が入る。
 
+レポートの先頭「0. 検証結果」に突き合わせの結果が出る。**不適合があればステージ自体が失敗する**ので、成功していれば 5 項目とも適合している。
+
+| 検査 | 内容 |
+|---|---|
+| エンジンバージョン | 設定の `target_engine_version` で始まること |
+| インスタンスクラス | 設定の `target_db_instance_class` と一致すること |
+| パラメータグループの関連付け | 設定の `target_db_parameter_group_name` が関連付いていること |
+| 適用状態 | `in-sync` であること |
+| レプリカ遅延 | 最大値が 0 秒であること |
+
+その先は人が見る。
+
 | 見るもの | 意味 |
 |---|---|
 | 宣言値 vs 適用値 | Step 2 のテンプレートどおりに適用されているか |

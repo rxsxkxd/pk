@@ -1,5 +1,16 @@
 // Step 4: 収集済み JSON と Step 2 の CloudFormation YAML から、Green 構成・
-// パラメーター整合性レポートを生成する。
+// パラメーター整合性を**検証**し、レポートを生成する。
+//
+// **検証とレポートはフラグで選ぶ。**両方を同時に行える。
+//
+//	--check          設定の宣言値と AWS の実状態を突き合わせ、不適合なら終了コード 1
+//	--output FILE    Markdown レポートを書き出す
+//
+// どちらか一方、または両方を指定する。
+//
+// 突き合わせ（engine / instance class / パラメータグループの関連付けと適用状態 /
+// ReplicaLag）は以前 verify_green.sh が担っていた。判定ロジックをレポート生成と
+// 同じ場所へ集約し、**同じ材料から同じ結論が出る**ようにしてある。
 //
 // MySQL 実効値（--runtime-values）は任意である。リモートでは Green DB へ到達できない
 // 構成もありうるため、渡さなければ該当列を「未収集」として出す。判定は AWS API から
@@ -29,6 +40,17 @@ type parameter struct {
 
 type parametersResponse struct {
 	Parameters []parameter `json:"Parameters"`
+}
+
+// greenInstance は describe-db-instances の Green 側の必要項目である。
+type greenInstance struct {
+	Engine            string `json:"Engine"`
+	EngineVersion     string `json:"EngineVersion"`
+	DBInstanceClass   string `json:"DBInstanceClass"`
+	DBParameterGroups []struct {
+		DBParameterGroupName string `json:"DBParameterGroupName"`
+		ParameterApplyStatus string `json:"ParameterApplyStatus"`
+	} `json:"DBParameterGroups"`
 }
 
 func die(format string, args ...any) {
@@ -89,6 +111,99 @@ func printDeclaredParameterNames(templatePath string) {
 	}
 }
 
+// checkOutcome は 1 件の検証結果である。
+type checkOutcome struct {
+	name     string // 何を見たか
+	expected string // 設定の宣言値（比較対象が無い検査では空）
+	actual   string // AWS から取得した実状態
+	ok       bool
+	detail   string // 補足（不適合の理由など）
+}
+
+// verifyGreen は Green の構成が設定の宣言どおりかを突き合わせる。
+// expect* が空の項目は「宣言が無い」ものとして検査を飛ばす。
+func verifyGreen(instance greenInstance, expectEngineVersion, expectInstanceClass, expectParameterGroup string) []checkOutcome {
+	outcomes := make([]checkOutcome, 0, 4)
+
+	if expectEngineVersion != "" {
+		// RDS の自動マイナーバージョンアップグレードを吸収するため前方一致で見る
+		// （宣言 8.4.10 に対し実体 8.4.10 は一致。8.0.x なら不一致）。
+		ok := strings.HasPrefix(instance.EngineVersion, expectEngineVersion)
+		outcomes = append(outcomes, checkOutcome{
+			name: "Green のエンジンバージョン", expected: expectEngineVersion,
+			actual: instance.EngineVersion, ok: ok,
+			detail: "宣言値で始まること（パッチ差分は許容）",
+		})
+	}
+
+	if expectInstanceClass != "" {
+		ok := instance.DBInstanceClass == expectInstanceClass
+		outcomes = append(outcomes, checkOutcome{
+			name: "Green のインスタンスクラス", expected: expectInstanceClass,
+			actual: instance.DBInstanceClass, ok: ok,
+		})
+	}
+
+	if expectParameterGroup != "" {
+		applyStatus := ""
+		for _, group := range instance.DBParameterGroups {
+			if group.DBParameterGroupName == expectParameterGroup {
+				applyStatus = group.ParameterApplyStatus
+				break
+			}
+		}
+		associated := applyStatus != ""
+		actual := applyStatus
+		if !associated {
+			associated = false
+			actual = "関連付けなし"
+			names := make([]string, 0, len(instance.DBParameterGroups))
+			for _, group := range instance.DBParameterGroups {
+				names = append(names, group.DBParameterGroupName)
+			}
+			outcomes = append(outcomes, checkOutcome{
+				name: "Green のパラメータグループ関連付け", expected: expectParameterGroup,
+				actual: actual, ok: false,
+				detail: "実際に関連付いているのは " + strings.Join(names, ", "),
+			})
+		} else {
+			outcomes = append(outcomes, checkOutcome{
+				name: "Green のパラメータグループ関連付け", expected: expectParameterGroup,
+				actual: expectParameterGroup, ok: true,
+			})
+			// 関連付いていても、適用が完了していなければ値は反映されていない。
+			outcomes = append(outcomes, checkOutcome{
+				name: "パラメータグループの適用状態", expected: "in-sync",
+				actual: applyStatus, ok: applyStatus == "in-sync",
+			})
+		}
+	}
+
+	return outcomes
+}
+
+// verifyReplicaLag は Green のレプリカ遅延が解消していることを確かめる。
+// データポイントが無い場合は「確認できていない」ため不適合とする。
+func verifyReplicaLag(datapoints []float64) checkOutcome {
+	if len(datapoints) == 0 {
+		return checkOutcome{
+			name: "レプリカ遅延", expected: "0 秒", actual: "データポイントなし", ok: false,
+			detail: "メトリクスが未取得である。Green の作成直後は数分待ってから再実行する",
+		}
+	}
+	maximum := datapoints[0]
+	for _, point := range datapoints[1:] {
+		if point > maximum {
+			maximum = point
+		}
+	}
+	return checkOutcome{
+		name: "レプリカ遅延", expected: "0 秒",
+		actual: fmt.Sprintf("%.3f 秒", maximum), ok: maximum <= 0,
+		detail: "直近 10 分・1 分粒度の最大値",
+	}
+}
+
 func main() {
 	templatePath := flag.String("template", "", "CloudFormation YAML")
 	greenInstancePath := flag.String("green-instance", "", "Green DB instance JSON")
@@ -98,7 +213,13 @@ func main() {
 	allParametersPath := flag.String("all-parameters", "", "all parameter JSON")
 	replicaLagPath := flag.String("replica-lag", "", "ReplicaLag JSON")
 	runtimeValuesPath := flag.String("runtime-values", "", "optional MySQL runtime values JSON")
-	outputPath := flag.String("output", "", "report Markdown")
+	outputPath := flag.String("output", "", "Markdown レポートの出力先（--check と併用可）")
+	// 設定ファイルの宣言値。verify_green.sh が config から解決して渡す。
+	// 空にした項目はその検査を行わない。
+	expectEngineVersion := flag.String("expect-engine-version", "", "設定の target_engine_version（前方一致で照合）")
+	expectInstanceClass := flag.String("expect-instance-class", "", "設定の target_db_instance_class")
+	expectParameterGroup := flag.String("expect-parameter-group", "", "設定の target_db_parameter_group_name")
+	check := flag.Bool("check", false, "宣言値と実状態を突き合わせ、不適合なら終了コード 1 を返す")
 	// Step 4 の実効値収集が、問い合わせ対象のパラメータ名を得るために使う。
 	// 同じバイナリに入れておけば、実行側（VerifyGreen）へ Go を持ち込まずに済む。
 	listParameterNames := flag.Bool("list-parameter-names", false,
@@ -117,11 +238,15 @@ func main() {
 		"template": *templatePath, "green-instance": *greenInstancePath,
 		"deployment": *deploymentPath, "user-parameters": *userParametersPath,
 		"system-parameters": *systemParametersPath, "all-parameters": *allParametersPath,
-		"replica-lag": *replicaLagPath, "output": *outputPath,
+		"replica-lag": *replicaLagPath,
 	} {
 		if value == "" {
 			die("--%s is required.", name)
 		}
+	}
+	// 検証だけ・レポートだけ・両方、のいずれかである。何もしない指定は誤りとして弾く。
+	if *outputPath == "" && !*check {
+		die("--output か --check の少なくとも一方を指定してください。")
 	}
 
 	// CloudFormation の Resources から DBParameterGroup を探し、YAML 上の宣言値を取得する。
@@ -147,15 +272,7 @@ func main() {
 	}
 
 	var greenResult struct {
-		DBInstances []struct {
-			Engine            string `json:"Engine"`
-			EngineVersion     string `json:"EngineVersion"`
-			DBInstanceClass   string `json:"DBInstanceClass"`
-			DBParameterGroups []struct {
-				DBParameterGroupName string `json:"DBParameterGroupName"`
-				ParameterApplyStatus string `json:"ParameterApplyStatus"`
-			} `json:"DBParameterGroups"`
-		} `json:"DBInstances"`
+		DBInstances []greenInstance `json:"DBInstances"`
 	}
 	readJSON(*greenInstancePath, &greenResult)
 	if len(greenResult.DBInstances) == 0 {
@@ -182,6 +299,21 @@ func main() {
 		} `json:"Datapoints"`
 	}
 	readJSON(*replicaLagPath, &lagResult)
+	lagMaximums := make([]float64, 0, len(lagResult.Datapoints))
+	for _, point := range lagResult.Datapoints {
+		lagMaximums = append(lagMaximums, point.Maximum)
+	}
+
+	// --- 突き合わせ ---------------------------------------------------------
+	// **--check のときだけ行う。**レポートだけが欲しい場合（収集済みファイルから
+	// 後で読み物を作り直す等）に、判定で落としたくないためである。
+	// 実施した場合は結果をレポートにも載せる。
+	// 「レポートの内容」と「終了コード」が食い違わないようにするためである。
+	var outcomes []checkOutcome
+	if *check {
+		outcomes = verifyGreen(instance, *expectEngineVersion, *expectInstanceClass, *expectParameterGroup)
+		outcomes = append(outcomes, verifyReplicaLag(lagMaximums))
+	}
 
 	names := map[string]bool{}
 	for name := range expected {
@@ -202,16 +334,56 @@ func main() {
 	}
 	sort.Strings(orderedNames)
 
-	output, err := os.Create(*outputPath)
-	if err != nil {
-		die("%s: %v", *outputPath, err)
+	// --output を省略した場合はレポートを書かず、検証だけを行う。
+	fprintln := func(format string, args ...any) {}
+	if *outputPath != "" {
+		output, err := os.Create(*outputPath)
+		if err != nil {
+			die("%s: %v", *outputPath, err)
+		}
+		defer output.Close()
+		fprintln = func(format string, args ...any) { fmt.Fprintf(output, format+"\n", args...) }
 	}
-	defer output.Close()
-	fprintln := func(format string, args ...any) { fmt.Fprintf(output, format+"\n", args...) }
 	fprintln("# Green 構成・パラメーター検証レポート")
 	fprintln("")
 	fprintln("このレポートは、Step 2 の CloudFormation YAML、RDS DB パラメータグループの取得結果、および Green DB の関連付け状態を比較したものである。")
 	fprintln("")
+	// 突き合わせの結果を最初に出す。読む人が最初に知りたいのは可否である。
+	if len(outcomes) > 0 {
+		failed := 0
+		for _, outcome := range outcomes {
+			if !outcome.ok {
+				failed++
+			}
+		}
+		fprintln("## 0. 検証結果")
+		fprintln("")
+		if failed == 0 {
+			fprintln("**すべて適合**（%d 件）", len(outcomes))
+		} else {
+			fprintln("**不適合 %d 件 / %d 件**", failed, len(outcomes))
+		}
+		fprintln("")
+		fprintln("| 判定 | 検査 | 宣言値 | 実状態 | 備考 |")
+		fprintln("|---|---|---|---|---|")
+		for _, outcome := range outcomes {
+			verdict := "適合"
+			if !outcome.ok {
+				verdict = "**不適合**"
+			}
+			expectedCell := outcome.expected
+			if expectedCell == "" {
+				expectedCell = "—"
+			}
+			detail := outcome.detail
+			if detail == "" {
+				detail = "—"
+			}
+			fprintln("| %s | %s | %s | %s | %s |",
+				verdict, escape(outcome.name), escape(expectedCell), escape(outcome.actual), escape(detail))
+		}
+		fprintln("")
+	}
 	fprintln("## 1. Blue/Green Deployment と Green DB の状態")
 	fprintln("")
 	fprintln("- Deployment: `%s` / `%s`", deployment.BlueGreenDeploymentIdentifier, deployment.Status)
@@ -288,8 +460,26 @@ func main() {
 			drift = append(drift, name)
 		}
 	}
+
+	// --- 終了コード ---------------------------------------------------------
+	// 不適合は「レポートに書いて終わり」にしない。**必ず終了コードへ反映する。**
+	// これを CI のジョブ失敗としてそのまま扱う。
+	failed := false
+	for _, outcome := range outcomes {
+		if outcome.ok {
+			continue
+		}
+		failed = true
+		fmt.Fprintf(os.Stderr, "不適合: %s（宣言 %q / 実状態 %q）\n", outcome.name, outcome.expected, outcome.actual)
+		if outcome.detail != "" {
+			fmt.Fprintf(os.Stderr, "        %s\n", outcome.detail)
+		}
+	}
 	if len(drift) > 0 {
+		failed = true
 		fmt.Fprintf(os.Stderr, "CloudFormation YAML と RDS PG Source=user の不一致: %s\n", strings.Join(drift, ", "))
+	}
+	if failed {
 		os.Exit(1)
 	}
 }

@@ -81,19 +81,13 @@ if [[ -z "$deployment_id" || "$deployment_id" == None ]]; then
 fi
 [[ "$status" == AVAILABLE ]] || { echo "Deployment is not AVAILABLE: $status" >&2; exit 1; }
 
-# [読み取り] Green DB のエンジン、クラス、パラメータグループ関連付け・適用状態を取得して宣言値と突合する。
+# [読み取り] Green DB の状態を JSON で落とす。
+# **突き合わせはここで行わない。**エンジン・インスタンスクラス・パラメータグループの
+# 関連付けと適用状態・レプリカ遅延の判定は、すべてレポート生成器（--check）が行う。
+# 判定ロジックをレポートと同じ場所へ集約し、レポートの内容と終了コードが
+# 食い違わないようにするためである。このスクリプトは収集と受け渡しに徹する。
 target_id=${target_arn##*:db:}
 aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$target_id" --output json > "$output_dir/green-db-instance.json"
-read -r green_engine_version green_instance_class <<< "$(
-  aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$target_id" \
-    --query 'DBInstances[0].[EngineVersion,DBInstanceClass]' --output text
-)"
-green_pg_apply_status=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$target_id" \
-  --query "DBInstances[0].DBParameterGroups[?DBParameterGroupName=='${target_db_parameter_group_name}'] | [0].ParameterApplyStatus" --output text)
-[[ "$green_engine_version" == "$target_engine_version"* ]] || { echo "Green engine mismatch: $green_engine_version" >&2; exit 1; }
-[[ "$green_instance_class" == "$target_db_instance_class" ]] || { echo "Green class mismatch: $green_instance_class" >&2; exit 1; }
-[[ "$green_pg_apply_status" != None ]] || { echo "Green parameter group mismatch" >&2; exit 1; }
-[[ "$green_pg_apply_status" == in-sync ]] || { echo "Green parameter group is not in-sync: $green_pg_apply_status" >&2; exit 1; }
 
 # [DB 読み取り・任意] GitHub Environment Secret 等で接続情報が提供された場合、Green の
 # MySQL 実効値を収集する。実効値はレポートにのみ掲載し、YAML との比較判定には使わない。
@@ -159,32 +153,30 @@ aws "${aws_args[@]}" rds describe-db-parameters --db-parameter-group-name "$targ
 # GNU date 前提（-d オプション）。本リポジトリの実行はいずれも GNU coreutils を含むコンテナ経由を想定する。
 end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 start_time=$(date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
+# レプリカ遅延は JSON を落とすだけで、判定はレポート生成器が行う。
 aws "${aws_args[@]}" cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name ReplicaLag --dimensions "Name=DBInstanceIdentifier,Value=$target_id" --statistics Maximum --period 60 --start-time "$start_time" --end-time "$end_time" --output json > "$output_dir/replica-lag.json"
-replica_lag_failed=false
-# JMESPath の max() は空配列に null を返す（--output text では "None"）。
-replica_lag_max=$(aws "${aws_args[@]}" cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name ReplicaLag --dimensions "Name=DBInstanceIdentifier,Value=$target_id" --statistics Maximum --period 60 --start-time "$start_time" --end-time "$end_time" --query 'max(Datapoints[].Maximum)' --output text)
-if [[ "$replica_lag_max" == None ]]; then
-  echo "ReplicaLag datapoint is unavailable" >&2
-  replica_lag_failed=true
-elif ! awk -v v="$replica_lag_max" 'BEGIN{exit !(v<=0)}'; then
-  echo "ReplicaLag is not zero: $replica_lag_max" >&2
-  replica_lag_failed=true
-fi
+
+# 検証とレポート生成をまとめて行う（--check と --output の併用）。
+# 設定ファイルの宣言値を --expect-* で渡し、Green の実状態と突き合わせさせる。
+# 不適合があればレポートの「0. 検証結果」に出たうえで、終了コード 1 が返る。
 report_args=(
-  --template "$target_parameter_group_template_path" \
-  --green-instance "$output_dir/green-db-instance.json" \
-  --deployment "$output_dir/deployment.json" \
-  --user-parameters "$output_dir/green-user-parameters.json" \
-  --system-parameters "$output_dir/green-system-parameters.json" \
-  --all-parameters "$output_dir/green-all-parameters.json" \
-  --replica-lag "$output_dir/replica-lag.json" \
+  --check
+  --template "$target_parameter_group_template_path"
+  --green-instance "$output_dir/green-db-instance.json"
+  --deployment "$output_dir/deployment.json"
+  --user-parameters "$output_dir/green-user-parameters.json"
+  --system-parameters "$output_dir/green-system-parameters.json"
+  --all-parameters "$output_dir/green-all-parameters.json"
+  --replica-lag "$output_dir/replica-lag.json"
+  --expect-engine-version "$target_engine_version"
+  --expect-instance-class "$target_db_instance_class"
+  --expect-parameter-group "$target_db_parameter_group_name"
   --output "$output_dir/green-verification-report.md"
 )
 [[ -n "$runtime_values_file" ]] && report_args+=(--runtime-values "$runtime_values_file")
-"$report_generator" "${report_args[@]}"
-if [[ "$replica_lag_failed" == true ]]; then
+if ! "$report_generator" "${report_args[@]}"; then
   echo "Artifacts: $output_dir"
-  echo 'VERIFY FAILED: ReplicaLag is not zero or unavailable.' >&2
+  echo 'VERIFY FAILED: レポートの「0. 検証結果」を確認する。' >&2
   exit 1
 fi
 echo "VERIFY PASSED: $deployment_id"

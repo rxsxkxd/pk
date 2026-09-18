@@ -44,45 +44,22 @@ phases:
 
   pre_build:
     commands:
-      # 1. ビルド済みレポート生成器の場所を決める。**ここではビルドしない。**
+      # 1. ビルド済みバイナリ 2 本の場所を決める。**ここではビルドしない。**
       #    CodePipeline から 2 つ目の input artifact として受け取る場合、その内容は
       #    CODEBUILD_SRC_DIR_<artifact 名> に展開される。
       #    単体実行では、あらかじめ置いた .tools/green-report/ を使う。
+      #
+      #    解決そのものは Ruby が行い、`KEY=値` の行を返す
+      #    （設定 YAML の読み取りと同じ流儀。scripts/lib/deployment_config.sh）。
+      #    見つからなければ Ruby が理由と探索先を出して終了コード 1 を返す。
+      #
+      #    **eval "$(...)" と書かない。**その形だと Ruby が失敗しても終了コードが
+      #    eval のものに化け、set -e をすり抜けて「空のまま先へ進む」ことになる。
+      #    いったん変数へ受けて失敗を捕まえる。
       - |
         set -eu
-        tool_dir_relative=.tools/green-report
-        # 2 本とも BuildReportTool が作る。**ここではビルドしない。**
-        #   generate_green_verification_report … レポートの組み立て
-        #   collect_green_runtime_values       … Green DB の実効値収集（mysql クライアントの代替）
-        resolve_tool() {
-          variable=$1
-          basename=$2
-          label=$3
-          eval "given=\${$variable:-}"
-          if [ -n "$given" ] && [ -f "$given" ]; then
-            echo "Using $variable given by the caller."
-            eval "$variable=\$given"
-            return 0
-          fi
-          if [ -n "${CODEBUILD_SRC_DIR_ReportToolOutput:-}" ] \
-             && [ -f "$CODEBUILD_SRC_DIR_ReportToolOutput/$tool_dir_relative/$basename" ]; then
-            eval "$variable=\"\$CODEBUILD_SRC_DIR_ReportToolOutput/\$tool_dir_relative/\$basename\""
-            echo "Using the $label from the BuildReportTool artifact."
-            return 0
-          fi
-          if [ -f "$CODEBUILD_SRC_DIR/$tool_dir_relative/$basename" ]; then
-            eval "$variable=\"\$CODEBUILD_SRC_DIR/\$tool_dir_relative/\$basename\""
-            echo "Using the $label found in the source tree."
-            return 0
-          fi
-          echo "The $label is absent. This project does not build it on purpose" >&2
-          echo '(it must run without reaching the network outside the VPC).' >&2
-          echo 'Run ci/codebuild/build-report-tool.yml and pass its artifact,' >&2
-          echo "or set $variable to a prebuilt binary." >&2
-          return 1
-        }
-        resolve_tool GREEN_REPORT_GENERATOR generate_green_verification_report 'report generator'
-        resolve_tool GREEN_RUNTIME_COLLECTOR collect_green_runtime_values 'runtime value collector'
+        green_tools=$(ruby scripts/lib/resolve_green_tools.rb)
+        eval "$green_tools"
         export GREEN_REPORT_GENERATOR GREEN_RUNTIME_COLLECTOR
       # 2. 実行できることを確認する。CodePipeline の artifact では実行ビットが落ちうる。
       - chmod +x "$GREEN_REPORT_GENERATOR" "$GREEN_RUNTIME_COLLECTOR"
@@ -101,10 +78,10 @@ phases:
         set -eu
         # 設定の読み取りはスクリプト本体と同じ経路を使う（Ruby で YAML→JSON、jq で取り出し）。
         . scripts/lib/deployment_config.sh
-        eval "$(deployment_config_vars "$CONFIG_FILE" "$SERVICE_NAME" '
+        deployment_config_eval "$CONFIG_FILE" "$SERVICE_NAME" '
           service($service) as $svc | {
             MYSQL_ENABLED: (if ($svc.mysql_verification.enabled // false) then "true" else "false" end),
-          } | shellvars')"
+          } | shellvars'
         echo "mysql_verification.enabled=${MYSQL_ENABLED}"
       # 5. 検証本体。Step 4 の判定はこのスクリプトが行う。
       - scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts

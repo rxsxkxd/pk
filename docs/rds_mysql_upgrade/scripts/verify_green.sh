@@ -32,7 +32,7 @@ source "$(dirname "$0")/lib/mysql_credentials.sh"
 
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
 # 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
-eval "$(deployment_config_vars "$config" "$service" '
+deployment_config_eval "$config" "$service" '
   service($service) as $svc | {
     source_id:                            required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
     source_engine_version:                required("source_engine_version"; $svc.source_engine_version),
@@ -42,7 +42,7 @@ eval "$(deployment_config_vars "$config" "$service" '
     target_db_parameter_group_name:       required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
     target_parameter_group_template_path: required("target_parameter_group_template_path"; $svc.target_parameter_group_template_path),
     config_region:                        required("aws_region"; .aws_region),
-  } | shellvars')"
+  } | shellvars'
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 

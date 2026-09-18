@@ -8,11 +8,16 @@
 #
 # 使い方:
 #   source "$(dirname "$0")/lib/deployment_config.sh"
-#   eval "$(deployment_config_vars "$config" "$service" '
+#   deployment_config_eval "$config" "$service" '
 #     service($service) as $svc | {
 #       config_region: required("aws_region"; .aws_region),
 #       source_id:     required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
-#     } | shellvars')"
+#     } | shellvars'
+#
+# **eval "$(deployment_config_vars ...)" と書かない。**その形だと読み取りが
+# 失敗しても終了コードが eval のものに化け、set -e をすり抜けて
+# 「変数が空のまま先へ進む」ことになる。deployment_config_eval は
+# いったん変数へ受けてから eval するので、失敗はその場で止まる。
 #
 # フィルタ内では下の共通関数（required / optional / service / shellvars）と、
 # 引数 ${service}（サービス名）が使える。
@@ -62,4 +67,13 @@ deployment_config_vars() {
   rm -f "$reason"
   printf '%s' "$document" \
     | jq -r --arg service "$service" "${DEPLOYMENT_CONFIG_FUNCTIONS} ${filter}"
+}
+
+# deployment_config_vars の結果を呼び出し元のスコープへ展開する。
+# **読み取りに失敗したらここで止める。**（上の注意書きを参照）
+# 関数内で local を付けずに eval するため、作られる変数は呼び出し元から見える。
+deployment_config_eval() {
+  local deployment_config_assignments
+  deployment_config_assignments=$(deployment_config_vars "$@") || return 1
+  eval "$deployment_config_assignments"
 }

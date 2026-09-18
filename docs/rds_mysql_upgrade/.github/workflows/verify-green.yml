@@ -73,10 +73,10 @@ jobs:
         run: |
           # 設定の読み取りはスクリプト本体と同じ経路を使う（Ruby で YAML→JSON、jq で取り出し）。
           . scripts/lib/deployment_config.sh
-          eval "$(deployment_config_vars 'config/blue-green/${{ inputs.environment }}.deployment.yml' '${{ inputs.service }}' '
+          deployment_config_eval 'config/blue-green/${{ inputs.environment }}.deployment.yml' '${{ inputs.service }}' '
             service($service) as $svc | {
               enabled: (if ($svc.mysql_verification.enabled // false) then "true" else "false" end),
-            } | shellvars')"
+            } | shellvars'
           echo "mysql_verification.enabled=$enabled"
       - name: Step 4 — verify Green configuration and replication lag
         env:

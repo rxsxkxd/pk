@@ -41,10 +41,10 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-switchover.XXXXXX")
 mkdir -p "$output_dir"
 # config から環境に紐づく AWS CLI のリージョン・プロファイルを取得する。AWS API は呼び出さない。
-eval "$(deployment_config_vars "$config" '' '{
+deployment_config_eval "$config" '' '{
   config_region:  required("aws_region"; .aws_region),
   config_profile: optional(.aws_profile; ""),
-} | shellvars')"
+} | shellvars'
 [[ -n "$region" ]] || region=$config_region
 [[ -n "$profile" ]] || profile=$config_profile
 aws_args=(--region "$region")

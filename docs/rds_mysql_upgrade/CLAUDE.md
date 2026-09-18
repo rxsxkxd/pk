@@ -144,7 +144,8 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 
 シェルスクリプトのデータ読み取りは **jq に一本化**している。YAML を JSON にする **Ruby の 1 行**だけが例外で（jq は YAML を読めないため）、その 1 行は `scripts/lib/deployment_config.sh` にしかない。**YAML / JSON はどちらも Ruby の標準ライブラリ（psych / json）なので、追加パッケージの導入は要らない。**
 
-- 設定 YAML → `deployment_config_vars <config> <service> '<jq フィルタ>'` で読む。フィルタは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを宣言する。共通関数（`required` / `optional` / `service` / `shellvars`）も同じファイルにある
+- 設定 YAML → **`deployment_config_eval <config> <service> '<jq フィルタ>'`** で読む。フィルタは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを宣言する。共通関数（`required` / `optional` / `service` / `shellvars`）も同じファイルにある
+- **`eval "$(...)" と書かない。**その形はコマンド置換の失敗を `eval` の終了コードが覆い隠すため、**読み取りが失敗しても `set -e` をすり抜けて「変数が空のまま先へ進む」。**いったん変数へ受けてから `eval` する（`deployment_config_eval` がそれを行う）。同じ理由で、buildspec 内で外部コマンドの出力を `eval` するときも 2 行に分ける
 - AWS 応答などの JSON → jq で直接読む
 - **スクリプトに Python を書かない。**設定の読み取りは上の 1 経路だけで、YAML を扱うのは Ruby、それ以外は jq である
 - CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う。パッケージの追加導入は無く、PyPI へも到達しない）

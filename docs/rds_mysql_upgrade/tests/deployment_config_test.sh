@@ -102,6 +102,31 @@ expect_ng '未知のサービス名を検出する' "$tmp/min.yml" \
 expect_ng '読めない設定ファイルを検出する' "$tmp/absent.yml" \
   '{} | shellvars' 'YAML を読み込めなかった'
 
+# --- deployment_config_eval が失敗を取りこぼさないこと ----------------------
+# eval "$(deployment_config_vars ...)" と書くと、読み取りが失敗しても終了コードが
+# eval のものに化けて set -e をすり抜ける。ラッパーはその場で止まる必要がある。
+if ( set -euo pipefail
+     source scripts/lib/deployment_config.sh
+     deployment_config_eval "$tmp/absent.yml" svc 'service($service) | {a: .x} | shellvars'
+   ) >/dev/null 2>&1; then
+  echo 'FAIL  deployment_config_eval が読み取り失敗をすり抜けた'
+  failed=$((failed + 1))
+else
+  echo 'ok    deployment_config_eval は読み取り失敗で停止する'
+fi
+
+# 正常系では呼び出し元のスコープへ変数が作られること。
+if ( set -euo pipefail
+     source scripts/lib/deployment_config.sh
+     deployment_config_eval "$tmp/full.yml" svc 'service($service) as $svc | {v: $svc.source_db_instance_identifier} | shellvars'
+     [[ -n "${v:-}" ]]
+   ) >/dev/null 2>&1; then
+  echo 'ok    deployment_config_eval は呼び出し元へ変数を作る'
+else
+  echo 'FAIL  deployment_config_eval で変数が作られない'
+  failed=$((failed + 1))
+fi
+
 echo
 if [[ "$failed" -eq 0 ]]; then echo 'すべて期待どおり。'; exit 0; fi
 echo "不適合: ${failed} 件" >&2; exit 1

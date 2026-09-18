@@ -80,7 +80,7 @@ source "$(dirname "$0")/lib/migration_phase.sh"
 # 設定ファイルの承認宣言と、スナップショット・移行元 DB の識別子を取得する。AWS API は呼び出さない。
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
 # 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
-eval "$(deployment_config_vars "$config" "$service" '
+deployment_config_eval "$config" "$service" '
   service($service) as $svc | $svc.actions as $actions | {
     build:                          optional($actions.build; "pending"),
     source_id:                      required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
@@ -90,7 +90,7 @@ eval "$(deployment_config_vars "$config" "$service" '
     target_engine_version:          required("target_engine_version"; $svc.target_engine_version),
     target_db_parameter_group_name: required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
     config_region:                  required("aws_region"; .aws_region),
-  } | shellvars')"
+  } | shellvars'
 [[ "$build" == approved ]] || { echo 'build: pending; no changes made.'; exit 0; }
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")

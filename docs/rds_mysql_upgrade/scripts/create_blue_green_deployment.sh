@@ -46,7 +46,7 @@ mkdir -p "$output_dir"
 # config のサービスに対応する作成設定を読み取る。AWS API は呼び出さない。
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
 # 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
-eval "$(deployment_config_vars "$config" "$service" '
+deployment_config_eval "$config" "$service" '
   service($service) as $svc | {
     source_db_instance_identifier:  required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
     target_engine_version:          required("target_engine_version"; $svc.target_engine_version),
@@ -55,7 +55,7 @@ eval "$(deployment_config_vars "$config" "$service" '
     environment:                    required("environment"; .environment),
     config_region:                  required("aws_region"; .aws_region),
     config_profile:                 optional(.aws_profile; ""),
-  } | shellvars')"
+  } | shellvars'
 [[ -n "$region" ]] || region=$config_region
 [[ -n "$profile" ]] || profile=$config_profile
 aws_args=(--region "$region")

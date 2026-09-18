@@ -34,12 +34,12 @@ mkdir -p "$output_dir"
 
 # config/blue-green/<environment>.deployment.yml から、確認対象のリモート DB
 # パラメータグループ名・リージョン・目標エンジンバージョンを取得する。AWS API は呼ばない。
-eval "$(deployment_config_vars "$config" "$service" '
+deployment_config_eval "$config" "$service" '
   service($service) as $svc | {
     config_region:               required("aws_region"; .aws_region),
     target_parameter_group_name: required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
     target_engine_version:       required("target_engine_version"; $svc.target_engine_version),
-  } | shellvars')"
+  } | shellvars'
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region")
 [[ -n "$profile" ]] && aws_args+=(--profile "$profile")

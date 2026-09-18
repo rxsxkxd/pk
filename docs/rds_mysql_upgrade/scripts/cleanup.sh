@@ -70,7 +70,7 @@ source "$(dirname "$0")/lib/migration_phase.sh"
 
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
 # 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
-eval "$(deployment_config_vars "$config" "$service" '
+deployment_config_eval "$config" "$service" '
   service($service) as $svc | $svc.actions as $actions | {
     cleanup_approved:               optional($actions.cleanup; "pending"),
     source_id:                      required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
@@ -81,7 +81,7 @@ eval "$(deployment_config_vars "$config" "$service" '
     # 固定名にすることで、途中失敗後の再実行でスナップショットが増殖しない。
     final_snapshot_id:              optional($svc.final_snapshot_identifier; "\($svc.source_db_instance_identifier)-final"),
     config_region:                  required("aws_region"; .aws_region),
-  } | shellvars')"
+  } | shellvars'
 [[ "$cleanup_approved" == approved ]] || { echo 'cleanup: pending; no changes made.'; exit 0; }
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")

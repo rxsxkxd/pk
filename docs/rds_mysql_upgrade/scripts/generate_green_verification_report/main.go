@@ -25,11 +25,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
 	"rds-mysql-upgrade/scripts/internal/cfn"
+	"rds-mysql-upgrade/scripts/internal/greenstate"
 )
 
 type parameter struct {
@@ -205,6 +207,9 @@ func verifyReplicaLag(datapoints []float64) checkOutcome {
 }
 
 func main() {
+	// collect_green_state が書き出したディレクトリ。指定すると下の 6 つの JSON は
+	// このディレクトリの既定の名前から読む（個別に指定した場合はそちらを優先する）。
+	inputDir := flag.String("input-dir", "", "collect_green_state の出力ディレクトリ")
 	templatePath := flag.String("template", "", "CloudFormation YAML")
 	greenInstancePath := flag.String("green-instance", "", "Green DB instance JSON")
 	deploymentPath := flag.String("deployment", "", "Blue/Green deployment JSON")
@@ -232,6 +237,26 @@ func main() {
 		}
 		printDeclaredParameterNames(*templatePath)
 		return
+	}
+
+	// --input-dir があれば、個別に指定されていない入力を既定の名前で補う。
+	// ファイル名は collect_green_state（scripts/internal/greenstate）と揃える。
+	if *inputDir != "" {
+		for _, input := range []struct {
+			path *string
+			file string
+		}{
+			{greenInstancePath, greenstate.GreenInstanceFile},
+			{deploymentPath, greenstate.DeploymentFile},
+			{userParametersPath, greenstate.UserParametersFile},
+			{systemParametersPath, greenstate.SystemParametersFile},
+			{allParametersPath, greenstate.AllParametersFile},
+			{replicaLagPath, greenstate.ReplicaLagFile},
+		} {
+			if *input.path == "" {
+				*input.path = filepath.Join(*inputDir, input.file)
+			}
+		}
 	}
 
 	for name, value := range map[string]string{

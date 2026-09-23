@@ -44,7 +44,7 @@ phases:
 
   pre_build:
     commands:
-      # 1. ビルド済みバイナリ 2 本の場所を決める。**ここではビルドしない。**
+      # 1. ビルド済みバイナリ 3 本の場所を決める。**ここではビルドしない。**
       #    CodePipeline から 2 つ目の input artifact として受け取る場合、その内容は
       #    CODEBUILD_SRC_DIR_<artifact 名> に展開される。
       #    単体実行では、あらかじめ置いた .tools/green-report/ を使う。
@@ -60,10 +60,10 @@ phases:
         set -eu
         green_tools=$(ruby scripts/lib/resolve_green_tools.rb)
         eval "$green_tools"
-        export GREEN_REPORT_GENERATOR GREEN_RUNTIME_COLLECTOR
+        export GREEN_STATE_COLLECTOR GREEN_RUNTIME_COLLECTOR GREEN_REPORT_GENERATOR
       # 2. 実行できることを確認する。CodePipeline の artifact では実行ビットが落ちうる。
-      - chmod +x "$GREEN_REPORT_GENERATOR" "$GREEN_RUNTIME_COLLECTOR"
-      - ls -l "$GREEN_REPORT_GENERATOR" "$GREEN_RUNTIME_COLLECTOR"
+      - chmod +x "$GREEN_STATE_COLLECTOR" "$GREEN_RUNTIME_COLLECTOR" "$GREEN_REPORT_GENERATOR"
+      - ls -l "$GREEN_STATE_COLLECTOR" "$GREEN_RUNTIME_COLLECTOR" "$GREEN_REPORT_GENERATOR"
 
   build:
     commands:

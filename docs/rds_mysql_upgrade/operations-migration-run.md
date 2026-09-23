@@ -178,7 +178,7 @@ flowchart LR
 |---|---|---|
 | `Source` | リポジトリを取得 | — |
 | `ReadApprovals` | `actions` を読み、後続ステージの条件に使う変数として公開 | — |
-| `BuildReportTool` | Go のバイナリ 2 本をビルドし artifact で渡す。**AWS を呼ばない** | — |
+| `BuildReportTool` | Go のバイナリ 3 本（AWS 状態の収集・DB 実効値の収集・判定とレポート）をビルドし artifact で渡す。**AWS を呼ばない** | — |
 | `PrecheckParameterGroup` | 8.4 パラメータグループの存在と family を確認（読み取りのみ） | — |
 | `BuildGreen` | 保護スナップショット＋Blue/Green の作成 | `build: pending` なら**何もせず正常終了** |
 | `VerifyGreen` | Green の構成・レプリカ遅延を検証し、**ゲート③のレポートを出す** | — |

@@ -117,14 +117,17 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 
 **実効値の有無で変わるのはこの列だけで、判定は AWS API から取得した値で行う。**リモートでも判定内容は変わらない。この性質は `tests/cfn_shorthand_test.sh` が両形態を突き合わせて固定しているので、**レポート生成器を変更したら両形態のテストを通すこと。**
 
-**Step 4 が使う Go バイナリは 2 本で、どちらも `BuildReportTool` が作って artifact で渡す。**
+**Step 4 が使う Go バイナリは 3 本で、どれも `BuildReportTool` が作って artifact で渡す。**収集（2 本）と判定（1 本）が別コマンドになっている。
 
 | バイナリ | ソース | 役割 | 受け取る環境変数 |
 |---|---|---|---|
-| `generate_green_verification_report` | `scripts/`（package main） | レポート（`.md`）の組み立て | `GREEN_REPORT_GENERATOR` |
+| `collect_green_state` | `scripts/collect_green_state/`（ロジックは `scripts/internal/greenstate`） | **AWS の状態収集**。Deployment を source ARN で引き当て、Green・パラメータ 3 種・レプリカ遅延を JSON 一式で書き出す | `GREEN_STATE_COLLECTOR` |
 | `collect_green_runtime_values` | `scripts/collect_green_runtime_values/` | Green DB の実効値収集 | `GREEN_RUNTIME_COLLECTOR` |
+| `generate_green_verification_report` | `scripts/generate_green_verification_report/` | 突き合わせ（`--check`）とレポートの組み立て。**AWS を呼ばない** | `GREEN_REPORT_GENERATOR` |
 
-**VerifyGreen はどちらもビルドしない。**片方でも欠けていれば理由を出して停止する（Go も外部ネットワークも持たない前提のため、自動復旧しない）。ローカル実行で環境変数を指定しなかった場合だけ、各スクリプトが一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
+`collect_green_state` の出力ディレクトリは判定器の **`--input-dir`** でそのまま渡せる（ファイル名は `greenstate` の定数で揃えてある。**名前を変えるときは両方を変える**）。`verify_green.sh` に残るのは、引数と設定の読み取り、**フェーズ判定**（`build_green` / `switchover` / `cleanup` と共有する `lib/migration_phase.sh` のため Go へ移さない）、MySQL 接続情報の解決、3 本の呼び出しだけである。
+
+**VerifyGreen はどれもビルドしない。**1 本でも欠けていれば理由を出して停止する（Go も外部ネットワークも持たない前提のため、自動復旧しない）。ローカル実行で環境変数を指定しなかった場合だけ、各スクリプトが一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
 
 **CodeBuild のイメージは全プロジェクトで `aws/codebuild/standard:7.0` 固定である。**カスタムイメージを指定する経路はテンプレートから削除してある（`VerifyGreenImage` パラメータ・`ImagePullCredentialsType`・ECR 読み取り権限を撤去）。同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持ち、欠けていた mysql クライアントは Go バイナリで置き換えたためである。旧方式の `ci/Dockerfile.verify-green` は**未使用のまま参考として残している**（冒頭にその旨を明記）。
 

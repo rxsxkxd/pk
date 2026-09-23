@@ -7,6 +7,7 @@
 #   <モジュールルート>/go.sum                                      依存の固定
 #   <モジュールルート>/scripts/generate_green_verification_report/  package main
 #   <モジュールルート>/scripts/collect_green_runtime_values/        package main
+#   <モジュールルート>/scripts/collect_green_state/                 package main
 #   <モジュールルート>/tools/                                       人が実行するコマンド
 #
 # **この形から外れていたら、黙って別のものをビルドさせずに落とす。**
@@ -84,10 +85,11 @@ if [ -f "$module_dir/scripts/go.mod" ]; then
   exit 1
 fi
 
-# ビルド対象のソースがあること（2 本とも）。
+# ビルド対象のソースがあること（3 本とも）。
 for required in scripts/generate_green_verification_report/main.go \
                 scripts/collect_green_runtime_values/main.go \
-                scripts/collect_green_runtime_values/rds-global-bundle.pem; do
+                scripts/collect_green_runtime_values/rds-global-bundle.pem \
+                scripts/collect_green_state/main.go; do
   if [ ! -f "$module_dir/$required" ]; then
     echo "構成が期待と違う: ${required} が無い。" >&2
     echo "モジュールルート: ${module_dir}" >&2

@@ -1,10 +1,11 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# Step 4 が使うビルド済みバイナリ 2 本の場所を決める。**ビルドはしない。**
+# Step 4 が使うビルド済みバイナリ 3 本の場所を決める。**ビルドはしない。**
 #
-#   generate_green_verification_report … レポートの組み立てと検証
+#   collect_green_state                … AWS の状態収集
 #   collect_green_runtime_values       … Green DB の実効値収集（mysql クライアントの代替）
+#   generate_green_verification_report … 突き合わせとレポートの組み立て
 #
 # VerifyGreen は Go も外部ネットワークも持たない前提なので、見つからなければ
 # 理由と対処を出して終了コード 1 を返す。**その場でビルドして回復させない。**
@@ -16,15 +17,16 @@
 # 使い方:
 #   vars=$(ruby scripts/lib/resolve_green_tools.rb) || exit 1
 #   eval "$vars"
-#   export GREEN_REPORT_GENERATOR GREEN_RUNTIME_COLLECTOR
+#   export GREEN_STATE_COLLECTOR GREEN_RUNTIME_COLLECTOR GREEN_REPORT_GENERATOR
 require 'shellwords'
 
 # artifact とソースツリーのどちらでも、この相対パスに置かれる。
 TOOL_DIR = '.tools/green-report'
 
 TOOLS = [
-  { variable: 'GREEN_REPORT_GENERATOR',  basename: 'generate_green_verification_report', label: 'report generator' },
+  { variable: 'GREEN_STATE_COLLECTOR',   basename: 'collect_green_state',                label: 'state collector' },
   { variable: 'GREEN_RUNTIME_COLLECTOR', basename: 'collect_green_runtime_values',       label: 'runtime value collector' },
+  { variable: 'GREEN_REPORT_GENERATOR',  basename: 'generate_green_verification_report', label: 'report generator' },
 ].freeze
 
 # 探す順に「どこから来たか」を添えて返す。呼び出し側の指定を最優先する。

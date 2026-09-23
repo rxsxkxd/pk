@@ -5,10 +5,12 @@
 #     その経路に Go module の取得（proxy.golang.org）を持ち込みたくない。
 #   - ビルドは AWS を一切呼ばない。失敗しても RDS には何の影響もない。
 #
-# 成果物は .tools/green-report/ 配下の 2 本である。
-#   generate_green_verification_report … レポート（.md）の組み立て
+# 成果物は .tools/green-report/ 配下の 3 本である。
+#   collect_green_state                … AWS の状態収集（Deployment・Green・パラメータ・遅延）
 #   collect_green_runtime_values       … Green DB の実効値収集（MySQL クライアントの代替）
-# 実行側（verify-green.yml）は GREEN_REPORT_GENERATOR と GREEN_RUNTIME_COLLECTOR で受け取る。
+#   generate_green_verification_report … 突き合わせ（--check）とレポート（.md）の組み立て
+# 実行側（verify-green.yml）は GREEN_STATE_COLLECTOR / GREEN_RUNTIME_COLLECTOR /
+# GREEN_REPORT_GENERATOR で受け取る。
 #
 # 実効値収集を Go にしてある理由: VerifyGreen は RDS のある VPC 内で動かす場合があり、
 # そこから apt リポジトリへ到達できないため mysql クライアントを実行時に導入できない。
@@ -64,7 +66,7 @@ phases:
       # 掴んだモジュールと、ビルド対象が main パッケージであることを確認する。
       # 期待は `rds-mysql-upgrade` と、2 本の main パッケージである。
       - cd "$(cat /tmp/module_dir)" && go list -m
-      - cd "$(cat /tmp/module_dir)" && go list -f '{{.ImportPath}} ({{.Name}})' ./scripts/generate_green_verification_report ./scripts/collect_green_runtime_values
+      - cd "$(cat /tmp/module_dir)" && go list -f '{{.ImportPath}} ({{.Name}})' ./scripts/collect_green_state ./scripts/collect_green_runtime_values ./scripts/generate_green_verification_report
 
   build:
     commands:
@@ -84,6 +86,8 @@ phases:
         # 実行側は VPC 内から外部へ出られないため、実行時に取得する選択肢が無い。
         CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
           -o "$out_dir/collect_green_runtime_values" ./scripts/collect_green_runtime_values
+        CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+          -o "$out_dir/collect_green_state" ./scripts/collect_green_state
       # バイナリができたことを確認する。
       - ls -l "${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report/"
       # AWS も DB も呼ばずに動くことだけ確かめる（引数不足で usage を出して落ちるのが正常）。
@@ -91,9 +95,11 @@ phases:
         out_dir=${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report
         "$out_dir/generate_green_verification_report" --help 2>&1 | head -1 || true
         "$out_dir/collect_green_runtime_values" 2>&1 | head -1 || true
+        "$out_dir/collect_green_state" 2>&1 | head -1 || true
 
 artifacts:
   files:
     - .tools/green-report/generate_green_verification_report
     - .tools/green-report/collect_green_runtime_values
+    - .tools/green-report/collect_green_state
   discard-paths: false

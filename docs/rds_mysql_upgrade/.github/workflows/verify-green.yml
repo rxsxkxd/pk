@@ -55,14 +55,17 @@ jobs:
         run: ruby --version
       - name: Build Step 4 binaries
         # CodeBuild と同じ手順でビルドする（Docker は使わない）。依存は go.sum に固定済み。
-        # 2 本とも必要である。
-        #   generate_green_verification_report … レポート（.md）の組み立て
+        # 3 本とも必要である。
+        #   collect_green_state                … AWS の状態収集
         #   collect_green_runtime_values       … Green DB の実効値収集
+        #   generate_green_verification_report … 突き合わせとレポート（.md）の組み立て
         run: |
           CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
             -o .tools/green-report/generate_green_verification_report ./scripts/generate_green_verification_report
           CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
             -o .tools/green-report/collect_green_runtime_values ./scripts/collect_green_runtime_values
+          CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+            -o .tools/green-report/collect_green_state ./scripts/collect_green_state
       # MySQL 実効値収集を行うかは config の mysql_verification.enabled が決める。
       # 接続方式（parameter_store / plaintext / prompt）も config が持ち、
       # verify_green.sh が解決する。prompt は対話入力のため CI では成立しない。
@@ -82,6 +85,7 @@ jobs:
         env:
           GREEN_REPORT_GENERATOR: ${{ github.workspace }}/.tools/green-report/generate_green_verification_report
           GREEN_RUNTIME_COLLECTOR: ${{ github.workspace }}/.tools/green-report/collect_green_runtime_values
+          GREEN_STATE_COLLECTOR: ${{ github.workspace }}/.tools/green-report/collect_green_state
         run: scripts/verify_green.sh --config 'config/blue-green/${{ inputs.environment }}.deployment.yml' --service '${{ inputs.service }}' --output-dir artifacts
       - uses: actions/upload-artifact@v4
         if: always()

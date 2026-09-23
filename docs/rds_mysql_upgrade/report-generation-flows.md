@@ -164,7 +164,8 @@ AWS を実際に叩くのは収集側だけである。
 
 | 収集するもの | AWS CLI の呼び出し回数 |
 |---|---|
-| `scripts/verify_green.sh` | 14 |
+| `scripts/verify_green.sh` | 1（フェーズ判定のみ） |
+| `scripts/internal/greenstate`（Go。`collect_green_state`） | 7 |
 | `scripts/cleanup.sh` | 12 |
 | `tools/collect_blue_green_prereqs.sh` | 12 |
 | `scripts/build_green.sh` | 10 |

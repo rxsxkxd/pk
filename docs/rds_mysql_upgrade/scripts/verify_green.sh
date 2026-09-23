@@ -46,11 +46,30 @@ deployment_config_eval "$config" "$service" '
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
+# Go のバイナリを決める。CI は BuildReportTool が作ったものを環境変数で受け取る。
+# 指定が無いローカル実行でだけ、その場で一時ファイルへビルドする。
+# **VerifyGreen（CI）ではビルドしない**——Go も外部ネットワークも持たない前提のため。
+#
+# 結果は第 1 引数の名前の変数へ入れる。**$(...) で受けない。**サブシェルになり、
+# 後始末用の built_tools への追加が親に届かず一時ファイルが残るため。
+repository_root=$(cd "$(dirname "$0")/.." && pwd)
+built_tools=()
+# 空配列の展開は bash 4.4 未満の set -u で unbound variable になるため +"..." で守る。
+trap 'rm -f ${built_tools[@]+"${built_tools[@]}"}' EXIT
+go_tool() {  # $1=結果を入れる変数名 $2=環境変数の値（空ならビルド） $3=パッケージ名
+  if [[ -n "$2" ]]; then printf -v "$1" '%s' "$2"; return; fi
+  local binary
+  binary=$(mktemp "${TMPDIR:-/tmp}/$3.XXXXXX")
+  built_tools+=("$binary")
+  go -C "$repository_root" build -o "$binary" "./scripts/$3"
+  printf -v "$1" '%s' "$binary"
+}
+
 # [読み取り] 移行元識別子が指す実体を見て、検証すべきフェーズかを判定する。
 # 切替後は <source_id> が green（新 Blue）を指すため、検証対象の Deployment は
 # 既に SWITCHOVER_COMPLETED であり AVAILABLE ではない。そのままだと後始末フェーズで
 # 再実行したときに必ず失敗するため、ここで「検証対象なし」として正常終了する。
-aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" --output json > "$output_dir/source.json"
+# フェーズ判定は build_green / switchover / cleanup と共有する（lib/migration_phase.sh）。
 read -r current_version current_group <<< "$(
   aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
     --query 'DBInstances[0].[EngineVersion,DBParameterGroups[0].DBParameterGroupName]' --output text
@@ -58,7 +77,6 @@ read -r current_version current_group <<< "$(
 phase=$(resolve_migration_phase "$current_version" "$current_group" \
   "$source_engine_version" "$source_db_parameter_group_name" \
   "$target_engine_version" "$target_db_parameter_group_name")
-
 if [[ "$phase" == post_switchover ]]; then
   echo "Already switched over: $source_id is ${current_version} with ${current_group}."
   echo 'Green の検証は切替前に行うものであり、検証対象はない。'
@@ -66,79 +84,36 @@ if [[ "$phase" == post_switchover ]]; then
   exit 0
 fi
 
-# [読み取り] Source ARN と、その Source に対応する Blue/Green Deployment を取得する。
-source_arn=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
-  --query 'DBInstances[0].DBInstanceArn' --output text)
-aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" --output json > "$output_dir/deployment.json"
-read -r deployment_id target_arn status <<< "$(
-  aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" \
-    --query 'BlueGreenDeployments[0].[BlueGreenDeploymentIdentifier,Target,Status]' --output text
-)"
-if [[ -z "$deployment_id" || "$deployment_id" == None ]]; then
-  echo "Blue/Green Deployment not found for $source_id" >&2
-  echo "Step 3（build_green.sh）が未実行か、config の actions.build が pending の可能性がある。" >&2
-  exit 1
-fi
-[[ "$status" == AVAILABLE ]] || { echo "Deployment is not AVAILABLE: $status" >&2; exit 1; }
+# [読み取り] 検証に必要な AWS の状態を集める（Go。scripts/internal/greenstate）。
+# Deployment を source の ARN で引き当て、Green・パラメータ 3 種・レプリカ遅延を
+# $output_dir へ書き出す。Deployment が無い／AVAILABLE でなければここで止まる。
+# **判定はしない。**判定は下の --check が行う。
+go_tool state_collector "${GREEN_STATE_COLLECTOR:-}" collect_green_state
+state_args=(--region "$region" --source-id "$source_id"
+            --target-parameter-group "$target_db_parameter_group_name" --output-dir "$output_dir")
+[[ -n "$profile" ]] && state_args+=(--profile "$profile")
+green_state=$("$state_collector" "${state_args[@]}")
+eval "$green_state"   # DEPLOYMENT_ID / GREEN_INSTANCE_ID / GREEN_ENDPOINT
 
-# [読み取り] Green DB の状態を JSON で落とす。
-# **突き合わせはここで行わない。**エンジン・インスタンスクラス・パラメータグループの
-# 関連付けと適用状態・レプリカ遅延の判定は、すべてレポート生成器（--check）が行う。
-# 判定ロジックをレポートと同じ場所へ集約し、レポートの内容と終了コードが
-# 食い違わないようにするためである。このスクリプトは収集と受け渡しに徹する。
-target_id=${target_arn##*:db:}
-aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$target_id" --output json > "$output_dir/green-db-instance.json"
-
-# [DB 読み取り・任意] GitHub Environment Secret 等で接続情報が提供された場合、Green の
-# MySQL 実効値を収集する。実効値はレポートにのみ掲載し、YAML との比較判定には使わない。
-# [DB 読み取り・任意] Green の実効値を収集する。
+# [DB 読み取り・任意] Green の MySQL 実効値を収集する。レポートにのみ載せ、判定には使わない。
 # 接続方式は設定ファイルの mysql_verification が決める（parameter_store / plaintext /
-# prompt）。--mysql-user を明示した場合は従来どおり呼び出し側の環境変数を使う。
+# prompt）。--mysql-user を明示した場合は呼び出し側の環境変数を使う（後方互換）。
 read_mysql_verification_config "$config" "$service"
 if [[ -n "$mysql_user" ]]; then
-  # 後方互換: 呼び出し側が利用者とパスワード環境変数を直接指定した場合。
   MYSQL_VERIFY_USER="$mysql_user"
   MYSQL_VERIFY_PASSWORD="${!mysql_password_env:-}"
   MYSQL_VERIFY_ENABLED=true
 elif [[ "$MYSQL_VERIFY_ENABLED" == true ]]; then
   resolve_mysql_credentials "$region" "$profile"
 fi
-
-# レポート生成器は Go 版だけである（decisions/implementation-language-policy.md）。
-# CI は事前にビルドしたバイナリを GREEN_REPORT_GENERATOR で渡す。
-# 指定がない場合はここでビルドする。go build の -o だけ絶対パスにすれば、
-# 呼び出し元のカレントディレクトリに依存せず、引数の相対パスもそのまま通る。
-#
-# レポート生成より前に決めておく。MySQL 実効値の収集も、パラメータ名の抽出に
-# 同じバイナリ（--list-parameter-names）を使うためである。
-report_generator=${GREEN_REPORT_GENERATOR:-}
-if [[ -z "$report_generator" ]]; then
-  repository_root=$(cd "$(dirname "$0")/.." && pwd)
-  report_generator=$(mktemp "${TMPDIR:-/tmp}/green-verification-report.XXXXXX")
-  trap 'rm -f "$report_generator"' EXIT
-  go -C "$repository_root" build -o "$report_generator" ./scripts/generate_green_verification_report
-fi
-
-# 実効値の収集も Go のバイナリで行う（MySQL クライアントを使わない）。
-# CI は BuildReportTool が作ったものを GREEN_RUNTIME_COLLECTOR で受け取る。
-runtime_collector=${GREEN_RUNTIME_COLLECTOR:-}
-
 if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then
-  green_endpoint=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$target_id" \
-    --query 'DBInstances[0].Endpoint.Address' --output text)
-  collect_args=(
-    --template "$target_parameter_group_template_path"
-    --host "$green_endpoint"
-    --port "$MYSQL_VERIFY_PORT"
-    --user "$MYSQL_VERIFY_USER"
-    --password-env MYSQL_VERIFY_PASSWORD
-    --output "$output_dir/green-runtime-values.json"
-  )
-  # TLS は常に検証する（証明書チェーンのみ。ホスト名は検証しない = VERIFY_CA 相当）。
-  # 既定では収集バイナリへ焼き込んだ RDS のトラストストアを使うため、設定は要らない。
-  # config の ssl_ca を指定した場合だけ、そのバンドルへ差し替える。
+  go_tool runtime_collector "${GREEN_RUNTIME_COLLECTOR:-}" collect_green_runtime_values
+  collect_args=(--template "$target_parameter_group_template_path" --host "$GREEN_ENDPOINT"
+                --port "$MYSQL_VERIFY_PORT" --user "$MYSQL_VERIFY_USER"
+                --password-env MYSQL_VERIFY_PASSWORD --collector "$runtime_collector"
+                --output "$output_dir/green-runtime-values.json")
+  # TLS は常に検証する（VERIFY_CA 相当）。未指定ならバイナリ内蔵の RDS トラストストアを使う。
   [[ -n "$MYSQL_VERIFY_SSL_CA" ]] && collect_args+=(--ssl-ca "$MYSQL_VERIFY_SSL_CA")
-  [[ -n "$runtime_collector" ]] && collect_args+=(--collector "$runtime_collector")
   export MYSQL_VERIFY_PASSWORD
   # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
   ruby "$(dirname "$0")/collect_green_runtime_values.rb" "${collect_args[@]}"
@@ -146,39 +121,21 @@ if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then
   runtime_values_file="$output_dir/green-runtime-values.json"
 fi
 
-# [読み取り] Green に反映された Source=user / Source=system / 全パラメータを取得する。
-# 後段のレポートで、Step 2 の CloudFormation YAML と Source=user を突き合わせる。
-aws "${aws_args[@]}" rds describe-db-parameters --db-parameter-group-name "$target_db_parameter_group_name" --source user --output json > "$output_dir/green-user-parameters.json"
-aws "${aws_args[@]}" rds describe-db-parameters --db-parameter-group-name "$target_db_parameter_group_name" --source system --output json > "$output_dir/green-system-parameters.json"
-aws "${aws_args[@]}" rds describe-db-parameters --db-parameter-group-name "$target_db_parameter_group_name" --output json > "$output_dir/green-all-parameters.json"
-# GNU date 前提（-d オプション）。本リポジトリの実行はいずれも GNU coreutils を含むコンテナ経由を想定する。
-end_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-start_time=$(date -u -d '-10 minutes' +%Y-%m-%dT%H:%M:%SZ)
-# レプリカ遅延は JSON を落とすだけで、判定はレポート生成器が行う。
-aws "${aws_args[@]}" cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name ReplicaLag --dimensions "Name=DBInstanceIdentifier,Value=$target_id" --statistics Maximum --period 60 --start-time "$start_time" --end-time "$end_time" --output json > "$output_dir/replica-lag.json"
-
-# 検証とレポート生成をまとめて行う（--check と --output の併用）。
-# 設定ファイルの宣言値を --expect-* で渡し、Green の実状態と突き合わせさせる。
+# 検証とレポート生成（Go。--check と --output の併用）。
+# 収集結果は --input-dir で渡し、設定の宣言値は --expect-* で渡す。
 # 不適合があればレポートの「0. 検証結果」に出たうえで、終了コード 1 が返る。
-report_args=(
-  --check
-  --template "$target_parameter_group_template_path"
-  --green-instance "$output_dir/green-db-instance.json"
-  --deployment "$output_dir/deployment.json"
-  --user-parameters "$output_dir/green-user-parameters.json"
-  --system-parameters "$output_dir/green-system-parameters.json"
-  --all-parameters "$output_dir/green-all-parameters.json"
-  --replica-lag "$output_dir/replica-lag.json"
-  --expect-engine-version "$target_engine_version"
-  --expect-instance-class "$target_db_instance_class"
-  --expect-parameter-group "$target_db_parameter_group_name"
-  --output "$output_dir/green-verification-report.md"
-)
+go_tool report_generator "${GREEN_REPORT_GENERATOR:-}" generate_green_verification_report
+report_args=(--check --input-dir "$output_dir"
+             --template "$target_parameter_group_template_path"
+             --expect-engine-version "$target_engine_version"
+             --expect-instance-class "$target_db_instance_class"
+             --expect-parameter-group "$target_db_parameter_group_name"
+             --output "$output_dir/green-verification-report.md")
 [[ -n "$runtime_values_file" ]] && report_args+=(--runtime-values "$runtime_values_file")
 if ! "$report_generator" "${report_args[@]}"; then
   echo "Artifacts: $output_dir"
   echo 'VERIFY FAILED: レポートの「0. 検証結果」を確認する。' >&2
   exit 1
 fi
-echo "VERIFY PASSED: $deployment_id"
+echo "VERIFY PASSED: $DEPLOYMENT_ID"
 echo "Artifacts: $output_dir"

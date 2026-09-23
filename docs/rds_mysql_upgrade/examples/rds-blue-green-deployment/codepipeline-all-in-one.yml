@@ -22,7 +22,7 @@ Metadata:
       - Label: { default: ソース（GitHub または CodeCommit） }
         Parameters: [SourceProvider, CodeStarConnectionArn, RepositoryId, CodeCommitRepositoryName, BranchName]
       - Label: { default: Step 4 の MySQL 実効値収集（任意） }
-        Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterArns, MySqlCredentialsKmsKeyArn]
+        Parameters: [CollectMySqlRuntimeValues, MySqlCredentialsParameterPath, MySqlCredentialsKmsKeyArn]
       - Label: { default: Step 4 検証の VPC 配置（任意。VerifyGreen だけが対象） }
         Parameters:
           - VpcId
@@ -180,18 +180,24 @@ Parameters:
       VerifyGreen に付けるセキュリティグループ。RDS 側の inbound でこの SG からの
       3306/tcp を許可する。
 
-  MySqlCredentialsParameterArns:
-    Type: CommaDelimitedList
+  MySqlCredentialsParameterPath:
+    Type: String
     Default: ''
+    # 先頭の / は必須、末尾の / は付けない。パラメータ ARN は
+    # arn:...:parameter/<階層> の形で、名前の先頭 / がそのまま ARN の区切りになるため。
+    AllowedPattern: '^$|^/[A-Za-z0-9_.\-/]*[A-Za-z0-9_.\-]$'
+    ConstraintDescription: >-
+      / で始まり / で終わらない SSM パラメータの階層を指定する（例: /rds-bg/staging）。
     Description: >-
-      VerifyGreen へ ssm:GetParameter を許可する SSM パラメータ（SecureString）の ARN。
-      **これは IAM の許可リストであり、読むパラメータ名を決めるものではない。**
+      VerifyGreen へ ssm:GetParameter を許可する SSM パラメータ（SecureString）の**階層**。
+      例: /rds-bg/staging → /rds-bg/staging/ 配下のパラメータをすべて読める。
+      **これは IAM の許可範囲であり、読むパラメータ名を決めるものではない。**
       どのパラメータを読むかは config/blue-green/<env>.deployment.yml の
       services.<name>.mysql_verification（parameter_name / user_parameter_name）が決める。
-      1 サービスにつきパスワード用とユーザー名用の 2 本を使うため、
-      **このパイプラインが扱う全サービス分の ARN を列挙する**
-      （3 サービスなら 6 本）。パイプラインは環境ごとに 1 本で、サービスは実行時の
-      パイプライン変数 ServiceName で切り替えるため、ロールは全サービスで共有する。
+      パイプラインは環境ごとに 1 本でサービスは実行時に切り替えるため、
+      **その環境の全サービスのパラメータをこの階層の下に置く。**
+      サービスを増やしてもスタックの更新は要らない。
+      **この階層には移行作業用のパラメータだけを置く**（配下すべてが読めるため）。
       空なら Parameter Store の読み取り権限を付与しない。
       暗号化がカスタマー管理キー（CMK）の場合は MySqlCredentialsKmsKeyArn も渡す。
 
@@ -233,7 +239,7 @@ Conditions:
   # VpcConfig と Elastic Network Interface 権限をまとめて切り替える。
   HasVpc: !Not [!Equals [!Ref VpcId, '']]
   # config の mysql_verification.auth_method は parameter_store 固定である。
-  HasMySqlCredentials: !Not [!Equals [!Join ['', !Ref MySqlCredentialsParameterArns], '']]
+  HasMySqlCredentials: !Not [!Equals [!Ref MySqlCredentialsParameterPath, '']]
   # SecureString がカスタマー管理キーで暗号化されている場合だけ kms:Decrypt を付ける。
   # AWS 管理キー（alias/aws/ssm）なら不要である（SSM が代理で復号する）。
   HasMySqlCredentialsKmsKey: !Not [!Equals [!Ref MySqlCredentialsKmsKeyArn, '']]
@@ -492,18 +498,20 @@ Resources:
               Version: '2012-10-17'
               Statement:
                 # auth_method: parameter_store で使う 2 本（パスワード・ユーザー名）を
-                # サービスごとに読む。対象は MySqlCredentialsParameterArns に列挙した
-                # ARN だけに限る。
+                # サービスごとに読む。対象は MySqlCredentialsParameterPath の階層配下に限る。
                 #
-                # 暗号化は AWS 管理キー（alias/aws/ssm）を前提とする。この場合
-                # SSM が代理で復号するため kms:Decrypt は要らない。
-                # カスタマー管理キーは運用想定外のため対応しない。
+                # 名前のリストから ARN を組み立てる形にはしていない。CloudFormation には
+                # リストの各要素へ !Sub をかける手段が無いためで、階層 1 つなら
+                # !Sub で ARN を組める。
+                #
+                # AWS 管理キー（alias/aws/ssm）なら SSM が代理で復号するため
+                # kms:Decrypt は要らない。CMK の場合は下の decrypt-mysql-credentials が付く。
                 - Sid: GetMySqlParameter
                   Effect: Allow
                   Action:
                     - 'ssm:GetParameter'
                     - 'ssm:GetParameters'
-                  Resource: !Ref MySqlCredentialsParameterArns
+                  Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${MySqlCredentialsParameterPath}/*'
           - !Ref 'AWS::NoValue'
         # SecureString がカスタマー管理キー（CMK）で暗号化されている場合だけ必要。
         #

@@ -83,6 +83,8 @@ aws ssm put-parameter --type SecureString \
 
 **ユーザー名も秘匿側へ置く。**設定ファイルには名前だけを書き、値は書かない。
 
+**環境ごとに 1 つの階層（例 `/rds-bg/staging`）の下へまとめて置く。**スタックには階層だけを渡し（`MySqlCredentialsParameterPath=/rds-bg/staging`）、VerifyGreen はその配下を読めるようになる。サービスを増やしても同じ階層に置けばスタックの更新は要らない。**この階層には移行作業用のパラメータだけを置く**（配下すべてが読めるため）。
+
 暗号化キーは **AWS 管理キー（`alias/aws/ssm`）を前提**とする。カスタマー管理キーなら `MySqlCredentialsKmsKeyArn` も渡す。
 
 MySQL ユーザーには `performance_schema.global_variables` を読める最小権限だけを与える。

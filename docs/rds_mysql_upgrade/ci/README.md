@@ -90,7 +90,7 @@ Step 4 が使うビルド済みバイナリ 2 本（レポート生成器と実�
 
 **`parameter_store` ではユーザー名も必ず秘匿側へ置く。** `parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` は秘匿側を持たないため config の `user` が必須である。
 
-CFn の `MySqlCredentialsParameterArns` に、パスワード用とユーザー名用の 2 本の SSM パラメータ ARN をカンマ区切りで渡す。指定したときだけ `ssm:GetParameter` が `VerifyGreenRole` に付く。
+CFn の `MySqlCredentialsParameterPath` に、SSM パラメータを置いた**階層**（例 `/rds-bg/staging`）を渡す。指定したときだけ、その配下への `ssm:GetParameter` が `VerifyGreenRole` に付く。
 
 Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。
 
@@ -111,7 +111,7 @@ CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`�
 
 実効値収集を有効にする場合は、`VerifyGreenProject` を RDS に到達できるネットワークへ配置する。**テンプレートは `VpcId` / `VerifyGreenSubnetIds` / `VerifyGreenSecurityGroupIds` を受け取って `VpcConfig` を組む**（セキュリティグループは作らないので別途用意する。[設定手順](verify-green-security-group-setup.md)）。
 
-接続情報は **SSM Parameter Store の 2 本**（パスワードとユーザー名）から取る。**どのパラメータを読むかは config の `mysql_verification`（`parameter_name` / `user_parameter_name`）が決め、サービスごとに変えられる。**CloudFormation の `MySqlCredentialsParameterArns` は `ssm:GetParameter` を許す ARN の列挙であって、読む名前を決めるものではない。SecureString をカスタマー管理キーで暗号化している場合は `MySqlCredentialsKmsKeyArn` も渡す（AWS 管理キーなら不要）。パイプラインは環境ごとに 1 本なので、**その環境で扱う全サービス分の ARN を渡す**。詳細と設定例は [セットアップ手順](codebuild-codepipeline-setup.md) にある。
+接続情報は **SSM Parameter Store の 2 本**（パスワードとユーザー名）から取る。**どのパラメータを読むかは config の `mysql_verification`（`parameter_name` / `user_parameter_name`）が決め、サービスごとに変えられる。**CloudFormation の `MySqlCredentialsParameterPath` は `ssm:GetParameter` を許す階層であって、読む名前を決めるものではない。SecureString をカスタマー管理キーで暗号化している場合は `MySqlCredentialsKmsKeyArn` も渡す（AWS 管理キーなら不要）。パイプラインは環境ごとに 1 本なので、**その環境の全サービスのパラメータを同じ階層の下に置く**（サービスを増やしてもスタック更新は要らない）。詳細と設定例は [セットアップ手順](codebuild-codepipeline-setup.md) にある。
 
 ## 2 つのテンプレート
 

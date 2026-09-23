@@ -151,7 +151,7 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 | `ReadApprovalsRole` | なし |
 | `PrecheckRole` | なし |
 | `BuildGreenRole` | `rds:CreateDBSnapshot` / `rds:CreateBlueGreenDeployment` / `rds:AddTagsToResource` |
-| `VerifyGreenRole` | `ssm:GetParameter` / `ssm:GetParameters`（`MySqlCredentialsParameterArns` 指定時のみ付与） |
+| `VerifyGreenRole` | `ssm:GetParameter` / `ssm:GetParameters`（`MySqlCredentialsParameterPath` 指定時のみ。対象はその階層の配下） |
 | `SwitchoverRole` | `rds:SwitchoverBlueGreenDeployment`（`deployment:*`）、`rds:ModifyDBInstance`／`rds:PromoteReadReplica`（`db:*`） |
 | **`CleanupRole`** | **`rds:DeleteDBInstance` / `rds:DeleteBlueGreenDeployment` / `rds:ModifyDBInstance`** / `rds:CreateDBSnapshot` / `rds:AddTagsToResource` |
 

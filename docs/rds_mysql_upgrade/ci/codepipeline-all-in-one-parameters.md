@@ -98,7 +98,7 @@ aws cloudformation deploy \
     "ProtectedRdsResourceArns=arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging*,arn:aws:rds:ap-northeast-1:123456789012:snapshot:example-service-staging*" \
     RdsMonitoringRoleName=rds-monitoring-role \
     CollectMySqlRuntimeValues=true \
-    "MySqlCredentialsParameterArns=arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/password,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/user" \
+    MySqlCredentialsParameterPath=/rds-bg/staging \
     VpcId=vpc-xxxxxxxx \
     VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb \
     VerifyGreenSecurityGroupIds=sg-xxxxxxxx
@@ -112,7 +112,7 @@ SecureString がカスタマー管理キーで暗号化されている場合だ�
     MySqlCredentialsKmsKeyArn=arn:aws:kms:ap-northeast-1:123456789012:key/00000000-0000-0000-0000-000000000000 \
 ```
 
-読むパラメータ名は **config が決める**。`MySqlCredentialsParameterArns` は IAM の許可リストにすぎない。詳細は [セットアップ手順](codebuild-codepipeline-setup.md) にある。
+読むパラメータ名は **config が決める**。`MySqlCredentialsParameterPath` は IAM の許可範囲（その階層の配下）にすぎない。**環境の全サービスのパラメータをこの階層の下に置く**ので、サービスを増やしてもスタック更新は要らない。詳細は [セットアップ手順](codebuild-codepipeline-setup.md) にある。
 
 ## 5. パラメータファイルを使う
 
@@ -128,7 +128,7 @@ cat > .local/rds-bg-staging.json <<'JSON'
   { "ParameterKey": "ProtectedRdsResourceArns",    "ParameterValue": "arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging*,arn:aws:rds:ap-northeast-1:123456789012:snapshot:example-service-staging*" },
   { "ParameterKey": "RdsMonitoringRoleName",       "ParameterValue": "rds-monitoring-role" },
   { "ParameterKey": "CollectMySqlRuntimeValues",   "ParameterValue": "true" },
-  { "ParameterKey": "MySqlCredentialsParameterArns", "ParameterValue": "arn:...:parameter/rds-bg/staging/example-service/mysql/password,arn:...:parameter/rds-bg/staging/example-service/mysql/user" },
+  { "ParameterKey": "MySqlCredentialsParameterPath", "ParameterValue": "/rds-bg/staging" },
   { "ParameterKey": "VpcId",                       "ParameterValue": "vpc-xxxxxxxx" },
   { "ParameterKey": "VerifyGreenSubnetIds",        "ParameterValue": "subnet-aaaa,subnet-bbbb" },
   { "ParameterKey": "VerifyGreenSecurityGroupIds", "ParameterValue": "sg-xxxxxxxx" }
@@ -218,7 +218,7 @@ aws cloudformation delete-stack --stack-name rds-bg-staging
 | パラメータ | 型 | 既定値 | 内容 |
 |---|---|---|---|
 | `CollectMySqlRuntimeValues` | String | `false` | `true` で Green DB へ接続し実効値を収集する。`false` なら AWS API の検証だけ |
-| `MySqlCredentialsParameterArns` | CommaDelimitedList | `''` | `ssm:GetParameter` を許す SSM パラメータの ARN。**IAM の許可リストであり、読む名前は config が決める。**1 サービス 2 本（パスワード・ユーザー名）で、その環境の全サービス分を列挙する |
+| `MySqlCredentialsParameterPath` | String | `''` | `ssm:GetParameter` を許す SSM パラメータの**階層**（例 `/rds-bg/staging`）。その配下すべてが読める。**IAM の許可範囲であり、読む名前は config が決める。**先頭 `/` 必須・末尾 `/` なし（`AllowedPattern` で検査） |
 | `MySqlCredentialsKmsKeyArn` | String | `''` | SecureString を暗号化している CMK の ARN。**AWS 管理キーなら空のまま。**指定すると `kms:ViaService` で SSM 経由に限定した `kms:Decrypt` が付く |
 
 ### Step 4 検証の VPC 配置（任意）
@@ -271,8 +271,8 @@ echo "$arns"
 | `ProtectedRdsResourceArns` | 空のまま本番へ適用する | アカウント・リージョン内の全 DB インスタンスとスナップショットが対象になる。**必ず絞る** |
 | `ProtectedRdsResourceArns` | 引用符で囲まない | カンマでシェルに分割され、別パラメータとして解釈される |
 | `RdsMonitoringRoleName` | 移行元の実際のロール名と違う | Step 3 が `iam:PassRole` の `AccessDenied` で失敗する |
-| `MySqlCredentialsParameterArns` | 1 サービス分しか渡さない | 他サービスの実行時に `ssm:GetParameter` が `AccessDenied` になる |
-| `MySqlCredentialsParameterArns` | 引用符で囲まない | カンマでシェルに分割され、別パラメータとして解釈される |
+| `MySqlCredentialsParameterPath` | サービスのパラメータを階層の外に置く | そのサービスの実行時に `ssm:GetParameter` が `AccessDenied` になる |
+| `MySqlCredentialsParameterPath` | 移行用以外の秘密を同じ階層に置く | VerifyGreen がそれも読めてしまう。**階層は移行作業専用にする** |
 | `VerifyGreenSubnetIds` | パブリック subnet を指定する | 動くが、検証を隔離する設計の意図が崩れる |
 | `ArtifactBucketName` | 既存スタックで空に変える | `ArtifactStore.Location` が変わり、それまでのアーティファクトを参照できなくなる |
 | `EnvironmentName` | config に無い環境名を渡す | 実行時に設定ファイルが読めず失敗する（`AllowedValues` で `staging` / `production` に制限している） |

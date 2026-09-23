@@ -288,7 +288,7 @@ aws rds describe-db-instances --db-instance-identifier <blue-id> \
 | | 決めるもの | 場所 | 粒度 |
 |---|---|---|---|
 | 設定 YAML | **読むパラメータ名** | `config/blue-green/<env>.deployment.yml` の `services.<name>.mysql_verification` | **サービス（= 移行対象 DB）ごと** |
-| CloudFormation | `ssm:GetParameter` を許す**対象 ARN** | `MySqlCredentialsParameterArns` | スタック（= 環境）単位 |
+| CloudFormation | `ssm:GetParameter` を許す**階層** | `MySqlCredentialsParameterPath` | スタック（= 環境）単位 |
 
 実際の取得は `scripts/lib/mysql_credentials.sh` が行う。config から解決した名前をそのまま使い、**CloudFormation から名前を受け取ることはしない。**
 
@@ -301,7 +301,7 @@ aws ssm get-parameter --name "<user_parameter_name>" --with-decryption   # ユ�
 
 パラメータ名は `services.<name>` 配下なので、DB ごとに別のパラメータを指せる。一方 **パイプラインは環境ごとに 1 本**で、サービスは実行時のパイプライン変数 `ServiceName` で切り替える。`VerifyGreenRole` も全サービスで共有する。
 
-したがって **`MySqlCredentialsParameterArns` には、その環境で扱う全サービス分の ARN を列挙する。**1 サービスあたり 2 本（パスワード・ユーザー名）である。
+したがって **その環境の全サービスのパラメータを 1 つの階層の下に置き、その階層を `MySqlCredentialsParameterPath` に渡す。**
 
 設定例。`staging` に 2 サービスある場合を示す。
 
@@ -324,14 +324,42 @@ services:
       port: 3306
 ```
 
-これに対して渡す CloudFormation パラメータは **4 本**になる。
+これに対して渡す CloudFormation パラメータは **階層 1 つ**である。
 
 ```text
 CollectMySqlRuntimeValues=true
-MySqlCredentialsParameterArns=arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/password,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/user,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/another-service/mysql/password,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/another-service/mysql/user
+MySqlCredentialsParameterPath=/rds-bg/staging
 ```
 
-`aws cloudformation deploy` でカンマ区切りの値を渡すときは、シェルに分割されないよう引用符で囲む。
+テンプレートはこれを次の IAM `Resource` に組み立てる。
+
+```
+arn:aws:ssm:<region>:<account>:parameter/rds-bg/staging/*
+```
+
+| 利点 | 内容 |
+|---|---|
+| **サービスを増やしてもスタック更新が要らない** | 新しいサービスのパラメータを同じ階層に置けば読める |
+| リージョンとアカウント ID を書かなくてよい | テンプレートが `${AWS::Region}` / `${AWS::AccountId}` で補う |
+| 環境をまたがない | `/rds-bg/staging/*` は `/rds-bg/production/...` にも `/rds-bg/staging-other/...` にも一致しない |
+
+**トレードオフは許可範囲である。**列挙した N 本だけでなく、**その階層の配下すべてが読める。**そのため **この階層には移行作業用のパラメータだけを置く**（他用途の秘密を同じ階層に置かない）。
+
+**指定の形に注意する。**`AllowedPattern` で次の形だけを受け付ける。
+
+| 値 | 可否 |
+|---|---|
+| `/rds-bg/staging` | 受理 |
+| `rds-bg/staging`（先頭 `/` なし） | **拒否** |
+| `/rds-bg/staging/`（末尾 `/` あり） | **拒否** |
+| `arn:aws:ssm:...`（ARN を渡した） | **拒否** |
+
+先頭の `/` はパラメータ名の一部であり、ARN では `parameter` の直後にそのまま続く（`parameter` と名前の間に `/` を重ねない）。末尾 `/` を禁じているのは、テンプレートが `/*` を足すためである。
+
+```
+名前: /rds-bg/staging/example-service/mysql/password
+ARN : arn:aws:ssm:<region>:<account>:parameter/rds-bg/staging/example-service/mysql/password
+```
 
 ```bash
 aws cloudformation deploy \
@@ -340,32 +368,19 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     CollectMySqlRuntimeValues=true \
-    "MySqlCredentialsParameterArns=arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/password,arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/example-service/mysql/user" \
+    MySqlCredentialsParameterPath=/rds-bg/staging \
     VpcId=vpc-xxxxxxxx \
     VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb \
     VerifyGreenSecurityGroupIds=sg-xxxxxxxx
 ```
 
-**パラメータ名の階層で ARN をまとめることもできる。**サービスを増やすたびにスタックを更新したくない場合は、ワイルドカードを 1 本渡す。ただし許可範囲は広くなる。
-
-```text
-MySqlCredentialsParameterArns=arn:aws:ssm:ap-northeast-1:123456789012:parameter/rds-bg/staging/*
-```
-
 DB ごとに権限を完全に分離したいなら、`EnvironmentName` を分けてスタックを別に作る。
-
-**ARN の形に注意する。**パラメータ名が `/` で始まる場合、ARN は `parameter` の直後にスラッシュを重ねない。
-
-```
-名前: /rds-bg/staging/example-service/mysql/password
-ARN : arn:aws:ssm:<region>:<account>:parameter/rds-bg/staging/example-service/mysql/password
-```
 
 ### 手順
 
-1. SSM Parameter Store に SecureString パラメータを、**サービスごとに 2 本**作成する。パスワード用（`parameter_name`）とユーザー名用（`user_parameter_name`）で、`auth_method: parameter_store` ではどちらも必須である
+1. SSM Parameter Store に SecureString パラメータを、**サービスごとに 2 本、環境ごとの階層の下に**作成する。パスワード用（`parameter_name`）とユーザー名用（`user_parameter_name`）で、`auth_method: parameter_store` ではどちらも必須である
 2. config の該当サービスへ `enabled: true`、`auth_method: parameter_store`、2 つのパラメータ名を書く
-3. `MySqlCredentialsParameterArns` に**全サービス分の ARN**を渡し、`CollectMySqlRuntimeValues=true` でスタックを更新する
+3. `MySqlCredentialsParameterPath` に**その階層**（例 `/rds-bg/staging`）を渡し、`CollectMySqlRuntimeValues=true` でスタックを更新する
 4. `VpcId` / `VerifyGreenSubnetIds` / `VerifyGreenSecurityGroupIds` を指定し、VerifyGreen を Green DB へ到達できる subnet へ置く（[セキュリティグループ設定](verify-green-security-group-setup.md)）
 5. MySQL ユーザーに `performance_schema.global_variables` を参照できる最小限の権限を与える
 
@@ -433,11 +448,11 @@ aws cloudformation deploy \
     CodeBuildServiceRoleArn=arn:aws:iam::123456789012:role/CodeBuildRdsBlueGreen
 ```
 
-初回は `CollectMySqlRuntimeValues` と `MySqlCredentialsParameterArns` を省略する。実効値取得を必要とするレビュー時だけ、ネットワーク・パラメータ・権限を確認したうえで以下を追加してスタック更新する。
+初回は `CollectMySqlRuntimeValues` と `MySqlCredentialsParameterPath` を省略する。実効値取得を必要とするレビュー時だけ、ネットワーク・パラメータ・権限を確認したうえで以下を追加してスタック更新する。
 
 ```text
 CollectMySqlRuntimeValues=true
-MySqlCredentialsParameterArns=<パスワード用 ARN>,<ユーザー名用 ARN>
+MySqlCredentialsParameterPath=/rds-bg/staging
 ```
 
 CodeCommit から取る場合は、`SourceProvider` と `CodeCommitRepositoryName` に差し替える（`CodeStarConnectionArn` と `RepositoryId` は渡さなくてよい）。

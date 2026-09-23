@@ -196,5 +196,7 @@ aws "${aws_args[@]}" rds describe-db-snapshots --db-snapshot-identifier "$snapsh
 create_args=(--config "$config" --service "$service" --region "$region" --output-dir "$output_dir/blue-green")
 [[ -n "$profile" ]] && create_args+=(--profile "$profile")
 # Ruby 版へ切り替えた。シェル版（.sh）も同じ内容で残してある。
-"$(dirname "$0")/create_blue_green_deployment.rb" "${create_args[@]}"
+# 実行ビットに頼らず ruby へ明示的に渡す。CodePipeline のソースアーティファクトでは
+# 実行ビットが落ちることがあり、buildspec の chmod は .sh しか対象にしていないため。
+ruby "$(dirname "$0")/create_blue_green_deployment.rb" "${create_args[@]}"
 echo "Build completed. Artifacts: $output_dir"

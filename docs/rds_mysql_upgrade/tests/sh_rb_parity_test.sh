@@ -174,12 +174,15 @@ for name in source-db-instance.json target-db-parameter-group.json create-blue-g
 done
 
 # --- 呼び出し側が .rb を指していること ---------------------------------------
+# **ruby へ明示的に渡していること**まで確認する。直接実行（shebang 頼み）だと、
+# CodePipeline のソースアーティファクトで実行ビットが落ちたときに
+# Permission denied（終了コード 126）で止まる。buildspec の chmod は .sh しか対象にしない。
 check_switch() {
   local caller=$1 target=$2
-  if grep -q "$target" "$caller"; then
-    printf 'ok    %s が %s を呼ぶ\n' "$(basename "$caller")" "$target"
+  if grep -qE "^[[:space:]]*ruby \"\\\$\(dirname \"\\\$0\"\)/${target}\"" "$caller"; then
+    printf 'ok    %s が ruby 経由で %s を呼ぶ\n' "$(basename "$caller")" "$target"
   else
-    printf 'FAIL  %s が %s を呼んでいない\n' "$(basename "$caller")" "$target"; failed=$((failed + 1))
+    printf 'FAIL  %s が ruby 経由で %s を呼んでいない\n' "$(basename "$caller")" "$target"; failed=$((failed + 1))
   fi
 }
 check_switch scripts/build_green.sh create_blue_green_deployment.rb

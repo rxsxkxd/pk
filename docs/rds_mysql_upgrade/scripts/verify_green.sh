@@ -140,7 +140,8 @@ if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then
   [[ -n "$MYSQL_VERIFY_SSL_CA" ]] && collect_args+=(--ssl-ca "$MYSQL_VERIFY_SSL_CA")
   [[ -n "$runtime_collector" ]] && collect_args+=(--collector "$runtime_collector")
   export MYSQL_VERIFY_PASSWORD
-  "$(dirname "$0")/collect_green_runtime_values.rb" "${collect_args[@]}"
+  # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
+  ruby "$(dirname "$0")/collect_green_runtime_values.rb" "${collect_args[@]}"
   unset MYSQL_VERIFY_PASSWORD
   runtime_values_file="$output_dir/green-runtime-values.json"
 fi

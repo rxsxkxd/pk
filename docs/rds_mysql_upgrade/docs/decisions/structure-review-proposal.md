@@ -2,7 +2,7 @@
 
 > 位置づけ: **未採択の検討メモ**である。現行の構成（[upgrade-flow-steps.md](../upgrade-flow-steps.md)）を否定するものではなく、Step 6／7 の実装と対象 DB の追加を進める前に決着させておきたい論点と、その対案をまとめる。
 > 対象: リポジトリ全体の構成とフローの形。個々のスクリプトの不具合ではない。
-> 実施状況: 論点9（ドキュメント配置）のうち `docs/references/`・`decisions/`・`reports/` への分離は実施済み（本ファイルも `decisions/` に移動済み）。`runbook`（`upgrade-flow-steps.md` とその参照先）はレビュー中のため据え置いており、`docs/` 配下への一括ネストも未実施。論点1〜8 は本文のとおり未着手。
+> 実施状況: 論点9（ドキュメント配置）のうち `docs/references/`・`decisions/`・`reports/` への分離は実施済み（本ファイルも `decisions/` に移動済み）。その後 `reports/` は、中身が補足ドキュメントであるため `auxiliary/` へ改名した。`runbook`（`upgrade-flow-steps.md` とその参照先）はレビュー中のため据え置いており、`docs/` 配下への一括ネストも未実施。論点1〜8 は本文のとおり未着手。
 
 ## 0. 現行方針のうち維持すべき点
 

@@ -93,7 +93,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 | `examples/` | サンプル入出力・CLI 実行例・ローカル検証環境。ゴールデンファイルによる回帰確認に使う |
 | `docs/references/` | 判断に使う技術リファレンス(手順書ではない) |
 | `docs/decisions/` | 結論→理由→代替案評価の意思決定記録(ADR)。未採択の検討中メモも含む |
-| `reports/` | 完了した作業の実施記録 |
+| `auxiliary/` | 補足ドキュメント（作業の実施記録や、現状の整理） |
 
 ### `docs/references/`
 
@@ -114,10 +114,10 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 - [idempotency-strategy.md](docs/decisions/idempotency-strategy.md) — 各フェーズの冪等性の現状評価とあるべき姿(**未採択**)。switchover が 2 回目に必ず失敗する点、cleanup が部分完了で成功を返す点など
 - [implementation-language-policy.md](docs/decisions/implementation-language-policy.md) — 実装言語の役割分担(**採択済み**)。プログラムは Go、シェルからの YAML 読み取りは Ruby、JSON は jq。Step 4 をローカル実行前提に寄せる判断を含む
 
-### `reports/`
+### `auxiliary/`
 
-- [inline-python-reduction-report.md](reports/inline-python-reduction-report.md) — `scripts/*.sh` のインライン `python3 -c` 削減対応記録(38→8箇所)
-- [verify-green-vpc-current-state.md](reports/verify-green-vpc-current-state.md) — VerifyGreen の VPC 設定の現状整理。既存 VPC に載せる方式であること、設定の粒度がスタック単位であること、VPC なしでも検証の結論が変わらないこと
+- [inline-python-reduction-report.md](auxiliary/inline-python-reduction-report.md) — `scripts/*.sh` のインライン `python3 -c` 削減対応記録(38→8箇所)
+- [verify-green-vpc-current-state.md](auxiliary/verify-green-vpc-current-state.md) — VerifyGreen の VPC 設定の現状整理。既存 VPC に載せる方式であること、設定の粒度がスタック単位であること、VPC なしでも検証の結論が変わらないこと
 
 ## 現在の既知の未決事項
 

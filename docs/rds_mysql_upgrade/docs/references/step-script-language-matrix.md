@@ -71,7 +71,7 @@ eval "$config_vars"
 
 必須・任意の判定と、`mysql_verification` の検証（`mysql-verification` サブコマンド）も同ファイルが行う。
 
-経緯は次のとおりである。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込み、2026-09-14 に 1 箇所へ統合したうえで Ruby へ切り替えた。その後、jq で行っていた取り出しと検証も Ruby へ移し、設定の読み取りから jq を外した。
+経緯は次のとおりである。以前は `python3 -c` が 38 箇所に散在し（[auxiliary/inline-python-reduction-report.md](../../auxiliary/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込み、2026-09-14 に 1 箇所へ統合したうえで Ruby へ切り替えた。その後、jq で行っていた取り出しと検証も Ruby へ移し、設定の読み取りから jq を外した。
 
 **Ruby を選んだ理由は、YAML と JSON がどちらも標準ライブラリ（psych / json）だからである。**PyYAML のような追加パッケージの導入が不要になり、CI から **PyPI への到達要件が消えた**。CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う）。
 

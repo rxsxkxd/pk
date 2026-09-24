@@ -85,7 +85,8 @@
 | 4 | `BuildGreen` | `BuildGreen` | なし | **あり**（`actions.build` が `approved` のときのみ） |
 | 5 | `VerifyGreen` | `VerifyGreen` | なし | なし |
 | 6 | `Switchover` | `ManualApproval` → `Switchover` | `SWITCHOVER_APPROVED == approved` | **あり・本番影響** |
-| 7 | `Cleanup` | `ManualApproval` → `Cleanup` | `CLEANUP_APPROVED == approved` | **あり・不可逆** |
+
+**Step 7（後始末）はパイプラインに含まれない。**旧 Blue の削除は不可逆で、切り戻し不要の判断や逆方向レプリケーションの確認と一体で行うべき作業のため、人がツール `tools/cleanup.sh` で実行する（手順は [移行の実行](../operations-migration-run.md) の B-4）。
 
 ## 実行シナリオ
 
@@ -95,28 +96,28 @@
 
 ```
 Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓ → VerifyGreen ✓
-  → Switchover [SKIP]  → Cleanup [SKIP]                        ⇒ 成功で終了
+  → Switchover [SKIP]                                           ⇒ 成功で終了
 ```
 
-Blue/Green が作成され、検証まで完了する。切替と後始末はステージごと飛ばされるため、**承認ボタンは表示されない。**
+Blue/Green が作成され、検証まで完了する。切替はステージごと飛ばされるため、**承認ボタンは表示されない。**
 
 ### 2 回目: 切替フェーズ（`switchover: approved` を追加）
 
 ```
 Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) → VerifyGreen ✓
-  → Switchover ▶ 承認待ち → 切替実行 ✓ → Cleanup [SKIP]         ⇒ 成功で終了
+  → Switchover ▶ 承認待ち → 切替実行 ✓                          ⇒ 成功で終了
 ```
 
 `BuildGreen` は既に `AVAILABLE` な Deployment があるため何もせず成功する（冪等）。切替ステージに入り、**ここで初めて承認が表示される。**
 
-### 3 回目: 後始末フェーズ（`cleanup: approved` を追加）
+### 切替後にもう一度実行した場合
 
 ```
 Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) → VerifyGreen ✓(対象なし)
-  → Switchover ▶ 承認待ち → 切替 ✓(完了済み) → Cleanup ▶ 承認待ち → 削除実行 ✓
+  → Switchover ▶ 承認待ち → 切替 ✓(完了済み)                    ⇒ 成功で終了
 ```
 
-`BuildGreen` と `Switchover` は移行元が既に 8.4 であることを検出して何もしない。`VerifyGreen` も「切替済みのため検証対象なし」で成功する。
+`BuildGreen` と `Switchover` は移行元が既に 8.4 であることを検出して何もしない。`VerifyGreen` も「切替済みのため検証対象なし」で成功する。後始末はこの後、パイプラインの外で `tools/cleanup.sh` を実行する。
 
 > **待機時間はパイプラインの外にある。** 構築から切替まで数週間空いても、その間パイプラインは実行されていない。CodePipeline の手動承認は既定 7 日でタイムアウトするが、承認が表示されるのは「そのフェーズを実行しに来たとき」だけなので問題にならない。
 
@@ -130,7 +131,6 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 | `BuildReportToolProject` | `build-report-tool.yml` | — | Go レポート生成器をビルドし artifact へ出す。AWS API を呼ばない。**外部ネットワークへ出るのはここだけ** |
 | `VerifyGreenProject` | `verify-green.yml` | `verify_green.sh` | artifact のバイナリを使うだけ。**Go も外部ネットワークも不要**（`PrivilegedMode` も不要） |
 | `SwitchoverProject` | `switchover.yml` | `switchover.sh` | **timeout 60 分**（切替完了待ち） |
-| `CleanupProject` | `cleanup.yml` | `cleanup.sh` | 既定 60 分 |
 
 全プロジェクトで `Image: aws/codebuild/standard:7.0`、`ComputeType: BUILD_GENERAL1_SMALL`。
 
@@ -153,11 +153,9 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 | `BuildGreenRole` | `rds:CreateDBSnapshot` / `rds:CreateBlueGreenDeployment` / `rds:AddTagsToResource` |
 | `VerifyGreenRole` | `ssm:GetParameter` / `ssm:GetParameters`（`MySqlCredentialsParameterPath` 指定時のみ。対象はその階層の配下） |
 | `SwitchoverRole` | `rds:SwitchoverBlueGreenDeployment`（`deployment:*`）、`rds:ModifyDBInstance`／`rds:PromoteReadReplica`（`db:*`） |
-| **`CleanupRole`** | **`rds:DeleteDBInstance` / `rds:DeleteBlueGreenDeployment` / `rds:ModifyDBInstance`** / `rds:CreateDBSnapshot` / `rds:AddTagsToResource` |
+**破壊的権限（`rds:DeleteDBInstance` / `rds:DeleteBlueGreenDeployment`）はどのロールも持たない。**このスタックが作るロールでは旧 Blue を削除できない。後始末は `tools/cleanup.sh` を作業者が実行し、そのとき作業者がこの権限を持つロールを引き受ける。
 
-**破壊的権限は `CleanupRole` にのみ存在する。** 他のロールでは旧 Blue を削除できない。
-
-`CodePipelineRole` はアーティファクトの読み書き、6 プロジェクトの `StartBuild`、`codestar-connections:UseConnection`、（指定時のみ）`sns:Publish` を持つ。
+`CodePipelineRole` はアーティファクトの読み書き、6 プロジェクト（ReadApprovals / Precheck / BuildGreen / BuildReportTool / VerifyGreen / Switchover）の `StartBuild`、`codestar-connections:UseConnection`、（指定時のみ）`sns:Publish` を持つ。
 
 ### リソースの絞り込み
 

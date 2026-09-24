@@ -2,7 +2,7 @@
 
 `examples/rds-blue-green-deployment/codepipeline-all-in-one.yml` を AWS CLI から登録する手順と、全パラメータのリファレンス。
 
-**このテンプレートが作るもの**: S3 バケット（`ArtifactBucketName` 省略時のみ）とバケットポリシー、IAM ロール 8 本（CodeBuild 用 7 + CodePipeline 用 1）とマネージドポリシー 1 本、CodeBuild プロジェクト 7 本、CodePipeline 1 本。
+**このテンプレートが作るもの**: S3 バケット（`ArtifactBucketName` 省略時のみ）とバケットポリシー、IAM ロール 7 本（CodeBuild 用 6 + CodePipeline 用 1）とマネージドポリシー 1 本、CodeBuild プロジェクト 6 本、CodePipeline 1 本。
 **作らないもの**: RDS リソース、セキュリティグループ、VPC・subnet、SSM パラメータ、CodeConnections の接続、KMS キー。
 
 構成の全体像は [パイプライン構成図](codepipeline-structure.md)、前提条件と設計上の判断は [セットアップ手順](codebuild-codepipeline-setup.md) にある。
@@ -42,7 +42,6 @@ aws cloudformation describe-stacks --stack-name rds-bg-staging \
 | `ArtifactBucket` | 使用しているアーティファクト用 S3 バケット名（自動作成した場合もここに出る） |
 | `PipelineName` | 作成した CodePipeline 名 |
 | `StartCommand` | サービスを指定して開始するコマンド（そのまま実行できる） |
-| `CleanupRoleArn` | 破壊的権限（`rds:DeleteDBInstance` 等）を持つロール。付与先の監査に使う |
 
 ### 実行
 
@@ -233,9 +232,9 @@ aws cloudformation delete-stack --stack-name rds-bg-staging
 
 ### 保護対象の RDS リソース
 
-`ProtectedRdsResourceArns` は `BuildGreenRole`（`rds:CreateDBSnapshot` 等）と `CleanupRole`（`rds:DeleteDBInstance` 等）の `Resource` にそのまま入る。IAM の `Resource` はリストを取れるため、**移行対象が複数あればそのまま列挙できる。**
+`ProtectedRdsResourceArns` は `BuildGreenRole`（`rds:CreateDBSnapshot` 等）の `Resource` にそのまま入る。IAM の `Resource` はリストを取れるため、**移行対象が複数あればそのまま列挙できる。**
 
-**`db` と `snapshot` の 2 種類が必要である。**保護スナップショットの作成と、後始末での最終スナップショット作成があるためで、片方だけでは失敗する。
+**`db` と `snapshot` の 2 種類が必要である。**保護スナップショットの作成は、元の DB インスタンス（`db`）に対する操作と、作られるスナップショット（`snapshot`）に対する操作の両方で認可されるためで、片方だけでは失敗する。
 
 | 指定 | 有効範囲 | 評価 |
 |---|---|---|
@@ -260,7 +259,7 @@ echo "$arns"
 | パラメータ | 型 | 既定値 | 内容 |
 |---|---|---|---|
 | `RdsMonitoringRoleName` | String | `rds-monitoring-role` | 移行元が拡張モニタリングで使っている IAM ロール名。**`iam:PassRole` の対象になる。**使っていなければ空にする。名前が違うと Step 3 が `AccessDenied` で失敗する |
-| `ProtectedRdsResourceArns` | CommaDelimitedList | `''` | RDS の変更権限（スナップショット作成・旧 Blue 削除）の対象 ARN。**複数指定できる。**`db` と `snapshot` の**両方**を入れる。詳細は下記 |
+| `ProtectedRdsResourceArns` | CommaDelimitedList | `''` | RDS の変更権限（保護スナップショットの作成）の対象 ARN。**複数指定できる。**`db` と `snapshot` の**両方**を入れる。詳細は下記 |
 | `ApprovalNotificationTopicArn` | String | `''` | 手動承認の通知先 SNS トピック。空なら通知しない |
 
 ## 8. 指定を誤りやすい箇所

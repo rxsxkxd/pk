@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 #
 # 移行元インスタンスの実状態から、移行のどの地点にいるかを判定する。
-# **判定の実装はここだけである。**シェルの scripts/lib/migration_phase.sh は
-# 同じ名前の関数を残したまま、このファイルを呼ぶだけにしてある。
+# **判定の実装はここだけである。**シェルのスクリプト（build_green / verify_green /
+# switchover / cleanup）は、このファイルを ruby で直接呼ぶ。
 #
 # 判定の根拠:
 #   切替時に RDS は blue を <name>-old1 へリネームし、green が <name> を引き継ぐ。
@@ -25,7 +25,7 @@
 #   MigrationPhase.resolve(current_version, current_group,
 #                          source_version, source_group, target_version, target_group)
 #
-# シェルから（migration_phase.sh 経由）:
+# シェルから（呼び出し側は migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb") として使う）:
 #   ruby migration_phase.rb resolve     <現在版> <現在PG> <移行元版> <移行元PG> <移行先版> <移行先PG>
 #   ruby migration_phase.rb describe    （同じ 6 引数）
 #   ruby migration_phase.rb major-minor <版>

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MySQL 接続情報の解決。
-# Step 4（verify_green.sh の実効値収集）と Step 7（cleanup.sh の逆レプリケーション確認）で共用する。
+# Step 4（verify_green.sh の実効値収集）で使う。
 #
 # 設定ファイルの mysql_verification ブロックから接続方式を読み、方式ごとに
 # パスワード（または IAM 認証トークン）を解決する。呼び出し側は方式を意識しない。

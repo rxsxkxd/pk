@@ -147,7 +147,7 @@ Green のヘルスチェックは DB へ接続して `SELECT VERSION()`、`@@rea
 | Step 5 | CI | `scripts/switchover.sh --config FILE --service NAME` | 宣言と状態の突き合わせ → 切替 → 完了待機 |
 | Step 6 | CI | `scripts/healthcheck_green_aws.sh --config FILE --service NAME` | エンドポイント・インスタンス状態の確認 → メトリクス比較 |
 | Step 6 | ローカル | `scripts/healthcheck_green_db.sh --config FILE --service NAME` | DB 接続 → バージョン・`read_only`・書き込み疎通の確認 |
-| Step 7 | CI | `scripts/cleanup.sh --config FILE --service NAME` | 宣言と状態の突き合わせ → Deployment 削除 → 旧 Blue の最終スナップショット付き削除 |
+| Step 7 | CI | `tools/cleanup.sh --config FILE --service NAME` | 宣言と状態の突き合わせ → Deployment 削除 → 旧 Blue の最終スナップショット付き削除 |
 
 Step 2 は生成と適用でエントリポイントを分けるが、どちらもローカル実行である。生成を反復してテンプレートを固め、PR レビューを経てから Change Set で適用する。Step 6 は DB 接続の有無でエントリポイントを 2 つに分ける。AWS API のみの確認は CI から DB 認証情報なしで実行でき、DB 接続を伴う確認はローカルのコンテナから対話パスワードで実行する。
 

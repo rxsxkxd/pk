@@ -168,10 +168,10 @@ aws codepipeline start-pipeline-execution \
 ```mermaid
 flowchart LR
     S["Source"] --> RA["ReadApprovals"] --> BRT["BuildReportTool"] --> PC["PrecheckPG"] --> BG["BuildGreen"] --> VG["VerifyGreen"]
-    VG --> SW["Switchover<br/>承認付き"] --> CU["Cleanup<br/>承認付き"]
+    VG --> SW["Switchover<br/>承認付き"]
 
     classDef gate fill:#fff4e6,stroke:#d97706,stroke-width:2px
-    class SW,CU gate
+    class SW gate
 ```
 
 | ステージ | 何をするか | 承認の影響 |
@@ -183,7 +183,6 @@ flowchart LR
 | `BuildGreen` | 保護スナップショット＋Blue/Green の作成 | `build: pending` なら**何もせず正常終了** |
 | `VerifyGreen` | Green の構成・レプリカ遅延を検証し、**ゲート③のレポートを出す** | — |
 | `Switchover` | 手動承認 → 切替 | `switchover: pending` なら**ステージごとスキップ**（承認ボタンも出ない） |
-| `Cleanup` | 手動承認 → 旧 Blue の削除 | `cleanup: pending` なら同上 |
 
 **`pending` のときステージごとスキップされるのは意図的である。**「承認しても何も起きない」クリックを発生させないためで、手動承認が表示された時点で実行される状態になっている。
 
@@ -216,9 +215,17 @@ flowchart LR
 
 問題なければ `switchover: approved` に変えて push し、パイプラインを再実行する。手動承認が表示されるので承認する。
 
-### B-4. 後始末
+### B-4. 後始末（パイプラインの外・人が実行）
 
-切替後は観測期間を置く。**逆方向レプリケーションが残っていないことをローカルから確認**してから `cleanup: approved` にする。
+**後始末はパイプラインに含まれない。**旧 Blue の削除は不可逆で、切り戻しが不要だという判断や逆方向レプリケーションの確認と一体で行うべき作業のため、人がツールで実行する。
+
+切替後は観測期間を置く。**逆方向レプリケーションが残っていないことをローカルから確認**してから `cleanup: approved` にし、ツールを実行する。
+
+```bash
+tools/cleanup.sh --config config/blue-green/staging.deployment.yml --service example-service
+```
+
+**実行には破壊的な権限が要る**（`rds:DeleteBlueGreenDeployment` / `DeleteDBInstance` / `ModifyDBInstance` / `CreateDBSnapshot` / `AddTagsToResource`）。パイプラインの実行ロールはこれを持たないので、作業者がこの権限を持つロールを引き受けて実行する。ツールも `actions.cleanup: approved` の宣言が無ければ何もせず終了する。
 
 **旧 Blue の削除は不可逆である。**最終スナップショットは `final_snapshot_identifier` の固定名で作られる（固定名にすることで、途中失敗後の再実行でスナップショットが増殖しない）。
 

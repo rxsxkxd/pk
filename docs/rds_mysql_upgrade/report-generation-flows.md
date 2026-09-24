@@ -166,7 +166,7 @@ AWS を実際に叩くのは収集側だけである。
 |---|---|
 | `scripts/verify_green.sh` | 1（フェーズ判定のみ） |
 | `scripts/internal/greenstate`（Go。`collect_green_state`） | 7 |
-| `scripts/cleanup.sh` | 12 |
+| `tools/cleanup.sh` | 12 |
 | `tools/collect_blue_green_prereqs.sh` | 12 |
 | `scripts/build_green.sh` | 10 |
 | `tools/collect_mysql84_parameter_inputs.sh` | 6 |

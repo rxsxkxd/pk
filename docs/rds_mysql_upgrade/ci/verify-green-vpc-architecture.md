@@ -43,7 +43,6 @@ flowchart TD
     PC --> BG["BuildGreen<br/>スナップショット + Green 作成"]
     BG --> VG["VerifyGreen<br/>構成・レプリカ・実効値の検証"]
     VG --> SW["Switchover<br/>承認付き"]
-    SW --> CU["Cleanup<br/>承認付き"]
 
     BRT -.->|"artifact: ReportToolOutput"| VG
 

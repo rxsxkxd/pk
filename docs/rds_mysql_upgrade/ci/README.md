@@ -27,7 +27,8 @@ codepipeline-all-in-one.yml:
   Source (GitHub / CodeCommit) → ReadApprovals → PrecheckPG → BuildGreen → VerifyGreen
                              config を読む    Step 2 確認    Step 3       Step 4
     → [Switchover]  承認 → 切替          ※ actions.switchover が approved のときだけ入る
-    → [Cleanup]     承認 → 削除          ※ actions.cleanup が approved のときだけ入る
+
+後始末（Step 7）はパイプラインに含まれない → tools/cleanup.sh を人が実行する
 ```
 
 `[ ]` で囲んだステージには**入場条件**が付いている。`ReadApprovals` が config の `actions` をパイプライン変数として公開し、`BeforeEntry` の `VariableCheck` が `approved` でなければ**ステージごとスキップ**する。
@@ -36,9 +37,9 @@ codepipeline-all-in-one.yml:
 
 | config の状態 | パイプラインの挙動 |
 |---|---|
-| `build: approved`、他は `pending` | 構築と検証まで実行。切替・後始末はスキップ → **成功で終了** |
+| `build: approved`、他は `pending` | 構築と検証まで実行。切替はスキップ → **成功で終了** |
 | `switchover: approved` を追加 | 再実行。構築は冪等に no-op、検証を通り、**切替の承認が表示される** |
-| `cleanup: approved` を追加 | 再実行。検証は「切替済みのため対象なし」で成功、**後始末の承認が表示される** |
+| 切替後 | 後始末は**パイプラインの外**で行う。`cleanup: approved` にして `tools/cleanup.sh` を実行する（作業者が破壊的権限を持つロールを引き受ける） |
 
 手動承認は**その操作が config で承認されているときだけ表示される**。何も起きない承認をクリックする状況が生じないため、承認の形骸化を防げる。承認ゲートの実体は従来どおり config の `actions` にあり、運用は変わらない。
 
@@ -70,9 +71,8 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 | `BuildReportToolProject` | `ci/codebuild/build-report-tool.yml` | — | Step 4 の Go レポート生成器をビルドするだけ。AWS API を呼ばない。**外部ネットワークへ出るのはここだけ** |
 | `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.sh` | 常に AWS API 検証を実行 |
 | `SwitchoverProject` | `ci/codebuild/switchover.yml` | `scripts/switchover.sh` | 手動承認済みかつ `actions.switchover: approved` の場合だけ切替 |
-| `CleanupProject` | `ci/codebuild/cleanup.yml` | `scripts/cleanup.sh` | 手動承認済みかつ `actions.cleanup: approved` の場合だけ削除 |
 
-`PrecheckProject` と `CleanupProject` は [codepipeline-all-in-one.yml](../examples/rds-blue-green-deployment/codepipeline-all-in-one.yml) だけが定義する。既存の `codepipeline.yml` は BuildGreen / VerifyGreen / Switchover の 3 つのみである。
+`PrecheckProject` は [codepipeline-all-in-one.yml](../examples/rds-blue-green-deployment/codepipeline-all-in-one.yml) だけが定義する。既存の `codepipeline.yml` は BuildGreen / VerifyGreen / Switchover の 3 つのみである。
 
 `VerifyGreenProject` の MySQL 実効値収集は、**設定ファイルの `mysql_verification` が制御する**（既定 `enabled: false` で Green DB へ接続しない）。パスワードの取得方法は `auth_method` で選ぶ。
 
@@ -125,8 +125,8 @@ CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`�
 | | `codepipeline.yml` | `codepipeline-all-in-one.yml` |
 |---|---|---|
 | サービス指定 | **スタックパラメータ**（サービスごとに 1 スタック） | **パイプライン実行時の変数**（環境ごとに 1 スタックで複数サービスを扱える） |
-| ステージ | Source → BuildGreen → VerifyGreen → 承認 → Switchover | Source → PrecheckPG → BuildGreen → VerifyGreen → 承認 → Switchover → 承認 → Cleanup |
-| IAM の分割 | 全 Step で 1 ロール | **Step ごとに別ロール**（破壊的権限は Cleanup ロールのみ） |
+| ステージ | Source → BuildGreen → VerifyGreen → 承認 → Switchover | Source → PrecheckPG → BuildGreen → VerifyGreen → 承認 → Switchover |
+| IAM の分割 | 全 Step で 1 ロール | **Step ごとに別ロール**（破壊的権限を持つロールは無い） |
 
 ## デプロイ例（IAM・CI 作成版）
 
@@ -156,7 +156,7 @@ aws codepipeline start-pipeline-execution \
 
 `--variables` を省略すると `DefaultServiceName` が使われる。
 
-`ProtectedRdsResourceArns` は RDS の変更権限（スナップショット作成・旧 Blue 削除）の `Resource` を絞るために使う。**カンマ区切りで複数指定でき**、`db` と `snapshot` の両方を入れる必要がある。空のままだとアカウント・リージョン内の全 DB インスタンスとスナップショットが対象になるため、**実運用では必ず対象を絞る**。`*` 1 つでも動作するが推奨しない。
+`ProtectedRdsResourceArns` は RDS の変更権限（保護スナップショットの作成）の `Resource` を絞るために使う。**カンマ区切りで複数指定でき**、`db` と `snapshot` の両方を入れる必要がある。空のままだとアカウント・リージョン内の全 DB インスタンスとスナップショットが対象になるため、**実運用では必ず対象を絞る**。`*` 1 つでも動作するが推奨しない。
 
 ## デプロイ例（既存ロールを使う版）
 

@@ -16,7 +16,7 @@
 
 | | 内容 |
 |---|---|
-| **作る** | S3 バケット 1（省略時）とバケットポリシー、IAM ロール 8（CodeBuild 用 7 + CodePipeline 用 1）とマネージドポリシー 1、CodeBuild プロジェクト 7、CodePipeline 1 |
+| **作る** | S3 バケット 1（省略時）とバケットポリシー、IAM ロール 7（CodeBuild 用 6 + CodePipeline 用 1）とマネージドポリシー 1、CodeBuild プロジェクト 6、CodePipeline 1 |
 | **作らない** | **RDS リソース**、セキュリティグループ、VPC・subnet、SSM パラメータ、CodeConnections の接続、KMS キー |
 
 **RDS を一切作らないことが重要である。**このスタックを作っても壊しても、DB には影響しない。
@@ -144,7 +144,6 @@ aws cloudformation describe-stacks --stack-name rds-bg-staging \
 | `ArtifactBucket` | 使用しているアーティファクト用バケット（自動作成した場合もここに出る） |
 | `PipelineName` | 次の編で使うパイプライン名 |
 | `StartCommand` | パイプラインを開始するコマンド（そのまま実行できる） |
-| `CleanupRoleArn` | 破壊的権限（`rds:DeleteDBInstance` 等）を持つロール。**付与先を監査する際に使う** |
 
 ### スタック作成直後にパイプラインが 1 回動く
 

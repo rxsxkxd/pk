@@ -210,7 +210,7 @@ Parameters:
     Type: CommaDelimitedList
     Default: ''
     Description: >-
-      RDS の変更権限（スナップショット作成・旧 Blue の削除）の対象を絞る ARN。
+      RDS の変更権限（保護スナップショットの作成）の対象を絞る ARN。
       **複数指定できる。**移行対象が複数ある場合は全部を列挙する。
       対象は db と snapshot の 2 種類で、**両方を入れること**
       （snapshot を忘れると保護スナップショットの作成が AccessDenied で失敗する）。
@@ -605,43 +605,10 @@ Resources:
                   - 'rds:PromoteReadReplica'
                 Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:*'
 
-  # Step 7: 破壊的権限。旧 Blue の削除を含むため、このロールにだけ付与する。
-  CleanupRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-cleanup'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: codebuild.amazonaws.com }
-            Action: 'sts:AssumeRole'
-      ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
-      Policies:
-        - PolicyName: cleanup-mutations
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: DeleteBlueGreenDeployment
-                Effect: Allow
-                Action: 'rds:DeleteBlueGreenDeployment'
-                Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:deployment:*'
-              - Sid: DeleteOldBlue
-                Effect: Allow
-                # 旧 Blue は <source>-old1 へリネームされる。最終スナップショットの作成も伴う。
-                Action:
-                  - 'rds:DeleteDBInstance'
-                  - 'rds:ModifyDBInstance'
-                  - 'rds:CreateDBSnapshot'
-                  - 'rds:AddTagsToResource'
-                # ProtectedRdsResourceArns をそのまま使う。IAM の Resource は
-                # リストを取れるため、複数の移行対象をそのまま列挙できる。
-                # 空のときだけ、このアカウント・リージョンの db / snapshot 全体へ落とす。
-                Resource: !If
-                  - HasProtectedRdsResourceArns
-                  - !Ref ProtectedRdsResourceArns
-                  - - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:*'
-                    - !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:snapshot:*'
+  # Step 7（後始末: 旧 Blue と Deployment の削除）はパイプラインから外した。
+  # 人が実行するツール tools/cleanup.sh になっている。以前あった CleanupRole
+  # （rds:DeleteDBInstance 等の破壊的権限を持つ唯一のロール）も削除したため、
+  # **このスタックが作るロールは、どれも旧 Blue を削除できない。**
 
   # --- CodePipeline ロール ----------------------------------------------------
   CodePipelineRole:
@@ -686,7 +653,6 @@ Resources:
                   - !GetAtt BuildReportToolProject.Arn
                   - !GetAtt VerifyGreenProject.Arn
                   - !GetAtt SwitchoverProject.Arn
-                  - !GetAtt CleanupProject.Arn
               # ソースの取得に必要な権限。SourceProvider で一方だけを付ける。
               - !If
                 - UseCodeConnections
@@ -868,23 +834,6 @@ Resources:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
-  CleanupProject:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-cleanup'
-      Description: Step 7 - 旧 Blue と Deployment の削除（config の actions.cleanup が approved の場合のみ）
-      ServiceRole: !GetAtt CleanupRole.Arn
-      Artifacts: { Type: CODEPIPELINE }
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec: ci/codebuild/cleanup.yml
-      Environment:
-        Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:7.0
-        EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
-          - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   # --- CodePipeline -----------------------------------------------------------
   BlueGreenPipeline:
@@ -1027,36 +976,6 @@ Resources:
               OutputArtifacts: [{ Name: SwitchoverOutput }]
               RunOrder: 2
 
-        # config の actions.cleanup が approved のときだけ入る。
-        - Name: Cleanup
-          BeforeEntry:
-            Conditions:
-              - Result: SKIP
-                Rules:
-                  - Name: CleanupApproved
-                    RuleTypeId: { Category: Rule, Owner: AWS, Provider: VariableCheck, Version: '1' }
-                    Configuration:
-                      Variable: '#{Approvals.CLEANUP_APPROVED}'
-                      Value: approved
-                      Operator: EQ
-          Actions:
-            - Name: ManualApproval
-              ActionTypeId: { Category: Approval, Owner: AWS, Provider: Manual, Version: '1' }
-              Configuration:
-                NotificationArn: !If [HasApprovalTopic, !Ref ApprovalNotificationTopicArn, !Ref 'AWS::NoValue']
-                CustomData: >-
-                  Step 6 の観測期間を経て、切り戻しが不要と判断できてから承認する。
-                  逆方向レプリケーションが残っていないことをローカルから確認済みであること。
-                  旧 Blue の削除は不可逆である。
-              RunOrder: 1
-            - Name: Cleanup
-              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
-              Configuration:
-                ProjectName: !Ref CleanupProject
-                EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
-              InputArtifacts: [{ Name: SourceOutput }]
-              OutputArtifacts: [{ Name: CleanupOutput }]
-              RunOrder: 2
 
 Outputs:
   ArtifactBucket:
@@ -1074,7 +993,3 @@ Outputs:
     Value: !Sub >-
       aws codepipeline start-pipeline-execution --name ${BlueGreenPipeline}
       --variables name=ServiceName,value=<service-name>
-
-  CleanupRoleArn:
-    Description: 破壊的権限（DeleteDBInstance 等）を持つロール。付与先を監査する際に使う
-    Value: !GetAtt CleanupRole.Arn

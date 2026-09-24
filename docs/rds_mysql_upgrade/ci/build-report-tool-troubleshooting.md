@@ -47,7 +47,6 @@ flowchart TD
     - !GetAtt BuildReportToolProject.Arn   # ← これが無いと S1 になる
     - !GetAtt VerifyGreenProject.Arn
     - !GetAtt SwitchoverProject.Arn
-    - !GetAtt CleanupProject.Arn
 ```
 
 **やること**：欠けている `!GetAtt <名前>Project.Arn` を足してスタックを更新する。
@@ -135,7 +134,7 @@ CLIENT_ERROR: ... unable to create ENI ... / is not authorized to perform: ec2:C
 
 | プロジェクト | 配置 |
 |---|---|
-| `ReadApprovals` / `Precheck` / `BuildGreen` / **`BuildReportTool`** / `Switchover` / `Cleanup` | **VPC 外** |
+| `ReadApprovals` / `Precheck` / `BuildGreen` / **`BuildReportTool`** / `Switchover` | **VPC 外** |
 | `VerifyGreen` | `VpcId` を指定したときだけ VPC 内（`VerifyGreenSubnetIds`） |
 
 ### I5: `shell: bash` が効かない

@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # Step 7: 承認済みの後始末（Blue/Green Deployment と旧 Blue の削除）を行う。
 #
+# **パイプラインからは外し、人が実行するツールにした。**以前は CodePipeline の
+# Cleanup ステージ（手動承認つき）から呼ばれていたが、旧 Blue の削除は不可逆で、
+# 切り戻し不要の判断や逆方向レプリケーションの確認と一体で行うべき作業のため、
+# 作業者が状況を確かめたうえで手で実行する。
+#
+# **実行には破壊的な権限が要る**（rds:DeleteBlueGreenDeployment / DeleteDBInstance /
+# ModifyDBInstance / CreateDBSnapshot / AddTagsToResource）。パイプラインの実行ロールは
+# もう持っていない。作業者がこの権限を持つロールを引き受けて実行する。
+#
+# 実行例:
+#   tools/cleanup.sh --config config/blue-green/staging.deployment.yml --service example-service
+#
 # 冪等性の担保:
 #   望ましい終了状態を「Deployment が存在せず、かつ旧 Blue が存在しない」と定義し、
 #   2 つのリソースを独立に判定する。片方の完了を全体の完了とみなさない。
@@ -29,7 +41,11 @@
 set -euo pipefail
 
 # shellcheck source=lib/deployment_config.sh
-source "$(dirname "$0")/lib/deployment_config.sh"
+# 設定の読み取りとフェーズ判定は scripts/lib/ のものを使う。**複製しない。**
+# 特にフェーズ判定は冪等性の中核で、build_green / verify_green / switchover と
+# 同じ実装（migration_phase.rb）でなければならない。
+scripts_lib="$(cd "$(dirname "$0")/../scripts/lib" && pwd)"
+source "$scripts_lib/deployment_config.sh"
 
 usage() {
   cat <<'USAGE'
@@ -68,7 +84,7 @@ mkdir -p "$output_dir"
 # 移行フェーズの判定（冪等性の第 1 層）は Ruby の 1 本で実装してある。
 # resolve で pre_switchover / post_switchover / unknown を返し、
 # describe で判定に使った実測値と宣言値を人向けに出す。
-migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
+migration_phase=(ruby "$scripts_lib/migration_phase.rb")
 
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
 # 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。

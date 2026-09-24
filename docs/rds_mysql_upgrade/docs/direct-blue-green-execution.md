@@ -229,7 +229,7 @@ scripts/switchover.sh \
 ### 9-1. 未承認状態の安全確認
 
 ```bash
-scripts/cleanup.sh \
+tools/cleanup.sh \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -246,7 +246,7 @@ scripts/cleanup.sh \
 read -rs -p 'Old Blue DB password: ' MYSQL_PASSWORD; echo
 export MYSQL_PASSWORD
 
-scripts/cleanup.sh \
+tools/cleanup.sh \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \

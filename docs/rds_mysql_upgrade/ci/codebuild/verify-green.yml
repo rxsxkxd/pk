@@ -32,12 +32,6 @@ phases:
       # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
       - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
       - ruby --version
-      # --- 診断: sh / bash 問題の切り分け用。原因が確定したら削除する ---------
-      - ls -l scripts/*.sh scripts/lib/*.sh
-      - head -1 scripts/verify_green.sh | od -c | head -1
-      - 'echo "shell=$0 bash=$(command -v bash)"; bash --version | head -1'
-      # --- 診断ここまで -----------------------------------------------------
-
       # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
       # 落ちていれば復元し、落ちていなければ何も変わらない。
       - chmod +x scripts/*.sh scripts/lib/*.sh
@@ -61,9 +55,8 @@ phases:
         green_tools=$(ruby scripts/lib/resolve_green_tools.rb)
         eval "$green_tools"
         export GREEN_STATE_COLLECTOR GREEN_RUNTIME_COLLECTOR GREEN_REPORT_GENERATOR
-      # 2. 実行できることを確認する。CodePipeline の artifact では実行ビットが落ちうる。
+      # 2. 実行ビットを復元する。CodePipeline の artifact では実行ビットが落ちうる。
       - chmod +x "$GREEN_STATE_COLLECTOR" "$GREEN_RUNTIME_COLLECTOR" "$GREEN_REPORT_GENERATOR"
-      - ls -l "$GREEN_STATE_COLLECTOR" "$GREEN_RUNTIME_COLLECTOR" "$GREEN_REPORT_GENERATOR"
 
   build:
     commands:

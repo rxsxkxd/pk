@@ -59,14 +59,6 @@ phases:
         # 保証されないため、ファイル経由という確実な方法にしておく。
         echo "$module_dir" > /tmp/module_dir
 
-      # --- 失敗したときに原因を一目で分かるようにする診断 --------------------
-      # GO111MODULE が off なら GOPATH モード（go.mod が無視される）。
-      # GOFLAGS が空でなければ -mod=vendor などが混ざっていないか見る。
-      - go env GO111MODULE GOFLAGS GOPATH GOMODCACHE GOTOOLCHAIN
-      # 掴んだモジュールと、ビルド対象が main パッケージであることを確認する。
-      # 期待は `rds-mysql-upgrade` と、2 本の main パッケージである。
-      - cd "$(cat /tmp/module_dir)" && go list -m
-      - cd "$(cat /tmp/module_dir)" && go list -f '{{.ImportPath}} ({{.Name}})' ./scripts/collect_green_state ./scripts/collect_green_runtime_values ./scripts/generate_green_verification_report
 
   build:
     commands:
@@ -88,14 +80,6 @@ phases:
           -o "$out_dir/collect_green_runtime_values" ./scripts/collect_green_runtime_values
         CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
           -o "$out_dir/collect_green_state" ./scripts/collect_green_state
-      # バイナリができたことを確認する。
-      - ls -l "${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report/"
-      # AWS も DB も呼ばずに動くことだけ確かめる（引数不足で usage を出して落ちるのが正常）。
-      - |
-        out_dir=${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report
-        "$out_dir/generate_green_verification_report" --help 2>&1 | head -1 || true
-        "$out_dir/collect_green_runtime_values" 2>&1 | head -1 || true
-        "$out_dir/collect_green_state" 2>&1 | head -1 || true
 
 artifacts:
   files:

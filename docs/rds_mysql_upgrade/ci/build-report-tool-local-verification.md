@@ -105,12 +105,10 @@ docker run --rm \
 ```
 go version go1.25.x linux/<arch>          ← install
 MODULE_DIR=/codebuild/output/src.../      ← pre_build（構成検査を通過）
-rds-mysql-upgrade                         ← go list -m
-rds-mysql-upgrade/scripts/generate_green_verification_report (main)   ← go list
-rds-mysql-upgrade/scripts/collect_green_runtime_values (main)
--rwxr-xr-x ... generate_green_verification_report   ← build
-Usage of .../generate_green_verification_report:    ← 動くバイナリである
+Phase complete: UPLOAD_ARTIFACTS State: SUCCEEDED   ← 成果物の収集
 ```
+
+バイナリそのものは、下の「成果物」で zip を開いて確かめる（3 本が入っていること）。
 
 各行の意味は [失敗切り分けの「正常時のログ」](build-report-tool-troubleshooting.md#5-r-ビルドは成功したのに後段で失敗する) にある。
 

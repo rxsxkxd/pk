@@ -194,8 +194,18 @@ CODEBUILD_SRC_DIR=<パス> bash scripts/resolve_go_module_root.sh
 
 ```
 MODULE_DIR=/codebuild/output/src123456789/src/.../rds_mysql_upgrade
-rds-mysql-upgrade                      ← go list -m
-rds-mysql-upgrade/scripts (main)       ← go list（ビルド対象が main であること）
+```
+
+### 手で追加確認するとき
+
+buildspec には診断用の出力を置いていない（検査は `resolve_go_module_root.sh` が行い、失敗すれば上のメッセージで止まる）。それでも原因が絞れないときは、同じソースのモジュールルートで次を手で実行する（ローカル、または一時的に buildspec へ足して）。
+
+```bash
+go env GO111MODULE GOFLAGS GOPATH GOMODCACHE GOTOOLCHAIN   # GO111MODULE=off なら GOPATH モード
+go list -m                                                  # rds-mysql-upgrade であること
+go list -f '{{.ImportPath}} ({{.Name}})' \
+  ./scripts/collect_green_state ./scripts/collect_green_runtime_values ./scripts/generate_green_verification_report
+                                                            # 3 本とも (main) であること
 ```
 
 `go list -m` が `rds-mysql-upgrade` 以外を返したら、掴んでいる `go.mod` が想定と違う。
@@ -204,7 +214,7 @@ rds-mysql-upgrade/scripts (main)       ← go list（ビルド対象が main で
 
 ## 4. B: go build が失敗する
 
-`MODULE_DIR=` と `go list -m` が正しく出た後で落ちた場合。
+`MODULE_DIR=` が正しく出た後、`go build` で落ちた場合。
 
 ### B1: GOPATH モードになっている
 
@@ -214,7 +224,7 @@ cannot find package "rds-mysql-upgrade/scripts/internal/cfn" in any of:
 	/go/src/rds-mysql-upgrade/scripts/internal/cfn (from $GOPATH)
 ```
 
-**意味**：`GO111MODULE=off` で module モードが無効。`go.mod` は完全に無視される。診断行の `go env` 1 行目（`GO111MODULE`）が `off` になっているはずである。
+**意味**：`GO111MODULE=off` で module モードが無効。`go.mod` は完全に無視される。「手で追加確認するとき」の `go env` を実行すると、1 行目（`GO111MODULE`）が `off` になっているはずである。
 
 **やること**：`off` を設定している場所を消す。候補は 3 つ。
 
@@ -279,7 +289,7 @@ SECURITY ERROR
 
 ### B6: `GOFLAGS` で挙動が変わっている
 
-`-mod=vendor` が入っていると `vendor/` を要求するが、このリポジトリは `vendor/` を持たない。診断行の `go env` 2 行目（`GOFLAGS`）が**空でないなら疑う**。
+`-mod=vendor` が入っていると `vendor/` を要求するが、このリポジトリは `vendor/` を持たない。「手で追加確認するとき」の `go env` の 2 行目（`GOFLAGS`）が**空でないなら疑う**。
 
 ### B7: コンパイルエラー
 
@@ -291,7 +301,9 @@ SECURITY ERROR
 
 `BUILD_GENERAL1_SMALL`（3 GB / 2 vCPU）で、依存 1 つの小さなプログラムをビルドするだけなので通常は起きない。起きるとすれば B2・B3 のダウンロード待ちがタイムアウトに達した場合で、**実際の原因はネットワークである。**
 
-### B9: 成果物が見つからない（`ls -l` で落ちる）
+### B9: 成果物が見つからない（`UPLOAD_ARTIFACTS` で落ちる）
+
+`no matching artifact paths found` のように、成果物の収集で失敗する。
 
 **意味**：`go build` は成功したが、バイナリが `artifacts.files` の宣言（`CODEBUILD_SRC_DIR` 相対の `.tools/green-report/generate_green_verification_report`）とは違う場所に出ている。
 
@@ -307,36 +319,23 @@ out_dir=${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report
 
 ### 正常時のログ
 
-この 7 点が揃っていれば `BuildReportTool` は成功している。
+この 3 点が揃っていれば `BuildReportTool` は成功している。
 
 ```
 go version go1.25.x linux/amd64                                        ← ❶ install
 
 MODULE_DIR=/codebuild/output/src123456789/src/.../rds_mysql_upgrade    ← ❷ pre_build
 
-on                                   ← ❸ go env（GO111MODULE）
-                                     ←    GOFLAGS（空が正常）
-/go                                  ←    GOPATH
-/go/pkg/mod                          ←    GOMODCACHE
-auto                                 ←    GOTOOLCHAIN
-
-rds-mysql-upgrade                    ← ❹ go list -m
-rds-mysql-upgrade/scripts/generate_green_verification_report (main)  ← ❺ go list
-rds-mysql-upgrade/scripts/collect_green_runtime_values (main)
-
--rwxr-xr-x 1 root root 3002706 ... generate_green_verification_report  ← ❻ build
-Usage of /codebuild/.../generate_green_verification_report:            ← ❼
+Phase complete: UPLOAD_ARTIFACTS State: SUCCEEDED                      ← ❸ artifacts
 ```
 
 | # | 見るもの | 期待 |
 |---|---|---|
 | ❶ | `go version` | `go1.25` 以上 |
 | ❷ | `MODULE_DIR=` | 1 行だけ。末尾がこのプロジェクトのディレクトリ（`scripts` で終わっていたら旧構成） |
-| ❸ | `GO111MODULE` | `on` または空。**`off` は異常** |
-| ❹ | `go list -m` | **`rds-mysql-upgrade`**。これ以外は掴んでいる `go.mod` が違う |
-| ❺ | `go list` | ビルド対象 **2 本**がどちらも `(main)` であること |
-| ❻ | `ls -l` | バイナリが存在し、サイズが数 MB |
-| ❼ | `Usage of ...` | 引数不足の usage。ここまで出れば動くバイナリである |
+| ❸ | `UPLOAD_ARTIFACTS` | `SUCCEEDED`。3 本のバイナリが artifact に入ったことを意味する（`go build` は失敗すれば build フェーズで止まる） |
+
+中身まで確かめたいときは、artifact（`.tools/green-report/`）を取り出して `ls -l` で 3 本が数 MB ずつあること、引数なしで実行して usage が出ることを見る。
 
 ### R1: VerifyGreen が `Report generator is absent` で止まる
 

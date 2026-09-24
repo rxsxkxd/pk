@@ -14,14 +14,6 @@ phases:
       # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
       - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
       - ruby --version
-      # --- 診断: sh / bash 問題の切り分け用。原因が確定したら削除する ---------
-      # 実行ビットが落ちていないか（左端が -rwxr-xr-x であること）
-      - ls -l scripts/*.sh scripts/lib/*.sh
-      # shebang が壊れていないか（先頭が #!/usr/bin/env bash であること）
-      - head -1 scripts/verify_green.sh | od -c | head -1
-      # このコマンドを実行しているシェルと bash の所在
-      - 'echo "shell=$0 bash=$(command -v bash)"; bash --version | head -1'
-      # --- 診断ここまで -----------------------------------------------------
       # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
       # 落ちていれば復元し、落ちていなければ何も変わらない。
       - chmod +x scripts/*.sh scripts/lib/*.sh

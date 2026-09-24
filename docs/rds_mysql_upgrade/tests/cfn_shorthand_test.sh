@@ -56,7 +56,7 @@ build_go() {
 
 if command -v go >/dev/null 2>&1 && build_go; then
   # --- パラメータ名の抽出（--list-parameter-names）-------------------------
-  # collect_green_runtime_values.sh が実効値収集の対象を決めるために使う経路である。
+  # 実効値の収集対象（パラメータ名）と同じ読み取り（scripts/internal/cfn）を使う経路である。
   # レポート生成と同じバイナリなので、実行側（VerifyGreen）へ Go を持ち込まない。
   for template in "$FIXTURE" "$LONGFORM"; do
     if ! names=$("$work/gen" --list-parameter-names --template "$template" 2>&1); then

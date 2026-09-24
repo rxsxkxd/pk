@@ -26,8 +26,6 @@ mkdir -p "$output_dir"
 # resolve で pre_switchover / post_switchover / unknown を返し、
 # describe で判定に使った実測値と宣言値を人向けに出す。
 migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
-# shellcheck source=lib/mysql_credentials.sh
-source "$(dirname "$0")/lib/mysql_credentials.sh"
 
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
 # 必要な項目とその必須・任意だけをここに宣言する（読み取りは lib/deployment_config.rb）。
@@ -43,25 +41,6 @@ config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$s
 eval "$config_vars"
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
-
-# Go のバイナリを決める。CI は BuildReportTool が作ったものを環境変数で受け取る。
-# 指定が無いローカル実行でだけ、その場で一時ファイルへビルドする。
-# **VerifyGreen（CI）ではビルドしない**——Go も外部ネットワークも持たない前提のため。
-#
-# 結果は第 1 引数の名前の変数へ入れる。**$(...) で受けない。**サブシェルになり、
-# 後始末用の built_tools への追加が親に届かず一時ファイルが残るため。
-repository_root=$(cd "$(dirname "$0")/.." && pwd)
-built_tools=()
-# 空配列の展開は bash 4.4 未満の set -u で unbound variable になるため +"..." で守る。
-trap 'rm -f ${built_tools[@]+"${built_tools[@]}"}' EXIT
-go_tool() {  # $1=結果を入れる変数名 $2=環境変数の値（空ならビルド） $3=パッケージ名
-  if [[ -n "$2" ]]; then printf -v "$1" '%s' "$2"; return; fi
-  local binary
-  binary=$(mktemp "${TMPDIR:-/tmp}/$3.XXXXXX")
-  built_tools+=("$binary")
-  go -C "$repository_root" build -o "$binary" "./scripts/$3"
-  printf -v "$1" '%s' "$binary"
-}
 
 # [読み取り] 移行元識別子が指す実体を見て、検証すべきフェーズかを判定する。
 # 切替後は <source_id> が green（新 Blue）を指すため、検証対象の Deployment は
@@ -82,52 +61,43 @@ if [[ "$phase" == post_switchover ]]; then
   exit 0
 fi
 
-# [読み取り] 検証に必要な AWS の状態を集める（Go。scripts/internal/greenstate）。
+# [読み取り] 検証に必要な AWS の状態を集める（Ruby。lib/green_state.rb）。
 # Deployment を source の ARN で引き当て、Green・パラメータ 3 種・レプリカ遅延を
 # $output_dir へ書き出す。Deployment が無い／AVAILABLE でなければここで止まる。
 # **判定はしない。**判定は下の --check が行う。
-go_tool state_collector "${GREEN_STATE_COLLECTOR:-}" collect_green_state
+# 同じ内容の Go 版（scripts/collect_green_state/）も残してある。
+# 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
 state_args=(--region "$region" --source-id "$source_id"
             --target-parameter-group "$target_db_parameter_group_name" --output-dir "$output_dir")
 [[ -n "$profile" ]] && state_args+=(--profile "$profile")
-green_state=$("$state_collector" "${state_args[@]}")
+green_state=$(ruby "$(dirname "$0")/collect_green_state.rb" "${state_args[@]}")
 eval "$green_state"   # DEPLOYMENT_ID / GREEN_INSTANCE_ID / GREEN_ENDPOINT
 
 # [DB 読み取り・任意] Green の MySQL 実効値を収集する。レポートにのみ載せ、判定には使わない。
-# 接続方式は設定ファイルの mysql_verification が決める（parameter_store / plaintext /
-# prompt）。--mysql-user を明示した場合は呼び出し側の環境変数を使う（後方互換）。
-mysql_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" mysql-verification "$config" "$service")
-eval "$mysql_vars"
-# 実効値収集の有効・無効をログへ残す（CI のログで後から確認できるように）。
-# 接続方式までで、ユーザー名・パラメータ名・パスワードは出さない。
-echo "mysql_verification.enabled=${MYSQL_VERIFY_ENABLED} auth_method=${MYSQL_VERIFY_AUTH}"
-if [[ -n "$mysql_user" ]]; then
-  echo 'mysql_verification: --mysql-user の指定により、呼び出し側の接続情報で収集する。'
-  MYSQL_VERIFY_USER="$mysql_user"
-  MYSQL_VERIFY_PASSWORD="${!mysql_password_env:-}"
-  MYSQL_VERIFY_ENABLED=true
-elif [[ "$MYSQL_VERIFY_ENABLED" == true ]]; then
-  resolve_mysql_credentials "$region" "$profile"
-fi
-if [[ "$MYSQL_VERIFY_ENABLED" == true && -z "$runtime_values_file" ]]; then
-  go_tool runtime_collector "${GREEN_RUNTIME_COLLECTOR:-}" collect_green_runtime_values
-  collect_args=(--template "$target_parameter_group_template_path" --host "$GREEN_ENDPOINT"
-                --port "$MYSQL_VERIFY_PORT" --user "$MYSQL_VERIFY_USER"
-                --password-env MYSQL_VERIFY_PASSWORD --collector "$runtime_collector"
-                --output "$output_dir/green-runtime-values.json")
-  # TLS は常に検証する（VERIFY_CA 相当）。未指定ならバイナリ内蔵の RDS トラストストアを使う。
-  [[ -n "$MYSQL_VERIFY_SSL_CA" ]] && collect_args+=(--ssl-ca "$MYSQL_VERIFY_SSL_CA")
-  export MYSQL_VERIFY_PASSWORD
+# 収集するか・接続情報（parameter_store / plaintext / prompt）の解決・収集の実行は
+# collect_green_runtime_values.rb が設定ファイルの mysql_verification を読んで行う。
+# 無効なら何もせず、出力ファイルも作らない。--runtime-values-file を渡せば収集しない。
+if [[ -z "$runtime_values_file" ]]; then
+  runtime_values="$output_dir/green-runtime-values.json"
+  rm -f "$runtime_values"   # 前回の結果を今回の結果と取り違えないため
+  runtime_args=(--config "$config" --service "$service" --host "$GREEN_ENDPOINT"
+                --region "$region" --output "$runtime_values")
+  [[ -n "$profile" ]] && runtime_args+=(--profile "$profile")
+  [[ -n "$mysql_user" ]] && runtime_args+=(--mysql-user "$mysql_user" --mysql-password-env "$mysql_password_env")
   # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
-  ruby "$(dirname "$0")/collect_green_runtime_values.rb" "${collect_args[@]}"
-  unset MYSQL_VERIFY_PASSWORD
-  runtime_values_file="$output_dir/green-runtime-values.json"
+  ruby "$(dirname "$0")/collect_green_runtime_values.rb" "${runtime_args[@]}"
+  if [[ -f "$runtime_values" ]]; then runtime_values_file=$runtime_values; fi
 fi
 
 # 検証とレポート生成（Go。--check と --output の併用）。
 # 収集結果は --input-dir で渡し、設定の宣言値は --expect-* で渡す。
 # 不適合があればレポートの「0. 検証結果」に出たうえで、終了コード 1 が返る。
-go_tool report_generator "${GREEN_REPORT_GENERATOR:-}" generate_green_verification_report
+# CloudFormation テンプレートの読み取り（scripts/internal/cfn）を実効値の収集器と
+# 共有するため、Go のままにしている。
+# バイナリの場所は resolve_green_tools.rb が決める。CI は BuildReportTool が作ったものを
+# GREEN_REPORT_GENERATOR で受け取る。指定が無いローカル実行でだけ、その場でビルドする。
+green_tools=$(ruby "$(dirname "$0")/lib/resolve_green_tools.rb" --build-missing generate_green_verification_report)
+eval "$green_tools"   # GREEN_REPORT_GENERATOR
 report_args=(--check --input-dir "$output_dir"
              --template "$target_parameter_group_template_path"
              --expect-engine-version "$target_engine_version"
@@ -135,7 +105,7 @@ report_args=(--check --input-dir "$output_dir"
              --expect-parameter-group "$target_db_parameter_group_name"
              --output "$output_dir/green-verification-report.md")
 [[ -n "$runtime_values_file" ]] && report_args+=(--runtime-values "$runtime_values_file")
-if ! "$report_generator" "${report_args[@]}"; then
+if ! "$GREEN_REPORT_GENERATOR" "${report_args[@]}"; then
   echo "Artifacts: $output_dir"
   echo 'VERIFY FAILED: レポートの「0. 検証結果」を確認する。' >&2
   exit 1

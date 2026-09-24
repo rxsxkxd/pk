@@ -168,7 +168,7 @@ GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_rep
 unset MYSQL_PASSWORD
 ```
 
-TLS CA を指定した MySQL 実効値収集が必要な場合は、先に `collect_green_runtime_values.sh --help` を確認して収集結果 JSON を作成し、`verify_green.sh --runtime-values-file <file>` を使う。
+MySQL 実効値収集の有効・無効、接続方式、TLS の CA（`ssl_ca`）は config の `mysql_verification` で指定し、`verify_green.sh` がそのまま使う。別途作成した収集結果 JSON を使う場合は `verify_green.sh --runtime-values-file <file>` を渡す。
 
 ## 6. Step 4 相当: 切替前の人手検証
 
@@ -267,7 +267,7 @@ unset MYSQL_PASSWORD
 | `collect_mysql84_parameter_inputs.sh` | Step 2 のパラメータグループ生成入力の収集。Phase 1 手順書を参照。 |
 | `check_target_parameter_group.sh` | 本書の Step 1。BuildGreen の直前に実行。 |
 | `build_green.sh` | 本書の Step 2 の入口。内部で `create_blue_green_deployment.sh` を呼ぶ。 |
-| `verify_green.sh` | 本書の Step 3 の入口。必要に応じて `collect_green_runtime_values.sh` を呼ぶ。 |
+| `verify_green.sh` | 本書の Step 3 の入口。必要に応じて `collect_green_runtime_values.rb` を呼ぶ。 |
 | `switchover.sh` | 本書の Step 5 の入口。内部で `switchover_blue_green_deployment.sh` を呼ぶ。 |
 | `cleanup.sh` | 本書の Step 7 の入口。 |
 

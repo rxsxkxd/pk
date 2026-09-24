@@ -290,7 +290,7 @@ aws rds describe-db-instances --db-instance-identifier <blue-id> \
 | 設定 YAML | **読むパラメータ名** | `config/blue-green/<env>.deployment.yml` の `services.<name>.mysql_verification` | **サービス（= 移行対象 DB）ごと** |
 | CloudFormation | `ssm:GetParameter` を許す**階層** | `MySqlCredentialsParameterPath` | スタック（= 環境）単位 |
 
-実際の取得は `scripts/lib/mysql_credentials.sh` が行う。config から解決した名前をそのまま使い、**CloudFormation から名前を受け取ることはしない。**
+実際の取得は `scripts/collect_green_runtime_values.rb` が行う。config から解決した名前をそのまま使い、**CloudFormation から名前を受け取ることはしない。**
 
 ```bash
 aws ssm get-parameter --name "<parameter_name>"      --with-decryption   # パスワード

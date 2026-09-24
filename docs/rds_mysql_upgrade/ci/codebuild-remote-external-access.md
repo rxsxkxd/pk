@@ -52,7 +52,7 @@ RDS API の認可は DB 接続ユーザーではなく、すべて CodeBuild サ
 
 MySQL 接続は、Secrets Manager secret の JSON にある `username` と `password` を、`MYSQL_USER`／`MYSQL_PASSWORD` として当該シェルプロセスにだけ渡して行う。パスワードは CodeBuild の通常環境変数、コマンド引数、artifact へ保存しない。
 
-現行の `ci/codebuild/verify-green.yml` は `--ssl-ca` や `--ssl-mode=VERIFY_CA` を `collect_green_runtime_values.sh` に渡していない。そのため、CA を用いたサーバー証明書検証はスクリプトの現行経路では強制されない。RDS MySQL 接続に証明書検証を必須とする場合は、RDS CA bundle を安全に CodeBuild へ供給し、`--ssl-ca` を渡す実装とする必要がある。
+> 追記: 上の Secrets Manager を使う記述は旧方式である。現行の接続情報は SSM Parameter Store から `scripts/collect_green_runtime_values.rb` が解決する（`auth_method`。Secrets Manager は対応しない）。TLS は収集バイナリが**常に VERIFY_CA 相当で検証する**（RDS のトラストストアを焼き込み済み。config の `ssl_ca` で差し替え可能）。
 
 また、DB は通常 VPC 内にあるため、`CollectMySqlRuntimeValues=true` の場合は `VerifyGreenProject` に Green DB へ到達可能な subnet と security group の `VpcConfig` が必要である。DB の security group は CodeBuild の security group から MySQL ポートへの到達だけを許可する。
 

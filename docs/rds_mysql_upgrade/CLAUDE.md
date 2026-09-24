@@ -22,9 +22,9 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 |---|---|---|---|
 | 1 | 既存 Blue の成立条件チェック | ローカル | `collect_blue_green_prereqs.sh` → `evaluate_blue_green_prereqs.rb` |
 | 2 | 8.4 パラメータグループの整理・生成・CFn 適用 | ローカル | `collect_mysql84_parameter_inputs.sh` → `generate_mysql84_parameter_group.rb` |
-| 3 | 保護スナップショット＋Blue/Green 作成 | CI | `build_green.sh` → `create_blue_green_deployment.sh` |
+| 3 | 保護スナップショット＋Blue/Green 作成 | CI | `build_green.sh` → `create_blue_green_deployment.rb` |
 | 4 | Green 構成・レプリカ同期の検証 | CI | `verify_green.sh` |
-| 5 | 切替 | CI（承認付き） | `switchover.sh` → `switchover_blue_green_deployment.sh` |
+| 5 | 切替 | CI（承認付き） | `switchover.sh` → `switchover_blue_green_deployment.rb` |
 | 6 | Green ヘルスチェック | CI（AWS API）＋ローカル（DB 接続） | 未実装 |
 | 7 | 後始末（旧 Blue 削除） | **ローカル（ツール）** | `tools/cleanup.sh`（パイプラインからは外した） |
 
@@ -37,7 +37,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - **宣言と実環境の突き合わせ（reconciliation）。** 設定ファイルは進捗の記録ではなく「このアクションを実行してよい」という人間の宣言（`pending` / `approved`）を持つ。CI は毎回 AWS の実状態を読み、未適用なら適用、適用済みなら何もしない。**CI が設定ファイルへ書き戻すことはしない。** `approved` → `pending` に戻しても適用済みのものは取り消さない。
 - **識別子は AWS から引き当てる。** Deployment ID を設定ファイルに持たず、`describe-blue-green-deployments --filters Name=source,Values=$source_arn` で毎回解決する。これにより再実行・リトライ・同時トリガーで二重作成・二重切替が起こらない。
 - **冪等性は二層で担保する。** ① 移行元インスタンスのエンジンバージョンとパラメータグループで「結果」を観測し（**実装は `scripts/lib/migration_phase.rb` の 1 本**。シェルの呼び出し側 4 本は `ruby scripts/lib/migration_phase.rb resolve ...` を直接呼ぶ。以前あったシェルの委譲ラッパー `migration_phase.sh` は廃止した）、② Deployment の `Status` を安全弁として併用する。切替時に blue が `-old1` へリネームされるため、`source_db_instance_identifier` が指す実体は切替の前後で変わる。この判定は Deployment が cleanup で削除された後も機能する。**終了コードは「操作を実行したか」ではなく「望ましい終了状態に到達しているか」で決める**（到達 = `0`、未到達かつ自動では到達不能 = `1`）。設計の背景は `decisions/idempotency-strategy.md`。
-- **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。MySQL 接続は設定ファイルの `mysql_verification` が制御する（既定 `enabled: false`）。パスワードの取得方法は `auth_method` で選ぶ（`parameter_store` / `plaintext` / `prompt`）。**読むパラメータ名は config（サービスごと）が決め、CloudFormation の `MySqlCredentialsParameterPath` は `ssm:GetParameter` を許す階層（例 `/rds-bg/staging`）にすぎない**——パイプラインは環境ごとに 1 本なので、その環境の全サービスのパラメータを同じ階層の下に置く。ARN のリストにしないのは、CloudFormation にリストの各要素へ `!Sub` をかける手段が無く、名前から ARN を組めないためである（階層 1 つなら `!Sub` で組める）。**この階層には移行作業用のパラメータだけを置く**（配下すべてが読めるため）。SecureString がカスタマー管理キーなら `MySqlCredentialsKmsKeyArn` も渡す（`kms:ViaService` で SSM 経由に限定した `kms:Decrypt` が付く。AWS 管理キーなら不要で、復号は SSM 側なので `kms` の VPC endpoint は要らない）。**`parameter_store` ではユーザー名も必ず秘匿側へ置く**——`parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` では config の `user` が必須である。解決は `scripts/lib/mysql_credentials.sh` が担い、値は `MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。**`plaintext` は設定ファイルが Git 追跡対象であるためテスト環境専用で、`environment: production` では拒否される。** **カタログからの生成（`generate_blue_green_config`）は `auth_method: parameter_store` 固定で出力する。**`secrets_manager` と `iam`（IAM データベース認証）は対応しない——不正な `auth_method` として拒否される。
+- **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。MySQL 接続は設定ファイルの `mysql_verification` が制御する（既定 `enabled: false`）。パスワードの取得方法は `auth_method` で選ぶ（`parameter_store` / `plaintext` / `prompt`）。**読むパラメータ名は config（サービスごと）が決め、CloudFormation の `MySqlCredentialsParameterPath` は `ssm:GetParameter` を許す階層（例 `/rds-bg/staging`）にすぎない**——パイプラインは環境ごとに 1 本なので、その環境の全サービスのパラメータを同じ階層の下に置く。ARN のリストにしないのは、CloudFormation にリストの各要素へ `!Sub` をかける手段が無く、名前から ARN を組めないためである（階層 1 つなら `!Sub` で組める）。**この階層には移行作業用のパラメータだけを置く**（配下すべてが読めるため）。SecureString がカスタマー管理キーなら `MySqlCredentialsKmsKeyArn` も渡す（`kms:ViaService` で SSM 経由に限定した `kms:Decrypt` が付く。AWS 管理キーなら不要で、復号は SSM 側なので `kms` の VPC endpoint は要らない）。**`parameter_store` ではユーザー名も必ず秘匿側へ置く**——`parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` では config の `user` が必須である。解決は `scripts/collect_green_runtime_values.rb` が担い（設定の読み取り・SSM からの取得・対話入力まで）、値は環境変数で実効値収集バイナリのプロセスにだけ渡す。**`plaintext` は設定ファイルが Git 追跡対象であるためテスト環境専用で、`environment: production` では拒否される。** **カタログからの生成（`generate_blue_green_config`）は `auth_method: parameter_store` 固定で出力する。**`secrets_manager` と `iam`（IAM データベース認証）は対応しない——不正な `auth_method` として拒否される。
 - **RDS パラメータグループの変更経路は CloudFormation のみ。** Blue/Green Deployment 自体は CFn カスタムリソースを使わず AWS CLI で扱う。
 - 破壊的 RDS 権限（`rds:DeleteDBInstance` 等）は**パイプラインのどの実行ロールも持たない。**Step 7（後始末）はパイプラインから外して人が実行するツール `tools/cleanup.sh` にしたため、実行する作業者がこの権限を持つロールを引き受ける。不可逆な削除を、切り戻し不要の判断・逆方向レプリケーションの確認と一体で人が行うためである。ツールも `actions.cleanup: approved` の宣言が無ければ何もしない。
 - **移行元が拡張モニタリング（Enhanced Monitoring）を使っている場合、Step 3 の実行ロールに `iam:PassRole` が要る。**Blue/Green 作成時に RDS が Green へその設定をコピーするためで、無いと `create-blue-green-deployment` が `AccessDenied` で失敗する。`codepipeline-all-in-one.yml` の `RdsMonitoringRoleName`（既定 `rds-monitoring-role`、空なら付与しない）で対象を指定し、`iam:PassedToService: monitoring.rds.amazonaws.com` の Condition で渡し先を固定する。
@@ -93,9 +93,9 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
   https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
 ```
 
-`scripts/collect_green_runtime_values.sh` はバイナリの場所を決めてパスワードを環境変数で渡すだけの薄いラッパーである。パスワードはコマンド引数・成果物に出さない。`auth_method: prompt` のときはここで対話入力を促す（エコーしない）。
+`scripts/collect_green_runtime_values.rb` は `--config` / `--service` / `--host` を受け取り、`mysql_verification` を読んで**収集するか・接続情報の解決・収集バイナリの起動**までを行う（無効なら何もせず、出力ファイルも作らない）。`verify_green.sh` は呼ぶだけで、MySQL の接続情報を扱わない。パスワードはコマンド引数・標準出力・成果物に出さず、環境変数で収集バイナリへ渡す。`auth_method: prompt` のときは対話入力を促す（エコーしない）。**端末が無い（CI）のに対話入力が要る場合は待たずに止まる。**
 
-**Step 4 の突き合わせは Go 側にある。**エンジンバージョン・インスタンスクラス・パラメータグループの関連付けと適用状態・レプリカ遅延、そして CloudFormation 宣言値と RDS の実値の比較は、すべてレポート生成器が行う。`verify_green.sh` は AWS から JSON を落として渡すだけで、**判定を持たない**。
+**Step 4 の突き合わせは Go のレポート生成器（判定器）にある。**エンジンバージョン・インスタンスクラス・パラメータグループの関連付けと適用状態・レプリカ遅延、そして CloudFormation 宣言値と RDS の実値の比較は、すべてレポート生成器が行う。`verify_green.sh` は AWS から JSON を落として渡すだけで、**判定を持たない**。
 
 フラグで動作を選ぶ。**両方を同時に指定できる。**
 
@@ -119,21 +119,21 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 
 **実効値の有無で変わるのはこの列だけで、判定は AWS API から取得した値で行う。**リモートでも判定内容は変わらない。この性質は `tests/cfn_shorthand_test.sh` が両形態を突き合わせて固定しているので、**レポート生成器を変更したら両形態のテストを通すこと。**
 
-**Step 4 が使う Go バイナリは 3 本で、どれも `BuildReportTool` が作って artifact で渡す。**収集（2 本）と判定（1 本）が別コマンドになっている。
+**Step 4 は収集（2 本）と判定（1 本）が別コマンドになっている。**このうち AWS の状態収集だけは **Ruby 版 `scripts/collect_green_state.rb` を `verify_green.sh` が `ruby` で直接呼ぶ。**Go 版も同じ内容で残してあり、**どちらを変えてももう一方へ同じ変更を入れる**（`tests/green_tools_go_rb_parity_test.sh` が終了コード・標準出力・標準エラー・書き出すファイル・AWS CLI の呼び出し引数の一致を検査する）。**判定器（レポート生成器）と実効値収集器は Go である。**どちらも CloudFormation テンプレートの読み取り（`scripts/internal/cfn`）を使うため、Ruby へ移すと同じ読み取りを Ruby でも持つことになり、実装が増えるだけだからである。3 本とも `BuildReportTool` がビルドして artifact で渡す（状態収集の Go 版は、残している間は引き続きビルドする）。
 
 | バイナリ | ソース | 役割 | 受け取る環境変数 |
 |---|---|---|---|
-| `collect_green_state` | `scripts/collect_green_state/`（ロジックは `scripts/internal/greenstate`） | **AWS の状態収集**。Deployment を source ARN で引き当て、Green・パラメータ 3 種・レプリカ遅延を JSON 一式で書き出す | `GREEN_STATE_COLLECTOR` |
+| `collect_green_state` | **実行は Ruby**: `scripts/collect_green_state.rb`（ロジックは `scripts/lib/green_state.rb`）。Go 版 `scripts/collect_green_state/`（`scripts/internal/greenstate`）は残置 | **AWS の状態収集**。Deployment を source ARN で引き当て、Green・パラメータ 3 種・レプリカ遅延を JSON 一式で書き出す | `GREEN_STATE_COLLECTOR` |
 | `collect_green_runtime_values` | `scripts/collect_green_runtime_values/` | Green DB の実効値収集 | `GREEN_RUNTIME_COLLECTOR` |
 | `generate_green_verification_report` | `scripts/generate_green_verification_report/` | 突き合わせ（`--check`）とレポートの組み立て。**AWS を呼ばない** | `GREEN_REPORT_GENERATOR` |
 
-`collect_green_state` の出力ディレクトリは判定器の **`--input-dir`** でそのまま渡せる（ファイル名は `greenstate` の定数で揃えてある。**名前を変えるときは両方を変える**）。`verify_green.sh` に残るのは、引数と設定の読み取り、**フェーズ判定**（`build_green` / `switchover` / `cleanup` と共有する判定のため Go へ移さない。実装は `lib/migration_phase.rb`）、MySQL 接続情報の解決、3 本の呼び出しだけである。
+`collect_green_state` の出力ディレクトリは判定器の **`--input-dir`** でそのまま渡せる（ファイル名は `lib/green_state.rb` と Go の `greenstate` の定数で揃えてある。**名前を変えるときは収集器の Go / Ruby と判定器をすべて変える**）。`verify_green.sh` に残るのは、引数と設定の読み取り、**フェーズ判定**（`build_green` / `switchover` / `cleanup` と共有する判定のため Go へ移さない。実装は `lib/migration_phase.rb`）、MySQL 接続情報の解決、3 本の呼び出しだけである。
 
-**VerifyGreen はどれもビルドしない。**1 本でも欠けていれば理由を出して停止する（Go も外部ネットワークも持たない前提のため、自動復旧しない）。ローカル実行で環境変数を指定しなかった場合だけ、各スクリプトが一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
+**VerifyGreen はどれもビルドしない。**`BuildReportTool` が作った 3 本のうち 1 本でも欠けていれば理由を出して停止する（Ruby へ切り替えた状態収集の Go バイナリも、Go 版を残している間は同じく要求する）（Go も外部ネットワークも持たない前提のため、自動復旧しない）。ローカル実行で環境変数を指定しなかった場合だけ、各スクリプトが一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
 
 **CodeBuild のイメージは全プロジェクトで `aws/codebuild/standard:7.0` 固定である。**カスタムイメージを指定する経路はテンプレートから削除してある（`VerifyGreenImage` パラメータ・`ImagePullCredentialsType`・ECR 読み取り権限を撤去）。同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持ち、欠けていた mysql クライアントは Go バイナリで置き換えたためである。旧方式の `ci/Dockerfile.verify-green` は**未使用のまま参考として残している**（冒頭にその旨を明記）。
 
-**CloudFormation テンプレートの読み取りは `internal/cfn` が担う。**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化し、値が組み込み関数の項目は「比較不能」として比較対象から外す。レポート生成器の `--list-parameter-names` が `scripts/internal/cfn` を、`tools/generate_blue_green_config_report` が `tools/internal/cfn` を使う。**この 2 本は同一内容の複製なので、短縮記法の扱いを変えるときは両方を直す**（`tests/cfn_shorthand_test.sh` が一致を検査する）。
+**CloudFormation テンプレートの読み取りは `internal/cfn` が担う。**短縮記法（`!Ref` / `!Sub`）を長形式へ正規化し、値が組み込み関数の項目は「比較不能」として比較対象から外す。レポート生成器・実効値収集器が `scripts/internal/cfn` を、`tools/generate_blue_green_config_report` が `tools/internal/cfn` を使う。**この 2 本は同一内容の複製なので、短縮記法の扱いを変えるときは両方を直す**（`tests/cfn_shorthand_test.sh` が一致を検査する）。
 
 ## 実行方法
 
@@ -159,7 +159,7 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
     config_region=required:aws_region)
   eval "$config_vars"
   ```
-- `mysql_verification` は検証を伴うので専用のサブコマンド `mysql-verification <config> <service>` が `MYSQL_VERIFY_*` を出す（auth_method の検証・production での plaintext 拒否もここ）。パスワード等の解決（SSM 呼び出し）はシェル側の `scripts/lib/mysql_credentials.sh` の `resolve_mysql_credentials` が行う
+- `mysql_verification` は検証を伴うので専用のサブコマンド `mysql-verification <config> <service>` が `MYSQL_VERIFY_*` を出す（auth_method の検証・production での plaintext 拒否もここ）。パスワード等の解決（SSM 呼び出し）は `scripts/collect_green_runtime_values.rb` が行う
 - 値から導く既定値（例: `cleanup.sh` の `final_snapshot_id` の `<source_id>-final`）は宣言に含めず、読み取り後にシェルで補う
 - **`eval "$(...)" と 1 行で書かない。**その形はコマンド置換の失敗を `eval` の終了コードが覆い隠すため、**読み取りが失敗しても `set -e` をすり抜けて「変数が空のまま先へ進む」。**いったん変数へ受けてから `eval` する。同じ理由で、buildspec 内で外部コマンドの出力を `eval` するときも 2 行に分ける（`tests/deployment_config_test.sh` が 2 行の形で停止することを検査している）
 - AWS 応答などの JSON → jq で直接読む
@@ -221,11 +221,17 @@ tests/migration_phase_test.sh
 # 設定 YAML の読み取りテスト（AWS へ接続しない）
 tests/deployment_config_test.sh
 
-# MySQL 接続方式の解決テスト（AWS へ接続しない）
+# MySQL 接続方式の検証と、解決から収集までの流れのテスト（AWS へも DB へも接続しない）
 tests/mysql_credentials_test.sh
+
+# Step 3 の分岐（承認・フェーズ判定・Deployment の状態・保護スナップショット）のテスト
+tests/build_green_test.sh
 
 # CloudFormation 短縮記法（!Ref / !Sub）を 3 実装が同じに解釈するかのテスト
 tests/cfn_shorthand_test.sh
+
+# Step 4 の状態収集の Go 版と Ruby 版が同じに振る舞うかのテスト（AWS へ接続しない）
+tests/green_tools_go_rb_parity_test.sh
 
 # 変数展開の直後に全角文字が来ていないかの点検（`$VAR）` は変数名の一部と解釈され
 # set -u 下で unbound variable になる。`${VAR}）` と書く）

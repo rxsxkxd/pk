@@ -106,6 +106,40 @@ snippet=$(ruby -ryaml -e '
   bash -c "cd '$OLDPWD'; $snippet" ) >/dev/null 2>&1
 check_status 'buildspec の受け取りが失敗を捕まえる' 1 $?
 
+# --- ⑧ --build-missing（verify_green.sh 用）----------------------------------
+# 偽の go: 呼び出しを記録し、-o の先に空のファイルを作る。本物のビルドはしない。
+mkdir -p "$work/gobin"
+cat > "$work/gobin/go" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> '$work/go.log'
+while [ \$# -gt 0 ]; do [ "\$1" = -o ] && : > "\$2"; shift; done
+EOF
+chmod +x "$work/gobin/go"
+run_build() { env -i PATH="$work/gobin:$PATH" HOME="$HOME" GREEN_TOOLS_BUILD_DIR="$work/built" "$@" \
+  ruby scripts/lib/resolve_green_tools.rb --build-missing "$GEN"; }
+
+rm -f "$work/go.log"
+out=$(run_build GREEN_REPORT_GENERATOR="$work/given/$GEN" 2>/dev/null); status=$?
+check_status '--build-missing: 指定があれば使う' 0 "$status"
+check '--build-missing: 指定したパスを返す' "GREEN_REPORT_GENERATOR=$work/given/$GEN" "$out"
+[[ ! -e "$work/go.log" ]] && echo 'ok    --build-missing: 指定があればビルドしない' \
+  || { echo 'FAIL  --build-missing: 指定があるのにビルドした'; failed=$((failed + 1)); }
+
+out=$(run_build 2>"$work/e8"); status=$?
+check_status '--build-missing: 無ければビルドする' 0 "$status"
+check '--build-missing: ビルド先のパスを返す' "GREEN_REPORT_GENERATOR=$work/built/$GEN" "$out"
+check '--build-missing: 対象パッケージをビルドする' "./scripts/$GEN" "$(cat "$work/go.log" 2>/dev/null)"
+check '--build-missing: ビルドしたと伝える' 'Building the report generator locally' "$(cat "$work/e8")"
+lines=$(printf '%s\n' "$out" | grep -c .)
+[[ "$lines" -eq 1 ]] && echo 'ok    --build-missing: 標準出力は指定した 1 本だけ' \
+  || { echo "FAIL  --build-missing: 標準出力が ${lines} 行"; failed=$((failed + 1)); }
+
+ruby_bin=$(ruby -e 'print RbConfig.ruby')
+env -i PATH=/nonexistent HOME="$HOME" GREEN_TOOLS_BUILD_DIR="$work/built2" \
+  "$ruby_bin" scripts/lib/resolve_green_tools.rb --build-missing "$GEN" >/dev/null 2>"$work/e9"; status=$?
+check_status '--build-missing: Go が無ければ失敗' 1 "$status"
+check '--build-missing: 渡し方を案内する' 'GREEN_REPORT_GENERATOR でビルド済みバイナリを渡すこと' "$(cat "$work/e9")"
+
 echo
 if [[ "$failed" -eq 0 ]]; then echo 'すべて期待どおり。'; exit 0; fi
 echo "不適合: ${failed} 件" >&2; exit 1

@@ -1,7 +1,7 @@
 # CodeBuild Step 3/4/5 用の軽量な実行 image。
 # Docker CLI/Buildx は VerifyGreen の Go バイナリ用マルチステージビルドに使う。
 FROM docker:27.5-cli AS docker-cli
-FROM public.ecr.aws/aws-cli/aws-cli:2.36.37 AS aws-cli
+FROM public.ecr.aws/aws-cli/aws-cli:2.37.1 AS aws-cli
 
 # 設定 YAML の読み取りに使う Ruby。compose.yaml の ruby サービスと同じ版で固定する。
 # YAML / JSON はどちらも標準ライブラリなので、追加パッケージの導入は要らない。

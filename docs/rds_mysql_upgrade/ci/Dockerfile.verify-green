@@ -45,7 +45,7 @@
 #   CloudFormation の VerifyGreenImage へそのタグを渡す
 #   （ImagePullCredentialsType: SERVICE_ROLE で引くため、ECR 読み取り権限は
 #     テンプレートが VerifyGreenRole へ条件付きで付与する）
-FROM public.ecr.aws/aws-cli/aws-cli:2.36.37 AS aws-cli
+FROM public.ecr.aws/aws-cli/aws-cli:2.37.1 AS aws-cli
 
 # 設定 YAML の読み取りに使う Ruby。compose.yaml と同じ版で固定する。
 # YAML / JSON はどちらも標準ライブラリなので gem の追加導入は要らない。

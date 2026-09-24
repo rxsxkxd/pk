@@ -9,7 +9,7 @@ name: rds-mysql-upgrade-tools
 # STS の一時認証情報は環境変数として渡す（ファイルを書き換えないため read_only 方針と両立する）。
 services:
   awscli:
-    image: public.ecr.aws/aws-cli/aws-cli:2.32.25
+    image: public.ecr.aws/aws-cli/aws-cli:2.37.1
     entrypoint: ["aws"]
     working_dir: /workspace
     environment:

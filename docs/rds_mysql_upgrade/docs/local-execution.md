@@ -2,7 +2,7 @@
 
 リポジトリルートの `compose.yaml`、`aws-config/`(ディレクトリ)、`global-bundle.pem`・`my.cnf`(ファイル)は、AWS CLI、`mysql`、`mysqlsh` をローカルインストールせずに実行するためのものです。DB インスタンスやパラメータグループを作成・変更する権限を付与するものではありません。実行できる AWS 操作は、マウントした認証情報に付与された IAM 権限に従います。
 
-使用するコンテナは 4 つである。`public.ecr.aws/aws-cli/aws-cli:2.32.25`、MySQL CLI と MySQL Shell を同梱する公式イメージ `mysql:8.4.11`、`ruby:3.4.10-slim-bookworm`、`golang:1.25` を使用する。`latest` タグは使用しない。AWS CLI・MySQL・Ruby はパッチバージョンまで、Go はマイナーまでを固定する。**Ruby は `slim` バリアントに統一している**（このリポジトリで使うのは標準ライブラリの psych / json だけで、full イメージの同梱物を必要としない）。
+使用するコンテナは 4 つである。`public.ecr.aws/aws-cli/aws-cli:2.37.1`、MySQL CLI と MySQL Shell を同梱する公式イメージ `mysql:8.4.11`、`ruby:3.4.10-slim-bookworm`、`golang:1.25` を使用する。`latest` タグは使用しない。AWS CLI・MySQL・Ruby はパッチバージョンまで、Go はマイナーまでを固定する。**Ruby は `slim` バリアントに統一している**（このリポジトリで使うのは標準ライブラリの psych / json だけで、full イメージの同梱物を必要としない）。
 
 > 現時点では定義ファイルと手順のみを用意しており、イメージの取得・実行検証は未実施である。MySQL 用の Dockerfile は不要であり、初回実行時に `mysql:8.4.11` が取得される。
 
@@ -110,7 +110,7 @@ docker run --rm -it \
   -v "$AWS_CONFIG_DIR:/root/.aws:ro" \
   -v "$(pwd):/workspace" -w /workspace \
   -e AWS_SDK_LOAD_CONFIG=1 -e AWS_PROFILE="${AWS_PROFILE:-default}" \
-  public.ecr.aws/aws-cli/aws-cli:2.32.25 \
+  public.ecr.aws/aws-cli/aws-cli:2.37.1 \
   rds describe-db-instances --db-instance-identifier <blue-instance-id>
 
 # mysql（RDS CA と接続設定を read-only マウント）

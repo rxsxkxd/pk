@@ -128,7 +128,7 @@ aws rds modify-db-instance \
 aws rds wait db-instance-available --db-instance-identifier verify-mysql84
 ```
 
-**アップグレードが失敗したら、それ自体が検証結果である。** RDS は事前チェックを行い、失敗するとイベントに理由が出る。
+**アップグレードが失敗したら、それ自体が検証結果である。** RDS 自身がアップグレード前の検査（RDS の prechecks。本リポジトリの成立条件チェック・構築前チェックとは別物）を行い、失敗するとイベントに理由が出る。
 
 ```sh
 aws rds describe-events --source-identifier verify-mysql84 \

@@ -11,6 +11,8 @@
 | Step | ツール | 言語 | AWS | 用途 | ゲート |
 |---|---|---|---|---|---|
 | 1 | [`collect_blue_green_prereqs.sh`](#collect_blue_green_prereqssh) | Bash | 読み取りのみ | Blue/Green の成立条件に要る情報を収集 | — |
+| 1 | [`collect_blue_mysql_state`](#collect_blue_mysql_state) | Go（`mysql` を exec） | 呼ばない（Blue の MySQL へ接続） | AWS API では見えない項目を MySQL から収集 | — |
+| 1 | [`collect_blue_upgrade_check`](#collect_blue_upgrade_check) | Go（`mysqlsh` を exec） | 呼ばない（Blue の MySQL へ接続） | MySQL Shell のアップグレードチェッカーを実行 | — |
 | 1 | [`evaluate_blue_green_prereqs.rb`](#evaluate_blue_green_prereqsrb) | Ruby | 呼ばない | 収集結果を判定し、レポートを出す | ① |
 | 2 | [`collect_mysql84_parameter_inputs.sh`](#collect_mysql84_parameter_inputssh) | Bash | 読み取りのみ | 8.0 パラメータグループと既定値を収集 | — |
 | 2 | [`generate_mysql84_parameter_group.rb`](#generate_mysql84_parameter_grouprb) | Ruby | 呼ばない | 8.4 用 CloudFormation テンプレートとレポートを生成 | ① |
@@ -27,7 +29,7 @@
 |---|---|
 | `0` | 成功（判定系では「不適合なし」） |
 | `1` | 判定系では不適合あり。収集系では AWS CLI・入力の失敗 |
-| `2` | 使い方の誤り（引数不足・不明な引数）。Go の 3 本と `cleanup.sh` |
+| `2` | 使い方の誤り（引数不足・不明な引数）。Go のコマンドと `cleanup.sh` |
 
 ゲート①〜③の意味とレポートの生成元は [report-generation-flows.md](../report-generation-flows.md) にある。
 
@@ -55,6 +57,61 @@ tools/collect_blue_green_prereqs.sh \
 - **出力**: `db-instance.json`、`all-db-instances.json`、`db-parameters.json`、`option-group.json`、`orderable-classes.json`、`db-proxies.json`、`db-proxy-targets-<n>.json`、`integrations.json`、`free-storage-space.json`、`metadata.json`。最後に保存先を表示する
 - **終了コード**: `0` 収集完了 / `0` 以外 AWS CLI の失敗
 - **詳細**: 各取得処理を 1 つずつ手で実行する手順は [collect_blue_green_prereqs.md](collect_blue_green_prereqs.md)。チェック項目の背景は [phase-0-precheck.md](../docs/phase-0-precheck.md)
+
+### MySQL 側の収集（2 本。**用意のみ。判定にはまだ組み込んでいない**）
+
+成立条件チェックは **AWS 側（上）と MySQL 側（下の 2 本）の 2 段階**である。MySQL 側は AWS API では見えない項目を、Blue へ接続して集める。どちらも**読み取りだけ**で、判定はしない。
+
+2 本は同じ接続規約に従う。
+
+- **パスワードは引数に取らない。**`--password-env` が指す環境変数（既定 `MYSQL_PASSWORD`）で渡す。`mysql` へは `MYSQL_PWD`、`mysqlsh` へは標準入力で渡る
+- TLS は **VERIFY_CA**（証明書チェーンを検証し、ホスト名は検証しない）。**`--ssl-ca` は必須**
+- `--output-dir` に `collect_blue_green_prereqs.sh` の収集先を指定すると、AWS 側の結果と同じディレクトリに並ぶ
+
+`mysql` / `mysqlsh` の両方が入っている compose の `mysql` コンテナ（`mysql:8.4.11`。RDS の CA は `/certs/rds/global-bundle.pem`）で動かす想定である。Go はコンテナに無いので、Linux 向けにビルドしたバイナリを渡す。
+
+```bash
+# ホストでビルド（コンテナのアーキテクチャに合わせる。Apple Silicon なら arm64）
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o .tools/collect_blue_mysql_state ./tools/collect_blue_mysql_state
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o .tools/collect_blue_upgrade_check ./tools/collect_blue_upgrade_check
+
+# パスワードは対話入力で環境変数へ置く（エコーしない）
+read -rs MYSQL_PASSWORD && export MYSQL_PASSWORD
+docker compose --env-file .env run --rm -e MYSQL_PASSWORD mysql \
+  .tools/collect_blue_mysql_state \
+  --host <blue-endpoint> --user <user> --ssl-ca /certs/rds/global-bundle.pem --output-dir <収集先>
+```
+
+接続ユーザーには `SELECT`・`PROCESS`・`REPLICATION CLIENT`・`SHOW VIEW`・`EVENT`・`TRIGGER` などの読み取り権限が要る（アップグレードチェッカーの検査項目による）。
+
+#### `collect_blue_mysql_state`
+
+`mysql` コマンドで次を取り、`blue-mysql-state.json` に書く。
+
+| 取るもの | 対応するチェック |
+|---|---|
+| `version`・`binlog_format` の実効値 | 0-1-02（パラメータグループの値と食い違うことがある） |
+| `SHOW REPLICA STATUS` | 0-1-06 外部 binlog レプリカ（**AWS API では確認できない**。要 `REPLICATION CLIENT`） |
+| ユーザースキーマの InnoDB 以外のテーブル | 移行ガイドの 0-2（MyISAM の棚卸し） |
+
+| オプション | 必須 | 既定値 | 内容 |
+|---|---|---|---|
+| `--host` / `--user` / `--ssl-ca` | ○ | — | 接続先 Blue、ユーザー、RDS の CA バンドル |
+| `--output-dir DIR` | ○ | — | 出力先 |
+| `--port` | | `3306` | |
+| `--password-env NAME` | | `MYSQL_PASSWORD` | パスワードを載せた環境変数の名前 |
+| `--mysql PATH` | | `mysql` | `mysql` コマンドのパス |
+| `--timeout` | | `2m` | 全体のタイムアウト |
+
+- **終了コード**: `0` 収集完了 / `1` 接続・権限・クエリの失敗（どれか 1 つでも失敗すれば何も書かない） / `2` 使い方の誤り
+
+#### `collect_blue_upgrade_check`
+
+`mysqlsh -- util check-for-server-upgrade --output-format=JSON`（移行ガイドの 0-3）を実行し、`blue-upgrade-check.json` に書く。チェッカーの JSON はそのまま `report` に入れ、件数（`error_count` / `warning_count` / `notice_count`）と `mysqlsh` の終了コードを取り出して並べる。
+
+オプションは上と同じで、`--mysql` の代わりに `--mysqlsh PATH`。加えて `--target-version`（既定 `8.4.9`。**`mysqlsh` 自身より新しい版は指定できない**）があり、`--timeout` の既定は `10m` である。
+
+- **終了コード**: `0` 収集完了（**チェッカーが問題を見つけても `0`**。件数は JSON に残る） / `1` JSON を取れなかった（接続・権限の失敗など） / `2` 使い方の誤り
 
 ### `evaluate_blue_green_prereqs.rb`
 

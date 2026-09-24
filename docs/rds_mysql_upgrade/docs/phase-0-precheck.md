@@ -1,5 +1,7 @@
 # Phase 0 — 0-1. Blue/Green の成立条件を確認
 
+> 本書の確認は**成立条件チェック**（Step 1。パイプラインを動かす前にローカルで行う）である。パイプライン中の構築前チェック・切替前検証とは別物で、呼び分けは [operations-migration-run.md](../operations-migration-run.md) の「チェックの呼び分け」にある。
+
 > 対象: Amazon RDS for MySQL 8.0.x から 8.4.x への Blue/Green Deployments を使ったメジャーアップグレード
 >
 > 目的: Blue/Green Deployments の作成リクエストが拒否される要因を、作成前にすべて解消する。

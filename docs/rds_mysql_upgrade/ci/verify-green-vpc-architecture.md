@@ -39,7 +39,7 @@ flowchart LR
 flowchart TD
     S["Source<br/>GitHub"] --> RA["ReadApprovals<br/>承認宣言を読む"]
     RA --> BRT["BuildReportTool<br/>go build（2 本）"]
-    BRT --> PC["PrecheckParameterGroup<br/>8.4 PG の事前確認"]
+    BRT --> PC["PrecheckParameterGroup<br/>構築前チェック（8.4 PG）"]
     PC --> BG["BuildGreen<br/>スナップショット + Green 作成"]
     BG --> VG["VerifyGreen<br/>構成・レプリカ・実効値の検証"]
     VG --> SW["Switchover<br/>承認付き"]

@@ -12,7 +12,9 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 
 ### Step 1〜7 の分割
 
-**実運用の手順は 2 本に集約してある。**`operations-environment-setup.md`（環境構築。CloudFormation でパイプラインを作るまで。一度だけ）と `operations-migration-run.md`（移行の実行。事前チェック・設定生成からパイプラインでの移行まで。対象ごとに繰り返す）である。**オペレーション手順を書き足すときは、まずこの 2 本のどちらかに属するかを考える。**個々のチェックの中身や背景は補足ドキュメント側に置き、2 本からはリンクする。
+**実運用の手順は 2 本に集約してある。**`operations-environment-setup.md`（環境構築。CloudFormation でパイプラインを作るまで。一度だけ）と `operations-migration-run.md`（移行の実行。成立条件チェック・設定生成からパイプラインでの移行まで。対象ごとに繰り返す）である。**オペレーション手順を書き足すときは、まずこの 2 本のどちらかに属するかを考える。**個々のチェックの中身や背景は補足ドキュメント側に置き、2 本からはリンクする。
+
+**チェックは 3 種類あり、「事前チェック」「事前確認」とひとまとめに呼ばない。**パイプライン前にローカルで行う **成立条件チェック**（Step 1。ゲート①）、パイプライン中で Blue/Green を作る直前の **構築前チェック**（ステージ `PrecheckParameterGroup`。移行先パラメータグループの存在と family）、Blue/Green 作成後・切替前の **切替前検証**（ステージ `VerifyGreen`。Step 4。ゲート③）である。定義は `operations-migration-run.md` の「チェックの呼び分け」。`precheck` を含むリソース名・ファイル名は既存のまま残しており、`docs/phase-0-precheck.md` は成立条件チェック、`PrecheckParameterGroup` は構築前チェックを指す。
 
 `docs/upgrade-flow-steps.md` が中心的な設計ドキュメントで、移行手順書の Phase 0〜5 を再実行可能な 7 ステップへ割り直している。**新しいスクリプトや CI ジョブを追加するときは、まずこのファイルの分類（実行形態・ワンストップ実行・承認要否）に照らす。**
 
@@ -59,7 +61,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 | ディレクトリ | 中身 |
 |---|---|
 | `scripts/` | CI から到達する実行スクリプトと、その共有ライブラリ（`lib/` / `internal/`）、Step 4 の Go コマンド 2 本。ビルド時の構成検査 `resolve_go_module_root.sh` もここ |
-| `tools/` | **人が手で実行するもの一式。**Step 7 の後始末（`cleanup.sh`。設定の読み取りとフェーズ判定は `scripts/lib/` を使い、複製しない）、Step 1・2 の収集・判定（`collect_blue_green_prereqs.sh` / `evaluate_blue_green_prereqs.rb` / `collect_mysql84_parameter_inputs.sh` / `generate_mysql84_parameter_group.rb`）、Blue/Green 設定の Go コマンド（`collect_rds_instance_inventory` / `generate_blue_green_config` / `generate_blue_green_config_report`）と、そのライブラリ（`internal/`）。**使い方の索引は `tools/README.md`**（ツールごとの用途・入出力・主なオプション・終了コードと詳細ドキュメントへのリンク）。Step 1 の取得処理を 1 つずつ実行する手順は `tools/collect_blue_green_prereqs.md` |
+| `tools/` | **人が手で実行するもの一式。**Step 7 の後始末（`cleanup.sh`。設定の読み取りとフェーズ判定は `scripts/lib/` を使い、複製しない）、Step 1・2 の収集・判定（`collect_blue_green_prereqs.sh` / `evaluate_blue_green_prereqs.rb` / 成立条件チェックの MySQL 側の収集 `collect_blue_mysql_state`（`mysql` を exec）・`collect_blue_upgrade_check`（`mysqlsh` を exec。ロジックは `internal/mysqlcli`。判定には未接続）/ `collect_mysql84_parameter_inputs.sh` / `generate_mysql84_parameter_group.rb`）、Blue/Green 設定の Go コマンド（`collect_rds_instance_inventory` / `generate_blue_green_config` / `generate_blue_green_config_report`）と、そのライブラリ（`internal/`）。**使い方の索引は `tools/README.md`**（ツールごとの用途・入出力・主なオプション・終了コードと詳細ドキュメントへのリンク）。Step 1 の取得処理を 1 つずつ実行する手順は `tools/collect_blue_green_prereqs.md` |
 | `tests/` | テスト一式 |
 
 **`scripts/internal/` と `tools/internal/` は共有しない。**CI から到達する側と人が実行する側を独立させるための方針で、Go の `internal/` 可視性がそれを強制する。唯一内容が重なる `cfn` は両方に複製して置いており、**片方を直したらもう片方へ同じ変更を入れる**（`tests/cfn_shorthand_test.sh` が 2 本の一致を検査するので、ずれるとテストが落ちる）。

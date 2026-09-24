@@ -14,7 +14,7 @@
 ```mermaid
 flowchart TD
     subgraph local["A. ローカルでの準備（AWS は読み取りのみ）"]
-        A1["A-1 事前チェック<br/>移行できるか・対象を選ぶ"]
+        A1["A-1 成立条件チェック<br/>移行できるか・対象を選ぶ"]
         A2["A-2 パラメータグループの生成と適用"]
         A3["A-3 移行設定 YAML の生成"]
         A4["A-4 承認の宣言<br/>actions を approved にする"]
@@ -41,15 +41,27 @@ flowchart TD
 |---|---|---|---|
 | ① | A-1 のあと | **移行できるか・どれを対象にするか** | 成立条件チェックとパラメータ変換のレポート |
 | ② | A-3 のあと | **この移行設定でよいか** | 設定レビューレポート |
-| ③ | B-2 のあと | **切り替えてよいか** | Green 検証レポート |
+| ③ | B-2 のあと | **切り替えてよいか** | 切替前検証（Green 検証）のレポート |
 
 各レポートの中身と生成元は [report-generation-flows.md](report-generation-flows.md) にある。
+
+### チェックの呼び分け
+
+移行中の「チェック」は 3 種類あり、**実行する時期も場所も違う。**「事前チェック」とひとまとめに呼ぶと取り違えるため、次の名前で呼び分ける。
+
+| 名前 | いつ | どこで | 何を確かめるか | 実体 | 結果が効く先 |
+|---|---|---|---|---|---|
+| **成立条件チェック** | パイプラインを動かす**前** | ローカル（A-1） | 既存 Blue で Blue/Green が作れるか（Step 1、項目 0-1-01〜14） | `tools/collect_blue_green_prereqs.sh` → `tools/evaluate_blue_green_prereqs.rb` | ゲート① |
+| **構築前チェック** | パイプライン中、**Blue/Green を作る直前** | CI（ステージ `PrecheckParameterGroup`） | 移行先 8.4 パラメータグループが存在し、family が合っているか | `scripts/check_target_parameter_group.sh` | 失敗なら BuildGreen へ進まない |
+| **切替前検証** | パイプライン中、**Blue/Green を作ったあと・切り替える前** | CI（ステージ `VerifyGreen`、Step 4） | Green の構成・パラメータ・レプリカ遅延が設定どおりか | `scripts/verify_green.sh` | ゲート③ |
+
+ステージ名・CodeBuild プロジェクト名・ファイル名にある `precheck` は**構築前チェックのことではない場合がある**点に注意する（`docs/phase-0-precheck.md` は成立条件チェック、`PrecheckParameterGroup` は構築前チェック）。これらは既存のリソース名・リンク先を変えないため、名前はそのまま残している。
 
 ## 2. A. ローカルでの準備
 
 各ツールのオプション・出力・終了コードは [tools/README.md](tools/README.md) にまとめてある。
 
-### A-1. 事前チェック — 移行できるか、どれを対象にするか
+### A-1. 成立条件チェック — 移行できるか、どれを対象にするか
 
 ```bash
 # 収集（AWS 読み取りのみ）
@@ -169,7 +181,7 @@ aws codepipeline start-pipeline-execution \
 
 ```mermaid
 flowchart LR
-    S["Source"] --> RA["ReadApprovals"] --> BRT["BuildReportTool"] --> PC["PrecheckPG"] --> BG["BuildGreen"] --> VG["VerifyGreen"]
+    S["Source"] --> RA["ReadApprovals"] --> BRT["BuildReportTool"] --> PC["PrecheckPG<br/>構築前チェック"] --> BG["BuildGreen"] --> VG["VerifyGreen<br/>切替前検証"]
     VG --> SW["Switchover<br/>承認付き"]
 
     classDef gate fill:#fff4e6,stroke:#d97706,stroke-width:2px
@@ -181,9 +193,9 @@ flowchart LR
 | `Source` | リポジトリを取得 | — |
 | `ReadApprovals` | `actions` を読み、後続ステージの条件に使う変数として公開 | — |
 | `BuildReportTool` | Go のバイナリ 3 本（AWS 状態の収集・DB 実効値の収集・判定とレポート）をビルドし artifact で渡す。**AWS を呼ばない** | — |
-| `PrecheckParameterGroup` | 8.4 パラメータグループの存在と family を確認（読み取りのみ） | — |
+| `PrecheckParameterGroup` | **構築前チェック。**8.4 パラメータグループの存在と family を確認（読み取りのみ）。失敗すれば BuildGreen へ進まない | — |
 | `BuildGreen` | 保護スナップショット＋Blue/Green の作成 | `build: pending` なら**何もせず正常終了** |
-| `VerifyGreen` | Green の構成・レプリカ遅延を検証し、**ゲート③のレポートを出す** | — |
+| `VerifyGreen` | **切替前検証。**Green の構成・レプリカ遅延を検証し、**ゲート③のレポートを出す** | — |
 | `Switchover` | 手動承認 → 切替 | `switchover: pending` なら**ステージごとスキップ**（承認ボタンも出ない） |
 
 **`pending` のときステージごとスキップされるのは意図的である。**「承認しても何も起きない」クリックを発生させないためで、手動承認が表示された時点で実行される状態になっている。
@@ -192,7 +204,7 @@ flowchart LR
 
 ### B-3. ゲート③ — 切り替えてよいか
 
-`VerifyGreen` が出すレポートを確認する。artifact（`VerifyGreenOutput`）に `green-verification-report.md` が入る。
+切替前検証（`VerifyGreen`）が出すレポートを確認する。artifact（`VerifyGreenOutput`）に `green-verification-report.md` が入る。
 
 レポートの先頭「0. 検証結果」に突き合わせの結果が出る。**不適合があればステージ自体が失敗する**ので、成功していれば 5 項目とも適合している。
 
@@ -269,7 +281,7 @@ scripts/switchover.sh   --config config/blue-green/staging.deployment.yml --serv
 | 知りたいこと | ドキュメント |
 |---|---|
 | **レポートの中身と生成元** | [report-generation-flows.md](report-generation-flows.md) |
-| Step 1 のチェック項目（0-1-01〜14） | [phase-0-precheck.md](docs/phase-0-precheck.md) |
+| 成立条件チェックの項目（Step 1、0-1-01〜14） | [phase-0-precheck.md](docs/phase-0-precheck.md) |
 | Step 2 のパラメータグループ管理 | [phase-1-parameter-group-cloudformation.md](docs/phase-1-parameter-group-cloudformation.md) |
 | 設定 YAML の生成とカタログ | [config-blue-green-generation-design.md](docs/config-blue-green-generation-design.md) / [migration-catalog-er.md](docs/migration-catalog-er.md) |
 | Step の分割と実装状況 | [upgrade-flow-steps.md](docs/upgrade-flow-steps.md) |

@@ -6,14 +6,14 @@ CodeBuild Local Agent の buildspec 互換性確認は [ci/codebuild-local-verif
 
 ## 1. 対象範囲と実行順序
 
-Step 1・2（事前確認、パラメータグループ生成・CloudFormation 適用）は、先に [phase-0-precheck.md](phase-0-precheck.md) と [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md) に従って完了させる。本書は、CloudFormation が移行先の MySQL 8.4 DB パラメータグループを作成済みである時点から開始する。
+Step 1・2（成立条件チェック、パラメータグループ生成・CloudFormation 適用）は、先に [phase-0-precheck.md](phase-0-precheck.md) と [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md) に従って完了させる。本書は、CloudFormation が移行先の MySQL 8.4 DB パラメータグループを作成済みである時点から開始する。
 
 ```text
 CloudFormation で 8.4 パラメータグループを作成済み
   │
-  ├─ 1. target parameter group の事前確認（読み取りのみ）
+  ├─ 1. 構築前チェック: target parameter group の確認（読み取りのみ）
   ├─ 2. BuildGreen: 保護スナップショット + Blue/Green 作成（変更）
-  ├─ 3. VerifyGreen: Green 設定 + ReplicaLag 検証（読み取りのみ）
+  ├─ 3. 切替前検証（VerifyGreen）: Green 設定 + ReplicaLag 検証（読み取りのみ）
   ├─ 4. アプリケーション・DB 接続・性能検証（手動）
   ├─ 5. Switchover（変更・本番影響）
   ├─ 6. 切替後のアプリケーション・監視確認（手動）
@@ -57,7 +57,7 @@ actions:
 
 `pending` のまま上位スクリプトを実行すると、変更せず正常終了する。承認値の変更は、レビュー済みの設定変更として管理する。
 
-## 3. Step 1 相当: 移行先パラメータグループの事前確認
+## 3. 構築前チェック: 移行先パラメータグループの確認
 
 CloudFormation で作成済みの `target_db_parameter_group_name` がリモートに存在し、目標エンジンバージョンに対応する family（例: `mysql8.4`）であることを確認する。
 
@@ -263,7 +263,7 @@ unset MYSQL_PASSWORD
 
 | スクリプト | 直接実行する場面 |
 | --- | --- |
-| `collect_blue_green_prereqs.sh` | Step 1 の事前棚卸し。一括収集や個別の読み取り確認は [tools/collect_blue_green_prereqs.md](../tools/collect_blue_green_prereqs.md) を参照。 |
+| `collect_blue_green_prereqs.sh` | Step 1 の成立条件チェック（収集）。一括収集や個別の読み取り確認は [tools/collect_blue_green_prereqs.md](../tools/collect_blue_green_prereqs.md) を参照。 |
 | `collect_mysql84_parameter_inputs.sh` | Step 2 のパラメータグループ生成入力の収集。Phase 1 手順書を参照。 |
 | `check_target_parameter_group.sh` | 本書の Step 1。BuildGreen の直前に実行。 |
 | `build_green.sh` | 本書の Step 2 の入口。内部で `create_blue_green_deployment.sh` を呼ぶ。 |

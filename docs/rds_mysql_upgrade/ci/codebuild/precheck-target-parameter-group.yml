@@ -1,4 +1,5 @@
-# BuildGreen の前に実行する、移行先 DB パラメータグループの事前確認専用 buildspec。
+# 構築前チェック（BuildGreen の直前）: 移行先 DB パラメータグループの確認専用 buildspec。
+# Step 1 の成立条件チェック（ローカル）とは別物である。
 # AWS API は describe-db-parameter-groups（読み取り）だけを使用し、RDS の変更操作は行わない。
 version: 0.2
 

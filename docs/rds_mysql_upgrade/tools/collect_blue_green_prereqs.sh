@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 1: AWS CLI の読み取り API だけを使い、Blue/Green の事前確認情報を収集する。
+# Step 1: AWS CLI の読み取り API だけを使い、Blue/Green の成立条件チェックに要る情報を収集する。
 set -euo pipefail
 
 usage() {

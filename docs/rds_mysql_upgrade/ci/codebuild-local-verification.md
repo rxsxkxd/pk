@@ -86,7 +86,7 @@ export CODEBUILD_LOCAL_AGENT_IMAGE=public.ecr.aws/codebuild/local-builds:aarch64
 
 異なるアーキテクチャを `--platform` でエミュレーション実行することもできるが、Local Agent・Docker-in-Docker・Go ビルドが遅くなり、ローカル互換性確認としては推奨しない。
 
-#### Echo buildspec 用の事前確認
+#### Echo buildspec を実行する前の準備確認
 
 `ci/codebuild/echo.yml` は Go レポート生成器や Docker Buildx を必要としない。前記で作成した `rds-codebuild-runner:local-${CODEBUILD_LOCAL_ARCH}` と、選択した Local Agent image だけで実行する。したがって、最初のローカル検証は Echo buildspec を使い、実行 image の pull・build、Local Agent、buildspec、artifact 出力までを先に確認する。
 
@@ -255,7 +255,7 @@ COLLECT_MYSQL_RUNTIME_VALUES=true
 
 ## 5. スクリプト直接実行との使い分け
 
-CodeBuild Local Agent の不具合とスクリプト本体の不具合を分けるため、同じ設定でシェルスクリプトを直接実行できる。パラメータグループ事前確認、BuildGreen、VerifyGreen、Switchover、Cleanup を含む直接実行の一連手順は [direct-blue-green-execution.md](../docs/direct-blue-green-execution.md) を参照する。ここでは切り分け用の VerifyGreen 最小例だけを示す。
+CodeBuild Local Agent の不具合とスクリプト本体の不具合を分けるため、同じ設定でシェルスクリプトを直接実行できる。構築前チェック（移行先パラメータグループ）、BuildGreen、VerifyGreen、Switchover、Cleanup を含む直接実行の一連手順は [direct-blue-green-execution.md](../docs/direct-blue-green-execution.md) を参照する。ここでは切り分け用の VerifyGreen 最小例だけを示す。
 
 ```bash
 scripts/verify_green.sh \

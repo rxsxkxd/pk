@@ -25,7 +25,8 @@ codepipeline.yml:
 
 codepipeline-all-in-one.yml:
   Source (GitHub / CodeCommit) → ReadApprovals → PrecheckPG → BuildGreen → VerifyGreen
-                             config を読む    Step 2 確認    Step 3       Step 4
+                             config を読む   構築前チェック  Step 3      Step 4
+                                                                           切替前検証
     → [Switchover]  承認 → 切替          ※ actions.switchover が approved のときだけ入る
 
 後始末（Step 7）はパイプラインに含まれない → tools/cleanup.sh を人が実行する
@@ -66,7 +67,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 | CodeBuild プロジェクト | buildspec | 既存スクリプト | 実行条件 |
 |---|---|---|---|
 | `ReadApprovalsProject` | `ci/codebuild/read-approvals.yml` | `scripts/read_action_approvals.sh` | AWS API を呼ばない。config を読むだけ |
-| `PrecheckProject` | `ci/codebuild/precheck-target-parameter-group.yml` | `scripts/check_target_parameter_group.sh` | 読み取りのみ。常に実行 |
+| `PrecheckProject` | `ci/codebuild/precheck-target-parameter-group.yml` | `scripts/check_target_parameter_group.sh` | **構築前チェック。**読み取りのみ。常に実行 |
 | `BuildGreenProject` | `ci/codebuild/build-green.yml` | `scripts/build_green.sh` | `actions.build: approved` の場合だけ作成 |
 | `BuildReportToolProject` | `ci/codebuild/build-report-tool.yml` | — | Step 4 の Go レポート生成器をビルドするだけ。AWS API を呼ばない。**外部ネットワークへ出るのはここだけ** |
 | `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.sh` | 常に AWS API 検証を実行 |

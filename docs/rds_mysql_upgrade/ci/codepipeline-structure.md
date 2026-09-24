@@ -39,7 +39,7 @@
    │
    ▼
 ┌─────────────────────────────────────────┐
-│ 3. PrecheckParameterGroup   [Step 2 確認]│  8.4 パラメータグループの存在と family
+│ 3. PrecheckParameterGroup                │  構築前チェック: 8.4 パラメータグループの存在と family
 └─────────────────────────────────────────┘
    │
    ▼
@@ -50,7 +50,7 @@
    │
    ▼
 ┌─────────────────────────────────────────┐
-│ 5. VerifyGreen              [Step 4]     │  Green 構成 + ReplicaLag の検証
+│ 5. VerifyGreen              [Step 4]     │  切替前検証: Green 構成 + ReplicaLag の検証
 │    Go は BuildReportTool が事前ビルド     │  切替後は「対象なし」で成功
 └─────────────────────────────────────────┘
    │
@@ -81,9 +81,9 @@
 |---|---|---|---|---|
 | 1 | `Source` | `SourceFromGitHub` または `SourceFromCodeCommit`（`SourceProvider` で切り替え） | なし | なし |
 | 2 | `ReadApprovals` | `ReadApprovals` | なし | なし（config を読むだけ） |
-| 3 | `PrecheckParameterGroup` | `PrecheckParameterGroup` | なし | なし（読み取り API のみ） |
+| 3 | `PrecheckParameterGroup`（構築前チェック） | `PrecheckParameterGroup` | なし | なし（読み取り API のみ） |
 | 4 | `BuildGreen` | `BuildGreen` | なし | **あり**（`actions.build` が `approved` のときのみ） |
-| 5 | `VerifyGreen` | `VerifyGreen` | なし | なし |
+| 5 | `VerifyGreen`（切替前検証） | `VerifyGreen` | なし | なし |
 | 6 | `Switchover` | `ManualApproval` → `Switchover` | `SWITCHOVER_APPROVED == approved` | **あり・本番影響** |
 
 **Step 7（後始末）はパイプラインに含まれない。**旧 Blue の削除は不可逆で、切り戻し不要の判断や逆方向レプリケーションの確認と一体で行うべき作業のため、人がツール `tools/cleanup.sh` で実行する（手順は [移行の実行](../operations-migration-run.md) の B-4）。

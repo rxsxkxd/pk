@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# BuildGreen 前に、移行先 DB パラメータグループの存在とファミリーだけを確認する。
+# 構築前チェック: BuildGreen 前に、移行先 DB パラメータグループの存在とファミリーだけを確認する。
+# （Step 1 の成立条件チェックとも、Step 4 の切替前検証とも別物である。）
 # AWS API は describe-db-parameter-groups（読み取り）だけを使用する。
 set -euo pipefail
 
@@ -79,7 +80,7 @@ fi
 
 # 判定結果は不適合でも成果物に残す。CI のログだけでなくレポートからも追えるようにする。
 {
-  printf '# 移行先 DB パラメータグループ事前確認\n'
+  printf '# 構築前チェック: 移行先 DB パラメータグループ\n'
   printf '\n'
   printf -- '- 対象名: `%s`\n' "$target_parameter_group_name"
   printf -- '- RDS が返した名前: `%s`\n' "$actual_name"

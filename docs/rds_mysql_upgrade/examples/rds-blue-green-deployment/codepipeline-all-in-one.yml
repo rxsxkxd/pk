@@ -404,7 +404,7 @@ Resources:
       # ログ出力と artifact の読み書きは CodeBuildCommonPolicy が持つ。
       ManagedPolicyArns: [!Ref CodeBuildCommonPolicy]
 
-  # Step 2 事前確認: 読み取りのみ。
+  # 構築前チェック（BuildGreen の直前。移行先パラメータグループの確認）: 読み取りのみ。
   PrecheckRole:
     Type: AWS::IAM::Role
     Properties:
@@ -717,7 +717,7 @@ Resources:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: !Sub '${PipelineNamePrefix}-${EnvironmentName}-precheck-parameter-group'
-      Description: Step 2 事前確認 - 移行先 DB パラメータグループの存在と family を確認する
+      Description: 構築前チェック - 移行先 DB パラメータグループの存在と family を確認する
       ServiceRole: !GetAtt PrecheckRole.Arn
       Artifacts: { Type: CODEPIPELINE }
       Source:

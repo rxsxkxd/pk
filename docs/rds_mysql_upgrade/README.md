@@ -7,7 +7,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 **実際に移行を動かすための手順は次の 2 本である。**この 2 本で完結する。
 
 1. **[operations-environment-setup.md](operations-environment-setup.md)** — オペレーション編 1／2: 環境構築。CloudFormation でパイプラインを作るまでの事前作業と手順。**一度だけ**
-2. **[operations-migration-run.md](operations-migration-run.md)** — オペレーション編 2／2: 移行の実行。事前チェック・設定生成から、パイプラインでの Blue/Green 移行まで。**移行対象ごとに繰り返す**
+2. **[operations-migration-run.md](operations-migration-run.md)** — オペレーション編 2／2: 移行の実行。成立条件チェック・設定生成から、パイプラインでの Blue/Green 移行まで。**移行対象ごとに繰り返す**
 
 設計・分類の背骨は次の1本。他のドキュメントはすべてこれらの詳細リファレンスか、周辺の技術メモ・記録である。
 
@@ -56,7 +56,7 @@ Step の詳細を掘り下げる際に参照する:
 - [config-blue-green-generation-design.md](docs/config-blue-green-generation-design.md) — RDS インベントリと人が管理する対応表から Blue/Green 設定 YAML を生成する支援ツールの最小設計
 - [report-generation-flows.md](report-generation-flows.md) — **レポート生成の全体像**。3 つの生成器（設定レビュー / パラメータ変換 / Green 検証）の役割・入力・実行タイミングを図で整理
 - [migration-catalog-er.md](docs/migration-catalog-er.md) — 移行カタログ(アプリケーション、接続、環境、パラメータグループ)の ER 図。YAML 構造の正本
-- [direct-blue-green-execution.md](docs/direct-blue-green-execution.md) — `scripts/*.sh` を直接実行する場合の、パラメータグループ事前確認から後始末までの一連手順
+- [direct-blue-green-execution.md](docs/direct-blue-green-execution.md) — `scripts/*.sh` を直接実行する場合の、構築前チェック（移行先パラメータグループの確認）から後始末までの一連手順
 - [ci/verify-green-vpc-architecture.md](ci/verify-green-vpc-architecture.md) — Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だけを RDS のある VPC 内へ置く構成（図つき）
 - [ci/verify-green-security-group-setup.md](ci/verify-green-security-group-setup.md) — 上記構成で必要なセキュリティグループの設定手順（テンプレートは SG を作らない）
 - [ci/build-report-tool-troubleshooting.md](ci/build-report-tool-troubleshooting.md) — Go ビルド（BuildReportTool）が失敗したときの切り分け。ログの何を見て何をするかの対応表

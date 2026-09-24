@@ -96,7 +96,7 @@ flowchart TD
 
 | 材料 | 出どころ |
 |---|---|
-| Green 検証レポート | ③の生成器（`scripts/generate_green_verification_report`） |
+| 切替前検証（Green 検証）のレポート | ③の生成器（`scripts/generate_green_verification_report`） |
 
 宣言値（Step 2 のテンプレート）・適用値（AWS API）・実効値（Green DB、任意）の 3 者を突き合わせる。**切替は不可逆に近い**（Blue は `-old1` へリネームされる）ため、ここが最後の確認になる。承認は `actions.switchover` を `approved` にすることで表明する。
 
@@ -232,7 +232,7 @@ flowchart LR
 
 **3 つの中で唯一、生成物を入力に取らない。**AWS 由来 JSON とルール定義だけで完結する。
 
-## 5. ③ Green 検証（Step 4）
+## 5. ③ Green 検証（Step 4・切替前検証）
 
 **Green が期待どおりに作られたかを確認し、切替してよいかの判断材料を出す。**
 

@@ -107,7 +107,7 @@ CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`�
 
 各 buildspec は設定 YAML を読むために、install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（CodeBuild image 同梱の rbenv を使う。`rbenv` が無い環境では何もしない）。**YAML / JSON は Ruby の標準ライブラリなので、パッケージの追加導入は無く、PyPI へも到達しない。**ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、Ruby があれば追加作業は要らない。
 
-データの読み取りは `jq` に一本化している。設定 YAML は `scripts/lib/deployment_config.sh` が **Ruby の標準ライブラリ**で JSON へ変換し、そこから先の取り出しと検証は jq が行う。CodeBuild の managed image と GitHub Actions のランナーには jq が同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
+設定 YAML の読み取りは `scripts/lib/deployment_config.rb` が **Ruby の標準ライブラリ（psych）**で行い、各スクリプトは取り出す項目だけを宣言する（`変数名=種別:パス[=既定値]`）。AWS CLI の応答（JSON）の取り出しには `jq` を使う。CodeBuild の managed image と GitHub Actions のランナーには jq が同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
 
 実効値収集を有効にする場合は、`VerifyGreenProject` を RDS に到達できるネットワークへ配置する。**テンプレートは `VpcId` / `VerifyGreenSubnetIds` / `VerifyGreenSecurityGroupIds` を受け取って `VpcConfig` を組む**（セキュリティグループは作らないので別途用意する。[設定手順](verify-green-security-group-setup.md)）。
 

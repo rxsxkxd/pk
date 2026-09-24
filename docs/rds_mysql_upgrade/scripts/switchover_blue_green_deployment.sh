@@ -3,9 +3,6 @@
 # このスクリプトは本番トラフィックに影響する変更操作を実行するため、--approve を必須とする。
 set -euo pipefail
 
-# shellcheck source=lib/deployment_config.sh
-source "$(dirname "$0")/lib/deployment_config.sh"
-
 usage() {
   cat <<'USAGE'
 Usage: switchover_blue_green_deployment.sh --config FILE --blue-green-deployment-id ID --approve [options]
@@ -41,10 +38,10 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-switchover.XXXXXX")
 mkdir -p "$output_dir"
 # config から環境に紐づく AWS CLI のリージョン・プロファイルを取得する。AWS API は呼び出さない。
-deployment_config_eval "$config" '' '{
-  config_region:  required("aws_region"; .aws_region),
-  config_profile: optional(.aws_profile; ""),
-} | shellvars'
+config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" '' \
+  config_region=required:aws_region \
+  config_profile=optional:aws_profile)
+eval "$config_vars"
 [[ -n "$region" ]] || region=$config_region
 [[ -n "$profile" ]] || profile=$config_profile
 aws_args=(--region "$region")

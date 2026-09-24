@@ -379,7 +379,7 @@ ADR での評価は次のとおり。
 | `tools/generate_mysql84_parameter_group.rb` | 307 | **移行を検討する** | 判定ロジックが重く、「要レビューが残れば exit 1」の判定も持つ。**単体テストが無い**（ゴールデンファイル差分を人が見るだけ）。CloudFormation YAML を扱うので `tools/internal/cfn` と噛み合う |
 | `tools/evaluate_blue_green_prereqs.rb` | 108 | **急がない** | JSON を読んで並べるだけで、Go 化して得られるのは単体テストだけ |
 
-`.rb` を全廃しても Ruby ランタイムへの依存は消えない。**シェルからの設定 YAML 読み取り**（`scripts/lib/deployment_config.sh` の 1 行）が psych を使うためである。
+`.rb` を全廃しても Ruby ランタイムへの依存は消えない。**設定 YAML の読み取り**（`scripts/lib/deployment_config.rb`）が psych を使うためである。
 
 ## 関連ドキュメント
 

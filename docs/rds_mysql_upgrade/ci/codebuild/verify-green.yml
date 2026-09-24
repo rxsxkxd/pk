@@ -50,7 +50,7 @@ phases:
       #    単体実行では、あらかじめ置いた .tools/green-report/ を使う。
       #
       #    解決そのものは Ruby が行い、`KEY=値` の行を返す
-      #    （設定 YAML の読み取りと同じ流儀。scripts/lib/deployment_config.sh）。
+      #    （設定 YAML の読み取りと同じ流儀。scripts/lib/deployment_config.rb）。
       #    見つからなければ Ruby が理由と探索先を出して終了コード 1 を返す。
       #
       #    **eval "$(...)" と書かない。**その形だと Ruby が失敗しても終了コードが
@@ -67,23 +67,14 @@ phases:
 
   build:
     commands:
-      # 4. 実効値収集の有効・無効を記録する。
-      #    接続方式（parameter_store / plaintext / prompt）は
-      #    config の mysql_verification が決め、verify_green.sh が解決する。
+      # 3. 検証本体。Step 4 の判定はこのスクリプトが行う。
+      #    実効値収集の有効・無効と接続方式（parameter_store / plaintext / prompt）は
+      #    config の mysql_verification が決め、verify_green.sh が読んでログへ出す。
+      #    **buildspec では設定を読まない。**
       #
       #    **MySQL クライアントは要らない。**収集は collect_green_runtime_values
       #    （静的リンクの Go バイナリ）が行い、RDS のトラストストアも焼き込んである。
       #    そのため apt-get も、MySQL 入りのカスタムイメージも不要である。
-      - |
-        set -eu
-        # 設定の読み取りはスクリプト本体と同じ経路を使う（Ruby で YAML→JSON、jq で取り出し）。
-        . scripts/lib/deployment_config.sh
-        deployment_config_eval "$CONFIG_FILE" "$SERVICE_NAME" '
-          service($service) as $svc | {
-            MYSQL_ENABLED: (if ($svc.mysql_verification.enabled // false) then "true" else "false" end),
-          } | shellvars'
-        echo "mysql_verification.enabled=${MYSQL_ENABLED}"
-      # 5. 検証本体。Step 4 の判定はこのスクリプトが行う。
       - scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
 
 artifacts:

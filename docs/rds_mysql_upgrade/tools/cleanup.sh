@@ -40,12 +40,10 @@
 #   2 引数の誤り
 set -euo pipefail
 
-# shellcheck source=lib/deployment_config.sh
 # 設定の読み取りとフェーズ判定は scripts/lib/ のものを使う。**複製しない。**
 # 特にフェーズ判定は冪等性の中核で、build_green / verify_green / switchover と
 # 同じ実装（migration_phase.rb）でなければならない。
 scripts_lib="$(cd "$(dirname "$0")/../scripts/lib" && pwd)"
-source "$scripts_lib/deployment_config.sh"
 
 usage() {
   cat <<'USAGE'
@@ -87,19 +85,20 @@ mkdir -p "$output_dir"
 migration_phase=(ruby "$scripts_lib/migration_phase.rb")
 
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
-# 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
-deployment_config_eval "$config" "$service" '
-  service($service) as $svc | $svc.actions as $actions | {
-    cleanup_approved:               optional($actions.cleanup; "pending"),
-    source_id:                      required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
-    source_engine_version:          required("source_engine_version"; $svc.source_engine_version),
-    source_db_parameter_group_name: required("source_db_parameter_group_name"; $svc.source_db_parameter_group_name),
-    target_engine_version:          required("target_engine_version"; $svc.target_engine_version),
-    target_db_parameter_group_name: required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
-    # 固定名にすることで、途中失敗後の再実行でスナップショットが増殖しない。
-    final_snapshot_id:              optional($svc.final_snapshot_identifier; "\($svc.source_db_instance_identifier)-final"),
-    config_region:                  required("aws_region"; .aws_region),
-  } | shellvars'
+# 必要な項目とその必須・任意だけをここに宣言する（読み取りは lib/deployment_config.rb）。
+config_vars=$(ruby "$scripts_lib/deployment_config.rb" vars "$config" "$service" \
+  cleanup_approved=optional:service.actions.cleanup=pending \
+  source_id=required:service.source_db_instance_identifier \
+  source_engine_version=required:service.source_engine_version \
+  source_db_parameter_group_name=required:service.source_db_parameter_group_name \
+  target_engine_version=required:service.target_engine_version \
+  target_db_parameter_group_name=required:service.target_db_parameter_group_name \
+  final_snapshot_id=optional:service.final_snapshot_identifier \
+  config_region=required:aws_region)
+eval "$config_vars"
+# 未指定なら移行元識別子から決める。固定名にすることで、途中失敗後の再実行で
+# スナップショットが増殖しない。
+[[ -n "$final_snapshot_id" ]] || final_snapshot_id="${source_id}-final"
 [[ "$cleanup_approved" == approved ]] || { echo 'cleanup: pending; no changes made.'; exit 0; }
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")

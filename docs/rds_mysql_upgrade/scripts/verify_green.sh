@@ -2,9 +2,6 @@
 # Step 4: Green の RDS 構成と ReplicaLag を AWS 読み取り API だけで検証する。
 set -euo pipefail
 
-# shellcheck source=lib/deployment_config.sh
-source "$(dirname "$0")/lib/deployment_config.sh"
-
 usage() { echo 'Usage: verify_green.sh --config FILE --service NAME [--runtime-values-file FILE | --mysql-user USER] [--mysql-password-env NAME] [--region REGION] [--profile PROFILE] [--output-dir DIR]'; }
 config=''; service=''; runtime_values_file=''; mysql_user=''; mysql_password_env='MYSQL_PASSWORD'; region=''; profile=''; output_dir=''
 while [[ $# -gt 0 ]]; do
@@ -33,18 +30,17 @@ migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
 source "$(dirname "$0")/lib/mysql_credentials.sh"
 
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
-# 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
-deployment_config_eval "$config" "$service" '
-  service($service) as $svc | {
-    source_id:                            required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
-    source_engine_version:                required("source_engine_version"; $svc.source_engine_version),
-    source_db_parameter_group_name:       required("source_db_parameter_group_name"; $svc.source_db_parameter_group_name),
-    target_engine_version:                required("target_engine_version"; $svc.target_engine_version),
-    target_db_instance_class:             required("target_db_instance_class"; $svc.target_db_instance_class),
-    target_db_parameter_group_name:       required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
-    target_parameter_group_template_path: required("target_parameter_group_template_path"; $svc.target_parameter_group_template_path),
-    config_region:                        required("aws_region"; .aws_region),
-  } | shellvars'
+# 必要な項目とその必須・任意だけをここに宣言する（読み取りは lib/deployment_config.rb）。
+config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
+  source_id=required:service.source_db_instance_identifier \
+  source_engine_version=required:service.source_engine_version \
+  source_db_parameter_group_name=required:service.source_db_parameter_group_name \
+  target_engine_version=required:service.target_engine_version \
+  target_db_instance_class=required:service.target_db_instance_class \
+  target_db_parameter_group_name=required:service.target_db_parameter_group_name \
+  target_parameter_group_template_path=required:service.target_parameter_group_template_path \
+  config_region=required:aws_region)
+eval "$config_vars"
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
@@ -100,8 +96,13 @@ eval "$green_state"   # DEPLOYMENT_ID / GREEN_INSTANCE_ID / GREEN_ENDPOINT
 # [DB 読み取り・任意] Green の MySQL 実効値を収集する。レポートにのみ載せ、判定には使わない。
 # 接続方式は設定ファイルの mysql_verification が決める（parameter_store / plaintext /
 # prompt）。--mysql-user を明示した場合は呼び出し側の環境変数を使う（後方互換）。
-read_mysql_verification_config "$config" "$service"
+mysql_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" mysql-verification "$config" "$service")
+eval "$mysql_vars"
+# 実効値収集の有効・無効をログへ残す（CI のログで後から確認できるように）。
+# 接続方式までで、ユーザー名・パラメータ名・パスワードは出さない。
+echo "mysql_verification.enabled=${MYSQL_VERIFY_ENABLED} auth_method=${MYSQL_VERIFY_AUTH}"
 if [[ -n "$mysql_user" ]]; then
+  echo 'mysql_verification: --mysql-user の指定により、呼び出し側の接続情報で収集する。'
   MYSQL_VERIFY_USER="$mysql_user"
   MYSQL_VERIFY_PASSWORD="${!mysql_password_env:-}"
   MYSQL_VERIFY_ENABLED=true

@@ -16,61 +16,21 @@
 #   - 呼び出し側は MYSQL_PWD 経由で MySQL クライアントのプロセスにだけ渡す。
 #   - 読み取りは config と AWS の読み取り API のみ。AWS の状態を変更しない。
 
-# 設定の読み取りは deployment_config.sh（Ruby で YAML→JSON、jq で取り出し）に委ねる。
-# shellcheck source=deployment_config.sh
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deployment_config.sh"
-
-# 設定ファイルから mysql_verification を読む。AWS API は呼び出さない。
+# 設定ファイルの mysql_verification の読み取りと検証は deployment_config.rb が行う。
+# 呼び出し側は次の 2 行で MYSQL_VERIFY_* を作ってから resolve_mysql_credentials を呼ぶ。
 #
-# 使い方: read_mysql_verification_config <config> <service>
-# 設定する変数:
-#   MYSQL_VERIFY_ENABLED         true / false
-#   MYSQL_VERIFY_USER            接続ユーザー
-#   MYSQL_VERIFY_AUTH            上記 auth_method のいずれか
-#   MYSQL_VERIFY_PARAMETER_NAME  parameter_store のとき
-#   MYSQL_VERIFY_PLAINTEXT       plaintext のとき
-#   MYSQL_VERIFY_SSL_CA          TLS 用の CA バンドルのパス（空なら未指定）
-#   MYSQL_VERIFY_PORT            接続ポート（既定 3306）
-read_mysql_verification_config() {
-  local config=$1 service=$2 resolved
-  # jq の失敗（検証エラー）を握り潰さないよう、いったん変数へ受けて判定する。
-  # 検証内容は上のコメントのとおりで、jq の error() が理由を stderr へ出す。
-  resolved=$(deployment_config_vars "$config" "$service" '
-    service($service).mysql_verification as $m
-    | (.environment // "") as $environment
-    | ($m.enabled // false) as $enabled
-    | ($m.auth_method // "prompt") as $auth
-    | (["parameter_store", "plaintext", "prompt"]) as $valid
-    | (if $enabled then
-        (if ($valid | index($auth)) == null then
-           error("mysql_verification.auth_method が不正です: \($auth)（有効な値: \($valid | join(", "))）")
-         # parameter_store はユーザー名も必ず秘匿側へ置く。config の user は使わない。
-         # 秘匿側を持たない plaintext / prompt では config の user を必須とする。
-         elif $auth != "parameter_store" and (($m.user // "") == "") then
-           error("auth_method: \($auth) には mysql_verification.user が必要です")
-         # plaintext は設定ファイルが Git 追跡対象であるため、本番では使わせない。
-         elif $auth == "plaintext" and $environment == "production" then
-           error("auth_method: plaintext は production では使用できません。parameter_store を使ってください")
-         else
-           ({parameter_store: ["parameter_name", "user_parameter_name"], plaintext: ["password"]}[$auth] // [])
-           | map(select(($m[.] // "") == "")) | first
-           | if . != null then
-               error("auth_method: \($auth) には mysql_verification.\(.) が必要です")
-             else empty end
-         end)
-       else empty end)
-    // {
-      MYSQL_VERIFY_ENABLED:             (if $enabled then "true" else "false" end),
-      MYSQL_VERIFY_USER:                optional($m.user; ""),
-      MYSQL_VERIFY_AUTH:                $auth,
-      MYSQL_VERIFY_PARAMETER_NAME:      optional($m.parameter_name; ""),
-      MYSQL_VERIFY_USER_PARAMETER_NAME: optional($m.user_parameter_name; ""),
-      MYSQL_VERIFY_PLAINTEXT:           optional($m.password; ""),
-      MYSQL_VERIFY_SSL_CA:              optional($m.ssl_ca; ""),
-      MYSQL_VERIFY_PORT:                optional($m.port; 3306),
-    } | shellvars') || return 1
-  eval "$resolved"
-}
+#   mysql_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" mysql-verification "$config" "$service")
+#   eval "$mysql_vars"
+#
+# 作られる変数:
+#   MYSQL_VERIFY_ENABLED              true / false
+#   MYSQL_VERIFY_USER                 接続ユーザー（plaintext / prompt のとき）
+#   MYSQL_VERIFY_AUTH                 上記 auth_method のいずれか
+#   MYSQL_VERIFY_PARAMETER_NAME       parameter_store のとき（パスワード）
+#   MYSQL_VERIFY_USER_PARAMETER_NAME  parameter_store のとき（ユーザー名）
+#   MYSQL_VERIFY_PLAINTEXT            plaintext のとき
+#   MYSQL_VERIFY_SSL_CA               TLS 用の CA バンドルのパス（空なら未指定）
+#   MYSQL_VERIFY_PORT                 接続ポート（既定 3306）
 
 # 方式に応じてユーザー名とパスワードを解決する。
 #

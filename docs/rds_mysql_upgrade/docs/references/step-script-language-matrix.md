@@ -44,9 +44,9 @@ fi
 |---|---|---|
 | Bash | 全エントリポイントの実行シェル。`set -euo pipefail` 前提 | 全 `.sh` ファイル（9 本） |
 | AWS CLI | RDS／CloudWatch／CloudFormation の読み取り・変更操作 | Step 1・3・4・5・7 の全 `.sh` |
-| Ruby（標準ライブラリのみ） | 判定ロジック（Step 1）・生成ロジック（Step 2）と、**設定 YAML を JSON へ変換する 1 行**。変換の実体は `scripts/lib/deployment_config.sh` の 1 箇所のみで、取り出しと検証は jq が行う。**gem の追加導入は無い（psych / json は標準ライブラリ）。新しいプログラムは Ruby で書かない** | `evaluate_blue_green_prereqs.rb`、`generate_mysql84_parameter_group.rb`、および設定を読む全 `.sh`（`scripts/lib/deployment_config.sh` 経由） |
+| Ruby（標準ライブラリのみ） | 判定ロジック（Step 1）・生成ロジック（Step 2）と、**設定 YAML の読み取り**。実体は `scripts/lib/deployment_config.rb` の 1 箇所のみで、シェルからはコマンドとして呼んで代入行を受け取る。**gem の追加導入は無い（psych / json は標準ライブラリ）。新しいプログラムは Ruby で書かない** | `evaluate_blue_green_prereqs.rb`、`generate_mysql84_parameter_group.rb`、および設定を読む全 `.sh`（`scripts/lib/deployment_config.rb` 経由） |
 | Go | **新しいプログラムは Go で書く**（`decisions/implementation-language-policy.md`）。現状は Step 4 のレポート生成、RDS インベントリ収集、Blue/Green 設定とレビューレポートの生成、CloudFormation テンプレートの読み取り。ビルド時のみ Go が必要で、実行時はバイナリ単体（ランタイム不要） | `generate_green_verification_report/`（Step 4 内部処理。単体では叩かず、`verify_green.sh` が `GREEN_REPORT_GENERATOR` 経由で呼ぶ）、`collect_green_runtime_values/`（Green DB の実効値収集。MySQL クライアントの代替）、`collect_rds_instance_inventory/`（Step 3 の前準備。内部で AWS CLI を呼ぶ）、`generate_blue_green_config/`（同じく Step 3 の前準備。AWS を呼ばない）、`generate_blue_green_config_report/`（同じ入力からレビュー用 Markdown を出す。設定ファイルは書き換えない）。いずれも `go run ./scripts/<コマンド名>` で実行し（`go.mod` はリポジトリ直下にあるため、引数の相対パスは実行時のカレントディレクトリ基準になる）、ロジックは `tools/internal/{common,collect,generate,cfn,report}` にある（`go test ./...` で単体テスト可能） |
-| jq | **設定と JSON の読み取り・生成**。設定 YAML（JSON 化後）からのシェル変数組み立て、AWS CLI 応答からの値取り出し、MySQL の `--batch` 出力の JSON 化 | 設定読み取りは `scripts/lib/deployment_config.sh` 経由で Step 3・4・5・7 の全 `.sh`。JSON は `check_target_parameter_group.sh`、`create_blue_green_deployment.sh`、`collect_green_runtime_values.sh` |
+| jq | **JSON の読み取り・生成**。AWS CLI 応答からの値取り出し、MySQL の `--batch` 出力の JSON 化（設定 YAML の読み取りには使わない） | `check_target_parameter_group.sh`、`create_blue_green_deployment.sh`、`collect_green_runtime_values.sh` |
 | MySQL クライアント（mysql／mysqlsh） | DB 接続を伴う実効値収集・逆レプリケーション確認。既定ではスキップされ、明示フラグ指定時のみ使用（CI に本番 DB 認証情報を常設しない方針のため） | `collect_green_runtime_values.sh`（Step 4 補助）、`cleanup.sh` の `--mysql-user` 指定時（Step 7） |
 
 ## 実行形態（ローカル／CI）との対応
@@ -60,15 +60,18 @@ fi
 
 ## 補足: Python は使わない。YAML は Ruby、その他は jq
 
-**シェルスクリプトから Python を呼ばない方針である。**Step 3・4・5・7 の `.sh` はいずれも設定 YAML を 1 回読むが、**その読み取りは `scripts/lib/deployment_config.sh` に集約されている**。YAML を扱うのは同ファイルの次の 1 行だけである。
+**シェルスクリプトから Python を呼ばない方針である。**Step 3・4・5・7 の `.sh` はいずれも設定 YAML を 1 回読むが、**その読み取りは `scripts/lib/deployment_config.rb` に集約されている**。各スクリプトは取り出す項目だけを宣言し、代入行を受け取って `eval` する。
 
 ```bash
-ruby -ryaml -rjson -e 'print JSON.generate(YAML.safe_load(File.read(ARGV[0])))' "$1"
+config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
+  build=optional:service.actions.build=pending \
+  config_region=required:aws_region)
+eval "$config_vars"
 ```
 
-取り出しと検証は jq が行い、各スクリプトは必要な項目だけを宣言する（共通関数 `required` / `optional` / `service` / `shellvars` も同ファイルにある）。
+必須・任意の判定と、`mysql_verification` の検証（`mysql-verification` サブコマンド）も同ファイルが行う。
 
-経緯は次のとおりである。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込み、2026-09-14 に 1 箇所へ統合したうえで Ruby へ切り替えた。
+経緯は次のとおりである。以前は `python3 -c` が 38 箇所に散在し（[reports/inline-python-reduction-report.md](../../reports/inline-python-reduction-report.md)）、その後スクリプトごとに 1 箇所ずつ計 9 箇所・206 行まで絞り込み、2026-09-14 に 1 箇所へ統合したうえで Ruby へ切り替えた。その後、jq で行っていた取り出しと検証も Ruby へ移し、設定の読み取りから jq を外した。
 
 **Ruby を選んだ理由は、YAML と JSON がどちらも標準ライブラリ（psych / json）だからである。**PyYAML のような追加パッケージの導入が不要になり、CI から **PyPI への到達要件が消えた**。CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う）。
 

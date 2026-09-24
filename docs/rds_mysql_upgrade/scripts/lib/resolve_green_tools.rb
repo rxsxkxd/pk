@@ -11,7 +11,7 @@
 # 理由と対処を出して終了コード 1 を返す。**その場でビルドして回復させない。**
 #
 # 出力は `KEY='値'` の行で、呼び出し側が eval して環境変数にする
-# （scripts/lib/deployment_config.sh と同じ流儀）。診断メッセージは stderr へ出す。
+# （scripts/lib/deployment_config.rb と同じ流儀）。診断メッセージは stderr へ出す。
 # 標準出力には eval される行だけを載せる。
 #
 # 使い方:

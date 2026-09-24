@@ -9,13 +9,13 @@
 | 対象 | 言語 | 理由 |
 |---|---|---|
 | **プログラム**（レポート生成、RDS インベントリ収集、Blue/Green 設定生成、CloudFormation テンプレート読み取り） | **Go** | 単一の静的バイナリで配布でき、実行側にランタイムを要求しない。単体テストを書ける |
-| **シェルからの設定 YAML 読み取り**（1 行） | **Ruby** | YAML（psych）と JSON が標準ライブラリで、gem の追加導入が不要。ビルド成果物も要らない |
-| JSON の取り出し・生成 | jq | CodeBuild の managed image と GitHub Actions のランナーに同梱されている |
+| **設定 YAML の読み取り**（`scripts/lib/deployment_config.rb`。シェルからはコマンドとして呼ぶ） | **Ruby** | YAML（psych）が標準ライブラリで、gem の追加導入が不要。ビルド成果物も要らない |
+| AWS 応答などの JSON の取り出し・生成 | jq | CodeBuild の managed image と GitHub Actions のランナーに同梱されている |
 | 手順の実行順序・AWS CLI の呼び出し | Bash | 収集と判定を分離する構成（`CLAUDE.md`）に合わせる |
 
 **新しいプログラムは Go で書く。**既存の Ruby は、**テスト可能性が問題になったものから順に移す**。一律の移行は目的ではない。
 
-**「Ruby を消す」ことは目標にしない。**設定 YAML の読み取り（`scripts/lib/deployment_config.sh` の 1 行）が Ruby ランタイムを要求し続けるため、`.rb` を全廃してもランタイム依存は消えない。移行の動機は依存削減ではなく**テスト可能性**である。
+**「Ruby を消す」ことは目標にしない。**設定 YAML の読み取り（`scripts/lib/deployment_config.rb`）が Ruby ランタイムを要求し続けるため、`.rb` を全廃してもランタイム依存は消えない。移行の動機は依存削減ではなく**テスト可能性**である。
 
 ### 対象外とするもの
 

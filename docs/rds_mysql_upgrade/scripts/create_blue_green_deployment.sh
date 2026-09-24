@@ -4,9 +4,6 @@
 # Green が AVAILABLE になるまで待機して終了する。切替は実施しない。
 set -euo pipefail
 
-# shellcheck source=lib/deployment_config.sh
-source "$(dirname "$0")/lib/deployment_config.sh"
-
 usage() {
   cat <<'USAGE'
 Usage: create_blue_green_deployment.sh --config FILE --service NAME [options]
@@ -45,17 +42,16 @@ command -v jq >/dev/null 2>&1 || { echo 'jq が見つからない。JSON の読�
 mkdir -p "$output_dir"
 # config のサービスに対応する作成設定を読み取る。AWS API は呼び出さない。
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
-# 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
-deployment_config_eval "$config" "$service" '
-  service($service) as $svc | {
-    source_db_instance_identifier:  required("source_db_instance_identifier"; $svc.source_db_instance_identifier),
-    target_engine_version:          required("target_engine_version"; $svc.target_engine_version),
-    target_db_instance_class:       required("target_db_instance_class"; $svc.target_db_instance_class),
-    target_db_parameter_group_name: required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
-    environment:                    required("environment"; .environment),
-    config_region:                  required("aws_region"; .aws_region),
-    config_profile:                 optional(.aws_profile; ""),
-  } | shellvars'
+# 必要な項目とその必須・任意だけをここに宣言する（読み取りは lib/deployment_config.rb）。
+config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
+  source_db_instance_identifier=required:service.source_db_instance_identifier \
+  target_engine_version=required:service.target_engine_version \
+  target_db_instance_class=required:service.target_db_instance_class \
+  target_db_parameter_group_name=required:service.target_db_parameter_group_name \
+  environment=required:environment \
+  config_region=required:aws_region \
+  config_profile=optional:aws_profile)
+eval "$config_vars"
 [[ -n "$region" ]] || region=$config_region
 [[ -n "$profile" ]] || profile=$config_profile
 aws_args=(--region "$region")

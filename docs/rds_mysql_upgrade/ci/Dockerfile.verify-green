@@ -32,7 +32,7 @@
 #
 # 含めるもの:
 #   - MySQL クライアント … Green DB の実効値収集（collect_green_runtime_values.sh）
-#   - Ruby            … 設定 YAML の読み取り（scripts/lib/deployment_config.sh）
+#   - Ruby            … 設定 YAML の読み取り（scripts/lib/deployment_config.rb）
 #   - jq              … JSON の読み取り
 #   - AWS CLI v2      … RDS / CloudWatch / SSM の読み取り
 #

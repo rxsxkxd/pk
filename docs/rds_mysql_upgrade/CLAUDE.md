@@ -139,7 +139,7 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 
 ### 実装言語の使い分け
 
-**プログラムは Go、シェルからの設定 YAML 読み取りだけ Ruby、JSON の取り出しは jq。**理由と適用範囲は `decisions/implementation-language-policy.md`（採択済み）にある。
+**プログラムは Go、設定 YAML の読み取りは Ruby、AWS 応答などの JSON の取り出しは jq。**理由と適用範囲は `decisions/implementation-language-policy.md`（採択済み）にある。
 
 - **新しいプログラムは Go で書く。**
 - **`scripts/` 配下のうち、buildspec から直接呼ばれない 3 本は Ruby へ置き換えた。**`create_blue_green_deployment` / `switchover_blue_green_deployment` / `collect_green_runtime_values` である。**シェル版（`.sh`）も同じ内容で残してあり、呼び出し側が `.rb` を指している。**どちらを変えてももう一方へ同じ変更を入れる（`tests/sh_rb_parity_test.sh` が両者の終了コード・AWS CLI の呼び出し引数・保存する JSON の一致を検査する）。Ruby 版は設定 YAML を psych で直接読むため **jq を必要としない**（`scripts/lib/deployment_config.rb`）。AWS は SDK ではなく **AWS CLI を exec する**ので、権限・プロファイル・リージョンの解決はシェル版と完全に同じである（`scripts/lib/aws_cli.rb`）
@@ -147,12 +147,21 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 - 既存の Ruby（`evaluate_blue_green_prereqs.rb`、`generate_mysql84_parameter_group.rb`）は**一律には移行しない。**テスト可能性が問題になったものから順に移す。`.rb` を全廃しても、設定 YAML の読み取りが Ruby ランタイムを要求し続けるため依存は消えない
 - `examples/mysql-timezone-replication/probe/` の Go / Ruby / Python は**移行対象外**である。ドライバごとの `time_zone` の扱いの違いを示すことが目的で、3 実装が並ぶこと自体が結論の根拠になっている
 
-シェルスクリプトのデータ読み取りは **jq に一本化**している。YAML を JSON にする **Ruby の 1 行**だけが例外で（jq は YAML を読めないため）、その 1 行は `scripts/lib/deployment_config.sh` にしかない。**YAML / JSON はどちらも Ruby の標準ライブラリ（psych / json）なので、追加パッケージの導入は要らない。**
+**設定 YAML の読み取りは `scripts/lib/deployment_config.rb` の 1 か所だけが行う。**Ruby からは `require_relative` して使い、シェルからはコマンドとして呼んで `NAME='値'` の代入行を受け取る。psych（Ruby 標準ライブラリ）で直接読むので、**設定の読み取りに jq は使わない**し、追加パッケージの導入も要らない。
 
-- 設定 YAML → **`deployment_config_eval <config> <service> '<jq フィルタ>'`** で読む。フィルタは「どのキーを、どの名前のシェル変数へ、必須か任意か」だけを宣言する。共通関数（`required` / `optional` / `service` / `shellvars`）も同じファイルにある
-- **`eval "$(...)" と書かない。**その形はコマンド置換の失敗を `eval` の終了コードが覆い隠すため、**読み取りが失敗しても `set -e` をすり抜けて「変数が空のまま先へ進む」。**いったん変数へ受けてから `eval` する（`deployment_config_eval` がそれを行う）。同じ理由で、buildspec 内で外部コマンドの出力を `eval` するときも 2 行に分ける
+- 設定 YAML → 取り出す項目を **`変数名=種別:パス[=既定値]`** で宣言して呼ぶ。種別は `required`（空・未定義なら `<パス> が未定義である` で終了コード 1）/ `optional`（既定値へ倒す）/ `flag`（`"true"` / `"false"`）。パスは `service.<キー>` がサービス配下、それ以外がトップレベルで、ドットで入れ子を辿る（例: `build=optional:service.actions.build=pending`）。**同じ名前のシェル関数では包まない**（上の方針と同じ）
+  ```bash
+  config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
+    build=optional:service.actions.build=pending \
+    source_id=required:service.source_db_instance_identifier \
+    config_region=required:aws_region)
+  eval "$config_vars"
+  ```
+- `mysql_verification` は検証を伴うので専用のサブコマンド `mysql-verification <config> <service>` が `MYSQL_VERIFY_*` を出す（auth_method の検証・production での plaintext 拒否もここ）。パスワード等の解決（SSM 呼び出し）はシェル側の `scripts/lib/mysql_credentials.sh` の `resolve_mysql_credentials` が行う
+- 値から導く既定値（例: `cleanup.sh` の `final_snapshot_id` の `<source_id>-final`）は宣言に含めず、読み取り後にシェルで補う
+- **`eval "$(...)" と 1 行で書かない。**その形はコマンド置換の失敗を `eval` の終了コードが覆い隠すため、**読み取りが失敗しても `set -e` をすり抜けて「変数が空のまま先へ進む」。**いったん変数へ受けてから `eval` する。同じ理由で、buildspec 内で外部コマンドの出力を `eval` するときも 2 行に分ける（`tests/deployment_config_test.sh` が 2 行の形で停止することを検査している）
 - AWS 応答などの JSON → jq で直接読む
-- **スクリプトに Python を書かない。**設定の読み取りは上の 1 経路だけで、YAML を扱うのは Ruby、それ以外は jq である
+- **スクリプトに Python を書かない。**YAML を扱うのは Ruby、JSON は jq である
 - CodeBuild では各 buildspec が install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（image 同梱の rbenv を使う。パッケージの追加導入は無く、PyPI へも到達しない）
 
 ローカルで Step 3〜5 を直接実行する前に、必要なコマンドがあることを確認する:

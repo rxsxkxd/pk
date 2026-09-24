@@ -28,13 +28,8 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$config" && -n "$service" ]] || { usage >&2; exit 2; }
 
-# shellcheck source=lib/deployment_config.sh
-source "$(dirname "$0")/lib/deployment_config.sh"
-
 # 未定義のアクションは pending として扱う（承認されていない側に倒す）。
-deployment_config_vars "$config" "$service" '
-  service($service).actions as $actions | {
-    BUILD_APPROVED:      optional($actions.build; "pending"),
-    SWITCHOVER_APPROVED: optional($actions.switchover; "pending"),
-    CLEANUP_APPROVED:    optional($actions.cleanup; "pending"),
-  } | shellvars'
+ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
+  BUILD_APPROVED=optional:service.actions.build=pending \
+  SWITCHOVER_APPROVED=optional:service.actions.switchover=pending \
+  CLEANUP_APPROVED=optional:service.actions.cleanup=pending

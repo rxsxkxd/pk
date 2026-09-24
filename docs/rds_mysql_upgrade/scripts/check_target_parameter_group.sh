@@ -3,9 +3,6 @@
 # AWS API は describe-db-parameter-groups（読み取り）だけを使用する。
 set -euo pipefail
 
-# shellcheck source=lib/deployment_config.sh
-source "$(dirname "$0")/lib/deployment_config.sh"
-
 usage() {
   echo 'Usage: check_target_parameter_group.sh --config FILE --service NAME [--region REGION] [--profile PROFILE] [--output-dir DIR]'
 }
@@ -34,12 +31,11 @@ mkdir -p "$output_dir"
 
 # config/blue-green/<environment>.deployment.yml から、確認対象のリモート DB
 # パラメータグループ名・リージョン・目標エンジンバージョンを取得する。AWS API は呼ばない。
-deployment_config_eval "$config" "$service" '
-  service($service) as $svc | {
-    config_region:               required("aws_region"; .aws_region),
-    target_parameter_group_name: required("target_db_parameter_group_name"; $svc.target_db_parameter_group_name),
-    target_engine_version:       required("target_engine_version"; $svc.target_engine_version),
-  } | shellvars'
+config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
+  config_region=required:aws_region \
+  target_parameter_group_name=required:service.target_db_parameter_group_name \
+  target_engine_version=required:service.target_engine_version)
+eval "$config_vars"
 [[ -n "$region" ]] || region=$config_region
 aws_args=(--region "$region")
 [[ -n "$profile" ]] && aws_args+=(--profile "$profile")

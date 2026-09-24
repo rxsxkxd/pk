@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# mysql_credentials.sh の設定読み取りと検証ロジックのテスト。AWS へは接続しない。
+# mysql_verification の読み取り・検証（deployment_config.rb）と
+# 接続情報の解決（mysql_credentials.sh）のテスト。AWS へは接続しない。
 # 実行: tests/mysql_credentials_test.sh
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -8,6 +9,13 @@ source scripts/lib/mysql_credentials.sh
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 failed=0
+
+# 呼び出し側（verify_green.sh）と同じ 2 行で MYSQL_VERIFY_* を作る。
+read_config() {
+  local mysql_vars
+  mysql_vars=$(ruby scripts/lib/deployment_config.rb mysql-verification "$tmp/c.yml" svc) || return 1
+  eval "$mysql_vars"
+}
 
 # 指定した mysql_verification を持つ設定ファイルを作る。
 make_config() {
@@ -27,7 +35,7 @@ YAML
 expect_ok() {
   local desc=$1; shift
   # サブシェルにすると関数が設定した変数が失われるため、直接呼ぶ。
-  if ! read_mysql_verification_config "$tmp/c.yml" svc 2>"$tmp/err"; then
+  if ! read_config 2>"$tmp/err"; then
     printf 'FAIL  %-46s 失敗した: %s\n' "$desc" "$(cat "$tmp/err")"; failed=$((failed+1)); return
   fi
   local bad=''
@@ -42,7 +50,7 @@ expect_ok() {
 # 失敗を期待する。第 2 引数はエラーメッセージに含まれるべき文字列。
 expect_ng() {
   local desc=$1 want=$2
-  if read_mysql_verification_config "$tmp/c.yml" svc 2>"$tmp/err"; then
+  if read_config 2>"$tmp/err"; then
     printf 'FAIL  %-46s 通ってしまった\n' "$desc"; failed=$((failed+1)); return
   fi
   out=$(cat "$tmp/err")
@@ -109,7 +117,7 @@ make_config staging "      enabled: true
       user: verifier
       auth_method: plaintext
       password: s3cret"
-read_mysql_verification_config "$tmp/c.yml" svc
+read_config
 resolve_mysql_credentials ap-northeast-1 '' 2>/dev/null
 [[ "$MYSQL_VERIFY_PASSWORD" == 's3cret' ]] \
   && echo 'ok    plaintext のパスワード解決' \
@@ -118,7 +126,7 @@ resolve_mysql_credentials ap-northeast-1 '' 2>/dev/null
 make_config staging "      enabled: true
       user: verifier
       auth_method: prompt"
-read_mysql_verification_config "$tmp/c.yml" svc
+read_config
 resolve_mysql_credentials ap-northeast-1 ''
 [[ -z "$MYSQL_VERIFY_PASSWORD" ]] \
   && echo 'ok    prompt は空（対話入力へ委ねる）' \
@@ -129,7 +137,7 @@ make_config staging "      enabled: true
       user: verifier
       auth_method: plaintext
       password: s3cret"
-read_mysql_verification_config "$tmp/c.yml" svc
+read_config
 MYSQL_VERIFY_USER=''
 if resolve_mysql_credentials ap-northeast-1 '' 2>/dev/null; then
   echo 'FAIL  ユーザー名未解決を検出できていない'; failed=$((failed+1))

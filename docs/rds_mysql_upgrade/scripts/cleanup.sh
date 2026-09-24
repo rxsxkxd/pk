@@ -65,8 +65,10 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-cleanup.XXXXXX")
 mkdir -p "$output_dir"
 
-# shellcheck source=lib/migration_phase.sh
-source "$(dirname "$0")/lib/migration_phase.sh"
+# 移行フェーズの判定（冪等性の第 1 層）は Ruby の 1 本で実装してある。
+# resolve で pre_switchover / post_switchover / unknown を返し、
+# describe で判定に使った実測値と宣言値を人向けに出す。
+migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
 
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
 # 必要な項目とその必須・任意だけをここに宣言する（共通関数は lib/deployment_config.sh）。
@@ -101,7 +103,7 @@ if [[ -z "${current_version:-}" || "$current_version" == None ]]; then
   echo "Source DB instance not found: $source_id" >&2
   exit 1
 fi
-phase=$(resolve_migration_phase "$current_version" "$current_group" \
+phase=$("${migration_phase[@]}" resolve "$current_version" "$current_group" \
   "$source_engine_version" "$source_db_parameter_group_name" \
   "$target_engine_version" "$target_db_parameter_group_name")
 
@@ -152,7 +154,7 @@ if [[ -n "$deployment_id" ]]; then
   esac
 elif [[ "$phase" != post_switchover ]]; then
   echo "Deployment が存在せず、かつ移行元が「移行後」の姿ではない。切替が完了していない可能性がある。" >&2
-  describe_migration_phase_inputs "$current_version" "$current_group" \
+  "${migration_phase[@]}" describe "$current_version" "$current_group" \
     "$source_engine_version" "$source_db_parameter_group_name" \
     "$target_engine_version" "$target_db_parameter_group_name" >&2
   exit 1

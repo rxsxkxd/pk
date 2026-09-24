@@ -74,8 +74,10 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-build.XXXXXX")
 mkdir -p "$output_dir"
 
-# shellcheck source=lib/migration_phase.sh
-source "$(dirname "$0")/lib/migration_phase.sh"
+# 移行フェーズの判定（冪等性の第 1 層）は Ruby の 1 本で実装してある。
+# resolve で pre_switchover / post_switchover / unknown を返し、
+# describe で判定に使った実測値と宣言値を人向けに出す。
+migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
 
 # 設定ファイルの承認宣言と、スナップショット・移行元 DB の識別子を取得する。AWS API は呼び出さない。
 # 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
@@ -105,7 +107,7 @@ read -r current_version current_group <<< "$(
     --query 'DBInstances[0].[EngineVersion,DBParameterGroups[0].DBParameterGroupName]' --output text
 )"
 
-phase=$(resolve_migration_phase "$current_version" "$current_group" \
+phase=$("${migration_phase[@]}" resolve "$current_version" "$current_group" \
   "$source_engine_version" "$source_db_parameter_group_name" \
   "$target_engine_version" "$target_db_parameter_group_name")
 
@@ -118,7 +120,7 @@ case "$phase" in
     ;;
   unknown)
     echo "移行元が移行前・移行後のいずれの宣言とも一致しない。設定の誤りか想定外のドリフトである。" >&2
-    describe_migration_phase_inputs "$current_version" "$current_group" \
+    "${migration_phase[@]}" describe "$current_version" "$current_group" \
       "$source_engine_version" "$source_db_parameter_group_name" \
       "$target_engine_version" "$target_db_parameter_group_name" >&2
     exit 1

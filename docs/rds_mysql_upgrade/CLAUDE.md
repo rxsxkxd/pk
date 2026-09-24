@@ -34,7 +34,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - **判定系は不適合時に終了コード `1` を返す。** CI のジョブ失敗としてそのまま扱う（例: `generate_mysql84_parameter_group.rb` は「要レビュー」が残ると `1`）。
 - **宣言と実環境の突き合わせ（reconciliation）。** 設定ファイルは進捗の記録ではなく「このアクションを実行してよい」という人間の宣言（`pending` / `approved`）を持つ。CI は毎回 AWS の実状態を読み、未適用なら適用、適用済みなら何もしない。**CI が設定ファイルへ書き戻すことはしない。** `approved` → `pending` に戻しても適用済みのものは取り消さない。
 - **識別子は AWS から引き当てる。** Deployment ID を設定ファイルに持たず、`describe-blue-green-deployments --filters Name=source,Values=$source_arn` で毎回解決する。これにより再実行・リトライ・同時トリガーで二重作成・二重切替が起こらない。
-- **冪等性は二層で担保する。** ① 移行元インスタンスのエンジンバージョンとパラメータグループで「結果」を観測し（`scripts/lib/migration_phase.sh`）、② Deployment の `Status` を安全弁として併用する。切替時に blue が `-old1` へリネームされるため、`source_db_instance_identifier` が指す実体は切替の前後で変わる。この判定は Deployment が cleanup で削除された後も機能する。**終了コードは「操作を実行したか」ではなく「望ましい終了状態に到達しているか」で決める**（到達 = `0`、未到達かつ自動では到達不能 = `1`）。設計の背景は `decisions/idempotency-strategy.md`。
+- **冪等性は二層で担保する。** ① 移行元インスタンスのエンジンバージョンとパラメータグループで「結果」を観測し（**実装は `scripts/lib/migration_phase.rb` の 1 本**。シェルの `scripts/lib/migration_phase.sh` は同じ関数名で Ruby を呼ぶだけで、判定を持たない。`tests/migration_phase_test.sh` がシェルへ判定を書き戻していないことも検査する）、② Deployment の `Status` を安全弁として併用する。切替時に blue が `-old1` へリネームされるため、`source_db_instance_identifier` が指す実体は切替の前後で変わる。この判定は Deployment が cleanup で削除された後も機能する。**終了コードは「操作を実行したか」ではなく「望ましい終了状態に到達しているか」で決める**（到達 = `0`、未到達かつ自動では到達不能 = `1`）。設計の背景は `decisions/idempotency-strategy.md`。
 - **本番 DB の認証情報を CI に常設しない。** DB 接続を伴う確認はローカルのコンテナから対話パスワードで行う。MySQL 接続は設定ファイルの `mysql_verification` が制御する（既定 `enabled: false`）。パスワードの取得方法は `auth_method` で選ぶ（`parameter_store` / `plaintext` / `prompt`）。**読むパラメータ名は config（サービスごと）が決め、CloudFormation の `MySqlCredentialsParameterPath` は `ssm:GetParameter` を許す階層（例 `/rds-bg/staging`）にすぎない**——パイプラインは環境ごとに 1 本なので、その環境の全サービスのパラメータを同じ階層の下に置く。ARN のリストにしないのは、CloudFormation にリストの各要素へ `!Sub` をかける手段が無く、名前から ARN を組めないためである（階層 1 つなら `!Sub` で組める）。**この階層には移行作業用のパラメータだけを置く**（配下すべてが読めるため）。SecureString がカスタマー管理キーなら `MySqlCredentialsKmsKeyArn` も渡す（`kms:ViaService` で SSM 経由に限定した `kms:Decrypt` が付く。AWS 管理キーなら不要で、復号は SSM 側なので `kms` の VPC endpoint は要らない）。**`parameter_store` ではユーザー名も必ず秘匿側へ置く**——`parameter_name`（パスワード）と `user_parameter_name`（ユーザー名）の両方が必須で、config の `user` は使わない。`plaintext` / `prompt` では config の `user` が必須である。解決は `scripts/lib/mysql_credentials.sh` が担い、値は `MYSQL_PWD` として MySQL クライアントのプロセスにだけ渡す。**`plaintext` は設定ファイルが Git 追跡対象であるためテスト環境専用で、`environment: production` では拒否される。** **カタログからの生成（`generate_blue_green_config`）は `auth_method: parameter_store` 固定で出力する。**`secrets_manager` と `iam`（IAM データベース認証）は対応しない——不正な `auth_method` として拒否される。
 - **RDS パラメータグループの変更経路は CloudFormation のみ。** Blue/Green Deployment 自体は CFn カスタムリソースを使わず AWS CLI で扱う。
 - 破壊的 RDS 権限（`rds:DeleteDBInstance` 等）は CI 実行ロールにのみ付与する。作業者には CloudFormation スタック操作権限だけを与える。
@@ -125,7 +125,7 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 | `collect_green_runtime_values` | `scripts/collect_green_runtime_values/` | Green DB の実効値収集 | `GREEN_RUNTIME_COLLECTOR` |
 | `generate_green_verification_report` | `scripts/generate_green_verification_report/` | 突き合わせ（`--check`）とレポートの組み立て。**AWS を呼ばない** | `GREEN_REPORT_GENERATOR` |
 
-`collect_green_state` の出力ディレクトリは判定器の **`--input-dir`** でそのまま渡せる（ファイル名は `greenstate` の定数で揃えてある。**名前を変えるときは両方を変える**）。`verify_green.sh` に残るのは、引数と設定の読み取り、**フェーズ判定**（`build_green` / `switchover` / `cleanup` と共有する `lib/migration_phase.sh` のため Go へ移さない）、MySQL 接続情報の解決、3 本の呼び出しだけである。
+`collect_green_state` の出力ディレクトリは判定器の **`--input-dir`** でそのまま渡せる（ファイル名は `greenstate` の定数で揃えてある。**名前を変えるときは両方を変える**）。`verify_green.sh` に残るのは、引数と設定の読み取り、**フェーズ判定**（`build_green` / `switchover` / `cleanup` と共有する判定のため Go へ移さない。実装は `lib/migration_phase.rb`）、MySQL 接続情報の解決、3 本の呼び出しだけである。
 
 **VerifyGreen はどれもビルドしない。**1 本でも欠けていれば理由を出して停止する（Go も外部ネットワークも持たない前提のため、自動復旧しない）。ローカル実行で環境変数を指定しなかった場合だけ、各スクリプトが一時ファイルへビルドして使う。Docker は使わない（`PrivilegedMode` も不要）。
 
@@ -143,7 +143,7 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 
 - **新しいプログラムは Go で書く。**
 - **`scripts/` 配下のうち、buildspec から直接呼ばれない 3 本は Ruby へ置き換えた。**`create_blue_green_deployment` / `switchover_blue_green_deployment` / `collect_green_runtime_values` である。**シェル版（`.sh`）も同じ内容で残してあり、呼び出し側が `.rb` を指している。**どちらを変えてももう一方へ同じ変更を入れる（`tests/sh_rb_parity_test.sh` が両者の終了コード・AWS CLI の呼び出し引数・保存する JSON の一致を検査する）。Ruby 版は設定 YAML を psych で直接読むため **jq を必要としない**（`scripts/lib/deployment_config.rb`）。AWS は SDK ではなく **AWS CLI を exec する**ので、権限・プロファイル・リージョンの解決はシェル版と完全に同じである（`scripts/lib/aws_cli.rb`）
-- **buildspec から直接呼ばれる 6 本と `resolve_go_module_root.sh` はシェルのまま。**`scripts/lib/*.sh` は `source` されて呼び出し元のシェル変数を作るため、呼び出し側がシェルである限り Ruby にできない
+- **buildspec から直接呼ばれる 6 本と `resolve_go_module_root.sh` はシェルのまま。**`scripts/lib/*.sh` は `source` されて呼び出し元のシェル変数を作るため、それ自体を Ruby へ置き換えることはできない。ただし**中の判定ロジックは Ruby へ出せる**——シェルの関数名を残したまま、中で `ruby` を呼んで結果を受け取る形にする（`migration_phase.sh` → `migration_phase.rb` がこの形）。実装が Ruby の 1 本になり、呼び出し側のシェルは変わらない
 - 既存の Ruby（`evaluate_blue_green_prereqs.rb`、`generate_mysql84_parameter_group.rb`）は**一律には移行しない。**テスト可能性が問題になったものから順に移す。`.rb` を全廃しても、設定 YAML の読み取りが Ruby ランタイムを要求し続けるため依存は消えない
 - `examples/mysql-timezone-replication/probe/` の Go / Ruby / Python は**移行対象外**である。ドライバごとの `time_zone` の扱いの違いを示すことが目的で、3 実装が並ぶこと自体が結論の根拠になっている
 

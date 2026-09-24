@@ -25,8 +25,10 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-verify.XXXXXX")
 mkdir -p "$output_dir"
 
-# shellcheck source=lib/migration_phase.sh
-source "$(dirname "$0")/lib/migration_phase.sh"
+# 移行フェーズの判定（冪等性の第 1 層）は Ruby の 1 本で実装してある。
+# resolve で pre_switchover / post_switchover / unknown を返し、
+# describe で判定に使った実測値と宣言値を人向けに出す。
+migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
 # shellcheck source=lib/mysql_credentials.sh
 source "$(dirname "$0")/lib/mysql_credentials.sh"
 
@@ -69,12 +71,12 @@ go_tool() {  # $1=結果を入れる変数名 $2=環境変数の値（空なら�
 # 切替後は <source_id> が green（新 Blue）を指すため、検証対象の Deployment は
 # 既に SWITCHOVER_COMPLETED であり AVAILABLE ではない。そのままだと後始末フェーズで
 # 再実行したときに必ず失敗するため、ここで「検証対象なし」として正常終了する。
-# フェーズ判定は build_green / switchover / cleanup と共有する（lib/migration_phase.sh）。
+# フェーズ判定は build_green / switchover / cleanup と共有する（lib/migration_phase.rb）。
 read -r current_version current_group <<< "$(
   aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
     --query 'DBInstances[0].[EngineVersion,DBParameterGroups[0].DBParameterGroupName]' --output text
 )"
-phase=$(resolve_migration_phase "$current_version" "$current_group" \
+phase=$("${migration_phase[@]}" resolve "$current_version" "$current_group" \
   "$source_engine_version" "$source_db_parameter_group_name" \
   "$target_engine_version" "$target_db_parameter_group_name")
 if [[ "$phase" == post_switchover ]]; then

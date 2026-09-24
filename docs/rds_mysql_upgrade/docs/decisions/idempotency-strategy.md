@@ -275,6 +275,7 @@ reconciliation 型では次の意味づけが正しい。**現状は switchover 
 ### 実装の要点
 
 - 判定関数は `scripts/lib/migration_phase.sh` に切り出し、Step 3・5・7 から `source` して共用する
+  - 追記（2026-09-24）: 判定の実装は `scripts/lib/migration_phase.rb` へ移した。`migration_phase.sh` は同じ関数名を残して Ruby を呼ぶだけで、呼び出し側のシェルは変更していない。Ruby スクリプトからは `require_relative` で同じ実装を使える。実装が 1 本なので、シェルと Ruby で判定がずれることはない
 - テーブル駆動テスト `tests/migration_phase_test.sh` を用意した。AWS へ接続しないため単体で実行できる。**このテストが実装中に前方一致の破綻を検出した**（上述）
 - Step 5 は切替完了まで待つようにした。`exit 0` が「望ましい終了状態に到達した」ことを意味するようにするためである
 - Step 3 の `PROVISIONING` 待機は明示的なポーリングで実装した。**AWS CLI に Blue/Green 用の waiter は存在しない**（RDS の waiter は `DBInstanceAvailable` / `DBSnapshotAvailable` など DB インスタンスとスナップショット系のみ）

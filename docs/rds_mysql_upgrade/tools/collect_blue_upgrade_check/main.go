@@ -14,6 +14,8 @@
 //	        --host <blue-endpoint> --user <user> --ssl-ca <rds-ca-bundle> --output-dir <収集先>
 //
 // パスワードは --password-env が指す環境変数（既定 MYSQL_PASSWORD）で渡す。**引数に取らない。**
+// TLS は --ssl-mode で選ぶ（既定 VERIFY_CA。DISABLED / PREFERRED / REQUIRED / VERIFY_IDENTITY も可）。
+// VERIFY_CA / VERIFY_IDENTITY は --ssl-ca が必須で、それ以外では --ssl-ca を渡せない。
 // mysqlsh へは標準入力（--passwords-from-stdin）で渡す。
 package main
 
@@ -38,10 +40,7 @@ func main() {
 
 func run() error {
 	var target mysqlcli.Target
-	flag.StringVar(&target.Host, "host", "", "Blue のエンドポイント（必須）")
-	flag.IntVar(&target.Port, "port", 3306, "接続ポート")
-	flag.StringVar(&target.User, "user", "", "接続ユーザー（必須）")
-	flag.StringVar(&target.SSLCA, "ssl-ca", "", "RDS の CA バンドル（必須。VERIFY_CA で接続する）")
+	mysqlcli.RegisterFlags(flag.CommandLine, &target, "Blue のエンドポイント（必須）")
 	passwordEnv := flag.String("password-env", "MYSQL_PASSWORD", "パスワードを載せた環境変数の名前")
 	outputDir := flag.String("output-dir", "", "出力先ディレクトリ（必須）")
 	// collect_blue_green_prereqs.sh の --target-engine-version と同じ既定値にそろえる。
@@ -50,7 +49,7 @@ func run() error {
 	mysqlshBin := flag.String("mysqlsh", "mysqlsh", "mysqlsh コマンドのパス")
 	timeout := flag.Duration("timeout", 10*time.Minute, "全体のタイムアウト（チェッカーは大きな DB で時間がかかる）")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: collect_blue_upgrade_check --host HOST --user USER --ssl-ca FILE --output-dir DIR [options]")
+		fmt.Fprintln(os.Stderr, "Usage: collect_blue_upgrade_check --host HOST --user USER [--ssl-mode MODE] [--ssl-ca FILE] --output-dir DIR [options]")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -62,6 +61,10 @@ func run() error {
 		fmt.Fprintln(os.Stderr, err)
 		flag.Usage()
 		os.Exit(2)
+	}
+	// 証明書を検証しないモードは明示したときだけ使える。使うときは警告を残す。
+	if warning := target.SecurityWarning(); warning != "" {
+		fmt.Fprintln(os.Stderr, warning)
 	}
 	password := os.Getenv(*passwordEnv)
 	if password == "" {

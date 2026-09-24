@@ -13,7 +13,8 @@
 // 接続規約:
 //   - **パスワードをコマンド引数に載せない。**mysql へは環境変数 MYSQL_PWD、
 //     mysqlsh へは標準入力（--passwords-from-stdin）で渡す
-//   - TLS は VERIFY_CA（証明書チェーンを検証し、ホスト名は検証しない）。CA バンドルは必須
+//   - TLS は --ssl-mode で選ぶ（下記の SSLModes）。**既定は VERIFY_CA**（証明書チェーンを
+//     検証し、ホスト名は検証しない）。検証する 2 つのモードでは CA バンドルが必須
 //   - mysql は --no-defaults で起動し、利用者の my.cnf に挙動を左右させない
 //
 // **判定はしない。**収集結果を JSON で書き出すだけで、合否は判定側が決める。
@@ -25,6 +26,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -39,15 +41,69 @@ const (
 	UpgradeCheckFileName = "blue-upgrade-check.json"
 )
 
+// DefaultSSLMode は --ssl-mode を指定しないときのモードである。
+// 証明書チェーンを検証する（ホスト名は検証しない）。弱いモードは明示したときだけ使う。
+const DefaultSSLMode = "VERIFY_CA"
+
+// SSLModes は mysql / mysqlsh の --ssl-mode に渡せる値と、その意味である。
+//
+//	DISABLED         TLS を使わない（平文。強制的に TLS なし）
+//	PREFERRED        サーバーが対応していれば TLS（任意。平文へ黙って落ちうる）
+//	REQUIRED         TLS 必須。ただし証明書は検証しない
+//	VERIFY_CA        TLS 必須。証明書チェーンを検証する（既定）
+//	VERIFY_IDENTITY  TLS 必須。証明書チェーンとホスト名を検証する
+//
+// 検証する 2 つ（VERIFY_CA / VERIFY_IDENTITY）は --ssl-ca が必須で、
+// 検証しない 3 つには --ssl-ca を渡せない（渡しても検証されず、指定の意図と食い違うため）。
+var SSLModes = []string{"DISABLED", "PREFERRED", "REQUIRED", "VERIFY_CA", "VERIFY_IDENTITY"}
+
 // Target は接続先である。パスワードはここに持たない（渡し方がコマンドごとに違うため）。
 type Target struct {
-	Host  string
-	Port  int
-	User  string
-	SSLCA string
+	Host    string
+	Port    int
+	User    string
+	SSLMode string // 空なら DefaultSSLMode
+	SSLCA   string
 }
 
-// Validate は必須項目を確かめる。
+// RegisterFlags は接続先のフラグ（--host / --port / --user / --ssl-mode / --ssl-ca）を登録する。
+// MySQL へ接続するツールはすべてこれを使い、フラグの名前と意味を揃える。
+func RegisterFlags(flags *flag.FlagSet, t *Target, hostUsage string) {
+	flags.StringVar(&t.Host, "host", t.Host, hostUsage)
+	flags.IntVar(&t.Port, "port", 3306, "接続ポート")
+	flags.StringVar(&t.User, "user", t.User, "接続ユーザー")
+	flags.StringVar(&t.SSLMode, "ssl-mode", DefaultSSLMode,
+		"TLS の扱い: "+strings.Join(SSLModes, " / ")+"（VERIFY_* は --ssl-ca が必須）")
+	flags.StringVar(&t.SSLCA, "ssl-ca", "", "CA バンドル（VERIFY_CA / VERIFY_IDENTITY のときだけ指定する）")
+}
+
+// VerifiesCertificate は、このモードがサーバー証明書を検証するかを返す。
+func (t Target) VerifiesCertificate() bool {
+	mode := t.mode()
+	return mode == "VERIFY_CA" || mode == "VERIFY_IDENTITY"
+}
+
+// SecurityWarning は、証明書を検証しないモードのときに利用者へ出す警告を返す（検証するなら空）。
+func (t Target) SecurityWarning() string {
+	switch t.mode() {
+	case "DISABLED":
+		return "WARNING: --ssl-mode=DISABLED は TLS を使わない。パスワードと結果が平文で流れる。"
+	case "PREFERRED":
+		return "WARNING: --ssl-mode=PREFERRED はサーバー証明書を検証せず、TLS が使えなければ平文で接続する。"
+	case "REQUIRED":
+		return "WARNING: --ssl-mode=REQUIRED は暗号化するが、サーバー証明書を検証しない（接続先のなりすましを防げない）。"
+	}
+	return ""
+}
+
+func (t Target) mode() string {
+	if t.SSLMode == "" {
+		return DefaultSSLMode
+	}
+	return strings.ToUpper(t.SSLMode)
+}
+
+// Validate は必須項目と TLS の組み合わせを確かめる。
 func (t Target) Validate() error {
 	var missing []string
 	if t.Host == "" {
@@ -56,16 +112,36 @@ func (t Target) Validate() error {
 	if t.User == "" {
 		missing = append(missing, "--user")
 	}
-	if t.SSLCA == "" {
-		missing = append(missing, "--ssl-ca")
-	}
 	if len(missing) > 0 {
 		return fmt.Errorf("%s は必須である", strings.Join(missing, ", "))
 	}
 	if t.Port <= 0 {
 		return fmt.Errorf("--port が不正: %d", t.Port)
 	}
+	mode := t.mode()
+	valid := false
+	for _, candidate := range SSLModes {
+		valid = valid || candidate == mode
+	}
+	if !valid {
+		return fmt.Errorf("--ssl-mode が不正: %s（有効な値: %s）", t.SSLMode, strings.Join(SSLModes, ", "))
+	}
+	if t.VerifiesCertificate() && t.SSLCA == "" {
+		return fmt.Errorf("--ssl-mode=%s には --ssl-ca が必要である（証明書を検証しないなら REQUIRED などを明示する）", mode)
+	}
+	if !t.VerifiesCertificate() && t.SSLCA != "" {
+		return fmt.Errorf("--ssl-mode=%s では --ssl-ca を使わない（証明書を検証しないモードである）", mode)
+	}
 	return nil
+}
+
+// sslArgs は mysql / mysqlsh 共通の TLS 引数である。
+func (t Target) sslArgs() []string {
+	args := []string{"--ssl-mode=" + t.mode()}
+	if t.SSLCA != "" {
+		args = append(args, "--ssl-ca="+t.SSLCA)
+	}
+	return args
 }
 
 // Result はコマンド 1 回分の実行結果である。
@@ -110,17 +186,27 @@ func ExecRunner(ctx context.Context, name string, args, env []string, stdin stri
 // 出力は --xml にする。タブ区切り（--batch）は値の中の改行やタブをエスケープで表すため、
 // 構造を持った XML の方が取り違えなく読める。NULL も xsi:nil で区別できる。
 func MySQLArgs(t Target, query string) []string {
-	return []string{
+	args := []string{
 		"--no-defaults", // 利用者の my.cnf を読まない。**先頭に置く必要がある**
 		"--host=" + t.Host,
 		"--port=" + strconv.Itoa(t.Port),
 		"--user=" + t.User,
-		"--ssl-mode=VERIFY_CA",
-		"--ssl-ca=" + t.SSLCA,
-		"--connect-timeout=10",
-		"--xml",
-		"--execute=" + query,
 	}
+	args = append(args, t.sslArgs()...)
+	return append(args, "--connect-timeout=10", "--xml", "--execute="+query)
+}
+
+// Query は mysql コマンドで SQL を 1 本実行し、結果の行を返す。**読み取りの SQL だけを渡す。**
+// パスワードは環境変数 MYSQL_PWD でだけ渡す。
+func Query(ctx context.Context, run Runner, mysqlBin string, t Target, password, sql string) ([]Row, error) {
+	result, err := run(ctx, mysqlBin, MySQLArgs(t, sql), []string{"MYSQL_PWD=" + password}, "")
+	if err != nil {
+		return nil, err
+	}
+	if result.ExitCode != 0 {
+		return nil, fmt.Errorf("mysql の終了コード %d: %s", result.ExitCode, strings.TrimSpace(string(result.Stderr)))
+	}
+	return ParseXML(result.Stdout)
 }
 
 // Row は結果の 1 行である。値が NULL の列は nil になる。
@@ -191,17 +277,9 @@ type State struct {
 // どれか 1 つでも失敗したら全体を失敗にする（欠けた収集結果で判定させないため）。
 func CollectState(ctx context.Context, run Runner, mysqlBin string, t Target, password string) (*State, error) {
 	query := func(label, sql string) ([]Row, error) {
-		result, err := run(ctx, mysqlBin, MySQLArgs(t, sql), []string{"MYSQL_PWD=" + password}, "")
+		rows, err := Query(ctx, run, mysqlBin, t, password, sql)
 		if err != nil {
-			return nil, err
-		}
-		if result.ExitCode != 0 {
-			return nil, fmt.Errorf("%s の取得に失敗した（mysql の終了コード %d）: %s",
-				label, result.ExitCode, strings.TrimSpace(string(result.Stderr)))
-		}
-		rows, err := ParseXML(result.Stdout)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", label, err)
+			return nil, fmt.Errorf("%s の取得に失敗した（%w）", label, err)
 		}
 		return rows, nil
 	}
@@ -247,18 +325,16 @@ func deref(value *string) string {
 func MySQLShellArgs(t Target, targetVersion string) []string {
 	// --no-wizard は付けない。付けるとパスワードの入力促しごと抑止され、
 	// 標準入力のパスワードが読まれずに「using password: NO」で失敗する（実測）。
-	return []string{
-		"--passwords-from-stdin",
-		"--ssl-mode=VERIFY_CA",
-		"--ssl-ca=" + t.SSLCA,
-		"--host=" + t.Host,
-		"--port=" + strconv.Itoa(t.Port),
-		"--user=" + t.User,
+	args := append([]string{"--passwords-from-stdin"}, t.sslArgs()...)
+	return append(args,
+		"--host="+t.Host,
+		"--port="+strconv.Itoa(t.Port),
+		"--user="+t.User,
 		"--",
 		"util", "check-for-server-upgrade",
-		"--target-version=" + targetVersion,
+		"--target-version="+targetVersion,
 		"--output-format=JSON",
-	}
+	)
 }
 
 // UpgradeCheck はアップグレードチェッカーの結果である（blue-upgrade-check.json）。

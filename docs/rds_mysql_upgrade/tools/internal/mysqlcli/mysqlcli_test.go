@@ -196,3 +196,60 @@ func TestCollectUpgradeCheckFailsWithoutJSON(t *testing.T) {
 		t.Fatalf("接続失敗を理由付きで返すこと: %v", err)
 	}
 }
+
+func TestSSLModes(t *testing.T) {
+	for _, tc := range []struct {
+		mode, ca string
+		ok       bool
+		want     []string // 引数に含まれるべきもの
+		absent   string   // 引数に含まれてはいけないもの
+		warns    bool
+	}{
+		{mode: "", ca: "/ca.pem", ok: true, want: []string{"--ssl-mode=VERIFY_CA", "--ssl-ca=/ca.pem"}},
+		{mode: "", ca: "", ok: false},
+		{mode: "verify_ca", ca: "/ca.pem", ok: true, want: []string{"--ssl-mode=VERIFY_CA"}},
+		{mode: "VERIFY_IDENTITY", ca: "/ca.pem", ok: true, want: []string{"--ssl-mode=VERIFY_IDENTITY", "--ssl-ca=/ca.pem"}},
+		{mode: "VERIFY_IDENTITY", ca: "", ok: false},
+		{mode: "REQUIRED", ca: "", ok: true, want: []string{"--ssl-mode=REQUIRED"}, absent: "--ssl-ca", warns: true},
+		{mode: "PREFERRED", ca: "", ok: true, want: []string{"--ssl-mode=PREFERRED"}, absent: "--ssl-ca", warns: true},
+		{mode: "DISABLED", ca: "", ok: true, want: []string{"--ssl-mode=DISABLED"}, absent: "--ssl-ca", warns: true},
+		{mode: "REQUIRED", ca: "/ca.pem", ok: false},
+		{mode: "DISABLED", ca: "/ca.pem", ok: false},
+		{mode: "SOMETIMES", ca: "", ok: false},
+	} {
+		target := Target{Host: "h", Port: 3306, User: "u", SSLMode: tc.mode, SSLCA: tc.ca}
+		err := target.Validate()
+		if (err == nil) != tc.ok {
+			t.Errorf("mode=%q ca=%q: Validate の結果が違う: %v", tc.mode, tc.ca, err)
+			continue
+		}
+		if !tc.ok {
+			continue
+		}
+		for _, args := range [][]string{MySQLArgs(target, "SELECT 1"), MySQLShellArgs(target, "8.4.9")} {
+			joined := strings.Join(args, " ")
+			for _, want := range tc.want {
+				if !strings.Contains(joined, want) {
+					t.Errorf("mode=%q: %q が引数に無い: %s", tc.mode, want, joined)
+				}
+			}
+			if tc.absent != "" && strings.Contains(joined, tc.absent) {
+				t.Errorf("mode=%q: %q が引数にある: %s", tc.mode, tc.absent, joined)
+			}
+		}
+		if (target.SecurityWarning() != "") != tc.warns {
+			t.Errorf("mode=%q: 警告の有無が違う: %q", tc.mode, target.SecurityWarning())
+		}
+	}
+}
+
+func TestQueryPassesPasswordOnlyByEnv(t *testing.T) {
+	fake := &fakeRunner{responses: map[string]Result{"SELECT 1": {Stdout: []byte(emptyXML)}}}
+	rows, err := Query(context.Background(), fake.run, "mysql", target, secret, "SELECT 1")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("Query: %v %v", rows, err)
+	}
+	if len(fake.env[0]) != 1 || fake.env[0][0] != "MYSQL_PWD="+secret {
+		t.Fatalf("パスワードは MYSQL_PWD だけで渡す: %v", fake.env[0])
+	}
+}

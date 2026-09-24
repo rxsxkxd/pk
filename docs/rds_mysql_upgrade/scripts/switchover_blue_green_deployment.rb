@@ -3,9 +3,7 @@
 #
 # Step 5 内部処理: switchover.sh から呼ばれる。検証済みの RDS Blue/Green Deployment を切り替える。
 # このスクリプトは本番トラフィックに影響する変更操作を実行するため、--approve を必須とする。
-#
-# 同じ内容のシェル版 switchover_blue_green_deployment.sh を残してある。
-# **どちらを変えても、もう一方へ同じ変更を入れる。**
+
 require 'fileutils'
 require 'optparse'
 require 'tmpdir'

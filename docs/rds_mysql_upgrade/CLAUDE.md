@@ -144,7 +144,7 @@ curl -o scripts/collect_green_runtime_values/rds-global-bundle.pem \
 **プログラムは Go、設定 YAML の読み取りは Ruby、AWS 応答などの JSON の取り出しは jq。**理由と適用範囲は `decisions/implementation-language-policy.md`（採択済み）にある。
 
 - **新しいプログラムは Go で書く。**
-- **`scripts/` 配下のうち、buildspec から直接呼ばれない 3 本は Ruby へ置き換えた。**`create_blue_green_deployment` / `switchover_blue_green_deployment` / `collect_green_runtime_values` である。**シェル版（`.sh`）も同じ内容で残してあり、呼び出し側が `.rb` を指している。**どちらを変えてももう一方へ同じ変更を入れる（`tests/sh_rb_parity_test.sh` が両者の終了コード・AWS CLI の呼び出し引数・保存する JSON の一致を検査する）。Ruby 版は設定 YAML を psych で直接読むため **jq を必要としない**（`scripts/lib/deployment_config.rb`）。AWS は SDK ではなく **AWS CLI を exec する**ので、権限・プロファイル・リージョンの解決はシェル版と完全に同じである（`scripts/lib/aws_cli.rb`）
+- **`scripts/` 配下のうち、buildspec から直接呼ばれない 3 本は Ruby へ置き換えた。**`create_blue_green_deployment` / `switchover_blue_green_deployment` / `collect_green_runtime_values` である。**シェル版（`.sh`）は削除した。**呼び出し側は `ruby <パス>` で `.rb` を呼ぶ（実行ビットに頼らない。`tests/ruby_invocation_test.sh` が検査する）。Ruby 版は設定 YAML を psych で直接読むため **jq を必要としない**（`scripts/lib/deployment_config.rb`）。AWS は SDK ではなく **AWS CLI を exec する**ので、権限・プロファイル・リージョンの解決はシェルから呼ぶ場合と完全に同じである（`scripts/lib/aws_cli.rb`）
 - **buildspec から直接呼ばれる 6 本と `resolve_go_module_root.sh` はシェルのまま。**`scripts/lib/*.sh` は `source` されて呼び出し元のシェル変数を作るため、それ自体を Ruby へ置き換えることはできない。ただし**判定ロジックは Ruby へ出せる**——シェルは `ruby <実装>.rb <サブコマンド> ...` を直接呼んで結果を受け取る（`migration_phase.rb` がこの形。呼び出し側は `migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")` と配列に入れて `"${migration_phase[@]}" resolve ...` で使う）。**同じ名前のシェル関数で包む委譲ラッパーは作らない**——回りくどく、実装の場所も分かりにくくなるため
 - 既存の Ruby（`evaluate_blue_green_prereqs.rb`、`generate_mysql84_parameter_group.rb`）は**一律には移行しない。**テスト可能性が問題になったものから順に移す。`.rb` を全廃しても、設定 YAML の読み取りが Ruby ランタイムを要求し続けるため依存は消えない
 - `examples/mysql-timezone-replication/probe/` の Go / Ruby / Python は**移行対象外**である。ドライバごとの `time_zone` の扱いの違いを示すことが目的で、3 実装が並ぶこと自体が結論の根拠になっている
@@ -226,6 +226,9 @@ tests/mysql_credentials_test.sh
 
 # Step 3 の分岐（承認・フェーズ判定・Deployment の状態・保護スナップショット）のテスト
 tests/build_green_test.sh
+
+# 呼び出し側のシェルが .rb を ruby 経由で呼んでいるか（実行ビットに頼らない）のテスト
+tests/ruby_invocation_test.sh
 
 # CloudFormation 短縮記法（!Ref / !Sub）を 3 実装が同じに解釈するかのテスト
 tests/cfn_shorthand_test.sh

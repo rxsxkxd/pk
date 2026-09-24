@@ -47,6 +47,8 @@ flowchart TD
 
 ## 2. A. ローカルでの準備
 
+各ツールのオプション・出力・終了コードは [tools/README.md](tools/README.md) にまとめてある。
+
 ### A-1. 事前チェック — 移行できるか、どれを対象にするか
 
 ```bash

@@ -4,10 +4,10 @@
 // AWS を一切呼ばない。入力は collect_rds_instance_inventory が収集した JSON と、
 // 人が管理する移行カタログ（config/migration-catalog.yml）だけである。
 //
-//	実行: go -C scripts run ./generate_blue_green_config \
+//	実行: go run ./tools/generate_blue_green_config \
 //	        --catalog CATALOG --inventory INVENTORY --environment ENV --output FILE
 //
-// go -C はカレントディレクトリを scripts/ へ移すため、パスは絶対パスで渡す。
+// リポジトリのルートで実行する。引数の相対パスは実行時のカレントディレクトリ基準である。
 package main
 
 import (

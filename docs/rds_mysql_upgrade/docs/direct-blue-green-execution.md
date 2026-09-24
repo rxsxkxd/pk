@@ -263,7 +263,7 @@ unset MYSQL_PASSWORD
 
 | スクリプト | 直接実行する場面 |
 | --- | --- |
-| `collect_blue_green_prereqs.sh` | Step 1 の事前棚卸し。一括収集や個別の読み取り確認は [tools/README.md](../tools/README.md) を参照。 |
+| `collect_blue_green_prereqs.sh` | Step 1 の事前棚卸し。一括収集や個別の読み取り確認は [tools/collect_blue_green_prereqs.md](../tools/collect_blue_green_prereqs.md) を参照。 |
 | `collect_mysql84_parameter_inputs.sh` | Step 2 のパラメータグループ生成入力の収集。Phase 1 手順書を参照。 |
 | `check_target_parameter_group.sh` | 本書の Step 1。BuildGreen の直前に実行。 |
 | `build_green.sh` | 本書の Step 2 の入口。内部で `create_blue_green_deployment.sh` を呼ぶ。 |

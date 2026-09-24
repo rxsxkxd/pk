@@ -2,10 +2,10 @@
 //
 // 収集ロジックは internal/collect にある。ここは CLI の配線だけを持つ。
 //
-//	実行: go -C scripts run ./collect_rds_instance_inventory \
+//	実行: go run ./tools/collect_rds_instance_inventory \
 //	        --region REGION --output FILE [--profile PROFILE]
 //
-// go -C はカレントディレクトリを scripts/ へ移すため、--output は絶対パスで渡す。
+// リポジトリのルートで実行する。引数の相対パスは実行時のカレントディレクトリ基準である。
 package main
 
 import (

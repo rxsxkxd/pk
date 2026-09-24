@@ -4,10 +4,10 @@
 // AWS を一切呼ばない。YAML 生成（generate_blue_green_config）とは別コマンドで、
 // 設定ファイルを書き換えずレポートだけを出す。
 //
-//	実行: go -C scripts run ./generate_blue_green_config_report \
+//	実行: go run ./tools/generate_blue_green_config_report \
 //	        --catalog CATALOG --inventory INVENTORY --environment ENV --output FILE
 //
-// go -C はカレントディレクトリを scripts/ へ移すため、パスは絶対パスで渡す。
+// リポジトリのルートで実行する。引数の相対パスは実行時のカレントディレクトリ基準である。
 package main
 
 import (

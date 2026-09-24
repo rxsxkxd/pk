@@ -59,7 +59,7 @@ Blue/Green 設定 YAML は `config/migration-catalog.yml`（人が管理する�
 | ディレクトリ | 中身 |
 |---|---|
 | `scripts/` | CI から到達する実行スクリプトと、その共有ライブラリ（`lib/` / `internal/`）、Step 4 の Go コマンド 2 本。ビルド時の構成検査 `resolve_go_module_root.sh` もここ |
-| `tools/` | **人が手で実行するもの一式。**Step 7 の後始末（`cleanup.sh`。設定の読み取りとフェーズ判定は `scripts/lib/` を使い、複製しない）、Step 1・2 の収集・判定（`collect_blue_green_prereqs.sh` / `evaluate_blue_green_prereqs.rb` / `collect_mysql84_parameter_inputs.sh` / `generate_mysql84_parameter_group.rb`）、Blue/Green 設定の Go コマンド（`collect_rds_instance_inventory` / `generate_blue_green_config` / `generate_blue_green_config_report`）と、そのライブラリ（`internal/`）。個別実行手順は `tools/README.md` |
+| `tools/` | **人が手で実行するもの一式。**Step 7 の後始末（`cleanup.sh`。設定の読み取りとフェーズ判定は `scripts/lib/` を使い、複製しない）、Step 1・2 の収集・判定（`collect_blue_green_prereqs.sh` / `evaluate_blue_green_prereqs.rb` / `collect_mysql84_parameter_inputs.sh` / `generate_mysql84_parameter_group.rb`）、Blue/Green 設定の Go コマンド（`collect_rds_instance_inventory` / `generate_blue_green_config` / `generate_blue_green_config_report`）と、そのライブラリ（`internal/`）。**使い方の索引は `tools/README.md`**（ツールごとの用途・入出力・主なオプション・終了コードと詳細ドキュメントへのリンク）。Step 1 の取得処理を 1 つずつ実行する手順は `tools/collect_blue_green_prereqs.md` |
 | `tests/` | テスト一式 |
 
 **`scripts/internal/` と `tools/internal/` は共有しない。**CI から到達する側と人が実行する側を独立させるための方針で、Go の `internal/` 可視性がそれを強制する。唯一内容が重なる `cfn` は両方に複製して置いており、**片方を直したらもう片方へ同じ変更を入れる**（`tests/cfn_shorthand_test.sh` が 2 本の一致を検査するので、ずれるとテストが落ちる）。

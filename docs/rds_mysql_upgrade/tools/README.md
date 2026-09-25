@@ -65,9 +65,9 @@ go run ./tools/collect_blue_green_prereqs \
 - **終了コード**: `0` 収集完了 / `0` 以外 AWS CLI の失敗
 - **詳細**: 各取得処理を 1 つずつ手で実行する手順は [collect_blue_green_prereqs.md](collect_blue_green_prereqs.md)。チェック項目の背景は [phase-0-precheck.md](../docs/phase-0-precheck.md)
 
-### MySQL 側の収集（2 本。結果はレポートに載る。判定には使わない）
+### MySQL 側の収集（2 本。結果は判定とレポートに反映される）
 
-成立条件チェックは **AWS 側（上）と MySQL 側（下の 2 本）の 2 段階**である。MySQL 側は AWS API では見えない項目を、Blue へ接続して集める。どちらも**読み取りだけ**で、判定はしない。`--output-dir` を AWS 側と同じ収集先にすると、`evaluate_blue_green_prereqs` のレポートの「MySQL 側の収集結果」に載る（無ければその節は省略と明示される）。
+成立条件チェックは **AWS 側（上）と MySQL 側（下の 2 本）の 2 段階**である。MySQL 側は AWS API では見えない項目を、Blue へ接続して集める。どちらも**読み取りだけ**で、判定はしない。`--output-dir` を AWS 側と同じ収集先にすると、`evaluate_blue_green_prereqs` が 0-1-06・0-2・0-3 の判定に使い、レポートの「MySQL 側の収集結果」に載せる（無ければ該当項目は REVIEW＝未収集になり、節は省略と明示される）。**`collect_blue_upgrade_check` はスナップショット復元機に対して実行する**（メタデータの全走査が走るため）。
 
 2 本は同じ接続規約に従う。
 
@@ -152,7 +152,16 @@ go run ./tools/evaluate_blue_green_prereqs \
 | `--output FILE` | | Markdown レポートの出力先（省略時は標準出力の一覧だけ） |
 
 - **出力**: 標準出力に判定一覧と、MySQL 側のファイルの有無（`あり` / `省略`）。`--output` を付けると**ゲート①のレポート**（判定に加えて観測値と取得元）
-- **MySQL 側の収集結果**: 入力ディレクトリに `blue-mysql-state.json`（`collect_blue_mysql_state`）や `blue-upgrade-check.json`（`collect_blue_upgrade_check`）があれば、レポートの「MySQL 側の収集結果」に載せる——binlog_format の実効値、`SHOW REPLICA STATUS`、InnoDB 以外のテーブル、アップグレードチェッカーの件数・検査項目・検出された問題（Error を先に）。**ファイルが無い節は「省略した」と、どのコマンドで取れるかを明示する。**判定と終了コードには使わない
+- **MySQL 側の収集結果**: 入力ディレクトリに `blue-mysql-state.json`（`collect_blue_mysql_state`）や `blue-upgrade-check.json`（`collect_blue_upgrade_check`）があれば、判定に使い、レポートの「MySQL 側の収集結果」に載せる（binlog_format の実効値、`SHOW REPLICA STATUS`、InnoDB 以外のテーブルと変換例、アップグレードチェッカーの件数・検査項目・検出された問題・チェッカーが示す対処と資料）。**ファイルが無い節は「省略した」と、どのコマンドで取れるかを明示する。**
+
+| 項目 | ファイルがあるとき | 無いとき |
+|---|---|---|
+| 0-1-06 外部 binlog レプリカ | `SHOW REPLICA STATUS` が空なら PASS、行があれば STOP | REVIEW（未収集） |
+| 0-1-02 binlog_format | 実効値がパラメータグループの値と違えば REVIEW（両方を示す） | パラメータグループの値だけで判定 |
+| 0-2 InnoDB 以外のテーブル | 無ければ PASS、MyISAM があれば STOP、他のエンジンだけなら REVIEW | REVIEW（未収集） |
+| 0-3 アップグレードチェッカー | Error があれば STOP、Warning があれば REVIEW、無ければ PASS | REVIEW（未収集） |
+
+- **補足事項**: レポートの末尾に、収集の網羅状況と収集日時、注意点（AWS 側と MySQL 側の収集日時が 24 時間以上離れている／状態の接続先が Blue と違う／チェッカーを本番に対して実行した／binlog_format の実効値の食い違い／RDS 固有の項目は `PrePatchCompatibility.log` で確認すること）、**全項目の合格条件・満たさないときの対処・参照**を載せる
 - **終了コード**: `0` `STOP` なし / `1` `STOP` が 1 件以上。`REVIEW` は終了コードに影響しない（人が確認する）
 - **詳細**: [report-generation-flows.md](../report-generation-flows.md)、サンプルは [examples/blue-green-prereqs/](../examples/blue-green-prereqs/README.md)
 

@@ -461,7 +461,7 @@ Resources:
                   Resource: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${RdsMonitoringRoleName}'
                   Condition:
                     StringEquals:
-                      'iam:PassedToService': monitoring.rds.amazonaws.com
+                      'iam:PassedToService': rds.amazonaws.com
                 - !Ref 'AWS::NoValue'
               - Sid: CreateBlueGreenDeployment
                 Effect: Allow

@@ -172,4 +172,4 @@ printf '{"db_instance_id":"%s","target_engine_version":"%s","collected_at":"%s"}
 go run ./tools/evaluate_blue_green_prereqs --input-dir "$OUTPUT_DIR"
 ```
 
-`STOP` は Blue/Green 作成前に解消が必要な不適合、`REVIEW` は手動確認または対応方針の記録が必要な項目である。0-1-06 は常に `REVIEW` となるため、手順 9 の確認結果を作業証跡として残す。
+`STOP` は Blue/Green 作成前に解消が必要な不適合、`REVIEW` は手動確認または対応方針の記録が必要な項目である。0-1-06 は、MySQL 側の収集結果（`blue-mysql-state.json`）が同じディレクトリに無ければ `REVIEW`（未収集）となるため、手順 9 の確認結果を作業証跡として残す。`collect_blue_mysql_state` で収集しておけば自動で判定される。

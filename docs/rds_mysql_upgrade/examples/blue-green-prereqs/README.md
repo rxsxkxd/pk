@@ -15,7 +15,7 @@ go run ./tools/evaluate_blue_green_prereqs \
   --output examples/blue-green-prereqs/output/prereqs-evaluation-report.md
 ```
 
-このサンプルは STOP が 0 件・REVIEW が 2 件なので、**終了コードは 0** である。
+このサンプルは STOP が 0 件・REVIEW が 2 件（0-1-02 binlog_format と 0-3 アップグレードチェッカーの Warning）なので、**終了コードは 0** である。
 
 ## 何を固定しているか
 
@@ -25,7 +25,9 @@ go run ./tools/evaluate_blue_green_prereqs \
 |---|---|---|---|
 | PASS | 0-1-01 自動バックアップ | `BackupRetentionPeriod=7` | `db-instance.json` |
 | REVIEW | 0-1-02 binlog_format | `MIXED` | `db-parameters.json` |
-| REVIEW | 0-1-06 外部 binlog レプリカ | AWS CLI では判定不可 | 手動確認 |
+| PASS | 0-1-06 外部 binlog レプリカ | `SHOW REPLICA STATUS` が空 | `blue-mysql-state.json` |
+| PASS | 0-2 InnoDB 以外のテーブル | なし | `blue-mysql-state.json` |
+| REVIEW | 0-3 アップグレードチェッカー | Error=0 / Warning=20 / Notice=2 | `blue-upgrade-check.json` |
 
 `binlog_format` を `MIXED` にしてあるのは、**REVIEW が出る経路を固定する**ためである（`ROW` だと PASS になり REVIEW 節が消える）。Blue が `MIXED` でも Blue/Green の作成自体は妨げられない——背景は [binlog-format-bluegreen-compatibility.md](../../docs/decisions/binlog-format-bluegreen-compatibility.md) にある。
 

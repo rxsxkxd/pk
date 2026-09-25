@@ -53,6 +53,8 @@ go run ./tools/evaluate_blue_green_prereqs \
   --input-dir <collector-output-dir>
 ```
 
+0-1-06（外部 binlog レプリカ）は AWS API では判定できないため、MySQL 側の収集（`go run ./tools/collect_blue_mysql_state --output-dir <collector-output-dir> ...`）を同じ収集先へ置くと自動で判定される。置かなければ REVIEW（未収集）になる。同じ収集で移行ガイドの 0-2（InnoDB 以外のテーブル）も、`collect_blue_upgrade_check`（スナップショット復元機に対して実行する）で 0-3（アップグレードチェッカー）も判定に加わる。使い方は [tools/README.md](../tools/README.md)。
+
 判定結果の `STOP` は Blue/Green 作成前に解消が必要な不適合、`REVIEW` は利用状況と対応手順の確認が必要な項目を表す。判定スクリプトは `STOP` がある場合に終了コード `1` を返すため、CI 等でも利用できる。
 
 ### 個別確認

@@ -206,7 +206,7 @@ func TestMySQLSideRendersResults(t *testing.T) {
 	report := evaluation.Report()
 	for _, want := range []string{
 		"| SHOW REPLICA STATUS | 1 行 |",
-		"|  | external.example | 3306 | Yes | Yes |  | a\|b |  |", // セル内の | はエスケープする
+		`|  | external.example | 3306 | Yes | Yes |  | a\|b |  |`, // セル内の | はエスケープする
 		"**InnoDB 以外のテーブル**（0-2。ユーザースキーマのみ。MyISAM は binlog レプリケーションで整合性が保証されない）\n\nなし。",
 		"| Error / Warning / Notice | 1 / 1 / 0 |",
 		"- Manual（`m`）",

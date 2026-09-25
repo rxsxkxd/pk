@@ -7,9 +7,9 @@
 ```mermaid
 flowchart TD
     subgraph pre["移行前（ローカル）"]
-        R0["⓪ 成立条件チェック<br/>evaluate_blue_green_prereqs.rb --output<br/><b>Ruby</b>"]
+        R0["⓪ 成立条件チェック<br/>evaluate_blue_green_prereqs --output<br/><b>Go</b>"]
         R1["① 設定レビュー<br/>generate_blue_green_config_report<br/><b>Go</b>"]
-        R2["② パラメータ変換<br/>generate_mysql84_parameter_group.rb<br/><b>Ruby</b>"]
+        R2["② パラメータ変換<br/>generate_mysql84_parameter_group<br/><b>Go</b>"]
     end
     subgraph post["Green 作成後（CI またはローカル）"]
         R3["③ Green 検証<br/>generate_green_verification_report<br/><b>Go</b>"]
@@ -30,9 +30,9 @@ flowchart TD
 
 | # | 生成器 | Step | 何を判断するため | 言語 | 判定するか |
 |---|---|---|---|---|---|
-| ⓪ | `tools/evaluate_blue_green_prereqs.rb --output` | **1** | **移行できるか・対象選定**（ゲート①） | **Ruby** | **する**（STOP が残れば exit 1） |
+| ⓪ | `tools/evaluate_blue_green_prereqs/ --output` | **1** | **移行できるか・対象選定**（ゲート①） | **Go** | **する**（STOP が残れば exit 1） |
 | ① | `tools/generate_blue_green_config_report/` | 3 の前準備 | **この移行設定でよいか**（ゲート②） | **Go** | **しない**（材料を並べるだけ） |
-| ② | `tools/generate_mysql84_parameter_group.rb` | **2** | **移行できるか・対象選定**（ゲート①） | **Ruby** | **する**（要レビューが残れば exit 1） |
+| ② | `tools/generate_mysql84_parameter_group/` | **2** | **移行できるか・対象選定**（ゲート①） | **Go** | **する**（要レビューが残れば exit 1） |
 | ③ | `scripts/generate_green_verification_report/` | **4** | **切り替えてよいか**（ゲート③） | **Go** | **する**（構成の突き合わせとドリフト検出。`--check`） |
 
 **番号は生成器の識別で、実行順ではない。**実行順は ⓪ → ② → ① → ③ である（下記）。ゲート①は ⓪ と ② の 2 本のレポートで判断する。
@@ -71,7 +71,7 @@ flowchart TD
 
 | 材料 | 出どころ | 形式 |
 |---|---|---|
-| 成立条件チェックの結果 | Step 1（`tools/evaluate_blue_green_prereqs.rb --output`） | `prereqs-evaluation-report.md` |
+| 成立条件チェックの結果 | Step 1（`tools/evaluate_blue_green_prereqs/ --output`） | `prereqs-evaluation-report.md` |
 | パラメータ変換のレビュー報告 | Step 2（②の生成器） | `mysql80-to-mysql84-parameter-report.md` |
 
 **ここを通らないと先へ進めない。**Step 1 に `STOP` が残る間は移行できず、Step 2 に「要レビュー」が残ると生成器が exit 1 を返す。
@@ -166,10 +166,10 @@ AWS を実際に叩くのは収集側だけである。
 |---|---|
 | `scripts/verify_green.sh` | 1（フェーズ判定のみ） |
 | `scripts/lib/green_state.rb`（Ruby。`collect_green_state.rb`。Go 版 `scripts/internal/greenstate` も同じ 7 回） | 7 |
-| `tools/cleanup.sh` | 12 |
-| `tools/collect_blue_green_prereqs.sh` | 12 |
+| `tools/cleanup/` | 12 |
+| `go run ./tools/collect_blue_green_prereqs` | 12 |
 | `scripts/build_green.sh` | 10 |
-| `tools/collect_mysql84_parameter_inputs.sh` | 6 |
+| `go run ./tools/collect_mysql84_parameter_inputs` | 6 |
 | `tools/internal/collect`（Go。`exec.Command("aws", ...)`） | インスタンス数に依存 |
 
 ## 3. ① 設定レビュー（Step 3 の前準備）
@@ -207,10 +207,10 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    AWS[("AWS")] -->|"describe-db-parameters 等<br/>6 回"| COL["tools/collect_mysql84_parameter_inputs.sh"]
+    AWS[("AWS")] -->|"describe-db-parameters 等<br/>6 回"| COL["go run ./tools/collect_mysql84_parameter_inputs"]
     COL --> JSON[("収集済み JSON")]
     RULES[("config/mysql80-to-84-parameter-rules.yml<br/><b>人が管理</b>")] --> GEN
-    JSON --> GEN["tools/generate_mysql84_parameter_group.rb<br/><b>Ruby</b>"]
+    JSON --> GEN["tools/generate_mysql84_parameter_group/<br/><b>Go</b>"]
     GEN --> TPL["mysql84-parameter-group.yaml<br/>（CloudFormation）"]
     GEN --> MD["mysql80-to-mysql84-parameter-report.md"]
     GEN -->|"要レビューが残れば"| EXIT["exit 1"]
@@ -327,8 +327,8 @@ flowchart LR
 | | ① 設定レビュー | ② パラメータ変換 | ③ Green 検証 |
 |---|---|---|---|
 | Step | 3 の前準備 | 2 | 4 |
-| 言語 | Go | Ruby | Go |
-| 規模 | 70 行 + ライブラリ 411 行 | 307 行 | 295 行 |
+| 言語 | Go | Go | Go |
+| 規模 | 70 行 + ライブラリ 411 行 | 60 行 + ライブラリ（`tools/internal/paramgen`） | 295 行 |
 | AWS を呼ぶ | **しない** | **しない** | **しない** |
 | 人が管理する定義 | `migration-catalog.yml` | `mysql80-to-84-parameter-rules.yml` | — |
 | 生成物を入力に取る | する（Step 2 の CFn） | **しない** | する（Step 2 の CFn） |
@@ -360,7 +360,7 @@ flowchart LR
 
 ## 8. Step 1 のレポート（任意出力）
 
-`tools/evaluate_blue_green_prereqs.rb`（Step 1、Ruby）は **`--output` を指定したときだけ** `.md` を出す。省略時は標準出力へ表形式で出すだけである。いずれの場合も STOP が残れば exit 1 を返す。
+`tools/evaluate_blue_green_prereqs/`（Step 1、Go）は **`--output` を指定したときだけ** `.md` を出す。省略時は標準出力へ表形式で出すだけである。いずれの場合も STOP が残れば exit 1 を返す。
 
 ```
 STATUS   ITEM                           DETAIL
@@ -370,16 +370,9 @@ STATUS   ITEM                           DETAIL
 
 ## 9. 言語の使い分け
 
-**新しいプログラムは Go**（`decisions/implementation-language-policy.md`、採択済み）。②が Ruby なのは先にあったためで、**既存の Ruby を一律には移行しない**方針である。
+**新しいプログラムは Go**（`decisions/implementation-language-policy.md`、採択済み）。**レポート生成器は 3 つとも Go である。**⓪（Step 1）と②（Step 2）は以前 Ruby だったが、`tools/` 配下を Go へ統一した際に移した。移行前に、Ruby 版と出力（ゴールデンファイルを含む）・終了コードが一致することを確かめている。②が出す CloudFormation テンプレートは、以前の Ruby（Psych）と一字一句同じ書式で書く（`tools/internal/paramgen/psych.go`）。
 
-ADR での評価は次のとおり。
-
-| スクリプト | 行数 | 評価 | 理由 |
-|---|---|---|---|
-| `tools/generate_mysql84_parameter_group.rb` | 307 | **移行を検討する** | 判定ロジックが重く、「要レビューが残れば exit 1」の判定も持つ。**単体テストが無い**（ゴールデンファイル差分を人が見るだけ）。CloudFormation YAML を扱うので `tools/internal/cfn` と噛み合う |
-| `tools/evaluate_blue_green_prereqs.rb` | 108 | **急がない** | JSON を読んで並べるだけで、Go 化して得られるのは単体テストだけ |
-
-`.rb` を全廃しても Ruby ランタイムへの依存は消えない。**設定 YAML の読み取り**（`scripts/lib/deployment_config.rb`）が psych を使うためである。
+`scripts/` 側には Ruby が残る。**設定 YAML の読み取り**（`scripts/lib/deployment_config.rb`）が psych を使うためである。
 
 ## 関連ドキュメント
 

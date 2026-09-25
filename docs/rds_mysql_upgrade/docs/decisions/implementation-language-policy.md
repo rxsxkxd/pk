@@ -49,13 +49,8 @@
 - **CloudFormation 短縮記法の実装を `internal/cfn` へ集約した。**Go 版レポート生成器が自前実装を持っていたのは、GitHub Actions が `.go` 1 ファイルだけを Docker でビルドしていたためである。GitHub Actions も CodeBuild と同じ `go build` に変えたことで制約が消え、**`ci/Dockerfile.green-verification-report` も削除した**（3 箇所 → 1 箇所）
   - 追記（2026-09-15）: **`scripts/` と `tools/` で Go のライブラリを共有しない**方針に変えたため、`internal/cfn` は `scripts/internal/cfn` と `tools/internal/cfn` の 2 本になった（1 箇所 → 2 箇所）。CI から到達する側と人が実行する側を独立させることを優先した判断である。同一内容の複製なので、**片方を直したらもう片方へ同じ変更を入れる**。ずれると `tests/cfn_shorthand_test.sh` が落ちる
 
-## 残っている Ruby プログラムの扱い
+## 残っていた Ruby プログラムの扱い
 
-移行の優先度は同じではない。**どちらも標準ライブラリだけで動き、ローカル専用**なので、「CI からランタイムを外す」という利点は働かない。
+> 追記（2026-09-25）: **実施済み。`tools/` 配下はすべて Go へ移した。**`generate_mysql84_parameter_group` と `evaluate_blue_green_prereqs`（Ruby）に加え、`collect_blue_green_prereqs` / `collect_mysql84_parameter_inputs` / `cleanup`（Bash）も Go にした。移行前に、旧版と出力・終了コード・AWS CLI の呼び出しが一致することを確かめ（Step 2 はゴールデンファイルと、ルール・入力を変えた 22 通り、テンプレートの値の書き方 69 通り）、単体テストを `tools/internal/{prereqs,paramgen,cleanup}` に置いた。
 
-| ファイル | 行数 | 判断 | 理由 |
-|---|---|---|---|
-| `tools/generate_mysql84_parameter_group.rb` | 307 | **移行を検討する** | `config/mysql80-to-84-parameter-rules.yml` の `copy` / `force` / `omit` / `target_only` を解釈する判定ロジックが重く、「要レビューが残れば exit 1」という判定も持つ。現状のテストは `examples/mysql84-parameter-generation/` のゴールデンファイル差分を人が見るだけで、**単体テストが無い**。CloudFormation YAML を扱うので `tools/internal/cfn` と噛み合う |
-| `tools/evaluate_blue_green_prereqs.rb` | 108 | **急がない** | 収集済み JSON を読んで STOP / 要判断を並べるだけで、Go 化して得られるのは単体テストだけである |
-
-どちらも `collect_*.sh` から直接呼ばれておらず、収集後に実行すべきコマンドを `echo` で案内しているだけである。**エントリポイントが人の手なので、移行しても呼び出し側の改修はほぼ案内文の書き換えで済む。**
+以前の判断（参考）: `generate_mysql84_parameter_group` は「判定ロジックが重く単体テストが無い」ため移行を検討する、`evaluate_blue_green_prereqs` は「JSON を並べるだけ」なので急がない、としていた。どちらも収集スクリプトから直接呼ばれておらず、移行しても呼び出し側の改修は案内文の書き換えで済んだ。

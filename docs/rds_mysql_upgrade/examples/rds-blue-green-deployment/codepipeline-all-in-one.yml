@@ -606,7 +606,7 @@ Resources:
                 Resource: !Sub 'arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:*'
 
   # Step 7（後始末: 旧 Blue と Deployment の削除）はパイプラインから外した。
-  # 人が実行するツール tools/cleanup.sh になっている。以前あった CleanupRole
+  # 人が実行するツール tools/cleanup/ になっている。以前あった CleanupRole
   # （rds:DeleteDBInstance 等の破壊的権限を持つ唯一のロール）も削除したため、
   # **このスタックが作るロールは、どれも旧 Blue を削除できない。**
 

@@ -29,7 +29,7 @@ codepipeline-all-in-one.yml:
                                                                            切替前検証
     → [Switchover]  承認 → 切替          ※ actions.switchover が approved のときだけ入る
 
-後始末（Step 7）はパイプラインに含まれない → tools/cleanup.sh を人が実行する
+後始末（Step 7）はパイプラインに含まれない → tools/cleanup/ を人が実行する
 ```
 
 `[ ]` で囲んだステージには**入場条件**が付いている。`ReadApprovals` が config の `actions` をパイプライン変数として公開し、`BeforeEntry` の `VariableCheck` が `approved` でなければ**ステージごとスキップ**する。
@@ -40,7 +40,7 @@ codepipeline-all-in-one.yml:
 |---|---|
 | `build: approved`、他は `pending` | 構築と検証まで実行。切替はスキップ → **成功で終了** |
 | `switchover: approved` を追加 | 再実行。構築は冪等に no-op、検証を通り、**切替の承認が表示される** |
-| 切替後 | 後始末は**パイプラインの外**で行う。`cleanup: approved` にして `tools/cleanup.sh` を実行する（作業者が破壊的権限を持つロールを引き受ける） |
+| 切替後 | 後始末は**パイプラインの外**で行う。`cleanup: approved` にして `tools/cleanup/` を実行する（作業者が破壊的権限を持つロールを引き受ける） |
 
 手動承認は**その操作が config で承認されているときだけ表示される**。何も起きない承認をクリックする状況が生じないため、承認の形骸化を防げる。承認ゲートの実体は従来どおり config の `actions` にあり、運用は変わらない。
 

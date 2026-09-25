@@ -362,7 +362,7 @@ MySQL 8.4 リファレンスマニュアルでは、このシステム変数に 
 
 ### `time_zone` は本リポジトリの生成器が自動的に引き継ぐ
 
-`config/mysql80-to-84-parameter-rules.yml` に `time_zone` のルールは登録していない。`generate_mysql84_parameter_group.rb` はルール未登録の `Source=user` パラメータを既定で `copy`（同名で 8.4 へ反映）として扱うため、8.0 側で `time_zone` を明示設定していれば、生成される 8.4 のテンプレートにも同じ値が入る。
+`config/mysql80-to-84-parameter-rules.yml` に `time_zone` のルールは登録していない。`generate_mysql84_parameter_group` はルール未登録の `Source=user` パラメータを既定で `copy`（同名で 8.4 へ反映）として扱うため、8.0 側で `time_zone` を明示設定していれば、生成される 8.4 のテンプレートにも同じ値が入る。
 
 ただし次の点は生成器では担保されないため、Step 2 のレビューで確認する。
 

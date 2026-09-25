@@ -1,16 +1,16 @@
 # Step 1 成立条件チェックの入出力サンプル
 
-`tools/evaluate_blue_green_prereqs.rb` の**匿名化済みゴールデンファイル**である。AWS へは接続しない。
+`tools/evaluate_blue_green_prereqs/` の**匿名化済みゴールデンファイル**である。AWS へは接続しない。
 
 | ディレクトリ | 内容 |
 |---|---|
-| `input/` | `tools/collect_blue_green_prereqs.sh` が出力する JSON を模したもの |
+| `input/` | `go run ./tools/collect_blue_green_prereqs` が出力する JSON を模したもの |
 | `output/` | 生成されるレポート（`prereqs-evaluation-report.md`） |
 
 ## 再生成
 
 ```bash
-ruby tools/evaluate_blue_green_prereqs.rb \
+go run ./tools/evaluate_blue_green_prereqs \
   --input-dir examples/blue-green-prereqs/input \
   --output examples/blue-green-prereqs/output/prereqs-evaluation-report.md
 ```
@@ -31,11 +31,10 @@ ruby tools/evaluate_blue_green_prereqs.rb \
 
 ## テスト
 
-`tests/evaluate_blue_green_prereqs_test.sh` がこの入出力を使う。確認するのは次の 4 点である。
+`tools/internal/prereqs` の単体テスト（`go test ./tools/internal/prereqs/`）がこの入出力を使う。確認するのは次の点である。
 
-- `--output` を省略しても従来どおり動く（ファイルを作らず、標準出力の書式も変わらない）
-- `--output` でレポートを出せ、**ゴールデンと一致する**
-- STOP があれば終了コード 1 になり、レポートに STOP 節が出る
-- 観測値と取得元がレポートに載る
+- レポートが**ゴールデンと一字一句一致する**
+- 入力を 1 項目ずつ書き換えると、該当項目が STOP / REVIEW に変わる
+- 収集ファイルが欠けていれば、その名前を挙げて止まる
 
 **判定ロジックを変えたら再生成して差分をレビューする。**

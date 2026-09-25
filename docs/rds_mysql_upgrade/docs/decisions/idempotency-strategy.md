@@ -107,7 +107,7 @@ services:
 
 実際の課題は冪等性ではなく鮮度である。`metadata.json` は `collected_at` を持つが、**後続の `build_green.sh` はこれを参照しない。** 1 か月前の成立条件チェックの結果のまま build を実行できてしまう。
 
-収集（`collect_blue_green_prereqs.sh`）と判定（`evaluate_blue_green_prereqs.rb`）を分離している設計は既に正しく、同じ JSON に対して何度でも同じ判定が出る。これは冪等性より価値のある性質である。
+収集（`collect_blue_green_prereqs`）と判定（`evaluate_blue_green_prereqs`）を分離している設計は既に正しく、同じ JSON に対して何度でも同じ判定が出る。これは冪等性より価値のある性質である。
 
 ### Step 3: build-green — 存在ベースの弊害が最も出ている
 
@@ -254,7 +254,7 @@ reconciliation 型では次の意味づけが正しい。**現状は switchover 
 いずれも AWS 環境がないため検証していない。実装前に確認する。
 
 **① 切替後の Deployment 解決**
-`cleanup.sh` は、切替後も `describe-blue-green-deployments --filters Name=source,Values=<新 Blue の ARN>` で Deployment を引けることを前提にしている。切替時に旧 Blue が `-old1` へリネームされるため、これは **Deployment の `Source` フィールドが作成時の ARN 文字列を保持し続けるか**に依存する。**この前提が崩れると cleanup は対象を見つけられない。**
+`tools/cleanup` は、切替後も `describe-blue-green-deployments --filters Name=source,Values=<新 Blue の ARN>` で Deployment を引けることを前提にしている。切替時に旧 Blue が `-old1` へリネームされるため、これは **Deployment の `Source` フィールドが作成時の ARN 文字列を保持し続けるか**に依存する。**この前提が崩れると cleanup は対象を見つけられない。**
 
 なお、バージョン ＋ PG による結果の観測を導入すると、switchover についてはこの前提から独立する。Deployment を引けなくても完了を判定できるためである。
 

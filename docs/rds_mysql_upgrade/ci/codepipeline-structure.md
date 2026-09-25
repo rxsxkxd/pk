@@ -86,7 +86,7 @@
 | 5 | `VerifyGreen`（切替前検証） | `VerifyGreen` | なし | なし |
 | 6 | `Switchover` | `ManualApproval` → `Switchover` | `SWITCHOVER_APPROVED == approved` | **あり・本番影響** |
 
-**Step 7（後始末）はパイプラインに含まれない。**旧 Blue の削除は不可逆で、切り戻し不要の判断や逆方向レプリケーションの確認と一体で行うべき作業のため、人がツール `tools/cleanup.sh` で実行する（手順は [移行の実行](../operations-migration-run.md) の B-4）。
+**Step 7（後始末）はパイプラインに含まれない。**旧 Blue の削除は不可逆で、切り戻し不要の判断や逆方向レプリケーションの確認と一体で行うべき作業のため、人がツール `tools/cleanup/` で実行する（手順は [移行の実行](../operations-migration-run.md) の B-4）。
 
 ## 実行シナリオ
 
@@ -117,7 +117,7 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
   → Switchover ▶ 承認待ち → 切替 ✓(完了済み)                    ⇒ 成功で終了
 ```
 
-`BuildGreen` と `Switchover` は移行元が既に 8.4 であることを検出して何もしない。`VerifyGreen` も「切替済みのため検証対象なし」で成功する。後始末はこの後、パイプラインの外で `tools/cleanup.sh` を実行する。
+`BuildGreen` と `Switchover` は移行元が既に 8.4 であることを検出して何もしない。`VerifyGreen` も「切替済みのため検証対象なし」で成功する。後始末はこの後、パイプラインの外で `tools/cleanup/` を実行する。
 
 > **待機時間はパイプラインの外にある。** 構築から切替まで数週間空いても、その間パイプラインは実行されていない。CodePipeline の手動承認は既定 7 日でタイムアウトするが、承認が表示されるのは「そのフェーズを実行しに来たとき」だけなので問題にならない。
 
@@ -153,7 +153,7 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 | `BuildGreenRole` | `rds:CreateDBSnapshot` / `rds:CreateBlueGreenDeployment` / `rds:AddTagsToResource` |
 | `VerifyGreenRole` | `ssm:GetParameter` / `ssm:GetParameters`（`MySqlCredentialsParameterPath` 指定時のみ。対象はその階層の配下） |
 | `SwitchoverRole` | `rds:SwitchoverBlueGreenDeployment`（`deployment:*`）、`rds:ModifyDBInstance`／`rds:PromoteReadReplica`（`db:*`） |
-**破壊的権限（`rds:DeleteDBInstance` / `rds:DeleteBlueGreenDeployment`）はどのロールも持たない。**このスタックが作るロールでは旧 Blue を削除できない。後始末は `tools/cleanup.sh` を作業者が実行し、そのとき作業者がこの権限を持つロールを引き受ける。
+**破壊的権限（`rds:DeleteDBInstance` / `rds:DeleteBlueGreenDeployment`）はどのロールも持たない。**このスタックが作るロールでは旧 Blue を削除できない。後始末は `tools/cleanup/` を作業者が実行し、そのとき作業者がこの権限を持つロールを引き受ける。
 
 `CodePipelineRole` はアーティファクトの読み書き、6 プロジェクト（ReadApprovals / Precheck / BuildGreen / BuildReportTool / VerifyGreen / Switchover）の `StartBuild`、`codestar-connections:UseConnection`、（指定時のみ）`sns:Publish` を持つ。
 

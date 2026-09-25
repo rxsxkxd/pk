@@ -229,7 +229,7 @@ scripts/switchover.sh \
 ### 9-1. 未承認状態の安全確認
 
 ```bash
-tools/cleanup.sh \
+tools/cleanup/ \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -246,7 +246,7 @@ tools/cleanup.sh \
 read -rs -p 'Old Blue DB password: ' MYSQL_PASSWORD; echo
 export MYSQL_PASSWORD
 
-tools/cleanup.sh \
+tools/cleanup/ \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -263,13 +263,13 @@ unset MYSQL_PASSWORD
 
 | スクリプト | 直接実行する場面 |
 | --- | --- |
-| `collect_blue_green_prereqs.sh` | Step 1 の成立条件チェック（収集）。一括収集や個別の読み取り確認は [tools/collect_blue_green_prereqs.md](../tools/collect_blue_green_prereqs.md) を参照。 |
-| `collect_mysql84_parameter_inputs.sh` | Step 2 のパラメータグループ生成入力の収集。Phase 1 手順書を参照。 |
+| `collect_blue_green_prereqs` | Step 1 の成立条件チェック（収集）。一括収集や個別の読み取り確認は [tools/collect_blue_green_prereqs.md](../tools/collect_blue_green_prereqs.md) を参照。 |
+| `collect_mysql84_parameter_inputs` | Step 2 のパラメータグループ生成入力の収集。Phase 1 手順書を参照。 |
 | `check_target_parameter_group.sh` | 本書の Step 1。BuildGreen の直前に実行。 |
-| `build_green.sh` | 本書の Step 2 の入口。内部で `create_blue_green_deployment.sh` を呼ぶ。 |
+| `build_green.sh` | 本書の Step 2 の入口。内部で `create_blue_green_deployment.rb` を呼ぶ。 |
 | `verify_green.sh` | 本書の Step 3 の入口。必要に応じて `collect_green_runtime_values.rb` を呼ぶ。 |
-| `switchover.sh` | 本書の Step 5 の入口。内部で `switchover_blue_green_deployment.sh` を呼ぶ。 |
-| `cleanup.sh` | 本書の Step 7 の入口。 |
+| `switchover.sh` | 本書の Step 5 の入口。内部で `switchover_blue_green_deployment.rb` を呼ぶ。 |
+| `cleanup`（`tools/cleanup/`。Go） | 本書の Step 7 の入口。 |
 
 ## 11. 実行後に保管するもの
 

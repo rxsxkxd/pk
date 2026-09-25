@@ -4,32 +4,39 @@
 
 実行順に並べた手順は [operations-migration-run.md](../operations-migration-run.md) にある。本書は「このツールは何をして、何を渡して、何が返るか」を引くためのものである。
 
-**コマンドはすべてリポジトリのルートで実行する。**オプションの完全な一覧は各ツールの `--help` が正である。
+**`tools/` のツールはすべて Go である**（`go run ./tools/<名前>`）。**コマンドはすべてリポジトリのルートで実行する。**オプションの完全な一覧は各ツールの `--help` が正である。ロジックは `tools/internal/` にあり、各 `main` は CLI の配線だけを持つ。
+
+AWS を読むツール（`collect_*` と `cleanup`）は `aws` コマンドを呼ぶ。ホストに AWS CLI があれば `go run` でよい。無ければ Linux 向けにビルドしたバイナリを compose の `awscli` コンテナで動かす（Go はコンテナに無いため）:
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o .tools/collect_blue_green_prereqs ./tools/collect_blue_green_prereqs   # Apple Silicon なら arm64
+docker compose --env-file .env run --rm --entrypoint .tools/collect_blue_green_prereqs awscli --db-instance-id <blue-id> --region <region>
+```
 
 ## 一覧
 
 | Step | ツール | 言語 | AWS | 用途 | ゲート |
 |---|---|---|---|---|---|
-| 1 | [`collect_blue_green_prereqs.sh`](#collect_blue_green_prereqssh) | Bash | 読み取りのみ | Blue/Green の成立条件に要る情報を収集 | — |
+| 1 | [`collect_blue_green_prereqs`](#collect_blue_green_prereqs) | Go | 読み取りのみ | Blue/Green の成立条件に要る情報を収集 | — |
 | 1 | [`collect_blue_mysql_state`](#collect_blue_mysql_state) | Go（`mysql` を exec） | 呼ばない（Blue の MySQL へ接続） | AWS API では見えない項目を MySQL から収集 | — |
 | 1 | [`collect_blue_upgrade_check`](#collect_blue_upgrade_check) | Go（`mysqlsh` を exec） | 呼ばない（Blue の MySQL へ接続） | MySQL Shell のアップグレードチェッカーを実行 | — |
-| 1 | [`evaluate_blue_green_prereqs.rb`](#evaluate_blue_green_prereqsrb) | Ruby | 呼ばない | 収集結果を判定し、レポートを出す | ① |
-| 2 | [`collect_mysql84_parameter_inputs.sh`](#collect_mysql84_parameter_inputssh) | Bash | 読み取りのみ | 8.0 パラメータグループと既定値を収集 | — |
-| 2 | [`generate_mysql84_parameter_group.rb`](#generate_mysql84_parameter_grouprb) | Ruby | 呼ばない | 8.4 用 CloudFormation テンプレートとレポートを生成 | ① |
+| 1 | [`evaluate_blue_green_prereqs`](#evaluate_blue_green_prereqs) | Go | 呼ばない | 収集結果を判定し、レポートを出す | ① |
+| 2 | [`collect_mysql84_parameter_inputs`](#collect_mysql84_parameter_inputs) | Go | 読み取りのみ | 8.0 パラメータグループと既定値を収集 | — |
+| 2 | [`generate_mysql84_parameter_group`](#generate_mysql84_parameter_group) | Go | 呼ばない | 8.4 用 CloudFormation テンプレートとレポートを生成 | ① |
 | 3 前 | [`collect_rds_instance_inventory`](#collect_rds_instance_inventory) | Go | 読み取りのみ | RDS インベントリを収集 | — |
 | 3 前 | [`generate_blue_green_config`](#generate_blue_green_config) | Go | 呼ばない | 移行設定 YAML を生成 | — |
 | 3 前 | [`generate_blue_green_config_report`](#generate_blue_green_config_report) | Go | 呼ばない | 移行設定のレビューレポートを生成 | ② |
-| 7 | [`cleanup.sh`](#cleanupsh) | Bash | **変更あり（削除）** | Blue/Green Deployment と旧 Blue の削除 | — |
+| 7 | [`cleanup`](#cleanup) | Go（`mysql` を exec。任意） | **変更あり（削除）** | Blue/Green Deployment と旧 Blue の削除 | — |
 
-どのツールも「収集」と「判定・生成」が別コマンドになっている。収集は AWS の読み取り API だけを呼んで JSON を落とし、判定・生成は AWS を呼ばずにその JSON だけを読む。**AWS を変更するのは `cleanup.sh` だけである。**
+どのツールも「収集」と「判定・生成」が別コマンドになっている。収集は AWS の読み取り API だけを呼んで JSON を落とし、判定・生成は AWS を呼ばずにその JSON だけを読む。**AWS を変更するのは `cleanup` だけである。**
 
 終了コードの共通の意味:
 
 | 終了コード | 意味 |
 |---|---|
 | `0` | 成功（判定系では「不適合なし」） |
-| `1` | 判定系では不適合あり。収集系では AWS CLI・入力の失敗 |
-| `2` | 使い方の誤り（引数不足・不明な引数）。Go のコマンドと `cleanup.sh` |
+| `1` | 判定系では不適合あり。収集系では AWS CLI・入力の失敗（理由を stderr へ出す） |
+| `2` | 使い方の誤り（引数不足・不明な引数） |
 
 ゲート①〜③の意味とレポートの生成元は [report-generation-flows.md](../report-generation-flows.md) にある。
 
@@ -37,12 +44,12 @@
 
 ## Step 1: 成立条件チェック
 
-### `collect_blue_green_prereqs.sh`
+### `collect_blue_green_prereqs`
 
 対象 Blue について、Blue/Green Deployments の成立条件に要る情報を AWS の読み取り API（`Describe*` / `Get*`）で集める。
 
 ```bash
-tools/collect_blue_green_prereqs.sh \
+go run ./tools/collect_blue_green_prereqs \
   --db-instance-id <blue-id> --region <region> --profile <profile> \
   --output-dir <収集先>
 ```
@@ -65,8 +72,8 @@ tools/collect_blue_green_prereqs.sh \
 2 本は同じ接続規約に従う。
 
 - **パスワードは引数に取らない。**`--password-env` が指す環境変数（既定 `MYSQL_PASSWORD`）で渡す。`mysql` へは `MYSQL_PWD`、`mysqlsh` へは標準入力で渡る
-- TLS は **VERIFY_CA**（証明書チェーンを検証し、ホスト名は検証しない）。**`--ssl-ca` は必須**
-- `--output-dir` に `collect_blue_green_prereqs.sh` の収集先を指定すると、AWS 側の結果と同じディレクトリに並ぶ
+- TLS は **`--ssl-mode`** で選ぶ（下の「MySQL の TLS」）。**既定は VERIFY_CA で、`--ssl-ca` が必須**
+- `--output-dir` に `collect_blue_green_prereqs` の収集先を指定すると、AWS 側の結果と同じディレクトリに並ぶ
 
 `mysql` / `mysqlsh` の両方が入っている compose の `mysql` コンテナ（`mysql:8.4.11`。RDS の CA は `/certs/rds/global-bundle.pem`）で動かす想定である。Go はコンテナに無いので、Linux 向けにビルドしたバイナリを渡す。
 
@@ -83,6 +90,23 @@ docker compose --env-file .env run --rm -e MYSQL_PASSWORD mysql \
 ```
 
 接続ユーザーには `SELECT`・`PROCESS`・`REPLICATION CLIENT`・`SHOW VIEW`・`EVENT`・`TRIGGER` などの読み取り権限が要る（アップグレードチェッカーの検査項目による）。
+
+#### MySQL の TLS（`--ssl-mode` / `--ssl-ca`）
+
+MySQL へ接続する 3 本（`collect_blue_mysql_state`・`collect_blue_upgrade_check`・`cleanup` の逆方向レプリケーション確認）は同じ規則に従う（実装は `tools/internal/mysqlcli`）。
+
+| `--ssl-mode` | TLS | サーバー証明書 | `--ssl-ca` | 用途 |
+|---|---|---|---|---|
+| `VERIFY_CA`（**既定**） | 必須 | チェーンを検証（ホスト名は見ない） | **必須** | 通常はこれ。RDS の CA バンドルを渡す |
+| `VERIFY_IDENTITY` | 必須 | チェーンとホスト名を検証 | **必須** | 最も厳しい。RDS のエンドポイント名で接続するとき |
+| `REQUIRED` | 必須 | 検証しない | 渡せない | 暗号化だけ必要で CA を用意できないとき |
+| `PREFERRED` | 任意（使えれば使う） | 検証しない | 渡せない | TLS の有無を問わず接続したいとき（平文へ黙って落ちうる） |
+| `DISABLED` | 使わない（強制的に平文） | — | 渡せない | TLS を無効にしたサーバーや検証用。パスワードも平文で流れる |
+
+- 検証しない 3 つ（`REQUIRED` / `PREFERRED` / `DISABLED`）は、指定すると **stderr に警告**を出す。明示しない限り使われない
+- 検証する 2 つで `--ssl-ca` が無い、または検証しない 3 つで `--ssl-ca` を渡した場合は、接続する前に使い方の誤りとして止める（指定の意図と挙動を食い違わせないため）
+- `DISABLED` / `PREFERRED` では `--get-server-public-key` を付ける。MySQL 8 の既定の認証方式（`caching_sha2_password`）が TLS なしでパスワードを送るのに必要なためである
+- 5 つのモードとも、実際の MySQL 8.0 に対して動作を確かめてある（`VERIFY_IDENTITY` はホスト名が証明書と一致しなければ拒否される）
 
 #### `collect_blue_mysql_state`
 
@@ -113,18 +137,18 @@ docker compose --env-file .env run --rm -e MYSQL_PASSWORD mysql \
 
 - **終了コード**: `0` 収集完了（**チェッカーが問題を見つけても `0`**。件数は JSON に残る） / `1` JSON を取れなかった（接続・権限の失敗など） / `2` 使い方の誤り
 
-### `evaluate_blue_green_prereqs.rb`
+### `evaluate_blue_green_prereqs`
 
 上の収集結果を判定し、`OK` / `REVIEW` / `STOP` を出す。AWS は呼ばない。
 
 ```bash
-ruby tools/evaluate_blue_green_prereqs.rb \
+go run ./tools/evaluate_blue_green_prereqs \
   --input-dir <収集先> --output <収集先>/prereqs-evaluation-report.md
 ```
 
 | オプション | 必須 | 内容 |
 |---|---|---|
-| `--input-dir DIR` | ○ | `collect_blue_green_prereqs.sh` の出力先 |
+| `--input-dir DIR` | ○ | `collect_blue_green_prereqs` の出力先 |
 | `--output FILE` | | Markdown レポートの出力先（省略時は標準出力の一覧だけ） |
 
 - **出力**: 標準出力に判定一覧。`--output` を付けると**ゲート①のレポート**（判定に加えて観測値と取得元）
@@ -135,12 +159,12 @@ ruby tools/evaluate_blue_green_prereqs.rb \
 
 ## Step 2: パラメータグループ
 
-### `collect_mysql84_parameter_inputs.sh`
+### `collect_mysql84_parameter_inputs`
 
 移行元の 8.0 カスタムパラメータグループと、8.0 / 8.4 の既定値を集める。
 
 ```bash
-tools/collect_mysql84_parameter_inputs.sh \
+go run ./tools/collect_mysql84_parameter_inputs \
   --source-parameter-group <8.0-pg-name> --output-dir <収集先>
 ```
 
@@ -154,18 +178,18 @@ tools/collect_mysql84_parameter_inputs.sh \
 - **出力**: `source-parameter-group.json`、`source-user-parameters.json`、`source-system-parameters.json`、`mysql80-default-parameters.json`、`mysql84-default-parameters.json`、`metadata.json`（`--db-instance-id` 指定時は `source-db-instance.json` も）
 - **終了コード**: `0` 収集完了 / `0` 以外 AWS CLI の失敗
 
-### `generate_mysql84_parameter_group.rb`
+### `generate_mysql84_parameter_group`
 
 収集結果と変換ルールから、8.4 用パラメータグループの CloudFormation テンプレートとレポートを作る。AWS は呼ばない。
 
 ```bash
-ruby tools/generate_mysql84_parameter_group.rb \
+go run ./tools/generate_mysql84_parameter_group \
   --input-dir <収集先> --output-dir <生成先> --system <name> --environment <env>
 ```
 
 | オプション | 必須 | 既定値 | 内容 |
 |---|---|---|---|
-| `--input-dir DIR` | ○ | — | `collect_mysql84_parameter_inputs.sh` の出力先 |
+| `--input-dir DIR` | ○ | — | `collect_mysql84_parameter_inputs` の出力先 |
 | `--output-dir DIR` | ○ | — | 生成先 |
 | `--system NAME` / `--environment NAME` | ○ | — | リソース名に使う |
 | `--rules FILE` | | `config/mysql80-to-84-parameter-rules.yml` | 変換ルール |
@@ -242,20 +266,22 @@ go run ./tools/generate_blue_green_config_report \
 
 ## Step 7: 後始末
 
-### `cleanup.sh`
+### `cleanup`
 
 切替後に、Blue/Green Deployment と旧 Blue（`<source>-old1`）を削除する。**不可逆な変更操作で、パイプラインからは外してある。**
 
 ```bash
-tools/cleanup.sh --config config/blue-green/staging.deployment.yml --service example-service
+go run ./tools/cleanup --config config/blue-green/staging.deployment.yml --service example-service
 ```
 
 | オプション | 必須 | 既定値 | 内容 |
 |---|---|---|---|
 | `--config FILE` / `--service NAME` | ○ | — | 移行設定とサービス名 |
 | `--mysql-user USER` | | — | 指定すると旧 Blue に接続し、逆方向レプリケーションが残っていないか確かめる |
-| `--mysql-password-env NAME` | | `MYSQL_PASSWORD` | パスワードを渡す環境変数名 |
-| `--ssl-ca FILE` | | — | RDS CA バンドル（VERIFY_CA で接続） |
+| `--mysql-password-env NAME` | | `MYSQL_PASSWORD` | パスワードを渡す環境変数名。空なら端末から対話入力する（エコーしない。端末が無ければ止める） |
+| `--ssl-mode MODE` | | `VERIFY_CA` | 旧 Blue への接続の TLS（上の「MySQL の TLS」） |
+| `--ssl-ca FILE` | | — | RDS CA バンドル（`VERIFY_CA` / `VERIFY_IDENTITY` では必須） |
+| `--mysql-port` / `--mysql` | | `3306` / `mysql` | 旧 Blue のポートと mysql コマンドのパス |
 | `--region` / `--profile` | | 設定ファイルの値 | |
 | `--output-dir DIR` | | 一時ディレクトリ | 応答 JSON の保存先 |
 
@@ -266,4 +292,4 @@ tools/cleanup.sh --config config/blue-green/staging.deployment.yml --service exa
 - **権限**: `rds:DeleteBlueGreenDeployment` / `DeleteDBInstance` / `ModifyDBInstance` / `CreateDBSnapshot` / `AddTagsToResource` が要る。パイプラインのロールは持たないので、作業者がこの権限を持つロールを引き受ける
 - **出力**: 応答 JSON。最終スナップショットは `final_snapshot_identifier`（未指定なら `<source>-final`）の固定名で作る
 - **終了コード**: `0` 望ましい終了状態に到達（Deployment も旧 Blue も無い、または削除中） / `1` 到達しておらず自動では到達できない / `2` 使い方の誤り
-- **詳細**: [operations-migration-run.md の B-4](../operations-migration-run.md)、[direct-blue-green-execution.md](../docs/direct-blue-green-execution.md)。冪等性の考え方は `cleanup.sh` 冒頭のコメント
+- **詳細**: [operations-migration-run.md の B-4](../operations-migration-run.md)、[direct-blue-green-execution.md](../docs/direct-blue-green-execution.md)。冪等性の考え方は `tools/internal/cleanup` 冒頭のコメント

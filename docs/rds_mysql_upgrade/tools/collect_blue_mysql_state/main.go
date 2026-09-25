@@ -6,7 +6,7 @@
 //   - ユーザースキーマの InnoDB 以外のテーブル（移行ガイドの 0-2。MyISAM の棚卸し）
 //
 // 収集ロジックは internal/mysqlcli にある。ここは CLI の配線だけを持つ。**判定はしない。**
-// 出力は --output-dir へ blue-mysql-state.json として書く。collect_blue_green_prereqs.sh の
+// 出力は --output-dir へ blue-mysql-state.json として書く。collect_blue_green_prereqs の
 // 出力先と同じディレクトリを指定すると、AWS 側の収集結果と一緒に置ける。
 //
 //	実行: go run ./tools/collect_blue_mysql_state \

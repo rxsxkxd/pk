@@ -39,7 +39,7 @@
 | 種別 | 箇所 |
 |---|---|
 | インライン `python3 -c` | 8 ファイル・計 38 箇所（`verify_green.sh` だけで 12） |
-| Ruby | `evaluate_blue_green_prereqs.rb` 106 行、`generate_mysql84_parameter_group.rb` 307 行、`generate_green_verification_report.rb` 114 行（**このうちレポート生成器は 2026-09-14 に削除し Go へ一本化**。残り 2 本の扱いは [implementation-language-policy.md](implementation-language-policy.md)） |
+| Ruby | `evaluate_blue_green_prereqs` 106 行、`generate_mysql84_parameter_group` 307 行、`generate_green_verification_report.rb` 114 行（**このうちレポート生成器は 2026-09-14 に削除し Go へ一本化**。残り 2 本の扱いは [implementation-language-policy.md](implementation-language-policy.md)） |
 | Go | `generate_green_verification_report` 259 行（当時。Ruby 版と同一機能） |
 | bash | 9 ファイル。各々が同じ `--config/--service/--region/--profile/--output-dir` のパースを持つ |
 
@@ -65,7 +65,7 @@
 
 1. 設定ファイル解決とアクション判定を Go に実装し、`--config`／`--service` から解決した値を JSON で出力するサブコマンドを作る。既存 bash はまずこれを呼ぶだけに変える（インライン python の除去）。
 2. ~~`generate_green_verification_report.rb` を削除し、Go 版に一本化する。~~**実施済み（2026-09-14）。**
-3. `evaluate_blue_green_prereqs.rb`／`generate_mysql84_parameter_group.rb` を移植する。この 2 つはローカル実行のみで CI に載らないため、優先度は低い。
+3. `evaluate_blue_green_prereqs`／`generate_mysql84_parameter_group` を移植する。この 2 つはローカル実行のみで CI に載らないため、優先度は低い。
 
 ---
 
@@ -245,7 +245,7 @@ services:
 |---|---|
 | Phase 0〜5 | `rds-mysql-84-migration-guide.md` |
 | Step 1〜7 | `upgrade-flow-steps.md` |
-| 0-1-01〜14 | `phase-0-precheck.md`、`evaluate_blue_green_prereqs.rb` の出力 |
+| 0-1-01〜14 | `phase-0-precheck.md`、`evaluate_blue_green_prereqs` の出力 |
 | 1〜7（＋5.5） | `docs/references/source-article-notes.md`（旧 `1.md`。出典記事の要約メモ。独自採番） |
 
 ルート直下に .md が 8 本フラットに並んでおり、どれが正典か外から分からない。

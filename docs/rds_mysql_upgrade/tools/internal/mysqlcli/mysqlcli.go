@@ -2,7 +2,7 @@
 //
 // 成立条件チェックは 2 段階である。
 //
-//  1. AWS 側: collect_blue_green_prereqs.sh が AWS の読み取り API で集める
+//  1. AWS 側: collect_blue_green_prereqs が AWS の読み取り API で集める
 //  2. MySQL 側: 本パッケージが Blue へ接続して集める（AWS API では見えない項目）
 //
 // **MySQL への接続は mysql / mysqlsh コマンドを exec して行う。**ドライバを
@@ -34,7 +34,7 @@ import (
 	"strings"
 )
 
-// 出力ファイル名。collect_blue_green_prereqs.sh の出力先へ一緒に置き、
+// 出力ファイル名。collect_blue_green_prereqs の出力先へ一緒に置き、
 // 判定側が同じ --input-dir から読めるようにする。
 const (
 	StateFileName        = "blue-mysql-state.json"
@@ -140,6 +140,12 @@ func (t Target) sslArgs() []string {
 	args := []string{"--ssl-mode=" + t.mode()}
 	if t.SSLCA != "" {
 		args = append(args, "--ssl-ca="+t.SSLCA)
+	}
+	// TLS なしで接続しうるモードでは、caching_sha2_password（MySQL 8 の既定の認証方式）が
+	// パスワードを送るためにサーバーの RSA 公開鍵を要求する。無いと ERROR 2061 で接続できない（実測）。
+	// 公開鍵は検証されないが、これらのモードはそもそも接続先を検証しない（警告を出している）。
+	if mode := t.mode(); mode == "DISABLED" || mode == "PREFERRED" {
+		args = append(args, "--get-server-public-key")
 	}
 	return args
 }

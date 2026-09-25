@@ -90,12 +90,12 @@ docker compose --env-file .env run --rm mysql \
   --ssl-mode=VERIFY_CA --ssl-ca=/certs/rds/global-bundle.pem \
   -e "SELECT VERSION();"
 
-# Ruby スクリプトの実行
+# Ruby スクリプトの実行（scripts/ 側。tools/ は Go である）
 docker compose --env-file .env run --rm ruby \
-  tools/generate_mysql84_parameter_group.rb --help
+  scripts/lib/migration_phase.rb major-minor 8.0.44
 
-# Go プログラムの実行
-docker compose --env-file .env run --rm go version
+# Go プログラムの実行（tools/。AWS を呼ぶツールは下の注意を参照）
+docker compose --env-file .env run --rm go run ./tools/generate_mysql84_parameter_group --help
 ```
 
 `mysql:8.4.11` は公式のマルチアーキテクチャイメージであり、Docker がホストに対応するイメージを選択する。
@@ -131,7 +131,7 @@ docker run --rm -it \
 
 # Ruby。AWS credential・RDS 証明書はマウントしない
 docker run --rm -it -v "$(pwd):/workspace" -w /workspace \
-  ruby:3.4.10-slim-bookworm tools/generate_mysql84_parameter_group.rb --help
+  ruby:3.4.10-slim-bookworm scripts/lib/migration_phase.rb major-minor 8.0.44
 
 # Go。AWS credential・RDS 証明書はマウントしない
 docker run --rm -it -v "$(pwd):/workspace" -w /workspace \

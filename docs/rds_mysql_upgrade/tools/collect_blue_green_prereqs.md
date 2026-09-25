@@ -1,6 +1,6 @@
 # Blue/Green 成立条件チェックの個別実行手順
 
-[`collect_blue_green_prereqs.sh`](collect_blue_green_prereqs.sh) は、本書の手順を一括実行する収集スクリプトである。本書ではレビューや障害調査のために、各取得処理を個別に実行する方法を示す。
+[`collect_blue_green_prereqs`](collect_blue_green_prereqs) は、本書の手順を一括実行する収集スクリプトである。本書ではレビューや障害調査のために、各取得処理を個別に実行する方法を示す。
 
 > `tools/` 全体の索引は [README.md](README.md) にある。
 
@@ -16,7 +16,7 @@ export TARGET_ENGINE_VERSION=8.4.9
 export OUTPUT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-prereqs.XXXXXX")
 ```
 
-`--profile` を使わない場合は、各コマンドから `--profile "$AWS_PROFILE"` を除く。個別取得後に Ruby の一括評価を行う場合は、以下で示すファイル名のまま `OUTPUT_DIR` に保存する。
+`--profile` を使わない場合は、各コマンドから `--profile "$AWS_PROFILE"` を除く。個別取得後に一括判定（`evaluate_blue_green_prereqs`）を行う場合は、以下で示すファイル名のまま `OUTPUT_DIR` に保存する。
 
 ## 1. DB インスタンスの基本情報
 
@@ -108,7 +108,7 @@ aws --region "$AWS_REGION" --profile "$AWS_PROFILE" rds describe-orderable-db-in
 aws --region "$AWS_REGION" --profile "$AWS_PROFILE" rds describe-db-proxies \
   --output json > "$OUTPUT_DIR/db-proxies.json"
 
-# Proxy ごとに実行する。出力ファイルの番号は任意だが Ruby 一括判定では 0 始まりの連番にする。
+# Proxy ごとに実行する。出力ファイルの番号は任意だが、一括判定では 0 始まりの連番にする。
 aws --region "$AWS_REGION" --profile "$AWS_PROFILE" rds describe-db-proxy-targets \
   --db-proxy-name <db-proxy-name> \
   --output json > "$OUTPUT_DIR/db-proxy-targets-0.json"
@@ -160,16 +160,16 @@ RDS API の読み取り結果だけでは、外部 MySQL をソースとする b
 mysql -h <blue-endpoint> -u <user> -p -e "SHOW REPLICA STATUS\G"
 ```
 
-## 10. Ruby で一括判定する場合
+## 10. 一括判定する場合
 
 手順 1〜8 の JSON を同じ `OUTPUT_DIR` に保存した後、収集メタデータを作成して判定する。
 
 ```bash
 printf '{"db_instance_id":"%s","target_engine_version":"%s","collected_at":"%s"}\n' \
-  "$DB_INSTANCE_ID" "$TARGET_ENGINE_VERSION" "$(ruby -rtime -e 'puts Time.now.utc.iso8601')" \
+  "$DB_INSTANCE_ID" "$TARGET_ENGINE_VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   > "$OUTPUT_DIR/metadata.json"
 
-ruby tools/evaluate_blue_green_prereqs.rb --input-dir "$OUTPUT_DIR"
+go run ./tools/evaluate_blue_green_prereqs --input-dir "$OUTPUT_DIR"
 ```
 
 `STOP` は Blue/Green 作成前に解消が必要な不適合、`REVIEW` は手動確認または対応方針の記録が必要な項目である。0-1-06 は常に `REVIEW` となるため、手順 9 の確認結果を作業証跡として残す。

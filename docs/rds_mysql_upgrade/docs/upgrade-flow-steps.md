@@ -17,7 +17,7 @@
 自動バックアップ、オプショングループ、パラメータ適用状態、インスタンスクラスの世代、レプリカ構成、空きストレージなどを収集し、`STOP`／`REVIEW` で判定する。
 `STOP` が 1 件でも残る間は後続ステップへ進まない。CI では PR 単位ではなく、対象環境ごとの手動トリガージョブとして回す。
 
-- 実装: [`scripts/collect_blue_green_prereqs.sh`](../tools/collect_blue_green_prereqs.sh) → [`scripts/evaluate_blue_green_prereqs.rb`](../tools/evaluate_blue_green_prereqs.rb)
+- 実装: [`scripts/collect_blue_green_prereqs`](../tools/collect_blue_green_prereqs/) → [`scripts/evaluate_blue_green_prereqs`](../tools/evaluate_blue_green_prereqs/)
 - 詳細: [phase-0-precheck.md](phase-0-precheck.md)
 - 補足: 外部 binlog レプリカの確認（0-1-06）だけは AWS API では判定できないため、DB へ接続して `SHOW REPLICA STATUS\G` の結果を証跡に残す。MyISAM 棚卸しと MySQL Shell の互換性チェックも、このステップと並行してスナップショット復元機に対して実施する。
 
@@ -27,7 +27,7 @@
 判定結果はレビュー用の Markdown レポートと、`AWS::RDS::DBParameterGroup` のみを含む CloudFormation テンプレートとして出力する。
 生成物を PR レビュー → Change Set レビューの二段で承認し、CloudFormation を唯一の変更経路としてパラメータグループを作成する。
 
-- 実装: [`scripts/collect_mysql84_parameter_inputs.sh`](../tools/collect_mysql84_parameter_inputs.sh) → [`scripts/generate_mysql84_parameter_group.rb`](../tools/generate_mysql84_parameter_group.rb)
+- 実装: [`scripts/collect_mysql84_parameter_inputs`](../tools/collect_mysql84_parameter_inputs/) → [`scripts/generate_mysql84_parameter_group`](../tools/generate_mysql84_parameter_group/)
 - ルール: [config/mysql80-to-84-parameter-rules.yml](../config/mysql80-to-84-parameter-rules.yml) ／ 詳細: [phase-1-parameter-group-cloudformation.md](phase-1-parameter-group-cloudformation.md)
 - 補足: 「要レビュー」「生成不可」が残ると Ruby スクリプトは終了コード `1` を返すため、ルール追加か個別判断の記録なしには CI を通せない。`innodb_buffer_pool_size` などインスタンス依存で 8.4 が自動算出する値は、原則テンプレートに固定しない。
 
@@ -37,7 +37,7 @@
 作成前に移行元が MySQL 8.0 であること、指定パラメータグループが `mysql8.4` ファミリーであることを読み取り API で検証してから変更操作に入る。
 作成後は Deployment が `AVAILABLE` になるまで待機して終了し、切替は行わない。
 
-- 実装: [`scripts/build_green.sh`](../scripts/build_green.sh) → [`scripts/create_blue_green_deployment.sh`](../scripts/create_blue_green_deployment.sh)
+- 実装: [`scripts/build_green.sh`](../scripts/build_green.sh) → [`scripts/create_blue_green_deployment.sh`](../scripts/create_blue_green_deployment.rb)
 - 設定: [config/blue-green/production.deployment.yml](../config/blue-green/production.deployment.yml) ／ [config/blue-green/staging.deployment.yml](../config/blue-green/staging.deployment.yml)
 - 補足: 現行スクリプトは `--target-engine-version 8.4.x` を作成時に一括指定するワンショット方式。作成に失敗すると Deployment ごと作り直しになるため、同一 8.0 で作成 → Green のみ手動昇格する二段方式を選ぶ場合はスクリプトを分割する。
 
@@ -57,7 +57,7 @@
 本番トラフィックに影響する唯一の変更操作であるため、設定ファイルで `switchover: approved` が宣言されていることを必須とし、直前に `AVAILABLE` 状態であることを再確認してから実行する。
 CI では自動実行せず、承認ステップ付きの手動ジョブとし、実行時刻・タイムアウト値・応答 JSON を証跡として保存する。
 
-- 実装: [`scripts/switchover.sh`](../scripts/switchover.sh) → [`scripts/switchover_blue_green_deployment.sh`](../scripts/switchover_blue_green_deployment.sh)
+- 実装: [`scripts/switchover.sh`](../scripts/switchover.sh) → [`scripts/switchover_blue_green_deployment.sh`](../scripts/switchover_blue_green_deployment.rb)
 - 補足: `--switchover-timeout`（既定 300 秒、最大 60 分）の間、既存コネクションは切断される。ALB／nginx のアイドルタイムアウトより短く収まるかを事前に確認しておく。
 
 ## Step 6. Green のヘルスチェック
@@ -76,7 +76,7 @@ Green で問題がないと判断できた時点で、Blue/Green Deployment を�
 プリチェック用に復元した検証インスタンスや踏み台、逆レプリケーションを張っていた場合はその停止もここでまとめて行う。
 旧環境を不可逆に失う操作を含むため、Step 6 の観測期間を経たうえで明示承認を必須とし、切替直後には実行できないようにする。
 
-- 実装: 未実装（`cleanup.sh` 等として新規作成が必要）
+- 実装: 未実装（`tools/cleanup` 等として新規作成が必要）
 - 参照: [rds-mysql-84-migration-guide.md](rds-mysql-84-migration-guide.md) の「後始末」
 - 補足: このステップを実行すると切り戻し経路が消える。Step 6 の中期観測（週次・月次バッチの完走）まで待ってから実行する運用とし、Extended Support 課金が発生していないことを翌月の請求で確認するまでを完了条件に含める。
 
@@ -147,7 +147,7 @@ Green のヘルスチェックは DB へ接続して `SELECT VERSION()`、`@@rea
 | Step 5 | CI | `scripts/switchover.sh --config FILE --service NAME` | 宣言と状態の突き合わせ → 切替 → 完了待機 |
 | Step 6 | CI | `scripts/healthcheck_green_aws.sh --config FILE --service NAME` | エンドポイント・インスタンス状態の確認 → メトリクス比較 |
 | Step 6 | ローカル | `scripts/healthcheck_green_db.sh --config FILE --service NAME` | DB 接続 → バージョン・`read_only`・書き込み疎通の確認 |
-| Step 7 | CI | `tools/cleanup.sh --config FILE --service NAME` | 宣言と状態の突き合わせ → Deployment 削除 → 旧 Blue の最終スナップショット付き削除 |
+| Step 7 | CI | `go run ./tools/cleanup --config FILE --service NAME` | 宣言と状態の突き合わせ → Deployment 削除 → 旧 Blue の最終スナップショット付き削除 |
 
 Step 2 は生成と適用でエントリポイントを分けるが、どちらもローカル実行である。生成を反復してテンプレートを固め、PR レビューを経てから Change Set で適用する。Step 6 は DB 接続の有無でエントリポイントを 2 つに分ける。AWS API のみの確認は CI から DB 認証情報なしで実行でき、DB 接続を伴う確認はローカルのコンテナから対話パスワードで実行する。
 

@@ -51,7 +51,7 @@ flowchart TD
 
 | 名前 | いつ | どこで | 何を確かめるか | 実体 | 結果が効く先 |
 |---|---|---|---|---|---|
-| **成立条件チェック** | パイプラインを動かす**前** | ローカル（A-1） | 既存 Blue で Blue/Green が作れるか（Step 1、項目 0-1-01〜14） | `tools/collect_blue_green_prereqs.sh` → `tools/evaluate_blue_green_prereqs.rb` | ゲート① |
+| **成立条件チェック** | パイプラインを動かす**前** | ローカル（A-1） | 既存 Blue で Blue/Green が作れるか（Step 1、項目 0-1-01〜14） | `go run ./tools/collect_blue_green_prereqs` → `tools/evaluate_blue_green_prereqs/` | ゲート① |
 | **構築前チェック** | パイプライン中、**Blue/Green を作る直前** | CI（ステージ `PrecheckParameterGroup`） | 移行先 8.4 パラメータグループが存在し、family が合っているか | `scripts/check_target_parameter_group.sh` | 失敗なら BuildGreen へ進まない |
 | **切替前検証** | パイプライン中、**Blue/Green を作ったあと・切り替える前** | CI（ステージ `VerifyGreen`、Step 4） | Green の構成・パラメータ・レプリカ遅延が設定どおりか | `scripts/verify_green.sh` | ゲート③ |
 
@@ -65,11 +65,11 @@ flowchart TD
 
 ```bash
 # 収集（AWS 読み取りのみ）
-tools/collect_blue_green_prereqs.sh \
+go run ./tools/collect_blue_green_prereqs \
   --db-instance-id <blue-id> --region <region> --profile <profile>
 
 # 判定 → ゲート①のレポート
-ruby tools/evaluate_blue_green_prereqs.rb \
+go run ./tools/evaluate_blue_green_prereqs \
   --input-dir <収集先> \
   --output <収集先>/prereqs-evaluation-report.md
 ```
@@ -84,10 +84,10 @@ ruby tools/evaluate_blue_green_prereqs.rb \
 
 ```bash
 # 収集（AWS 読み取りのみ）
-tools/collect_mysql84_parameter_inputs.sh --source-parameter-group <8.0-pg-name>
+go run ./tools/collect_mysql84_parameter_inputs --source-parameter-group <8.0-pg-name>
 
 # 生成 → CloudFormation テンプレート＋ゲート①のレポート
-ruby tools/generate_mysql84_parameter_group.rb \
+go run ./tools/generate_mysql84_parameter_group \
   --input-dir <dir> --output-dir <dir> --system <name> --environment <env>
 ```
 
@@ -236,7 +236,7 @@ flowchart LR
 切替後は観測期間を置く。**逆方向レプリケーションが残っていないことをローカルから確認**してから `cleanup: approved` にし、ツールを実行する。
 
 ```bash
-tools/cleanup.sh --config config/blue-green/staging.deployment.yml --service example-service
+go run ./tools/cleanup --config config/blue-green/staging.deployment.yml --service example-service
 ```
 
 **実行には破壊的な権限が要る**（`rds:DeleteBlueGreenDeployment` / `DeleteDBInstance` / `ModifyDBInstance` / `CreateDBSnapshot` / `AddTagsToResource`）。パイプラインの実行ロールはこれを持たないので、作業者がこの権限を持つロールを引き受けて実行する。ツールも `actions.cleanup: approved` の宣言が無ければ何もせず終了する。

@@ -43,7 +43,7 @@ func run() error {
 	mysqlcli.RegisterFlags(flag.CommandLine, &target, "Blue のエンドポイント（必須）")
 	passwordEnv := flag.String("password-env", "MYSQL_PASSWORD", "パスワードを載せた環境変数の名前")
 	outputDir := flag.String("output-dir", "", "出力先ディレクトリ（必須）")
-	// collect_blue_green_prereqs.sh の --target-engine-version と同じ既定値にそろえる。
+	// collect_blue_green_prereqs の --target-engine-version と同じ既定値にそろえる。
 	// mysqlsh 自身のバージョンより新しい値は指定できない。
 	targetVersion := flag.String("target-version", "8.4.9", "移行先の MySQL バージョン")
 	mysqlshBin := flag.String("mysqlsh", "mysqlsh", "mysqlsh コマンドのパス")

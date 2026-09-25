@@ -30,25 +30,23 @@ USAGE = <<~USAGE
   Usage: create_blue_green_deployment.rb --config FILE --service NAME [options]
     --config FILE               環境別設定ファイル（必須）
     --service NAME              config の services 配下に定義したサービス名（必須）
-    --deployment-name NAME      Blue/Green Deployment 名（省略時はサービス・環境・時刻から生成）
     --region REGION             AWS Region（設定ファイルの aws_region を上書き）
     --profile PROFILE           AWS CLI profile（省略時は AWS CLI の既定認証情報）
     --output-dir DIR            応答 JSON の保存先（default: temporary directory）
-    --wait-timeout-seconds SEC  AVAILABLE 待機の上限秒数（default: 3600）
     --poll-interval-seconds SEC 状態確認の間隔（default: 30。テストで短くするため）
 USAGE
 
-options = { region: '', profile: '', output_dir: '', wait_timeout_seconds: '3600',
-            poll_interval_seconds: '30', deployment_name: '' }
+# AVAILABLE 待機の上限秒数。Green の作成は大きな DB で長くかかる。
+WAIT_TIMEOUT_SECONDS = 3600
+
+options = { region: '', profile: '', output_dir: '', poll_interval_seconds: '30' }
 parser = OptionParser.new do |opts|
   opts.banner = USAGE
   opts.on('--service NAME') { |v| options[:service] = v }
-  opts.on('--deployment-name NAME') { |v| options[:deployment_name] = v }
   opts.on('--config FILE') { |v| options[:config] = v }
   opts.on('--region REGION') { |v| options[:region] = v }
   opts.on('--profile PROFILE') { |v| options[:profile] = v }
   opts.on('--output-dir DIR') { |v| options[:output_dir] = v }
-  opts.on('--wait-timeout-seconds SEC') { |v| options[:wait_timeout_seconds] = v }
   opts.on('--poll-interval-seconds SEC') { |v| options[:poll_interval_seconds] = v }
   opts.on('-h', '--help') { puts opts; exit 0 }
 end
@@ -66,10 +64,8 @@ end
   warn "--#{key} is required."
   exit 2
 end
-%i[wait_timeout_seconds poll_interval_seconds].each do |key|
-  next if options[key].match?(/\A[0-9]+\z/)
-
-  warn "--#{key.to_s.tr('_', '-')} must be an integer."
+unless options[:poll_interval_seconds].match?(/\A[0-9]+\z/)
+  warn '--poll-interval-seconds must be an integer.'
   exit 2
 end
 
@@ -101,7 +97,7 @@ save = ->(name) { File.join(output_dir, name) }
 # （RDS の waiter は DBInstance / DBSnapshot 系のみ）ため、明示的にポーリングする。
 # PROVISIONING 以外の状態になったら、待っても AVAILABLE にはならないので打ち切る。
 wait_for_available = lambda do |deployment_identifier|
-  deadline = Time.now + options[:wait_timeout_seconds].to_i
+  deadline = Time.now + WAIT_TIMEOUT_SECONDS
   loop do
     # [待機中・読み取り] Green の構築状態を取得する。
     described = aws.run_json('rds', 'describe-blue-green-deployments',
@@ -185,13 +181,11 @@ begin
     exit 1
   end
 
-  deployment_name = options[:deployment_name]
-  if deployment_name.to_s.empty?
-    deployment_name = "#{options[:service]}-#{environment}-mysql84-bg-#{Time.now.utc.strftime('%Y%m%d%H%M%S')}"
-  end
+  # Deployment 名はサービス・環境・時刻から決める（識別は移行元の ARN で行うので、名前には依らない）。
+  deployment_name = "#{options[:service]}-#{environment}-mysql84-bg-#{Time.now.utc.strftime('%Y%m%d%H%M%S')}"
   unless deployment_name.match?(/\A[A-Za-z][A-Za-z0-9-]{0,59}\z/)
-    warn "Invalid --deployment-name: #{deployment_name}"
-    exit 2
+    warn "サービス名と環境名から作った Deployment 名が RDS の命名規則に合わない: #{deployment_name}"
+    exit 1
   end
 
   # --- 保護スナップショット（切り戻し可能な状態を作成前に確保する）----------

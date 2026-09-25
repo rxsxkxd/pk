@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 4 のビルド済みバイナリ 3 本の解決（scripts/lib/resolve_green_tools.rb）を確認する。
+# Step 4 のビルド済みバイナリ 2 本の解決（scripts/lib/resolve_green_tools.rb）を確認する。
 # AWS へも DB へも接続しない。
 #
 # 確認するのは 4 点である。
@@ -39,12 +39,11 @@ fi
 REL=.tools/green-report
 GEN=generate_green_verification_report
 COL=collect_green_runtime_values
-STA=collect_green_state
-make_tools() { mkdir -p "$1/$REL"; : > "$1/$REL/$GEN"; : > "$1/$REL/$COL"; : > "$1/$REL/$STA"; }
+make_tools() { mkdir -p "$1/$REL"; : > "$1/$REL/$GEN"; : > "$1/$REL/$COL"; }
 
 make_tools "$work/src"
 make_tools "$work/artifact"
-mkdir -p "$work/given"; : > "$work/given/$GEN"; : > "$work/given/$COL"; : > "$work/given/$STA"
+mkdir -p "$work/given"; : > "$work/given/$GEN"; : > "$work/given/$COL"
 
 run() { env -i PATH="$PATH" HOME="$HOME" "$@" ruby scripts/lib/resolve_green_tools.rb; }
 
@@ -70,12 +69,12 @@ check '他方はソース/artifact から解決する' "GREEN_RUNTIME_COLLECTOR=
 
 # --- ④ 標準出力は eval できる行だけ ------------------------------------------
 lines=$(printf '%s\n' "$out" | grep -c .)
-if [[ "$lines" -eq 3 ]]; then
-  echo 'ok    標準出力は 3 行だけ（診断は stderr）'
+if [[ "$lines" -eq 2 ]]; then
+  echo 'ok    標準出力は 2 行だけ（診断は stderr）'
 else
-  echo "FAIL  標準出力が 3 行でない: ${lines}"; failed=$((failed + 1))
+  echo "FAIL  標準出力が 2 行でない: ${lines}"; failed=$((failed + 1))
 fi
-( eval "$out"; [[ -n "$GREEN_REPORT_GENERATOR" && -n "$GREEN_RUNTIME_COLLECTOR" && -n "$GREEN_STATE_COLLECTOR" ]] ) \
+( eval "$out"; [[ -n "$GREEN_REPORT_GENERATOR" && -n "$GREEN_RUNTIME_COLLECTOR" ]] ) \
   && echo 'ok    eval して変数になる' || { echo 'FAIL  eval できない'; failed=$((failed + 1)); }
 
 # --- ⑤ 片方だけ欠けていれば失敗 ----------------------------------------------

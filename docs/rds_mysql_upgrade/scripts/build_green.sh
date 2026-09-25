@@ -24,13 +24,11 @@ Usage: build_green.sh --config FILE --service NAME [options]
   --region REGION    AWS Region（設定ファイルの aws_region を上書き）
   --profile PROFILE  AWS CLI profile（省略時は AWS CLI の既定認証情報）
   --output-dir DIR   応答 JSON の保存先（default: temporary directory）
-  --wait-timeout-seconds SEC  AVAILABLE 待機の上限秒数（default: 3600）
 USAGE
 }
 
 
 config=''; service=''; region=''; profile=''; output_dir=''
-wait_timeout_seconds=3600
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config) config=${2:?}; shift 2 ;;
@@ -38,13 +36,11 @@ while [[ $# -gt 0 ]]; do
     --region) region=${2:?}; shift 2 ;;
     --profile) profile=${2:?}; shift 2 ;;
     --output-dir) output_dir=${2:?}; shift 2 ;;
-    --wait-timeout-seconds) wait_timeout_seconds=${2:?}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 [[ -n "$config" && -n "$service" ]] || { usage >&2; exit 2; }
-[[ "$wait_timeout_seconds" =~ ^[0-9]+$ ]] || { echo '--wait-timeout-seconds must be an integer.' >&2; exit 2; }
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-build.XXXXXX")
 mkdir -p "$output_dir"
 
@@ -74,5 +70,5 @@ esac
 # --- 第 2 層: Deployment の状態別分岐・保護スナップショット・作成 ----------
 # create_blue_green_deployment.rb が行う（冒頭のコメントを参照）。
 ruby "$(dirname "$0")/create_blue_green_deployment.rb" "${common[@]}" \
-  --output-dir "$output_dir" --wait-timeout-seconds "$wait_timeout_seconds"
+  --output-dir "$output_dir"
 echo "Build completed. Artifacts: $output_dir"

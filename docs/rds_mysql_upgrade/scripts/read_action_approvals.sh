@@ -13,7 +13,9 @@
 # 出力例:
 #   BUILD_APPROVED=approved
 #   SWITCHOVER_APPROVED=pending
-#   CLEANUP_APPROVED=pending
+#
+# 後始末（cleanup）はパイプラインから外したので、その承認はここでは扱わない
+# （tools/cleanup が設定の actions.cleanup を自分で読む）。
 set -euo pipefail
 
 usage() { echo 'Usage: read_action_approvals.sh --config FILE --service NAME'; }
@@ -31,5 +33,4 @@ done
 # 未定義のアクションは pending として扱う（承認されていない側に倒す）。
 ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
   BUILD_APPROVED=optional:service.actions.build=pending \
-  SWITCHOVER_APPROVED=optional:service.actions.switchover=pending \
-  CLEANUP_APPROVED=optional:service.actions.cleanup=pending
+  SWITCHOVER_APPROVED=optional:service.actions.switchover=pending

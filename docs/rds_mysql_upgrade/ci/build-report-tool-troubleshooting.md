@@ -204,8 +204,8 @@ buildspec には診断用の出力を置いていない（検査は `resolve_go_
 go env GO111MODULE GOFLAGS GOPATH GOMODCACHE GOTOOLCHAIN   # GO111MODULE=off なら GOPATH モード
 go list -m                                                  # rds-mysql-upgrade であること
 go list -f '{{.ImportPath}} ({{.Name}})' \
-  ./scripts/collect_green_state ./scripts/collect_green_runtime_values ./scripts/generate_green_verification_report
-                                                            # 3 本とも (main) であること
+  ./scripts/collect_green_runtime_values ./scripts/generate_green_verification_report
+                                                            # 2 本とも (main) であること
 ```
 
 `go list -m` が `rds-mysql-upgrade` 以外を返したら、掴んでいる `go.mod` が想定と違う。

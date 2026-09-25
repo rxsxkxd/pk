@@ -16,7 +16,7 @@ phases:
       - ruby --version
       # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
       # 落ちていれば復元し、落ちていなければ何も変わらない。
-      - chmod +x scripts/*.sh scripts/lib/*.sh
+      - chmod +x scripts/*.sh
   build:
     commands:
       - scripts/switchover.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --approve --output-dir artifacts

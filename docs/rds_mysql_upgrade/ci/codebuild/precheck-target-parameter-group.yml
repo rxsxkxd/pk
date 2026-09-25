@@ -18,7 +18,7 @@ phases:
       - ruby --version
       # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
       # 落ちていれば復元し、落ちていなければ何も変わらない。
-      - chmod +x scripts/*.sh scripts/lib/*.sh
+      - chmod +x scripts/*.sh
   build:
     commands:
       # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。

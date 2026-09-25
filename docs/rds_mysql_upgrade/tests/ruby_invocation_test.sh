@@ -26,13 +26,25 @@ check_call scripts/build_green.sh lib/migration_phase.rb
 check_call scripts/switchover.sh lib/migration_phase.rb
 
 # 呼ばれる .rb が実在すること（削除・改名の取り残しを防ぐ）。
-for rb in create_blue_green_deployment switchover_blue_green_deployment prepare_green_verification collect_green_state collect_green_runtime_values check_target_parameter_group; do
+for rb in create_blue_green_deployment switchover_blue_green_deployment prepare_green_verification collect_green_runtime_values check_target_parameter_group; do
   if [[ -f "scripts/${rb}.rb" ]] && ruby -c "scripts/${rb}.rb" >/dev/null 2>&1; then
     printf 'ok    scripts/%s.rb が存在し構文が正しい\n' "$rb"
   else
     printf 'FAIL  scripts/%s.rb が無いか構文エラー\n' "$rb"; failed=$((failed + 1))
   fi
 done
+
+# buildspec の chmod が指すファイルが実在すること。
+# パターンに一致するファイルが無いと、bash はパターンをそのまま chmod へ渡して失敗し、
+# buildspec の install フェーズごと落ちる（scripts/lib/*.sh を Ruby へ移した後に実際に起きかけた）。
+while IFS= read -r pattern; do
+  # shellcheck disable=SC2086
+  if compgen -G "$pattern" >/dev/null; then
+    printf 'ok    buildspec の chmod %s に一致するファイルがある\n' "$pattern"
+  else
+    printf 'FAIL  buildspec の chmod %s に一致するファイルが無い\n' "$pattern"; failed=$((failed + 1))
+  fi
+done < <(grep -hE 'chmod \+x scripts/' ci/codebuild/*.yml | sed 's/.*chmod +x //' | tr ' ' '\n' | grep '^scripts/' | sort -u)
 
 echo
 if [[ "$failed" -eq 0 ]]; then echo 'すべて期待どおり。'; exit 0; fi

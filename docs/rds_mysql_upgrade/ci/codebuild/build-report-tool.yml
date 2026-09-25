@@ -5,12 +5,10 @@
 #     その経路に Go module の取得（proxy.golang.org）を持ち込みたくない。
 #   - ビルドは AWS を一切呼ばない。失敗しても RDS には何の影響もない。
 #
-# 成果物は .tools/green-report/ 配下の 3 本である。
-#   collect_green_state                … AWS の状態収集（Deployment・Green・パラメータ・遅延）
+# 成果物は .tools/green-report/ 配下の 2 本である（AWS の状態収集は Ruby の scripts/lib/green_state.rb）。
 #   collect_green_runtime_values       … Green DB の実効値収集（MySQL クライアントの代替）
 #   generate_green_verification_report … 突き合わせ（--check）とレポート（.md）の組み立て
-# 実行側（verify-green.yml）は GREEN_STATE_COLLECTOR / GREEN_RUNTIME_COLLECTOR /
-# GREEN_REPORT_GENERATOR で受け取る。
+# 実行側（verify-green.yml）は GREEN_RUNTIME_COLLECTOR / GREEN_REPORT_GENERATOR で受け取る。
 #
 # 実効値収集を Go にしてある理由: VerifyGreen は RDS のある VPC 内で動かす場合があり、
 # そこから apt リポジトリへ到達できないため mysql クライアントを実行時に導入できない。
@@ -78,12 +76,9 @@ phases:
         # 実行側は VPC 内から外部へ出られないため、実行時に取得する選択肢が無い。
         CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
           -o "$out_dir/collect_green_runtime_values" ./scripts/collect_green_runtime_values
-        CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
-          -o "$out_dir/collect_green_state" ./scripts/collect_green_state
 
 artifacts:
   files:
     - .tools/green-report/generate_green_verification_report
     - .tools/green-report/collect_green_runtime_values
-    - .tools/green-report/collect_green_state
   discard-paths: false

@@ -35,14 +35,12 @@ check_status() {
 make_layout() {
   local root=$1
   mkdir -p "$root/scripts/generate_green_verification_report" \
-           "$root/scripts/collect_green_runtime_values" \
-           "$root/scripts/collect_green_state" "$root/tools"
+           "$root/scripts/collect_green_runtime_values" "$root/tools"
   printf 'module rds-mysql-upgrade\n\ngo 1.25\n' > "$root/go.mod"
   : > "$root/go.sum"
   : > "$root/scripts/generate_green_verification_report/main.go"
   : > "$root/scripts/collect_green_runtime_values/main.go"
   : > "$root/scripts/collect_green_runtime_values/rds-global-bundle.pem"
-  : > "$root/scripts/collect_green_state/main.go"
 }
 
 # --- ① 期待どおりの構成 -----------------------------------------------------
@@ -103,7 +101,6 @@ check '残骸を指摘する' 'go.mod が複数ある' "$(cat "$work/e7")"
 for missing in scripts/generate_green_verification_report/main.go \
                scripts/collect_green_runtime_values/main.go \
                scripts/collect_green_runtime_values/rds-global-bundle.pem \
-               scripts/collect_green_state/main.go \
                go.sum; do
   rm -rf "$work/miss"; make_layout "$work/miss/proj"; rm -f "$work/miss/proj/$missing"
   CODEBUILD_SRC_DIR="$work/miss" bash "$SCRIPT" >/dev/null 2>"$work/e8"; status=$?

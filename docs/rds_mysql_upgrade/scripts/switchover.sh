@@ -24,12 +24,10 @@ Usage: switchover.sh --config FILE --service NAME --approve [options]
   --region REGION             AWS Region（設定ファイルの aws_region を上書き）
   --profile PROFILE           AWS CLI profile（省略時は AWS CLI の既定認証情報）
   --output-dir DIR            応答 JSON の保存先（default: temporary directory）
-  --wait-timeout-seconds SEC  切替完了待機の上限秒数（default: 1800）
 USAGE
 }
 
 config=''; service=''; approve=false; region=''; profile=''; output_dir=''
-wait_timeout_seconds=1800
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --config) config=${2:?}; shift 2 ;;
@@ -38,13 +36,11 @@ while [[ $# -gt 0 ]]; do
     --region) region=${2:?}; shift 2 ;;
     --profile) profile=${2:?}; shift 2 ;;
     --output-dir) output_dir=${2:?}; shift 2 ;;
-    --wait-timeout-seconds) wait_timeout_seconds=${2:?}; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 [[ -n "$config" && -n "$service" && "$approve" == true ]] || { usage >&2; exit 2; }
-[[ "$wait_timeout_seconds" =~ ^[0-9]+$ ]] || { echo '--wait-timeout-seconds must be an integer.' >&2; exit 2; }
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-switchover-step.XXXXXX")
 mkdir -p "$output_dir"
 
@@ -74,4 +70,4 @@ esac
 # --- 第 2 層: 安全弁（Deployment の状態）と切替・完了待ち -----------------
 # switchover_blue_green_deployment.rb が行う（冒頭のコメントを参照）。
 ruby "$(dirname "$0")/switchover_blue_green_deployment.rb" "${common[@]}" --approve \
-  --output-dir "$output_dir" --wait-timeout-seconds "$wait_timeout_seconds"
+  --output-dir "$output_dir"

@@ -7,7 +7,6 @@
 #   <モジュールルート>/go.sum                                      依存の固定
 #   <モジュールルート>/scripts/generate_green_verification_report/  package main
 #   <モジュールルート>/scripts/collect_green_runtime_values/        package main
-#   <モジュールルート>/scripts/collect_green_state/                 package main
 #   <モジュールルート>/tools/                                       人が実行するコマンド
 #
 # **この形から外れていたら、黙って別のものをビルドさせずに落とす。**
@@ -24,18 +23,9 @@
 # ローカルからもそのまま実行できる。
 set -eu
 
-usage() { echo 'Usage: resolve_go_module_root.sh [--search-root DIR] [--max-depth N]'; }
-search_root=${CODEBUILD_SRC_DIR:-}
+# 引数は取らない。探索の深さは固定（リポジトリの配置が深くなったらここを変える）。
+search_root=${CODEBUILD_SRC_DIR:-$(pwd)}
 max_depth=4
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --search-root) search_root=${2:?}; shift 2 ;;
-    --max-depth) max_depth=${2:?}; shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
-  esac
-done
-[ -n "$search_root" ] || search_root=$(pwd)
 
 # CODEBUILD_SRC_DIR はシンボリックリンクである
 # （/codebuild/output/srcNNN/src -> /codebuild/output/srcDownload/src）。
@@ -85,11 +75,10 @@ if [ -f "$module_dir/scripts/go.mod" ]; then
   exit 1
 fi
 
-# ビルド対象のソースがあること（3 本とも）。
+# ビルド対象のソースがあること（2 本とも）。
 for required in scripts/generate_green_verification_report/main.go \
                 scripts/collect_green_runtime_values/main.go \
-                scripts/collect_green_runtime_values/rds-global-bundle.pem \
-                scripts/collect_green_state/main.go; do
+                scripts/collect_green_runtime_values/rds-global-bundle.pem; do
   if [ ! -f "$module_dir/$required" ]; then
     echo "構成が期待と違う: ${required} が無い。" >&2
     echo "モジュールルート: ${module_dir}" >&2

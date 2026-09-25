@@ -34,7 +34,7 @@
 ┌─────────────────────────────────────────┐                    └──────────────────────┘
 │ 2. ReadApprovals        Namespace: Approvals                 │
 │    config の actions を読み、変数として公開                    │
-│    → BUILD_APPROVED / SWITCHOVER_APPROVED / CLEANUP_APPROVED │
+│    → BUILD_APPROVED / SWITCHOVER_APPROVED                    │
 └─────────────────────────────────────────┘
    │
    ▼
@@ -62,15 +62,8 @@
 ║    │ RunOrder 2: Switchover (CodeBuild)│ ║      ステージごと SKIP
 ║    └───────────────────────────────────┘ ║
 ╚═════════════════════════════════════════╝
-   │
-   ▼
-╔═════════════════════════════════════════╗
-║ 7. Cleanup                  [Step 7]     ║  ◄── 入場条件
-║    ┌───────────────────────────────────┐ ║      #{Approvals.CLEANUP_APPROVED}
-║    │ RunOrder 1: ManualApproval        │ ║      == "approved" でなければ
-║    │ RunOrder 2: Cleanup (CodeBuild)   │ ║      ステージごと SKIP
-║    └───────────────────────────────────┘ ║
-╚═════════════════════════════════════════╝
+
+後始末（Step 7）はパイプラインに含まれない → tools/cleanup を人が実行する
 ```
 
 二重線のステージには **`BeforeEntry` 条件（`VariableCheck` / `Result: SKIP`）** が付いている。config が承認していないフェーズは、手動承認を含めてステージごと飛ばされる。

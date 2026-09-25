@@ -3,7 +3,6 @@
 #
 # Step 4 が使う Go バイナリの場所を決める。
 #
-#   collect_green_state                … AWS の状態収集（実行は Ruby 版。Go 版を残置）
 #   collect_green_runtime_values       … Green DB の実効値収集（mysql クライアントの代替）
 #   generate_green_verification_report … 突き合わせとレポートの組み立て
 #
@@ -12,7 +11,7 @@
 # 2 つの使い方がある。
 #
 #   ruby scripts/lib/resolve_green_tools.rb
-#     VerifyGreen（CI）用。3 本すべてを探し、**ビルドはしない。**VerifyGreen は Go も
+#     VerifyGreen（CI）用。2 本とも探し、**ビルドはしない。**VerifyGreen は Go も
 #     外部ネットワークも持たない前提なので、見つからなければ理由と対処を出して終了コード 1。
 #
 #   ruby scripts/lib/resolve_green_tools.rb --build-missing <名前>...
@@ -36,7 +35,6 @@ module GreenTools
   REPOSITORY_ROOT = File.expand_path('../..', __dir__)
 
   TOOLS = [
-    { variable: 'GREEN_STATE_COLLECTOR',   basename: 'collect_green_state',                label: 'state collector' },
     { variable: 'GREEN_RUNTIME_COLLECTOR', basename: 'collect_green_runtime_values',       label: 'runtime value collector' },
     { variable: 'GREEN_REPORT_GENERATOR',  basename: 'generate_green_verification_report', label: 'report generator' },
   ].freeze

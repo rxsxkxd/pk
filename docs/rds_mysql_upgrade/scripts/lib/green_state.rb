@@ -1,17 +1,15 @@
 # frozen_string_literal: true
 #
 # Step 4 の検証に必要な AWS の状態を収集し、判定器
-# （generate_green_verification_report --input-dir）が読むファイル一式を書き出す（Ruby 版）。
+# （generate_green_verification_report --input-dir）が読むファイル一式を書き出す。
 #
-# Go の scripts/internal/greenstate と**同じ呼び出し・同じファイル・同じメッセージ**に
-# してある（tests/green_tools_go_rb_parity_test.sh が突き合わせる）。
-# **どちらを変えても、もう一方へ同じ変更を入れる。**
+# prepare_green_verification.rb（Step 4 の準備）から使う。
 #
 # **収集だけを行い、判定はしない。**適合・不適合の判断は判定器の --check が行う。
 # ここが返すエラーは「収集できなかった」ことだけである（Deployment が無い・AVAILABLE でない等）。
 #
 # AWS は SDK ではなく AWS CLI を exec する（権限・プロファイル・リージョンの解決が
-# シェル版・Go 版と同じになる）。JSON は 1 回取って自分で読み、--query で二重に叩かない。
+# 他のスクリプトと同じになる）。JSON は 1 回取って自分で読み、--query で二重に叩かない。
 require 'fileutils'
 require 'json'
 require 'open3'
@@ -20,7 +18,7 @@ module GreenState
   class Error < StandardError; end
 
   # 書き出すファイル名。判定器の --input-dir はこの名前を前提に読む。
-  # **名前を変えるときは判定器（Go の generate_green_verification_report）も同時に変える。**
+  # **名前を変えるときは判定器（Go の generate_green_verification_report の --input-dir）も同時に変える。**
   SOURCE_INSTANCE_FILE   = 'source.json'
   DEPLOYMENT_FILE        = 'deployment.json'
   GREEN_INSTANCE_FILE    = 'green-db-instance.json'

@@ -165,7 +165,7 @@ AWS を実際に叩くのは収集側だけである。
 | 収集するもの | AWS CLI の呼び出し回数 |
 |---|---|
 | `scripts/verify_green.sh` | 1（フェーズ判定のみ） |
-| `scripts/lib/green_state.rb`（Ruby。`prepare_green_verification.rb` から使う。Go 版 `scripts/internal/greenstate` も同じ 7 回） | 7 |
+| `scripts/lib/green_state.rb`（Ruby。`prepare_green_verification.rb` から使う） | 7 |
 | `tools/cleanup/` | 12 |
 | `go run ./tools/collect_blue_green_prereqs` | 12 |
 | `scripts/build_green.sh` | 10 |

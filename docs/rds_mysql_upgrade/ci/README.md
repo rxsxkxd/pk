@@ -85,7 +85,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 
 `BuildReportTool` は `scripts/resolve_go_module_root.sh` で Go モジュールルートを突き止め、**期待する構成になっているかを先に検査する**（`go.mod` の位置・重複・ビルド対象のソースと `go.sum` の有無）。外れていれば `構成が…` で始まるメッセージを出して停止し、黙って別のものをビルドしない。
 
-Step 4 が使うビルド済みバイナリ 3 本（AWS の状態収集・DB の実効値収集・判定とレポート）の場所は `scripts/lib/resolve_green_tools.rb` が決める。呼び出し側の指定 → `BuildReportTool` の artifact → ソースツリー の順に探し、見つからなければ理由と探索先を出して停止する（**VerifyGreen ではビルドしない**）。ローカルで `verify_green.sh` を直接実行し環境変数を渡していない場合だけ、`--build-missing` でその場でビルドする（出力先は `.tools/green-report/`）。
+Step 4 が使うビルド済みバイナリ 2 本（DB の実効値収集・判定とレポート。AWS の状態収集は Ruby の `scripts/lib/green_state.rb`）の場所は `scripts/lib/resolve_green_tools.rb` が決める。呼び出し側の指定 → `BuildReportTool` の artifact → ソースツリー の順に探し、見つからなければ理由と探索先を出して停止する（**VerifyGreen ではビルドしない**）。ローカルで `verify_green.sh` を直接実行し環境変数を渡していない場合だけ、`--build-missing` でその場でビルドする（出力先は `.tools/green-report/`）。
 
 解決は `scripts/collect_green_runtime_values.rb` が行い、値はログ・コマンド引数・成果物へ出さず、環境変数で実効値収集バイナリのプロセスにだけ渡す。上表以外の値（`secrets_manager`、`iam` など）は不正な `auth_method` として拒否する。
 

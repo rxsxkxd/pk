@@ -33,12 +33,13 @@ USAGE = <<~USAGE
     --region REGION              AWS Region（空なら設定ファイルの aws_region）
     --profile PROFILE            AWS CLI profile（空なら設定ファイルの aws_profile）
     --output-dir DIR             応答 JSON の保存先（default: temporary directory）
-    --wait-timeout-seconds SEC   切替完了待機の上限秒数（default: 1800）
     --poll-interval-seconds SEC  状態確認の間隔（default: 15。テストで短くするため）
 USAGE
 
-options = { approve: false, region: '', profile: '', output_dir: '',
-            wait_timeout_seconds: '1800', poll_interval_seconds: '15' }
+# 切替完了待機の上限秒数（RDS に渡す切替タイムアウトとは別物）。
+WAIT_TIMEOUT_SECONDS = 1800
+
+options = { approve: false, region: '', profile: '', output_dir: '', poll_interval_seconds: '15' }
 parser = OptionParser.new do |opts|
   opts.banner = USAGE
   opts.on('--config FILE') { |v| options[:config] = v }
@@ -47,7 +48,6 @@ parser = OptionParser.new do |opts|
   opts.on('--region REGION') { |v| options[:region] = v }
   opts.on('--profile PROFILE') { |v| options[:profile] = v }
   opts.on('--output-dir DIR') { |v| options[:output_dir] = v }
-  opts.on('--wait-timeout-seconds SEC') { |v| options[:wait_timeout_seconds] = v }
   opts.on('--poll-interval-seconds SEC') { |v| options[:poll_interval_seconds] = v }
   opts.on('-h', '--help') { puts opts; exit 0 }
 end
@@ -68,10 +68,8 @@ unless options[:approve]
   warn '--approve is required because switchover changes production routing.'
   exit 2
 end
-%i[wait_timeout_seconds poll_interval_seconds].each do |key|
-  next if options[key].match?(/\A[0-9]+\z/)
-
-  warn "--#{key.to_s.tr('_', '-')} must be an integer."
+unless options[:poll_interval_seconds].match?(/\A[0-9]+\z/)
+  warn '--poll-interval-seconds must be an integer.'
   exit 2
 end
 
@@ -103,7 +101,7 @@ aws = AwsCli.new(region: region, profile: profile)
 # SWITCHOVER_COMPLETED になるまで待つ。AWS CLI に Blue/Green 用の waiter は無い。
 # SWITCHOVER_IN_PROGRESS 以外になったら、待っても完了しないので打ち切る。
 wait_for_switchover = lambda do |deployment_identifier|
-  deadline = Time.now + options[:wait_timeout_seconds].to_i
+  deadline = Time.now + WAIT_TIMEOUT_SECONDS
   loop do
     described = aws.run_json('rds', 'describe-blue-green-deployments',
                              '--blue-green-deployment-identifier', deployment_identifier,

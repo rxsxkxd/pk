@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -81,35 +80,6 @@ func readParameters(path string) map[string]parameter {
 
 func escape(value string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(value, "|", "\\|"), "\n", "<br>")
-}
-
-// safeParameterName は SQL へ埋め込める識別子だけを通す。
-var safeParameterName = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
-
-// printDeclaredParameterNames は テンプレートが宣言しているパラメータ名を並べる。
-// 実値が決まっているものも組み込み関数のものも、名前としては同じように必要である。
-func printDeclaredParameterNames(templatePath string) {
-	group, err := cfn.ReadDBParameterGroup(templatePath)
-	if err != nil {
-		die("%v", err)
-	}
-	names := make([]string, 0, len(group.Declared)+len(group.Unresolved))
-	for name := range group.Declared {
-		names = append(names, name)
-	}
-	for name := range group.Unresolved {
-		names = append(names, name)
-	}
-	if len(names) == 0 {
-		die("%s: パラメータが 1 つも宣言されていません。", templatePath)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if !safeParameterName.MatchString(name) {
-			die("%s: パラメータ名として扱えない文字が含まれます: %q", templatePath, name)
-		}
-		fmt.Println(name)
-	}
 }
 
 // checkOutcome は 1 件の検証結果である。
@@ -224,19 +194,7 @@ func main() {
 	expectInstanceClass := flag.String("expect-instance-class", "", "設定の target_db_instance_class")
 	expectParameterGroup := flag.String("expect-parameter-group", "", "設定の target_db_parameter_group_name")
 	check := flag.Bool("check", false, "宣言値と実状態を突き合わせ、不適合なら終了コード 1 を返す")
-	// Step 4 の実効値収集が、問い合わせ対象のパラメータ名を得るために使う。
-	// 同じバイナリに入れておけば、実行側（VerifyGreen）へ Go を持ち込まずに済む。
-	listParameterNames := flag.Bool("list-parameter-names", false,
-		"print the parameter names declared in --template, one per line, then exit")
 	flag.Parse()
-
-	if *listParameterNames {
-		if *templatePath == "" {
-			die("--template is required with --list-parameter-names.")
-		}
-		printDeclaredParameterNames(*templatePath)
-		return
-	}
 
 	// --input-dir があれば、個別に指定されていない入力を既定の名前で補う。
 	// ファイル名は状態の収集（scripts/lib/green_state.rb の定数）と揃える。**変えるときは両方を変える。**

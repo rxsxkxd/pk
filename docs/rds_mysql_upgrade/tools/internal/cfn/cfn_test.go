@@ -133,3 +133,45 @@ func TestReadDBParameterGroupOnRepositoryFixture(t *testing.T) {
 		}
 	}
 }
+
+// ParameterNames は Step 4 の実効値収集が問い合わせる名前の一覧である。
+// 短縮記法の fixture と長形式の生成物のどちらからも名前を拾い、組み込み関数で
+// 宣言した項目も（値は比較できないが）名前としては含めることを確かめる。
+func TestParameterNamesOnRepositoryTemplates(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want []string
+	}{
+		{"../../examples/cfn-shorthand/mysql84-parameter-group-shorthand.yaml", []string{"binlog_format", "replica_parallel_workers"}},
+		{"../../examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml", []string{"binlog_format"}},
+	} {
+		if _, err := os.Stat(tc.path); err != nil {
+			t.Skipf("fixture が無い: %v", err)
+		}
+		names, err := ParameterNames(tc.path)
+		if err != nil {
+			t.Fatalf("%s: ParameterNames: %v", tc.path, err)
+		}
+		got := strings.Join(names, " ")
+		for _, want := range tc.want {
+			if !strings.Contains(" "+got+" ", " "+want+" ") {
+				t.Errorf("%s: %s が含まれない: %s", filepath.Base(tc.path), want, got)
+			}
+		}
+	}
+}
+
+func TestParameterNamesRejectsUnsafeName(t *testing.T) {
+	path := writeTemplate(t, `Resources:
+  Group:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: mysql8.4
+      Description: test
+      Parameters:
+        "bad-name; DROP": "1"
+`)
+	if _, err := ParameterNames(path); err == nil {
+		t.Error("SQL 識別子として安全でない名前を拒否していない")
+	}
+}

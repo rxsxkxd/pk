@@ -3,7 +3,7 @@
 # 2 つの実行形態（MySQL 実効値あり／なし）を確認する。AWS へは接続しない。
 #
 # 短縮記法の実装は scripts/internal/cfn と tools/internal/cfn の 2 本があり、
-# 前者をレポート生成器（--list-parameter-names を含む）が、後者を tools/ のコマンドが
+# 前者をレポート生成器と実効値の収集器が、後者を tools/ のコマンドが
 # 使う。scripts/ と tools/ は Go のライブラリを共有しない方針のため複製しており、
 # 内容が一致していることをこのテストで担保する。
 # 「短縮記法を長形式へ正規化し、組み込み関数の値は比較対象から外す」挙動である。
@@ -55,20 +55,6 @@ build_go() {
 }
 
 if command -v go >/dev/null 2>&1 && build_go; then
-  # --- パラメータ名の抽出（--list-parameter-names）-------------------------
-  # 実効値の収集対象（パラメータ名）と同じ読み取り（scripts/internal/cfn）を使う経路である。
-  # レポート生成と同じバイナリなので、実行側（VerifyGreen）へ Go を持ち込まない。
-  for template in "$FIXTURE" "$LONGFORM"; do
-    if ! names=$("$work/gen" --list-parameter-names --template "$template" 2>&1); then
-      printf 'FAIL  %-52s %s\n' "名前抽出: $(basename "$template")" "$names"
-      failed=$((failed + 1)); continue
-    fi
-    check "名前抽出: $(basename "$template")" 'binlog_format' "$names"
-  done
-  # 組み込み関数で宣言した項目もパラメータ名としては拾う（実効値の収集対象になる）。
-  names=$("$work/gen" --list-parameter-names --template "$FIXTURE" 2>/dev/null)
-  check '名前抽出: 組み込み関数の項目も名前は拾う' 'replica_parallel_workers' "$names"
-
   # --- レポート生成 ---------------------------------------------------------
   if "$work/gen" "${report_args[@]}" --output "$work/go.md" 2>"$work/go.err"; then
     check 'Go: 組み込み関数は比較不能として出る' '比較不能（Ref）' "$(cat "$work/go.md")"

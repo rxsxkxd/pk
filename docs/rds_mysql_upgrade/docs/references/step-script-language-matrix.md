@@ -11,7 +11,7 @@
 | 2 | パラメータ整理とパラメータグループ生成 | `collect_mysql84_parameter_inputs` | — | Bash + AWS CLI |
 | | | `generate_mysql84_parameter_group` | — | Go |
 | 3 | スナップショット取得と Blue/Green 作成 | `build_green.sh` | → `create_blue_green_deployment.rb`（内部処理） | Bash + AWS CLI + Ruby + jq |
-| 4 | Green 構成チェック＋レプリカ同期チェック | `verify_green.sh` | → `collect_green_state.rb`（AWS の状態収集）、→ `collect_green_runtime_values.rb`（DB 実効値の収集。補助・任意）、→ `generate_green_verification_report`（Go。判定とレポート生成、内部処理） | Bash + AWS CLI + Ruby + jq、任意で MySQL クライアントと Go |
+| 4 | Green 構成チェック＋レプリカ同期チェック | `verify_green.sh` | → `prepare_green_verification.rb`（準備: フェーズの観測・AWS の状態収集・DB 実効値の収集〔任意。`collect_green_runtime_values.rb`〕）、→ `generate_green_verification_report`（Go。判定とレポート生成、内部処理） | Bash + AWS CLI + Ruby + jq、任意で MySQL クライアントと Go |
 | 5 | Blue/Green 切り替え | `switchover.sh` | → `switchover_blue_green_deployment.rb`（内部処理） | Bash + AWS CLI + Ruby + jq |
 | 6 | Green ヘルスチェック | 未実装 | — | — |
 | 7 | 後始末 | `cleanup`（`tools/cleanup/`） | — | Go + AWS CLI、任意で MySQL クライアント |

@@ -5,7 +5,7 @@
 #   Go:   scripts/collect_green_state/（scripts/internal/greenstate）
 #   Ruby: scripts/collect_green_state.rb（scripts/lib/green_state.rb）
 #
-# 呼び出し側（verify_green.sh）は Ruby 版へ切り替えてあり、Go 版は残してある。
+# パイプラインは Ruby 版のロジック（lib/green_state.rb）を prepare_green_verification.rb から使い、Go 版は残してある。
 # **どちらかを変えたら、もう一方へ同じ変更を入れる。**ずれるとこのテストが落ちる。
 #
 # 比べるもの: 終了コード・標準出力・標準エラー・書き出したファイル・AWS CLI の呼び出し引数。
@@ -146,15 +146,13 @@ for missing in 0 2 4 6; do
 done
 
 # ===========================================================================
-# 2. 呼び出し側が Ruby 版を使っていること
+# 2. パイプラインが Ruby 版のロジックを使っていること
 # ===========================================================================
-for target in collect_green_state.rb; do
-  if grep -qE "ruby \"\\\$\(dirname \"\\\$0\"\)/${target}\"" scripts/verify_green.sh; then
-    ok "verify_green.sh が ruby 経由で ${target} を呼ぶ"
-  else
-    fail "verify_green.sh が ${target} を呼んでいない" ''
-  fi
-done
+if grep -q "require_relative 'lib/green_state'" scripts/prepare_green_verification.rb; then
+  ok 'prepare_green_verification.rb が lib/green_state.rb を使う'
+else
+  fail 'prepare_green_verification.rb が lib/green_state.rb を使っていない' ''
+fi
 
 echo
 if [[ "$failed" -eq 0 ]]; then echo 'すべて期待どおり。'; exit 0; fi

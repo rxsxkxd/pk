@@ -267,7 +267,7 @@ unset MYSQL_PASSWORD
 | `collect_mysql84_parameter_inputs` | Step 2 のパラメータグループ生成入力の収集。Phase 1 手順書を参照。 |
 | `check_target_parameter_group.rb` | 本書の Step 1。BuildGreen の直前に実行。 |
 | `build_green.sh` | 本書の Step 2 の入口。内部で `create_blue_green_deployment.rb` を呼ぶ。 |
-| `verify_green.sh` | 本書の Step 3 の入口。必要に応じて `collect_green_runtime_values.rb` を呼ぶ。 |
+| `verify_green.sh` | 本書の Step 3 の入口。準備（フェーズの観測・AWS の状態・MySQL 実効値の収集）は `prepare_green_verification.rb`、判定とレポートは Go の判定器が行う。 |
 | `switchover.sh` | 本書の Step 5 の入口。内部で `switchover_blue_green_deployment.rb` を呼ぶ。 |
 | `cleanup`（`tools/cleanup/`。Go） | 本書の Step 7 の入口。 |
 

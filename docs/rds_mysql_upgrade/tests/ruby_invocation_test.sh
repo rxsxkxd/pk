@@ -20,13 +20,13 @@ check_call() {  # $1=呼び出し側 $2=呼ばれる .rb（scripts/ からの相
 }
 check_call scripts/build_green.sh create_blue_green_deployment.rb
 check_call scripts/switchover.sh switchover_blue_green_deployment.rb
-check_call scripts/verify_green.sh collect_green_state.rb
-check_call scripts/verify_green.sh collect_green_runtime_values.rb
+check_call scripts/verify_green.sh prepare_green_verification.rb
 check_call scripts/verify_green.sh lib/resolve_green_tools.rb
-check_call scripts/verify_green.sh lib/deployment_config.rb
+check_call scripts/build_green.sh lib/migration_phase.rb
+check_call scripts/switchover.sh lib/migration_phase.rb
 
 # 呼ばれる .rb が実在すること（削除・改名の取り残しを防ぐ）。
-for rb in create_blue_green_deployment switchover_blue_green_deployment collect_green_state collect_green_runtime_values; do
+for rb in create_blue_green_deployment switchover_blue_green_deployment prepare_green_verification collect_green_state collect_green_runtime_values check_target_parameter_group; do
   if [[ -f "scripts/${rb}.rb" ]] && ruby -c "scripts/${rb}.rb" >/dev/null 2>&1; then
     printf 'ok    scripts/%s.rb が存在し構文が正しい\n' "$rb"
   else

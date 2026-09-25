@@ -41,7 +41,27 @@ module MigrationPhase
   POST = 'post_switchover'
   UNKNOWN = 'unknown'
 
+  # 観測の結果。declared は判定に使った宣言値（移行元版・移行元 PG・移行先版・移行先 PG）。
+  Observation = Struct.new(:phase, :current_version, :current_group, :source_id, :declared, keyword_init: true)
+
   module_function
+
+  # 設定を読み、移行元の実体を AWS から読んで（読み取りだけ）判定する。
+  # config は DeploymentConfig、aws は AwsCli。save を渡すと describe-db-instances の応答を保存する。
+  # 失敗は DeploymentConfig::Error / AwsCli::Error として呼び出し側へ伝える。
+  def observe(config, service_name, aws, save: nil)
+    service = config.service(service_name)
+    declared = %w[source_engine_version source_db_parameter_group_name target_engine_version target_db_parameter_group_name]
+               .map { |key| service.required(key) }
+    source_id = service.required('source_db_instance_identifier')
+    # [読み取り] 移行元識別子が指す実体。切替後は green（新 Blue）を指す。
+    source = aws.run_json('rds', 'describe-db-instances', '--db-instance-identifier', source_id, save_to: save)
+    instance = source.dig('DBInstances', 0) || {}
+    version = instance['EngineVersion'].to_s
+    group = instance.dig('DBParameterGroups', 0, 'DBParameterGroupName').to_s
+    Observation.new(phase: resolve(version, group, *declared), current_version: version, current_group: group,
+                    source_id: source_id, declared: declared)
+  end
 
   # エンジンバージョンから major.minor だけを取り出す。
   # 8.0.44 -> 8.0 / 8.4.10 -> 8.4 / 8.0 -> 8.0 / 8 -> 8 / 8.04.0 -> 8.04
@@ -112,27 +132,19 @@ if $PROGRAM_NAME == __FILE__
     abort 'observe には --config と --service が要る' if options[:config].to_s.empty? || options[:service].to_s.empty?
     begin
       config = DeploymentConfig.load(options[:config])
-      service = config.service(options[:service])
-      declared = %w[source_engine_version source_db_parameter_group_name target_engine_version target_db_parameter_group_name]
-                 .map { |key| service.required(key) }
-      source_id = service.required('source_db_instance_identifier')
       region = options[:region].empty? ? config.required('aws_region') : options[:region]
       profile = options[:profile].empty? ? config.optional('aws_profile') : options[:profile]
-      # [読み取り] 移行元識別子が指す実体。切替後は green（新 Blue）を指す。
-      source = AwsCli.new(region: region, profile: profile)
-                     .run_json('rds', 'describe-db-instances', '--db-instance-identifier', source_id,
-                               save_to: options[:save].empty? ? nil : options[:save])
+      seen = MigrationPhase.observe(config, options[:service], AwsCli.new(region: region, profile: profile),
+                                    save: options[:save].empty? ? nil : options[:save])
     rescue DeploymentConfig::Error, AwsCli::Error => e
       warn e.message
       exit 1
     end
-    instance = source.dig('DBInstances', 0) || {}
-    version = instance['EngineVersion'].to_s
-    group = instance.dig('DBParameterGroups', 0, 'DBParameterGroupName').to_s
-    phase = MigrationPhase.resolve(version, group, *declared)
-    warn MigrationPhase.describe_inputs(version, group, *declared) if phase == MigrationPhase::UNKNOWN
-    { 'PHASE' => phase, 'CURRENT_VERSION' => version, 'CURRENT_GROUP' => group, 'SOURCE_ID' => source_id }
-      .each { |name, value| puts "#{name}=#{Shellwords.escape(value)}" }
+    if seen.phase == MigrationPhase::UNKNOWN
+      warn MigrationPhase.describe_inputs(seen.current_version, seen.current_group, *seen.declared)
+    end
+    { 'PHASE' => seen.phase, 'CURRENT_VERSION' => seen.current_version, 'CURRENT_GROUP' => seen.current_group,
+      'SOURCE_ID' => seen.source_id }.each { |name, value| puts "#{name}=#{Shellwords.escape(value)}" }
   when 'resolve'
     abort 'resolve には 6 つの引数が要る' unless arguments.size == 6
     puts MigrationPhase.resolve(*arguments)

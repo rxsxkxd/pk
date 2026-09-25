@@ -1,0 +1,196 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Sample - single EC2 instance running nginx + Phusion Passenger + Rails (Ubuntu 24.04).
+  Provisioned by UserData, completion reported with cfn-signal. Access via SSM Session Manager (no SSH).
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet (route to an internet gateway)
+  AllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: Source CIDR allowed to access HTTP (port 80)
+  InstanceType:
+    Type: String
+    Default: t3.small
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  RailsVersion:
+    Type: String
+    Default: "~> 8.0.0"
+
+Resources:
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTP for nginx-passenger-rails sample
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedCidr
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref ImageId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile: { Arn: !GetAtt InstanceProfile.Arn }
+        MetadataOptions:
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            SubnetId: !Ref SubnetId
+            Groups: [!Ref WebSecurityGroup]
+            AssociatePublicIpAddress: true
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeSize: 20
+              VolumeType: gp3
+              Encrypted: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub ${AWS::StackName}-web
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euo pipefail
+            export HOME=/root
+            export DEBIAN_FRONTEND=noninteractive
+            export NEEDRESTART_MODE=a
+            APT="apt-get -y -o DPkg::Lock::Timeout=600"
+            APP_USER=rails
+            APP_DIR=/var/www/demo
+
+            # --- cfn-signal (Ubuntu does not ship aws-cfn-bootstrap) ---
+            $APT update
+            $APT install python3-venv curl ca-certificates gnupg
+            python3 -m venv /opt/aws/cfn
+            /opt/aws/cfn/bin/pip install -q https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+            signal() {
+              /opt/aws/cfn/bin/cfn-signal -e "$1" --stack ${AWS::StackName} --resource Instance --region ${AWS::Region} || true
+            }
+            trap 'signal 1' ERR
+
+            # --- Ruby / build tools ---
+            $APT install ruby-full build-essential libsqlite3-dev libyaml-dev zlib1g-dev pkg-config
+            gem install rails -v '${RailsVersion}' --no-document
+
+            # --- nginx + Passenger (Phusion APT repository) ---
+            curl -fsSL https://oss-binaries.phusionpassenger.com/auto-software-signing-gpg-key.txt \
+              | gpg --dearmor -o /etc/apt/trusted.gpg.d/phusion.gpg
+            echo "deb https://oss-binaries.phusionpassenger.com/apt/passenger noble main" \
+              > /etc/apt/sources.list.d/passenger.list
+            $APT update
+            $APT install nginx libnginx-mod-http-passenger
+            if [ ! -f /etc/nginx/modules-enabled/50-mod-http-passenger.conf ]; then
+              ln -s /usr/share/nginx/modules-available/mod-http-passenger.load \
+                /etc/nginx/modules-enabled/50-mod-http-passenger.conf
+            fi
+
+            # --- Rails application (runs as a dedicated user) ---
+            id "$APP_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$APP_USER"
+            mkdir -p /var/www
+            chown "$APP_USER":"$APP_USER" /var/www
+            runuser -l "$APP_USER" -c "cd /var/www && rails new demo --minimal --skip-git --skip-bundle"
+
+            cat > "$APP_DIR/app/controllers/welcome_controller.rb" <<'EOF'
+            class WelcomeController < ApplicationController
+              def index
+              end
+            end
+            EOF
+            mkdir -p "$APP_DIR/app/views/welcome"
+            cat > "$APP_DIR/app/views/welcome/index.html.erb" <<'EOF'
+            <h1>nginx + Passenger + Rails</h1>
+            <ul>
+              <li>Host: <%= Socket.gethostname %></li>
+              <li>Ruby: <%= RUBY_VERSION %></li>
+              <li>Rails: <%= Rails.version %></li>
+              <li>Environment: <%= Rails.env %></li>
+            </ul>
+            EOF
+            sed -i '/^Rails.application.routes.draw do/a\  root "welcome#index"' "$APP_DIR/config/routes.rb"
+            # This sample serves plain HTTP; disable the HTTPS redirect Rails enables in production by default
+            sed -i -E 's/^(\s*)config\.(force_ssl|assume_ssl) = true/\1config.\2 = false/' \
+              "$APP_DIR/config/environments/production.rb"
+            chown -R "$APP_USER":"$APP_USER" "$APP_DIR"
+
+            runuser -l "$APP_USER" -c "cd $APP_DIR \
+              && bundle config set --local path vendor/bundle \
+              && bundle install \
+              && RAILS_ENV=production bin/rails db:prepare \
+              && RAILS_ENV=production bin/rails assets:precompile"
+
+            # --- nginx site ---
+            cat > /etc/nginx/sites-available/demo <<EOF
+            server {
+                listen 80 default_server;
+                server_name _;
+                root $APP_DIR/public;
+
+                passenger_enabled on;
+                passenger_app_env production;
+            }
+            EOF
+            rm -f /etc/nginx/sites-enabled/default
+            ln -sf /etc/nginx/sites-available/demo /etc/nginx/sites-enabled/demo
+            nginx -t
+            systemctl restart nginx
+
+            # --- Verify end to end, then report success ---
+            for i in $(seq 1 30); do
+              curl -fsS http://localhost/up >/dev/null && break
+              [ "$i" -eq 30 ] && exit 1
+              sleep 5
+            done
+            curl -fsS http://localhost/ -o /tmp/index.html
+            grep -q "nginx + Passenger + Rails" /tmp/index.html
+
+            signal 0
+
+  Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+  Url:
+    Value: !Sub http://${Instance.PublicDnsName}/
+  SessionCommand:
+    Description: Shell access via SSM Session Manager
+    Value: !Sub aws ssm start-session --target ${Instance} --region ${AWS::Region}

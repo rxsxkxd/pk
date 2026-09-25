@@ -2,6 +2,7 @@ package prereqs
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -194,7 +195,7 @@ func TestMySQLSideOmittedIsExplicit(t *testing.T) {
 
 func TestMySQLSideRendersResults(t *testing.T) {
 	state := `{"collected_at":"T","host":"blue","port":3306,"version":"8.0.39","binlog_format":"MIXED",
-	  "replica_status":[{"Source_Host":"external.example","Source_Port":"3306","Replica_IO_Running":"Yes","Replica_SQL_Running":"Yes","Last_Error":"a|b"}],
+	  "replica_status":[{"Source_Host":"external.example","Source_Port":"3306","Replica_IO_Running":"Yes","Replica_SQL_Running":"Yes","Last_IO_Error":"a|b"}],
 	  "non_innodb_tables":[]}`
 	check := `{"collected_at":"T","host":"blue","port":3306,"target_version":"8.4.9","error_count":1,"warning_count":1,"notice_count":0,
 	  "report":{"serverVersion":"8.0.39","summary":"1 errors","checksPerformed":[
@@ -205,8 +206,8 @@ func TestMySQLSideRendersResults(t *testing.T) {
 	report := evaluation.Report()
 	for _, want := range []string{
 		"| SHOW REPLICA STATUS | 1 行 |",
-		"| external.example | 3306 | Yes | Yes | a\\|b |", // セル内の | はエスケープする
-		"**InnoDB 以外のテーブル**（ユーザースキーマ。MyISAM は Blue/Green のレプリケーションで整合性が保証されない）\n\nなし。",
+		"|  | external.example | 3306 | Yes | Yes |  | a\|b |  |", // セル内の | はエスケープする
+		"**InnoDB 以外のテーブル**（0-2。ユーザースキーマのみ。MyISAM は binlog レプリケーションで整合性が保証されない）\n\nなし。",
 		"| Error / Warning / Notice | 1 / 1 / 0 |",
 		"- Manual（`m`）",
 	} {
@@ -217,14 +218,77 @@ func TestMySQLSideRendersResults(t *testing.T) {
 	if strings.Index(report, "| Error | `b` |") > strings.Index(report, "| Warning | `a` |") {
 		t.Errorf("Error を Warning より先に並べること")
 	}
-	// 判定には使わない（外部レプリカがあっても 0-1-06 は REVIEW のまま、終了コードも変わらない）。
-	for _, result := range evaluation.Results {
-		if strings.HasPrefix(result.Item, "0-1-06") && result.Status != "REVIEW" {
-			t.Errorf("MySQL 側の結果で判定を変えないこと: %s", result.Status)
+	// 外部レプリカがあれば 0-1-06 は STOP、チェッカーの Error があれば 0-3 も STOP。
+	for item, want := range map[string]string{"0-1-06": "STOP", "0-3": "STOP"} {
+		if got := resultOf(t, evaluation, item).Status; got != want {
+			t.Errorf("%s: %s（期待 %s）", item, got, want)
 		}
 	}
-	if evaluation.Count("STOP") != 0 {
-		t.Errorf("MySQL 側の結果で STOP を増やさないこと")
+}
+
+func resultOf(t *testing.T, evaluation *Evaluation, item string) Result {
+	t.Helper()
+	for _, result := range evaluation.Results {
+		if strings.HasPrefix(result.Item, item+" ") {
+			return result
+		}
+	}
+	t.Fatalf("%s が無い", item)
+	return Result{}
+}
+
+func TestMySQLSideVerdicts(t *testing.T) {
+	state := func(binlog, tables string) string {
+		return `{"collected_at":"2026-09-17T00:05:00Z","host":"h","version":"8.0.39","binlog_format":"` + binlog +
+			`","replica_status":[],"non_innodb_tables":[` + tables + `]}`
+	}
+	check := func(errors, warnings int) string {
+		return fmt.Sprintf(`{"collected_at":"2026-09-17T00:10:00Z","host":"restored","target_version":"8.4.9","error_count":%d,"warning_count":%d,"notice_count":0,"report":{}}`, errors, warnings)
+	}
+	for _, tc := range []struct {
+		name, state, check, item, want, detail string
+	}{
+		{"未収集なら 0-1-06 は REVIEW", "", "", "0-1-06", "REVIEW", "collect_blue_mysql_state"},
+		{"未収集なら 0-2 は REVIEW", "", "", "0-2", "REVIEW", "未収集"},
+		{"未収集なら 0-3 は REVIEW", "", "", "0-3", "REVIEW", "collect_blue_upgrade_check"},
+		{"レプリカでなければ 0-1-06 は PASS", state("MIXED", ""), "", "0-1-06", "PASS", "空"},
+		{"MyISAM があれば 0-2 は STOP", state("MIXED", `{"TABLE_SCHEMA":"app","TABLE_NAME":"t","ENGINE":"MyISAM"}`), "", "0-2", "STOP", "MyISAM=1"},
+		{"MyISAM 以外だけなら 0-2 は REVIEW", state("MIXED", `{"TABLE_SCHEMA":"app","TABLE_NAME":"t","ENGINE":"MEMORY"}`), "", "0-2", "REVIEW", "MEMORY=1"},
+		{"Error が無く Warning があれば 0-3 は REVIEW", "", check(0, 3), "0-3", "REVIEW", "Warning=3"},
+		{"どちらも無ければ 0-3 は PASS", "", check(0, 0), "0-3", "PASS", "Error=0"},
+		{"実効値がパラメータグループと違えば 0-1-02 は REVIEW", state("ROW", ""), "", "0-1-02", "REVIEW", "食い違っている"},
+	} {
+		result := resultOf(t, withMySQLSide(t, tc.state, tc.check), tc.item)
+		if result.Status != tc.want || !strings.Contains(result.Detail, tc.detail) {
+			t.Errorf("%s: %s %q", tc.name, result.Status, result.Detail)
+		}
+	}
+}
+
+func TestNotes(t *testing.T) {
+	// 例題の Blue のエンドポイントと、それ以外の接続先。
+	blue := "example-service-production-mysql80.xxxxxxxxxxxx.ap-northeast-1.rds.amazonaws.com"
+	for _, tc := range []struct {
+		name, state, check, want string
+	}{
+		{"欠けた収集があれば未収集として判定したと書く", "", "", "MySQL 側の収集が欠けている"},
+		{"収集日時が離れていれば再収集を促す", `{"collected_at":"2026-01-01T00:00:00Z","host":"` + blue + `","replica_status":[],"non_innodb_tables":[]}`, "", "時間以上離れている"},
+		{"状態の接続先が Blue でなければ確認を促す", `{"collected_at":"2026-09-17T00:05:00Z","host":"other","replica_status":[],"non_innodb_tables":[]}`, "", "接続先（`other`）が対象 Blue のエンドポイント"},
+		{"チェッカーを本番に対して実行していれば注意する", "", `{"collected_at":"2026-09-17T00:10:00Z","host":"` + blue + `","report":{}}`, "対象 Blue（本番）に対して実行している"},
+		{"RDS 固有の項目は Shell で出ないことを常に書く", "", "", "PrePatchCompatibility.log"},
+	} {
+		if report := withMySQLSide(t, tc.state, tc.check).Report(); !strings.Contains(report, tc.want) {
+			t.Errorf("%s: %q が無い", tc.name, tc.want)
+		}
+	}
+	// 項目ごとの補足は全項目に載る。
+	evaluation := withMySQLSide(t, "", "")
+	report := evaluation.Report()
+	for _, result := range evaluation.Results {
+		key := strings.Fields(result.Item)[0]
+		if guidanceByItem[key].Condition == "" || !strings.Contains(report, "| "+result.Status+" | "+escapeCell(result.Item)+" | "+escapeCell(guidanceByItem[key].Condition)) {
+			t.Errorf("%s の補足が無い", result.Item)
+		}
 	}
 }
 

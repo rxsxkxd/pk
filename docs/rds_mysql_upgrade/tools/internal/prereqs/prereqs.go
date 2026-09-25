@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"rds-mysql-upgrade/tools/internal/awscli"
+	"rds-mysql-upgrade/tools/internal/mysqlcli"
 )
 
 // ---------------------------------------------------------------------------
@@ -163,7 +164,10 @@ type Evaluation struct {
 	InstanceClass string
 	Metadata      map[string]any
 	Results       []Result
-	MySQL         mysqlSide // MySQL 側の収集結果（任意。判定には使わない）
+	MySQL         mysqlSide // MySQL 側の収集結果（任意。無ければ該当項目は REVIEW）
+
+	Endpoint       string // 対象 Blue のエンドポイント（MySQL 側の接続先の確認に使う）
+	binlogDeclared string // パラメータグループ上の binlog_format
 }
 
 // Count は指定した判定の件数を返す。
@@ -308,10 +312,16 @@ func Evaluate(dir string) (*Evaluation, error) {
 		proxyTargets = append(proxyTargets, list(document, "Targets")...)
 	}
 
+	side, err := readMySQLSide(dir)
+	if err != nil {
+		return nil, err
+	}
+
 	evaluation := &Evaluation{
 		InstanceID: text(instance["DBInstanceIdentifier"]), Engine: text(instance["Engine"]),
 		EngineVersion: text(instance["EngineVersion"]), InstanceClass: text(instance["DBInstanceClass"]),
-		Metadata: metadata,
+		Metadata: metadata, MySQL: side,
+		Endpoint: text(object(instance["Endpoint"])["Address"]),
 	}
 	add := func(status, item, detail, source string) {
 		evaluation.Results = append(evaluation.Results, Result{status, item, detail, source})
@@ -337,14 +347,24 @@ func Evaluate(dir string) (*Evaluation, error) {
 			break
 		}
 	}
-	if binlogValue == "ROW" {
-		add("PASS", "0-1-02 binlog_format", "ROW（Green 作成の必須条件ではないが、運用方針と一致）", "db-parameters.json")
-	} else {
+	evaluation.binlogDeclared = binlogValue
+	effective := side.binlogEffective()
+	effectiveNote := ""
+	if effective != "" {
+		effectiveNote = "。実効値=" + effective
+	}
+	switch {
+	case binlogValue == "ROW" && (effective == "" || effective == "ROW"):
+		add("PASS", "0-1-02 binlog_format", "ROW（Green 作成の必須条件ではないが、運用方針と一致）"+effectiveNote, "db-parameters.json")
+	case effective != "" && binlogValue != "" && effective != binlogValue:
+		add("REVIEW", "0-1-02 binlog_format", "パラメータグループ="+binlogValue+effectiveNote+"（食い違っている。適用待ちや上書きを確認する）",
+			"db-parameters.json / "+mysqlcli.StateFileName)
+	default:
 		shown := binlogValue
 		if shown == "" {
 			shown = "取得不可"
 		}
-		add("REVIEW", "0-1-02 binlog_format", shown+"（Blue/Green 作成の阻害要因ではない。ROW 統一は別変更として判断）", "db-parameters.json")
+		add("REVIEW", "0-1-02 binlog_format", shown+"（Blue/Green 作成の阻害要因ではない。ROW 統一は別変更として判断）"+effectiveNote, "db-parameters.json")
 	}
 
 	var statuses []string
@@ -366,7 +386,7 @@ func Evaluate(dir string) (*Evaluation, error) {
 	}
 	add(verdict(!contains(optionNames, "MEMCACHED"), "STOP"), "0-1-04 MEMCACHED", optionDetail, "option-group.json")
 
-	add("REVIEW", "0-1-06 外部 binlog レプリカ", "AWS CLI のみでは判定不可。SHOW REPLICA STATUS\\G の結果が空であることを手動確認", "手動確認（収集対象外）")
+	evaluation.Results = append(evaluation.Results, side.replicaResult())
 
 	childIDs := make([]string, 0)
 	for _, id := range list(instance, "ReadReplicaDBInstanceIdentifiers") {
@@ -460,11 +480,8 @@ func Evaluate(dir string) (*Evaluation, error) {
 	}
 	add(verdict(!iamAuth, "REVIEW"), "0-1-14 IAM DB 認証", iamDetail, "db-instance.json")
 
-	side, err := readMySQLSide(dir)
-	if err != nil {
-		return nil, err
-	}
-	evaluation.MySQL = side
+	// MySQL 側の収集結果による項目（無ければ REVIEW＝未収集）。
+	evaluation.Results = append(evaluation.Results, side.engineResult(), side.checkerResult())
 	return evaluation, nil
 }
 
@@ -546,6 +563,7 @@ func (e *Evaluation) Report() string {
 	lines = append(lines, e.MySQL.reportLines()...)
 	section("STOP", "## STOP — 解消しないと移行できない")
 	section("REVIEW", "## REVIEW — 人の確認が要る")
+	lines = append(lines, e.notes()...)
 	lines = append(lines,
 		"## この結果の読み方",
 		"",
@@ -554,7 +572,7 @@ func (e *Evaluation) Report() string {
 		"- このレポートは収集済み JSON だけから作る。**AWS へは接続していない**ため、",
 		"  収集時点（上記の収集日時）の状態を示す。時間が空いたら再収集する",
 		"- 項目の採番は `docs/phase-0-precheck.md` のチェックリストに対応する",
-		"- MySQL 側の収集結果は判定に使っていない。ファイルが無い節は「省略した」と明示している",
+		"- MySQL 側の収集（接続先の状態・アップグレードチェッカー）が無い場合、関わる項目は REVIEW（未収集）になり、該当する節は「省略した」と明示している",
 		"",
 		"この結果をもとに、**移行できるか・どのインスタンスを対象にするか**を判断する。",
 		"対象を決めたら次は移行設定の生成とそのレビューへ進む（`report-generation-flows.md`）。",

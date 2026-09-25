@@ -163,6 +163,7 @@ type Evaluation struct {
 	InstanceClass string
 	Metadata      map[string]any
 	Results       []Result
+	MySQL         mysqlSide // MySQL 側の収集結果（任意。判定には使わない）
 }
 
 // Count は指定した判定の件数を返す。
@@ -459,6 +460,11 @@ func Evaluate(dir string) (*Evaluation, error) {
 	}
 	add(verdict(!iamAuth, "REVIEW"), "0-1-14 IAM DB 認証", iamDetail, "db-instance.json")
 
+	side, err := readMySQLSide(dir)
+	if err != nil {
+		return nil, err
+	}
+	evaluation.MySQL = side
 	return evaluation, nil
 }
 
@@ -485,6 +491,7 @@ func (e *Evaluation) Summary() string {
 		fmt.Fprintf(&b, "%s %s %s\n", pad(result.Status, 8), pad(result.Item, 30), result.Detail)
 	}
 	fmt.Fprintf(&b, "結果: STOP=%d, REVIEW=%d\n", e.Count("STOP"), e.Count("REVIEW"))
+	b.WriteString(e.MySQL.summaryLine() + "\n")
 	return b.String()
 }
 
@@ -536,6 +543,7 @@ func (e *Evaluation) Report() string {
 		}
 		lines = append(lines, "")
 	}
+	lines = append(lines, e.MySQL.reportLines()...)
 	section("STOP", "## STOP — 解消しないと移行できない")
 	section("REVIEW", "## REVIEW — 人の確認が要る")
 	lines = append(lines,
@@ -546,6 +554,7 @@ func (e *Evaluation) Report() string {
 		"- このレポートは収集済み JSON だけから作る。**AWS へは接続していない**ため、",
 		"  収集時点（上記の収集日時）の状態を示す。時間が空いたら再収集する",
 		"- 項目の採番は `docs/phase-0-precheck.md` のチェックリストに対応する",
+		"- MySQL 側の収集結果は判定に使っていない。ファイルが無い節は「省略した」と明示している",
 		"",
 		"この結果をもとに、**移行できるか・どのインスタンスを対象にするか**を判断する。",
 		"対象を決めたら次は移行設定の生成とそのレビューへ進む（`report-generation-flows.md`）。",

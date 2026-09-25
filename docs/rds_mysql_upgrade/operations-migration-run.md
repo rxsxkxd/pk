@@ -52,7 +52,7 @@ flowchart TD
 | 名前 | いつ | どこで | 何を確かめるか | 実体 | 結果が効く先 |
 |---|---|---|---|---|---|
 | **成立条件チェック** | パイプラインを動かす**前** | ローカル（A-1） | 既存 Blue で Blue/Green が作れるか（Step 1、項目 0-1-01〜14） | `go run ./tools/collect_blue_green_prereqs` → `tools/evaluate_blue_green_prereqs/` | ゲート① |
-| **構築前チェック** | パイプライン中、**Blue/Green を作る直前** | CI（ステージ `PrecheckParameterGroup`） | 移行先 8.4 パラメータグループが存在し、family が合っているか | `scripts/check_target_parameter_group.sh` | 失敗なら BuildGreen へ進まない |
+| **構築前チェック** | パイプライン中、**Blue/Green を作る直前** | CI（ステージ `PrecheckParameterGroup`） | 移行先 8.4 パラメータグループが存在し、family が合っているか | `scripts/check_target_parameter_group.rb` | 失敗なら BuildGreen へ進まない |
 | **切替前検証** | パイプライン中、**Blue/Green を作ったあと・切り替える前** | CI（ステージ `VerifyGreen`、Step 4） | Green の構成・パラメータ・レプリカ遅延が設定どおりか | `scripts/verify_green.sh` | ゲート③ |
 
 ステージ名・CodeBuild プロジェクト名・ファイル名にある `precheck` は**構築前チェックのことではない場合がある**点に注意する（`docs/phase-0-precheck.md` は成立条件チェック、`PrecheckParameterGroup` は構築前チェック）。これらは既存のリソース名・リンク先を変えないため、名前はそのまま残している。

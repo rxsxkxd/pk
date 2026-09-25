@@ -25,7 +25,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 | `scripts/*.rb`・`scripts/lib/*.rb` | パイプラインの **AWS 操作**と設定 YAML の読み取り | **Ruby**（AWS は `scripts/lib/aws_cli.rb` 経由で AWS CLI を exec。SDK は使わない） |
 | `scripts/<名前>/`（Go） | パイプラインの **MySQL クエリ**と判定・レポート | **Go**（BuildReportTool がビルドし artifact で渡す） |
 
-- **シェルから `aws` / `mysql` を直接実行しない。**AWS 操作は Ruby、MySQL クエリは Go に置き、シェルはそれを呼ぶだけにする。
+- **シェルから `aws` / `mysql` を直接実行しない。**AWS 操作は Ruby、MySQL クエリは Go に置き、シェルはそれを呼ぶだけにする。フェーズ判定の観測も `ruby scripts/lib/migration_phase.rb observe` が行う。シェルが Ruby を呼ぶだけになるなら、シェルを作らず buildspec から `ruby scripts/<名前>.rb` を直接呼ぶ（例: `check_target_parameter_group.rb`）。
 - `.rb` は `ruby <パス>` で呼ぶ（CodePipeline の artifact で実行ビットが落ちるため。`tests/ruby_invocation_test.sh`）。同じ名前のシェル関数で包まない。
 - 外部コマンドの出力を `eval` するときは**変数へ受けてから 2 行で**。`eval "$(...)"` は失敗が `set -e` をすり抜ける。
 - `scripts/` と `tools/` はコードを共有しない。同じ規則を両側で持つもの（フェーズ判定・設定の読み取り・`cfn`）は、変えるときに両側を直す。

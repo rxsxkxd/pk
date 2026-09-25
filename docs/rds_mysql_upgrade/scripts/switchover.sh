@@ -48,115 +48,30 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-switchover-step.XXXXXX")
 mkdir -p "$output_dir"
 
-# 移行フェーズの判定（冪等性の第 1 層）は Ruby の 1 本で実装してある。
-# resolve で pre_switchover / post_switchover / unknown を返し、
-# describe で判定に使った実測値と宣言値を人向けに出す。
-migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
-
-# 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
-# 必要な項目とその必須・任意だけをここに宣言する（読み取りは lib/deployment_config.rb）。
+# 設定の承認宣言だけを読む（読み取りは lib/deployment_config.rb）。AWS API は呼び出さない。
 config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
-  approved=optional:service.actions.switchover=pending \
-  timeout=optional:service.actions.switchover_timeout=300 \
-  source_id=required:service.source_db_instance_identifier \
-  source_engine_version=required:service.source_engine_version \
-  source_db_parameter_group_name=required:service.source_db_parameter_group_name \
-  target_engine_version=required:service.target_engine_version \
-  target_db_parameter_group_name=required:service.target_db_parameter_group_name \
-  config_region=required:aws_region)
+  approved=optional:service.actions.switchover=pending)
 eval "$config_vars"
 [[ "$approved" == approved ]] || { echo 'switchover: pending; no changes made.'; exit 0; }
-[[ -n "$region" ]] || region=$config_region
-aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
-# --- 第 1 層: 結果の観測 ---------------------------------------------------
-# [読み取り] 移行元識別子が指す実体のエンジンバージョンとパラメータグループを見る。
-aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
-  --output json > "$output_dir/source.json"
-read -r current_version current_group <<< "$(
-  aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
-    --query 'DBInstances[0].[EngineVersion,DBParameterGroups[0].DBParameterGroupName]' --output text
-)"
+# --region / --profile は空でもそのまま渡す（空なら Ruby 側が設定ファイルの値を使う）。
+# 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
+common=(--config "$config" --service "$service" --region "$region" --profile "$profile")
 
-phase=$("${migration_phase[@]}" resolve "$current_version" "$current_group" \
-  "$source_engine_version" "$source_db_parameter_group_name" \
-  "$target_engine_version" "$target_db_parameter_group_name")
-
-case "$phase" in
+# --- 第 1 層: 結果の観測（観測と判定は lib/migration_phase.rb）------------
+phase_vars=$(ruby "$(dirname "$0")/lib/migration_phase.rb" observe "${common[@]}")
+eval "$phase_vars"   # PHASE / CURRENT_VERSION / CURRENT_GROUP / SOURCE_ID
+case "$PHASE" in
   post_switchover)
     # Deployment が cleanup 済みで存在しなくても、ここで完了と判定できる。
-    echo "Switchover already completed: $source_id is ${current_version} with ${current_group}."
-    echo "Artifacts: $output_dir"
-    exit 0
-    ;;
+    echo "Switchover already completed: $SOURCE_ID is ${CURRENT_VERSION} with ${CURRENT_GROUP}."
+    exit 0 ;;
   unknown)
-    echo "移行元が移行前・移行後のいずれの宣言とも一致しない。設定の誤りか想定外のドリフトである。" >&2
-    "${migration_phase[@]}" describe "$current_version" "$current_group" \
-      "$source_engine_version" "$source_db_parameter_group_name" \
-      "$target_engine_version" "$target_db_parameter_group_name" >&2
-    exit 1
-    ;;
+    echo '移行元が移行前・移行後のいずれの宣言とも一致しない。設定の誤りか想定外のドリフトである。' >&2
+    exit 1 ;;
 esac
 
-# --- 第 2 層: 安全弁（Deployment の状態）-----------------------------------
-# [読み取り] Source に紐づく Deployment を検索する。設定値ではなく AWS の実状態から対象を解決する。
-source_arn=$(aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
-  --query 'DBInstances[0].DBInstanceArn' --output text)
-aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" \
-  --output json > "$output_dir/deployment.json"
-read -r deployment_id deployment_status <<< "$(
-  aws "${aws_args[@]}" rds describe-blue-green-deployments --filters "Name=source,Values=$source_arn" \
-    --query 'BlueGreenDeployments[0].[BlueGreenDeploymentIdentifier,Status]' --output text
-)"
-
-if [[ -z "$deployment_id" || "$deployment_id" == None ]]; then
-  # 移行前なのに Deployment がない。Step 3 が未実行か、誤って削除されている。
-  echo "Blue/Green Deployment not found for $source_id (phase: pre_switchover)." >&2
-  echo "Step 3（build_green.sh）が完了しているか確認する。" >&2
-  exit 1
-fi
-
-# 切替完了を待つ。exit 0 が「望ましい終了状態に到達した」ことを意味するようにする。
-wait_for_switchover() {
-  local deadline=$(( $(date +%s) + wait_timeout_seconds ))
-  local status
-  while true; do
-    status=$(aws "${aws_args[@]}" rds describe-blue-green-deployments \
-      --blue-green-deployment-identifier "$deployment_id" \
-      --query 'BlueGreenDeployments[0].Status' --output text)
-    case "$status" in
-      SWITCHOVER_COMPLETED)
-        echo "Switchover completed: $deployment_id"
-        return 0 ;;
-      SWITCHOVER_IN_PROGRESS)
-        echo "  status: $status" ;;
-      *)
-        echo "Switchover did not complete; status: $status" >&2
-        return 1 ;;
-    esac
-    [[ $(date +%s) -lt $deadline ]] || { echo "Timed out waiting for SWITCHOVER_COMPLETED." >&2; return 1; }
-    sleep 15
-  done
-}
-
-case "$deployment_status" in
-  AVAILABLE)
-    args=(--config "$config" --blue-green-deployment-id "$deployment_id" --approve
-          --switchover-timeout "$timeout" --region "$region" --output-dir "$output_dir/result")
-    [[ -n "$profile" ]] && args+=(--profile "$profile")
-    # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
-    ruby "$(dirname "$0")/switchover_blue_green_deployment.rb" "${args[@]}"
-    wait_for_switchover
-    ;;
-  SWITCHOVER_IN_PROGRESS)
-    # 既に切替が走っている。二重に API を呼ばず完了だけを待つ。
-    echo "Switchover already in progress: $deployment_id"
-    wait_for_switchover
-    ;;
-  *)
-    echo "Switchover requires AVAILABLE status; current status: $deployment_status" >&2
-    exit 1
-    ;;
-esac
-
-echo "Artifacts: $output_dir"
+# --- 第 2 層: 安全弁（Deployment の状態）と切替・完了待ち -----------------
+# switchover_blue_green_deployment.rb が行う（冒頭のコメントを参照）。
+ruby "$(dirname "$0")/switchover_blue_green_deployment.rb" "${common[@]}" --approve \
+  --output-dir "$output_dir" --wait-timeout-seconds "$wait_timeout_seconds"

@@ -25,10 +25,17 @@
 #   MigrationPhase.resolve(current_version, current_group,
 #                          source_version, source_group, target_version, target_group)
 #
-# シェルから（呼び出し側は migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb") として使う）:
+# シェルから:
+#   ruby migration_phase.rb observe --config FILE --service NAME [--region R] [--profile P] [--save FILE]
+#     設定を読み、移行元の実体を AWS から読んで（読み取りだけ）判定し、次を代入行で出す。
+#     呼び出し側は変数へ受けてから eval する。unknown のときは判定の根拠を stderr へ出す。
+#       PHASE / CURRENT_VERSION / CURRENT_GROUP / SOURCE_ID
 #   ruby migration_phase.rb resolve     <現在版> <現在PG> <移行元版> <移行元PG> <移行先版> <移行先PG>
 #   ruby migration_phase.rb describe    （同じ 6 引数）
 #   ruby migration_phase.rb major-minor <版>
+#
+# **シェルから aws を直接呼ばない**ため、観測（AWS の読み取り）もここで行う。
+# 判定そのもの（resolve）は AWS を呼ばない純粋な関数のままにしてある。
 module MigrationPhase
   PRE = 'pre_switchover'
   POST = 'post_switchover'
@@ -84,6 +91,48 @@ end
 if $PROGRAM_NAME == __FILE__
   command, *arguments = ARGV
   case command
+  when 'observe'
+    require 'optparse'
+    require 'shellwords'
+    require_relative 'aws_cli'
+    require_relative 'deployment_config'
+    options = { region: '', profile: '', save: '' }
+    begin
+      OptionParser.new do |opts|
+        opts.on('--config FILE') { |v| options[:config] = v }
+        opts.on('--service NAME') { |v| options[:service] = v }
+        opts.on('--region REGION') { |v| options[:region] = v }
+        opts.on('--profile PROFILE') { |v| options[:profile] = v }
+        opts.on('--save FILE', '移行元の describe-db-instances 応答の保存先（任意）') { |v| options[:save] = v }
+      end.parse!(arguments)
+    rescue OptionParser::ParseError => e
+      warn e.message
+      exit 2
+    end
+    abort 'observe には --config と --service が要る' if options[:config].to_s.empty? || options[:service].to_s.empty?
+    begin
+      config = DeploymentConfig.load(options[:config])
+      service = config.service(options[:service])
+      declared = %w[source_engine_version source_db_parameter_group_name target_engine_version target_db_parameter_group_name]
+                 .map { |key| service.required(key) }
+      source_id = service.required('source_db_instance_identifier')
+      region = options[:region].empty? ? config.required('aws_region') : options[:region]
+      profile = options[:profile].empty? ? config.optional('aws_profile') : options[:profile]
+      # [読み取り] 移行元識別子が指す実体。切替後は green（新 Blue）を指す。
+      source = AwsCli.new(region: region, profile: profile)
+                     .run_json('rds', 'describe-db-instances', '--db-instance-identifier', source_id,
+                               save_to: options[:save].empty? ? nil : options[:save])
+    rescue DeploymentConfig::Error, AwsCli::Error => e
+      warn e.message
+      exit 1
+    end
+    instance = source.dig('DBInstances', 0) || {}
+    version = instance['EngineVersion'].to_s
+    group = instance.dig('DBParameterGroups', 0, 'DBParameterGroupName').to_s
+    phase = MigrationPhase.resolve(version, group, *declared)
+    warn MigrationPhase.describe_inputs(version, group, *declared) if phase == MigrationPhase::UNKNOWN
+    { 'PHASE' => phase, 'CURRENT_VERSION' => version, 'CURRENT_GROUP' => group, 'SOURCE_ID' => source_id }
+      .each { |name, value| puts "#{name}=#{Shellwords.escape(value)}" }
   when 'resolve'
     abort 'resolve には 6 つの引数が要る' unless arguments.size == 6
     puts MigrationPhase.resolve(*arguments)
@@ -94,6 +143,6 @@ if $PROGRAM_NAME == __FILE__
     abort 'major-minor には 1 つの引数が要る' unless arguments.size == 1
     puts MigrationPhase.major_minor(arguments.first)
   else
-    abort "Usage: #{File.basename(__FILE__)} resolve|describe|major-minor ARGS..."
+    abort "Usage: #{File.basename(__FILE__)} observe|resolve|describe|major-minor ARGS..."
   end
 end

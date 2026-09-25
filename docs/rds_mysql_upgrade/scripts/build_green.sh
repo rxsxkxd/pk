@@ -48,59 +48,31 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-build.XXXXXX")
 mkdir -p "$output_dir"
 
-# 移行フェーズの判定（冪等性の第 1 層）は Ruby の 1 本で実装してある。
-# resolve で pre_switchover / post_switchover / unknown を返し、
-# describe で判定に使った実測値と宣言値を人向けに出す。
-migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
-
-# 設定ファイルの承認宣言と、フェーズ判定に使う宣言値を取得する。AWS API は呼び出さない。
-# 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
-# 必要な項目とその必須・任意だけをここに宣言する（読み取りは lib/deployment_config.rb）。
+# 設定の承認宣言だけを読む（読み取りは lib/deployment_config.rb）。AWS API は呼び出さない。
 config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
-  build=optional:service.actions.build=pending \
-  source_id=required:service.source_db_instance_identifier \
-  source_engine_version=required:service.source_engine_version \
-  source_db_parameter_group_name=required:service.source_db_parameter_group_name \
-  target_engine_version=required:service.target_engine_version \
-  target_db_parameter_group_name=required:service.target_db_parameter_group_name \
-  config_region=required:aws_region)
+  build=optional:service.actions.build=pending)
 eval "$config_vars"
 [[ "$build" == approved ]] || { echo 'build: pending; no changes made.'; exit 0; }
-[[ -n "$region" ]] || region=$config_region
-aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
-# --- 第 1 層: フェーズガード -----------------------------------------------
-# [読み取り] 移行元の実体を見る。応答 JSON は create_blue_green_deployment.rb が保存する。
-read -r current_version current_group <<< "$(
-  aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
-    --query 'DBInstances[0].[EngineVersion,DBParameterGroups[0].DBParameterGroupName]' --output text
-)"
+# --region / --profile は空でもそのまま渡す（空なら Ruby 側が設定ファイルの値を使う）。
+# 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
+common=(--config "$config" --service "$service" --region "$region" --profile "$profile")
 
-phase=$("${migration_phase[@]}" resolve "$current_version" "$current_group" \
-  "$source_engine_version" "$source_db_parameter_group_name" \
-  "$target_engine_version" "$target_db_parameter_group_name")
-
-case "$phase" in
+# --- 第 1 層: フェーズガード（観測と判定は lib/migration_phase.rb）--------
+phase_vars=$(ruby "$(dirname "$0")/lib/migration_phase.rb" observe "${common[@]}")
+eval "$phase_vars"   # PHASE / CURRENT_VERSION / CURRENT_GROUP / SOURCE_ID
+case "$PHASE" in
   post_switchover)
     # 切替済み。Deployment が cleanup 済みで存在しなくても新規作成へ進まない。
-    echo "Migration already completed: $source_id is ${current_version} with ${current_group}."
-    echo "Artifacts: $output_dir"
-    exit 0
-    ;;
+    echo "Migration already completed: $SOURCE_ID is ${CURRENT_VERSION} with ${CURRENT_GROUP}."
+    exit 0 ;;
   unknown)
-    echo "移行元が移行前・移行後のいずれの宣言とも一致しない。設定の誤りか想定外のドリフトである。" >&2
-    "${migration_phase[@]}" describe "$current_version" "$current_group" \
-      "$source_engine_version" "$source_db_parameter_group_name" \
-      "$target_engine_version" "$target_db_parameter_group_name" >&2
-    exit 1
-    ;;
+    echo '移行元が移行前・移行後のいずれの宣言とも一致しない。設定の誤りか想定外のドリフトである。' >&2
+    exit 1 ;;
 esac
 
 # --- 第 2 層: Deployment の状態別分岐・保護スナップショット・作成 ----------
 # create_blue_green_deployment.rb が行う（冒頭のコメントを参照）。
-# 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
-create_args=(--config "$config" --service "$service" --region "$region" --output-dir "$output_dir"
-             --wait-timeout-seconds "$wait_timeout_seconds")
-[[ -n "$profile" ]] && create_args+=(--profile "$profile")
-ruby "$(dirname "$0")/create_blue_green_deployment.rb" "${create_args[@]}"
+ruby "$(dirname "$0")/create_blue_green_deployment.rb" "${common[@]}" \
+  --output-dir "$output_dir" --wait-timeout-seconds "$wait_timeout_seconds"
 echo "Build completed. Artifacts: $output_dir"

@@ -65,9 +65,9 @@ go run ./tools/collect_blue_green_prereqs \
 - **終了コード**: `0` 収集完了 / `0` 以外 AWS CLI の失敗
 - **詳細**: 各取得処理を 1 つずつ手で実行する手順は [collect_blue_green_prereqs.md](collect_blue_green_prereqs.md)。チェック項目の背景は [phase-0-precheck.md](../docs/phase-0-precheck.md)
 
-### MySQL 側の収集（2 本。**用意のみ。判定にはまだ組み込んでいない**）
+### MySQL 側の収集（2 本。結果はレポートに載る。判定には使わない）
 
-成立条件チェックは **AWS 側（上）と MySQL 側（下の 2 本）の 2 段階**である。MySQL 側は AWS API では見えない項目を、Blue へ接続して集める。どちらも**読み取りだけ**で、判定はしない。
+成立条件チェックは **AWS 側（上）と MySQL 側（下の 2 本）の 2 段階**である。MySQL 側は AWS API では見えない項目を、Blue へ接続して集める。どちらも**読み取りだけ**で、判定はしない。`--output-dir` を AWS 側と同じ収集先にすると、`evaluate_blue_green_prereqs` のレポートの「MySQL 側の収集結果」に載る（無ければその節は省略と明示される）。
 
 2 本は同じ接続規約に従う。
 
@@ -151,7 +151,8 @@ go run ./tools/evaluate_blue_green_prereqs \
 | `--input-dir DIR` | ○ | `collect_blue_green_prereqs` の出力先 |
 | `--output FILE` | | Markdown レポートの出力先（省略時は標準出力の一覧だけ） |
 
-- **出力**: 標準出力に判定一覧。`--output` を付けると**ゲート①のレポート**（判定に加えて観測値と取得元）
+- **出力**: 標準出力に判定一覧と、MySQL 側のファイルの有無（`あり` / `省略`）。`--output` を付けると**ゲート①のレポート**（判定に加えて観測値と取得元）
+- **MySQL 側の収集結果**: 入力ディレクトリに `blue-mysql-state.json`（`collect_blue_mysql_state`）や `blue-upgrade-check.json`（`collect_blue_upgrade_check`）があれば、レポートの「MySQL 側の収集結果」に載せる——binlog_format の実効値、`SHOW REPLICA STATUS`、InnoDB 以外のテーブル、アップグレードチェッカーの件数・検査項目・検出された問題（Error を先に）。**ファイルが無い節は「省略した」と、どのコマンドで取れるかを明示する。**判定と終了コードには使わない
 - **終了コード**: `0` `STOP` なし / `1` `STOP` が 1 件以上。`REVIEW` は終了コードに影響しない（人が確認する）
 - **詳細**: [report-generation-flows.md](../report-generation-flows.md)、サンプルは [examples/blue-green-prereqs/](../examples/blue-green-prereqs/README.md)
 

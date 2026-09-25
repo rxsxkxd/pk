@@ -4,7 +4,7 @@
 
 | ディレクトリ | 内容 |
 |---|---|
-| `input/` | `go run ./tools/collect_blue_green_prereqs` が出力する JSON を模したもの |
+| `input/` | `go run ./tools/collect_blue_green_prereqs` が出力する JSON を模したもの。MySQL 側の `blue-mysql-state.json` / `blue-upgrade-check.json` は、実際の MySQL 8.0 に対して `collect_blue_mysql_state` / `collect_blue_upgrade_check` を実行した結果を匿名化したもの |
 | `output/` | 生成されるレポート（`prereqs-evaluation-report.md`） |
 
 ## 再生成

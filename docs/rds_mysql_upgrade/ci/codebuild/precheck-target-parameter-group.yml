@@ -21,7 +21,8 @@ phases:
       - chmod +x scripts/*.sh scripts/lib/*.sh
   build:
     commands:
-      - scripts/check_target_parameter_group.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
+      # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
+      - ruby scripts/check_target_parameter_group.rb --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
 
 artifacts:
   files:

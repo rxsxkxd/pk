@@ -154,3 +154,87 @@ func TestCollect(t *testing.T) {
 		}
 	}
 }
+
+// 例題を複製し、MySQL 側のファイルを入れ替える（nil なら置かない）。
+func withMySQLSide(t *testing.T, state, check string) *Evaluation {
+	t.Helper()
+	dir := mutate(t, "metadata.json", func(map[string]any) {})
+	for name, content := range map[string]string{"blue-mysql-state.json": state, "blue-upgrade-check.json": check} {
+		path := filepath.Join(dir, name)
+		_ = os.Remove(path)
+		if content != "" {
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	evaluation, err := Evaluate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evaluation
+}
+
+func TestMySQLSideOmittedIsExplicit(t *testing.T) {
+	evaluation := withMySQLSide(t, "", "")
+	report := evaluation.Report()
+	for _, want := range []string{
+		"## MySQL 側の収集結果",
+		"**省略した。**入力ディレクトリに `blue-mysql-state.json` が無い（`collect_blue_mysql_state` を実行していない）。",
+		"**省略した。**入力ディレクトリに `blue-upgrade-check.json` が無い（`collect_blue_upgrade_check` を実行していない）。",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("レポートに %q が無い", want)
+		}
+	}
+	if !strings.Contains(evaluation.Summary(), "blue-mysql-state.json=省略, blue-upgrade-check.json=省略") {
+		t.Errorf("標準出力にも省略を示すこと:\n%s", evaluation.Summary())
+	}
+}
+
+func TestMySQLSideRendersResults(t *testing.T) {
+	state := `{"collected_at":"T","host":"blue","port":3306,"version":"8.0.39","binlog_format":"MIXED",
+	  "replica_status":[{"Source_Host":"external.example","Source_Port":"3306","Replica_IO_Running":"Yes","Replica_SQL_Running":"Yes","Last_Error":"a|b"}],
+	  "non_innodb_tables":[]}`
+	check := `{"collected_at":"T","host":"blue","port":3306,"target_version":"8.4.9","error_count":1,"warning_count":1,"notice_count":0,
+	  "report":{"serverVersion":"8.0.39","summary":"1 errors","checksPerformed":[
+	    {"id":"a","title":"A","status":"OK","detectedProblems":[{"level":"Warning","dbObject":"w","description":"warn"}]},
+	    {"id":"b","title":"B","status":"OK","detectedProblems":[{"level":"Error","dbObject":"e","description":"err"}]}],
+	  "manualChecks":[{"id":"m","title":"Manual"}]}}`
+	evaluation := withMySQLSide(t, state, check)
+	report := evaluation.Report()
+	for _, want := range []string{
+		"| SHOW REPLICA STATUS | 1 行 |",
+		"| external.example | 3306 | Yes | Yes | a\\|b |", // セル内の | はエスケープする
+		"**InnoDB 以外のテーブル**（ユーザースキーマ。MyISAM は Blue/Green のレプリケーションで整合性が保証されない）\n\nなし。",
+		"| Error / Warning / Notice | 1 / 1 / 0 |",
+		"- Manual（`m`）",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("レポートに %q が無い", want)
+		}
+	}
+	if strings.Index(report, "| Error | `b` |") > strings.Index(report, "| Warning | `a` |") {
+		t.Errorf("Error を Warning より先に並べること")
+	}
+	// 判定には使わない（外部レプリカがあっても 0-1-06 は REVIEW のまま、終了コードも変わらない）。
+	for _, result := range evaluation.Results {
+		if strings.HasPrefix(result.Item, "0-1-06") && result.Status != "REVIEW" {
+			t.Errorf("MySQL 側の結果で判定を変えないこと: %s", result.Status)
+		}
+	}
+	if evaluation.Count("STOP") != 0 {
+		t.Errorf("MySQL 側の結果で STOP を増やさないこと")
+	}
+}
+
+func TestMySQLSidePartial(t *testing.T) {
+	evaluation := withMySQLSide(t, `{"version":"8.0.39","replica_status":[],"non_innodb_tables":[]}`, "")
+	report := evaluation.Report()
+	if !strings.Contains(report, "| MySQL バージョン | 8.0.39 |") || !strings.Contains(report, "`collect_blue_upgrade_check` を実行していない") {
+		t.Errorf("片方だけあるときは、ある方を載せて無い方を省略と示すこと")
+	}
+	if !strings.Contains(evaluation.Summary(), "blue-mysql-state.json=あり, blue-upgrade-check.json=省略") {
+		t.Errorf("標準出力: %s", evaluation.Summary())
+	}
+}

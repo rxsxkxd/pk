@@ -15,26 +15,25 @@ Blue/Green Deployment は CloudFormation カスタムリソースを使わず、
 ## Green の作成
 
 ```bash
-scripts/create_blue_green_deployment.sh \
+scripts/build_green.sh \
   --config config/blue-green/staging.deployment.yml \
-  --service example-service \
-  --deployment-name example-service-staging-mysql84-bg-20260827
+  --service example-service
 ```
 
-スクリプトは `AVAILABLE` になるまで待機して終了する。応答 JSON は一時ディレクトリに保存される。完了後に Green の接続、レプリケーション、アプリケーション、性能を検証する。
+設定の `actions.build: approved` が無ければ何もしない。移行元に対応する Deployment があれば作り直さず、無ければ保護スナップショットを確保してから作成し、`AVAILABLE` になるまで待機して終了する（内部で `scripts/create_blue_green_deployment.rb` を呼ぶ）。応答 JSON は一時ディレクトリに保存される。完了後に Green の接続、レプリケーション、アプリケーション、性能を検証する。
 
 ## 切替
 
-検証完了後のみ、作成スクリプトが出力した Deployment 識別子を指定して実行する。
+検証完了後のみ実行する。Deployment 識別子は指定しない（移行元から毎回引き当てる）。
 
 ```bash
-scripts/switchover_blue_green_deployment.sh \
+scripts/switchover.sh \
   --config config/blue-green/staging.deployment.yml \
-  --blue-green-deployment-id <blue-green-deployment-identifier> \
+  --service example-service \
   --approve
 ```
 
-`--approve` がない場合、切替操作は実行されない。
+設定の `actions.switchover: approved` と `--approve` の両方が無ければ、切替操作は実行されない。切替済みなら何もせず成功し、実行した場合は切替完了まで待つ（内部で `scripts/switchover_blue_green_deployment.rb` を呼ぶ）。
 
 `aws_region` は環境設定から取得する。ローカルで名前付きプロファイルを使う場合だけ、コマンドの `--profile` を指定する。GitHub Actions では OIDC で取得した一時認証情報を使用する。
 

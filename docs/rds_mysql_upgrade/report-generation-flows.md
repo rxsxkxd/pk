@@ -362,6 +362,8 @@ flowchart LR
 
 `tools/evaluate_blue_green_prereqs/`（Step 1、Go）は **`--output` を指定したときだけ** `.md` を出す。省略時は標準出力へ表形式で出すだけである。いずれの場合も STOP が残れば exit 1 を返す。
 
+入力ディレクトリに MySQL 側の収集結果（`blue-mysql-state.json` / `blue-upgrade-check.json`）があれば、レポートの「MySQL 側の収集結果」節に載せる（`SHOW REPLICA STATUS`、InnoDB 以外のテーブル、MySQL Shell のアップグレードチェッカーの結果）。**無いファイルの節は省略したことを明示する。**この節は判断材料であり、判定と終了コードには使わない。
+
 ```
 STATUS   ITEM                           DETAIL
 --------------------------------------------------------------------------------

@@ -25,8 +25,8 @@ eval "$(ruby scripts/lib/deployment_config.rb vars "$config" "$service" \
   tv=required:service.target_engine_version tpg=required:service.target_db_parameter_group_name)"
 
 # 偽の aws。応答は $fake/ のファイルで決める。
-#   phase          フェーズ判定の --query に返す「バージョン<TAB>パラメータグループ」
-#   source.json / deployments.json / family / snapshot-status（無ければ NotFound）
+#   source.json    移行元（EngineVersion と DBParameterGroups でフェーズ判定が決まる）
+#   deployments.json / family / snapshot-status（無ければ NotFound）
 #   statuses       --blue-green-deployment-identifier で問い合わせるたびに先頭行から 1 つずつ返す
 #   snapshot-error あれば describe-db-snapshots をこの内容で失敗させる
 make_fake() {
@@ -36,7 +36,6 @@ make_fake() {
 d='$fake'
 printf '%s\n' "\$*" >> "\$d/calls.log"
 case "\$*" in
-  *"describe-db-instances"*"--query"*) cat "\$d/phase" ;;
   *describe-db-instances*) cat "\$d/source.json" ;;
   *"describe-blue-green-deployments --filters"*) cat "\$d/deployments.json" ;;
   *"describe-blue-green-deployments --blue-green-deployment-identifier"*)
@@ -57,11 +56,13 @@ case "\$*" in
 esac
 EOF
   chmod +x "$fake/aws"
-  printf '%s\t%s\n' "${sv}.40" "$spg" > "$fake/phase"
-  printf '{"DBInstances":[{"DBInstanceArn":"arn:aws:rds:r:1:db:%s","Engine":"mysql","EngineVersion":"8.0.40"}]}\n' "$sid" > "$fake/source.json"
+  set_source "${sv}.40" "$spg"
   echo '{"BlueGreenDeployments":[]}' > "$fake/deployments.json"
   echo mysql8.4 > "$fake/family"
   : > "$fake/statuses"
+}
+set_source() {  # $1=エンジンバージョン $2=パラメータグループ（フェーズ判定の入力）
+  printf '{"DBInstances":[{"DBInstanceArn":"arn:aws:rds:r:1:db:%s","Engine":"mysql","EngineVersion":"%s","DBParameterGroups":[{"DBParameterGroupName":"%s"}]}]}\n' "$sid" "$1" "$2" > "$fake/source.json"
 }
 existing() {  # $1=Status
   printf '{"BlueGreenDeployments":[{"BlueGreenDeploymentIdentifier":"bgd-old","Status":"%s"}]}\n' "$1" > "$fake/deployments.json"
@@ -99,11 +100,11 @@ PATH="$fake:$PATH" bash scripts/build_green.sh --config config/blue-green/stagin
 st=$?; [[ -f "$fake/calls.log" ]] && fail 'pending: AWS を呼ばない' "$(cat "$fake/calls.log")" || expect 'pending: 何もせず成功' $st 0 no no 'no changes made'
 
 make_fake post
-printf '%s\t%s\n' "$tv" "$tpg" > "$fake/phase"
+set_source "$tv" "$tpg"
 run_build "$config"; expect '切替済み: 作成へ進まない' $? 0 no no 'Migration already completed'
 
 make_fake unknown
-printf '%s\t%s\n' 5.7.44 other-pg > "$fake/phase"
+set_source 5.7.44 other-pg
 run_build "$config"; expect 'フェーズ不明: 止める' $? 1 no no 'いずれの宣言とも一致しない'
 
 # --- 第 2 層: 既存 Deployment ------------------------------------------------
@@ -147,7 +148,7 @@ make_fake family; echo mysql8.0 > "$fake/family"
 run_build "$config"; expect '新規・パラメータグループが 8.4 でない: 作成しない' $? 1 no no 'family must be mysql8.4'
 
 make_fake not80
-printf '{"DBInstances":[{"DBInstanceArn":"arn:aws:rds:r:1:db:x","Engine":"mysql","EngineVersion":"5.7.44"}]}\n' > "$fake/source.json"
+set_source 5.7.44 "$spg"
 run_create; expect '新規・移行元が 8.0 でない: 作成しない' $? 1 no no 'must be MySQL 8.0'
 
 make_fake new-fails; printf 'PROVISIONING\nINVALID_CONFIGURATION\n' > "$fake/statuses"

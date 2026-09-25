@@ -22,17 +22,9 @@ done
 [[ -n "$output_dir" ]] || output_dir=$(mktemp -d "${TMPDIR:-/tmp}/rds-bg-verify.XXXXXX")
 mkdir -p "$output_dir"
 
-# 移行フェーズの判定（冪等性の第 1 層）は Ruby の 1 本で実装してある。
-# resolve で pre_switchover / post_switchover / unknown を返し、
-# describe で判定に使った実測値と宣言値を人向けに出す。
-migration_phase=(ruby "$(dirname "$0")/lib/migration_phase.rb")
-
-# 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う。
-# 必要な項目とその必須・任意だけをここに宣言する（読み取りは lib/deployment_config.rb）。
+# 設定の読み込みは 1 回だけ行い、以降はシェル変数として使う（読み取りは lib/deployment_config.rb）。
 config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$service" \
   source_id=required:service.source_db_instance_identifier \
-  source_engine_version=required:service.source_engine_version \
-  source_db_parameter_group_name=required:service.source_db_parameter_group_name \
   target_engine_version=required:service.target_engine_version \
   target_db_instance_class=required:service.target_db_instance_class \
   target_db_parameter_group_name=required:service.target_db_parameter_group_name \
@@ -40,24 +32,16 @@ config_vars=$(ruby "$(dirname "$0")/lib/deployment_config.rb" vars "$config" "$s
   config_region=required:aws_region)
 eval "$config_vars"
 [[ -n "$region" ]] || region=$config_region
-aws_args=(--region "$region"); [[ -n "$profile" ]] && aws_args+=(--profile "$profile")
 
-# [読み取り] 移行元識別子が指す実体を見て、検証すべきフェーズかを判定する。
-# 切替後は <source_id> が green（新 Blue）を指すため、検証対象の Deployment は
-# 既に SWITCHOVER_COMPLETED であり AVAILABLE ではない。そのままだと後始末フェーズで
-# 再実行したときに必ず失敗するため、ここで「検証対象なし」として正常終了する。
-# フェーズ判定は build_green / switchover / cleanup と共有する（lib/migration_phase.rb）。
-read -r current_version current_group <<< "$(
-  aws "${aws_args[@]}" rds describe-db-instances --db-instance-identifier "$source_id" \
-    --query 'DBInstances[0].[EngineVersion,DBParameterGroups[0].DBParameterGroupName]' --output text
-)"
-phase=$("${migration_phase[@]}" resolve "$current_version" "$current_group" \
-  "$source_engine_version" "$source_db_parameter_group_name" \
-  "$target_engine_version" "$target_db_parameter_group_name")
-if [[ "$phase" == post_switchover ]]; then
-  echo "Already switched over: $source_id is ${current_version} with ${current_group}."
+# 移行元識別子が指す実体を見て、検証すべきフェーズかを判定する（観測と判定は lib/migration_phase.rb）。
+# 切替後は <source_id> が green（新 Blue）を指し、検証対象の Deployment は既に
+# SWITCHOVER_COMPLETED である。後始末フェーズで再実行しても落ちないよう「検証対象なし」で終える。
+phase_vars=$(ruby "$(dirname "$0")/lib/migration_phase.rb" observe \
+  --config "$config" --service "$service" --region "$region" --profile "$profile")
+eval "$phase_vars"   # PHASE / CURRENT_VERSION / CURRENT_GROUP / SOURCE_ID
+if [[ "$PHASE" == post_switchover ]]; then
+  echo "Already switched over: $source_id is ${CURRENT_VERSION} with ${CURRENT_GROUP}."
   echo 'Green の検証は切替前に行うものであり、検証対象はない。'
-  echo "Artifacts: $output_dir"
   exit 0
 fi
 
@@ -65,11 +49,9 @@ fi
 # Deployment を source の ARN で引き当て、Green・パラメータ 3 種・レプリカ遅延を
 # $output_dir へ書き出す。Deployment が無い／AVAILABLE でなければここで止まる。
 # **判定はしない。**判定は下の --check が行う。
-# 同じ内容の Go 版（scripts/collect_green_state/）も残してある。
 # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
-state_args=(--region "$region" --source-id "$source_id"
+state_args=(--region "$region" --profile "$profile" --source-id "$source_id"
             --target-parameter-group "$target_db_parameter_group_name" --output-dir "$output_dir")
-[[ -n "$profile" ]] && state_args+=(--profile "$profile")
 green_state=$(ruby "$(dirname "$0")/collect_green_state.rb" "${state_args[@]}")
 eval "$green_state"   # DEPLOYMENT_ID / GREEN_INSTANCE_ID / GREEN_ENDPOINT
 
@@ -81,8 +63,7 @@ if [[ -z "$runtime_values_file" ]]; then
   runtime_values="$output_dir/green-runtime-values.json"
   rm -f "$runtime_values"   # 前回の結果を今回の結果と取り違えないため
   runtime_args=(--config "$config" --service "$service" --host "$GREEN_ENDPOINT"
-                --region "$region" --output "$runtime_values")
-  [[ -n "$profile" ]] && runtime_args+=(--profile "$profile")
+                --region "$region" --profile "$profile" --output "$runtime_values")
   [[ -n "$mysql_user" ]] && runtime_args+=(--mysql-user "$mysql_user" --mysql-password-env "$mysql_password_env")
   # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
   ruby "$(dirname "$0")/collect_green_runtime_values.rb" "${runtime_args[@]}"

@@ -2,7 +2,7 @@
 # レポート生成器の検証機能（--check）を確認する。AWS へも DB へも接続しない。
 #
 # 突き合わせ（engine / instance class / パラメータグループの関連付けと適用状態 /
-# ReplicaLag）は以前 verify_green.sh が担っていた。Go へ移したので、
+# ReplicaLag）は以前シェル版の verify_green.sh が担っていた。Go へ移したので、
 # **同じ判定がバイナリ側で効くこと**をここで固定する。
 #
 # 確認するのは 4 点である。

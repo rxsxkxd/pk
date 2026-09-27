@@ -4,7 +4,7 @@
 # Step 4 補助: Green DB の MySQL 実効値を収集する。レポートにのみ載せ、判定には使わない。
 #
 # 設定ファイルの mysql_verification を読み、**収集するかどうか・接続情報の解決・収集の実行**
-# までをここで行う。verify_green.sh は `--config` と `--service` と Green のエンドポイントを
+# までをここで行う。verify_green.rb は `--config` と `--service` と Green のエンドポイントを
 # 渡すだけでよい。
 #
 #   mysql_verification.enabled が false   … 何もせず終了コード 0（出力ファイルを作らない）

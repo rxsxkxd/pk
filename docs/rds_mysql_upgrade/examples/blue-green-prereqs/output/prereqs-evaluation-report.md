@@ -48,6 +48,32 @@ Blue へ接続して集めた、AWS API では見えない情報である。0-1-
 | binlog_format（実効値） | MIXED |
 | SHOW REPLICA STATUS | 0 行 |
 | InnoDB 以外のテーブル | 0 件 |
+| サーバー変数（SHOW GLOBAL VARIABLES） | 41 件 |
+
+**主要なサーバー変数**（判定には使わない。移行の前後で比べる基準値。全件は JSON の `variables`）
+
+| 変数 | 値 | 見る理由 |
+|---|---|---|
+| version_comment | `Source distribution` | ディストリビューション |
+| log_bin | `ON` | Blue/Green はバイナリログでレプリケーションする（RDS では自動バックアップが有効なら ON） |
+| binlog_format | `MIXED` | 0-1-02。パラメータグループの値との食い違いを見る |
+| binlog_row_image | `FULL` | ROW 形式時の出力量 |
+| gtid_mode | `OFF_PERMISSIVE` | 参考。Blue/Green は GTID を要求しない |
+| enforce_gtid_consistency | `OFF` | 参考 |
+| default_authentication_plugin | `caching_sha2_password` | 8.4 で削除される（authentication_policy へ移る） |
+| authentication_policy | `*,,` | 8.4 での認証方式の決め方 |
+| character_set_server | `utf8mb4` | 8.4 で既定は変わらない。アプリの接続設定との整合 |
+| collation_server | `utf8mb4_0900_ai_ci` | 同上 |
+| time_zone | `Asia/Tokyo` | 時刻の扱い（docs/references/mysql-timezone.md） |
+| system_time_zone | `UTC` | 同上 |
+| sql_mode | `NO_ENGINE_SUBSTITUTION` | 8.4 で既定は変わらない。明示値の確認 |
+| lower_case_table_names | `0` | 初期化後に変更できない |
+| transaction_isolation | `REPEATABLE-READ` | 参考 |
+| explicit_defaults_for_timestamp | `ON` | 参考 |
+| default_storage_engine | `InnoDB` | 0-2 に関連 |
+| innodb_default_row_format | `dynamic` | 参考 |
+| read_only | `OFF` | Blue は書き込み可能であること |
+| max_connections | `1365` | 参考 |
 
 **SHOW REPLICA STATUS**（0-1-06。空なら Blue は外部からのレプリカではない）
 
@@ -63,6 +89,7 @@ Blue へ接続して集めた、AWS API では見えない情報である。0-1-
 |---|---|
 | 収集日時 | 2026-09-17T00:10:00Z |
 | 接続先 | `example-service-production-mysql80-upgrade-check.xxxxxxxxxxxx.ap-northeast-1.rds.amazonaws.com:3306` |
+| チェッカーが見た接続先 | `example-service-production-mysql80-upgrade-check.xxxxxxxxxxxx.ap-northeast-1.rds.amazonaws.com:3306` |
 | サーバー | 8.0.39 - Source distribution |
 | 移行先バージョン | 8.4.9 |
 | Error / Warning / Notice | 0 / 20 / 2 |
@@ -71,56 +98,80 @@ Blue へ接続して集めた、AWS API では見えない情報である。0-1-
 
 **検査項目**
 
-| 検査 | 状態 | 検出件数 |
-|---|---|---|
-| Removed system variables（`removedSysVars`） | OK | 0 |
-| System variables with new default values（`sysVarsNewDefaults`） | OK | 20 |
-| Issues reported by 'check table x for upgrade' command（`checkTableCommand`） | OK | 0 |
-| Checks for foreign keys not referencing a full unique index（`foreignKeyReferences`） | OK | 0 |
-| Check for deprecated or invalid user authentication methods.（`authMethodUsage`） | OK | 0 |
-| Check for deprecated or removed plugin usage.（`pluginUsage`） | OK | 0 |
-| Check for deprecated or invalid default authentication methods in system variables.（`deprecatedDefaultAuth`） | OK | 0 |
-| Check for deprecated or invalid authentication methods in use by MySQL Router internal accounts.（`deprecatedRouterAuthMethod`） | OK | 0 |
-| Checks for errors in column definitions（`columnDefinition`） | OK | 0 |
-| Check for allowed values in System Variables.（`sysvarAllowedValues`） | OK | 0 |
-| Checks for user privileges that will be removed（`invalidPrivileges`） | OK | 2 |
-| Checks for partitions by key using columns with prefix key indexes（`partitionsWithPrefixKeys`） | OK | 0 |
+| 検査 | 状態 | Error | Warning | Notice |
+|---|---|---|---|---|
+| Removed system variables（`removedSysVars`） | OK | 0 | 0 | 0 |
+| System variables with new default values（`sysVarsNewDefaults`） | OK | 0 | 20 | 0 |
+| Issues reported by 'check table x for upgrade' command（`checkTableCommand`） | OK | 0 | 0 | 0 |
+| Checks for foreign keys not referencing a full unique index（`foreignKeyReferences`） | OK | 0 | 0 | 0 |
+| Check for deprecated or invalid user authentication methods.（`authMethodUsage`） | OK | 0 | 0 | 0 |
+| Check for deprecated or removed plugin usage.（`pluginUsage`） | OK | 0 | 0 | 0 |
+| Check for deprecated or invalid default authentication methods in system variables.（`deprecatedDefaultAuth`） | OK | 0 | 0 | 0 |
+| Check for deprecated or invalid authentication methods in use by MySQL Router internal accounts.（`deprecatedRouterAuthMethod`） | OK | 0 | 0 | 0 |
+| Checks for errors in column definitions（`columnDefinition`） | OK | 0 | 0 | 0 |
+| Check for allowed values in System Variables.（`sysvarAllowedValues`） | OK | 0 | 0 | 0 |
+| Checks for user privileges that will be removed（`invalidPrivileges`） | OK | 0 | 0 | 2 |
+| Checks for partitions by key using columns with prefix key indexes（`partitionsWithPrefixKeys`） | OK | 0 | 0 | 0 |
 
-**検出された問題**（Error を先に並べる）
+**検出された問題**（Error を先に並べる。内容はチェッカーの出力のまま）
 
-| レベル | 検査 | 対象 | 内容 |
-|---|---|---|---|
-| Warning | `sysVarsNewDefaults` | binlog_transaction_dependency_tracking | default value will change from COMMIT_ORDER to WRITESET. |
-| Warning | `sysVarsNewDefaults` | group_replication_consistency | default value will change from EVENTUAL to BEFORE_ON_PRIMARY_FAILOVER. |
-| Warning | `sysVarsNewDefaults` | group_replication_exit_state_action | default value will change from READ_ONLY to OFFLINE_MODE. |
-| Warning | `sysVarsNewDefaults` | innodb_adaptive_hash_index | default value will change from ON to OFF. |
-| Warning | `sysVarsNewDefaults` | innodb_buffer_pool_in_core_file | default value will change from ON to OFF. |
-| Warning | `sysVarsNewDefaults` | innodb_buffer_pool_instances | default value will change from 8 (or 1 if innodb_buffer_pool_size < 1GB) to MAX(1, #vcpu/4). |
-| Warning | `sysVarsNewDefaults` | innodb_change_buffering | default value will change from all to none. |
-| Warning | `sysVarsNewDefaults` | innodb_doublewrite_files | default value will change from innodb_buffer_pool_instances * 2 to 2. |
-| Warning | `sysVarsNewDefaults` | innodb_doublewrite_pages | default value will change from innodb_write_io_threads to 128. |
-| Warning | `sysVarsNewDefaults` | innodb_flush_method | default value will change from fsynch (unix) or unbuffered (windows) to O_DIRECT. |
-| Warning | `sysVarsNewDefaults` | innodb_io_capacity | default value will change from 200 to 10000. |
-| Warning | `sysVarsNewDefaults` | innodb_io_capacity_max | default value will change from 200 to 2 x innodb_io_capacity. |
-| Warning | `sysVarsNewDefaults` | innodb_log_buffer_size | default value will change from 16777216 (16MB) to 67108864 (64MB). |
-| Warning | `sysVarsNewDefaults` | innodb_log_writer_threads | default value will change from ON to OFF ( if #vcpu <= 32 ). |
-| Warning | `sysVarsNewDefaults` | innodb_numa_interleave | default value will change from OFF to ON. |
-| Warning | `sysVarsNewDefaults` | innodb_page_cleaners | default value will change from 4 to innodb_buffer_pool_instances. |
-| Warning | `sysVarsNewDefaults` | innodb_parallel_read_threads | default value will change from 4 to MAX(#vcpu/8, 4). |
-| Warning | `sysVarsNewDefaults` | innodb_purge_threads | default value will change from 4 to 1 ( if #vcpu <= 16 ). |
-| Warning | `sysVarsNewDefaults` | innodb_read_io_threads | default value will change from 4 to MAX(#vcpu/2, 4). |
-| Warning | `sysVarsNewDefaults` | innodb_redo_log_capacity | default value will change from 104857600 (100MB) to MIN ( #vcpu/2, 16 )GB. |
-| Notice | `invalidPrivileges` | 'root'@'%' | The user 'root'@'%' has the following privileges that will be removed as part of the upgrade process: SET_USER_ID |
-| Notice | `invalidPrivileges` | 'root'@'localhost' | The user 'root'@'localhost' has the following privileges that will be removed as part of the upgrade process: SET_USER_ID |
+| レベル | 検査 | 種別 | 対象 | 内容 | Blue の現在値 |
+|---|---|---|---|---|---|
+| Warning | `sysVarsNewDefaults` | SystemVariable | binlog_transaction_dependency_tracking | default value will change from COMMIT_ORDER to WRITESET. | `COMMIT_ORDER` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | group_replication_consistency | default value will change from EVENTUAL to BEFORE_ON_PRIMARY_FAILOVER. | `EVENTUAL` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | group_replication_exit_state_action | default value will change from READ_ONLY to OFFLINE_MODE. | `READ_ONLY` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_adaptive_hash_index | default value will change from ON to OFF. | `OFF` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_buffer_pool_in_core_file | default value will change from ON to OFF. | `ON` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_buffer_pool_instances | default value will change from 8 (or 1 if innodb_buffer_pool_size < 1GB) to MAX(1, #vcpu/4). | `8` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_change_buffering | default value will change from all to none. | `all` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_doublewrite_files | default value will change from innodb_buffer_pool_instances * 2 to 2. | `2` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_doublewrite_pages | default value will change from innodb_write_io_threads to 128. | `4` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_flush_method | default value will change from fsynch (unix) or unbuffered (windows) to O_DIRECT. | `O_DIRECT` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_io_capacity | default value will change from 200 to 10000. | `200` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_io_capacity_max | default value will change from 200 to 2 x innodb_io_capacity. | `2000` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_log_buffer_size | default value will change from 16777216 (16MB) to 67108864 (64MB). | `8388608` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_log_writer_threads | default value will change from ON to OFF ( if #vcpu <= 32 ). | `ON` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_numa_interleave | default value will change from OFF to ON. | `OFF` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_page_cleaners | default value will change from 4 to innodb_buffer_pool_instances. | `4` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_parallel_read_threads | default value will change from 4 to MAX(#vcpu/8, 4). | `4` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_purge_threads | default value will change from 4 to 1 ( if #vcpu <= 16 ). | `1` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_read_io_threads | default value will change from 4 to MAX(#vcpu/2, 4). | `4` |
+| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_redo_log_capacity | default value will change from 104857600 (100MB) to MIN ( #vcpu/2, 16 )GB. | `104857600` |
+| Notice | `invalidPrivileges` | User | 'root'@'%' | The user 'root'@'%' has the following privileges that will be removed as part of the upgrade process: SET_USER_ID | — |
+| Notice | `invalidPrivileges` | User | 'root'@'localhost' | The user 'root'@'localhost' has the following privileges that will be removed as part of the upgrade process: SET_USER_ID | — |
 
-**検出された検査の説明と対処**（チェッカーが返した内容）
+「既定値が変わる」変数は、パラメータグループで値を明示していなければ 8.4 で新しい既定値になる。Blue の現在値を 8.4 でも保ちたい場合は、Step 2 のパラメータグループに明示する。
 
-- **System variables with new default values**（`sysVarsNewDefaults`）
+**各検査の説明と対処**（チェッカーが返した内容。英語のまま載せる）
+
+- **Removed system variables**（`removedSysVars`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
+- **System variables with new default values**（`sysVarsNewDefaults`。状態 OK、検出 20 件）
   - 説明: Warning: Following system variables that are not defined in your configuration file will have new default values. Please review if you rely on their current values and if so define them before performing upgrade.
   - 資料: https://dev.mysql.com/blog-archive/new-defaults-in-mysql-8-0/
-- **Checks for user privileges that will be removed**（`invalidPrivileges`）
+- **Issues reported by 'check table x for upgrade' command**（`checkTableCommand`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
+- **Checks for foreign keys not referencing a full unique index**（`foreignKeyReferences`。状態 OK、検出 0 件）
+  - 対処: Convert non unique key to unique key if values do not have any duplicates. In case of foreign keys involving partial columns of key, create composite unique key containing all the referencing columns if values do not have any duplicates.
+  - 対処: Remove foreign keys referring to non unique key/partial columns of key.
+  - 対処: In case of multi level references which involves more than two tables change foreign key reference.
+- **Check for deprecated or invalid user authentication methods.**（`authMethodUsage`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
+- **Check for deprecated or removed plugin usage.**（`pluginUsage`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
+- **Check for deprecated or invalid default authentication methods in system variables.**（`deprecatedDefaultAuth`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
+- **Check for deprecated or invalid authentication methods in use by MySQL Router internal accounts.**（`deprecatedRouterAuthMethod`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
+- **Checks for errors in column definitions**（`columnDefinition`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
+- **Check for allowed values in System Variables.**（`sysvarAllowedValues`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
+- **Checks for user privileges that will be removed**（`invalidPrivileges`。状態 OK、検出 2 件）
   - 説明: Verifies for users containing grants to be removed as part of the upgrade process.
   - 対処: If the privileges are not being used, no action is required, otherwise, ensure they stop being used before the upgrade as they will be lost.
+- **Checks for partitions by key using columns with prefix key indexes**（`partitionsWithPrefixKeys`。状態 OK、検出 0 件）
+  - （説明・対処の記載なし）
 
 **手動確認が要る項目**（チェッカーが自動では判定しないもの）
 

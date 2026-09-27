@@ -16,14 +16,14 @@ CodePipeline（サービス・環境ごとに 1 本）
           └─ Switchover    : Step 5、Blue/Green 切替
 ```
 
-各 CodeBuild はリポジトリ内の buildspec を使い、実処理は共通のシェルスクリプトを呼ぶ。
+各 CodeBuild はリポジトリ内の buildspec を使い、実処理は共通の Ruby スクリプト（`ruby scripts/<名前>.rb`）を呼ぶ。
 
 | Step | CodeBuild project | buildspec | 実行スクリプト |
 |---|---|---|---|
-| 3 | `BuildGreenProject` | `ci/codebuild/build-green.yml` | `scripts/build_green.sh` |
+| 3 | `BuildGreenProject` | `ci/codebuild/build-green.yml` | `scripts/build_green.rb` |
 | 4 | `BuildReportToolProject` | `ci/codebuild/build-report-tool.yml` | — （Go レポート生成器のビルドのみ） |
-| 4 | `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.sh` |
-| 5 | `SwitchoverProject` | `ci/codebuild/switchover.yml` | `scripts/switchover.sh` |
+| 4 | `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.rb` |
+| 5 | `SwitchoverProject` | `ci/codebuild/switchover.yml` | `scripts/switchover.rb` |
 
 ## 0. CodeBuild の動作環境コンテナと追加導入物
 
@@ -31,9 +31,9 @@ AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS �
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
-| BuildGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 3 を実行 |
-| VerifyGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` と `runtime-versions: golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | 同一イメージ内で Go バイナリをビルドし、シェルスクリプトと共に実行 |
-| Switchover | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | シェルスクリプトと AWS CLI で Step 5 を実行 |
+| BuildGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 3 を実行 |
+| VerifyGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` と `runtime-versions: golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | BuildReportTool がビルドした Go バイナリを受け取り、Ruby スクリプトから実行 |
+| Switchover | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 5 を実行 |
 
 ### 共通コンテナ
 
@@ -58,7 +58,7 @@ VerifyGreen だけは `runtime-versions: golang: 1.25` を指定する。Docker 
 ruby --version   # YAML / JSON は標準ライブラリなので追加導入は無い
 ```
 
-用途は、`scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` と、その下位スクリプトが環境設定 YAML を読み取るためである。Ruby は CodeBuild のいずれのプロジェクトでも使用しない。AWS managed image では `standard:7.0` に含まれる Python 3 を、ローカル代替 image では Dockerfile で固定した Python 3.11 を使用する。
+用途は、`scripts/build_green.rb`・`scripts/verify_green.rb`・`scripts/switchover.rb`（と `scripts/lib/` のライブラリ）の実行と、環境設定 YAML の読み取りである。Python は使わない。
 
 ### VerifyGreen の Go レポート生成器
 
@@ -73,7 +73,7 @@ ci/codebuild/build-report-tool.yml   ← ビルドだけ。AWS を呼ばない
 ci/codebuild/verify-green.yml        ← 実行だけ。Go を使わない
   ├─ pre_build: CODEBUILD_SRC_DIR_ReportToolOutput から上記バイナリを受け取る
   │             （受け取れなければ明示エラーで停止する。ここではビルドしない）
-  └─ build:     verify_green.sh が実行
+  └─ build:     verify_green.rb が実行
 ```
 
 **分けた理由**は、VerifyGreen が Green DB へ到達するため VPC 内へ配置される可能性があり、その経路に Go module の取得（`proxy.golang.org`）を持ち込みたくないためである。
@@ -121,7 +121,7 @@ VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティ
 
 #### 外部 egress を持たない場合に必要な VPC endpoint
 
-`verify_green.sh` が呼ぶ API は次のとおりで、NAT を置かないなら endpoint が必要である。
+`verify_green.rb` が呼ぶ API は次のとおりで、NAT を置かないなら endpoint が必要である。
 
 | endpoint | 用途 | 種別 |
 |---|---|---|
@@ -495,7 +495,7 @@ BuildGreen は `actions.build: approved` かつ既存 Deployment がない場合
 
 VerifyGreen の artifact と CloudWatch・アプリケーション検証の結果を確認する。切替を許可する場合だけ、構成ファイルの `actions.switchover: approved` をレビュー済みブランチへ反映する。
 
-その後、CodePipeline Console の `ApproveSwitchover` ステージで承認する。ManualApproval と `actions.switchover: approved` の二つがそろわなければ、Switchover は実変更を行わない。`AVAILABLE` 以外の状態では `scripts/switchover.sh` が失敗するため、原因を確認してから再実行する。
+その後、CodePipeline Console の `ApproveSwitchover` ステージで承認する。ManualApproval と `actions.switchover: approved` の二つがそろわなければ、Switchover は実変更を行わない。`AVAILABLE` 以外の状態では `scripts/switchover.rb` が失敗するため、原因を確認してから再実行する。
 
 ## 6. 成果物・ログ・再実行
 

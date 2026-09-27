@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -180,10 +181,43 @@ func (side mysqlSide) reportLines() []string {
 	return lines
 }
 
+// referenceVariables は「主要なサーバー変数」に並べる変数と、見る理由である。
+// 判定には使わない（判定に使うのは binlog_format だけ）。移行の前後で比べる基準値として残す。
+var referenceVariables = []struct{ name, note string }{
+	{"version_comment", "ディストリビューション"},
+	{"log_bin", "Blue/Green はバイナリログでレプリケーションする（RDS では自動バックアップが有効なら ON）"},
+	{"binlog_format", "0-1-02。パラメータグループの値との食い違いを見る"},
+	{"binlog_row_image", "ROW 形式時の出力量"},
+	{"gtid_mode", "参考。Blue/Green は GTID を要求しない"},
+	{"enforce_gtid_consistency", "参考"},
+	{"default_authentication_plugin", "8.4 で削除される（authentication_policy へ移る）"},
+	{"authentication_policy", "8.4 での認証方式の決め方"},
+	{"character_set_server", "8.4 で既定は変わらない。アプリの接続設定との整合"},
+	{"collation_server", "同上"},
+	{"time_zone", "時刻の扱い（docs/references/mysql-timezone.md）"},
+	{"system_time_zone", "同上"},
+	{"sql_mode", "8.4 で既定は変わらない。明示値の確認"},
+	{"lower_case_table_names", "初期化後に変更できない"},
+	{"transaction_isolation", "参考"},
+	{"explicit_defaults_for_timestamp", "参考"},
+	{"default_storage_engine", "0-2 に関連"},
+	{"innodb_default_row_format", "参考"},
+	{"read_only", "Blue は書き込み可能であること"},
+	{"max_connections", "参考"},
+}
+
+func (side mysqlSide) variables() map[string]any {
+	if side.State == nil {
+		return nil
+	}
+	return object(side.State["variables"])
+}
+
 func (side mysqlSide) stateLines() []string {
 	s := side.State
 	replicas := list(s, "replica_status")
 	tables := list(s, "non_innodb_tables")
+	variables := side.variables()
 	lines := []string{
 		"| 項目 | 値 |",
 		"|---|---|",
@@ -193,14 +227,33 @@ func (side mysqlSide) stateLines() []string {
 		"| binlog_format（実効値） | " + escapeCell(text(s["binlog_format"])) + " |",
 		fmt.Sprintf("| SHOW REPLICA STATUS | %d 行 |", len(replicas)),
 		fmt.Sprintf("| InnoDB 以外のテーブル | %d 件 |", len(tables)),
+		fmt.Sprintf("| サーバー変数（SHOW GLOBAL VARIABLES） | %d 件 |", len(variables)),
 		"",
+	}
+
+	lines = append(lines, "**主要なサーバー変数**（判定には使わない。移行の前後で比べる基準値。全件は JSON の `variables`）", "")
+	if variables == nil {
+		lines = append(lines, "未収集（この収集結果にはサーバー変数が無い。`collect_blue_mysql_state` を再実行すると載る）。", "")
+	} else {
+		lines = append(lines, "| 変数 | 値 | 見る理由 |", "|---|---|---|")
+		for _, v := range referenceVariables {
+			value, ok := variables[v.name]
+			shown := "`" + escapeCell(text(value)) + "`"
+			if !ok {
+				shown = "（この版には無い）"
+			} else if text(value) == "" {
+				shown = "（空）"
+			}
+			lines = append(lines, "| "+v.name+" | "+shown+" | "+escapeCell(v.note)+" |")
+		}
+		lines = append(lines, "")
 	}
 
 	lines = append(lines, "**SHOW REPLICA STATUS**（0-1-06。空なら Blue は外部からのレプリカではない）", "")
 	if len(replicas) == 0 {
 		lines = append(lines, "空（レプリケーションの受け側になっていない）。", "")
 	} else {
-		// 判断に使う列だけを並べる。全列は JSON に残っている。
+		// 判断に使う列を先に要約し、続けてチャネルごとに全列を載せる。
 		columns := []string{"Channel_Name", "Source_Host", "Source_Port", "Replica_IO_Running", "Replica_SQL_Running",
 			"Seconds_Behind_Source", "Last_IO_Error", "Last_SQL_Error"}
 		lines = append(lines, "| "+strings.Join(columns, " | ")+" |", "|"+strings.Repeat("---|", len(columns)))
@@ -213,13 +266,24 @@ func (side mysqlSide) stateLines() []string {
 			lines = append(lines, "| "+strings.Join(cells, " | ")+" |")
 		}
 		lines = append(lines, "", "外部 binlog レプリカは Blue/Green の前提を満たさない。構成を解消するか、移行方式を再検討する。", "")
+		for i, entry := range replicas {
+			row := object(entry)
+			lines = append(lines, fmt.Sprintf("<details><summary>%d 行目の全列（チャネル `%s`）</summary>", i+1, text(row["Channel_Name"])), "",
+				"| 列 | 値 |", "|---|---|")
+			for _, column := range sortedAnyKeys(row) {
+				lines = append(lines, "| "+escapeCell(column)+" | "+escapeCell(text(row[column]))+" |")
+			}
+			lines = append(lines, "", "</details>", "")
+		}
 	}
 
 	lines = append(lines, "**InnoDB 以外のテーブル**（0-2。ユーザースキーマのみ。MyISAM は binlog レプリケーションで整合性が保証されない）", "")
 	if len(tables) == 0 {
 		lines = append(lines, "なし。", "")
 	} else {
-		lines = append(lines, "| スキーマ | テーブル | エンジン | 対処の例 |", "|---|---|---|---|")
+		lines = append(lines, "| スキーマ | テーブル | エンジン | 行形式 | 行数（概算） | データ | インデックス | 作成 | 最終更新 | 対処の例 |",
+			"|---|---|---|---|---|---|---|---|---|---|")
+		var total float64
 		for _, entry := range tables {
 			row := object(entry)
 			schema, table, engine := text(row["TABLE_SCHEMA"]), text(row["TABLE_NAME"]), text(row["ENGINE"])
@@ -227,9 +291,14 @@ func (side mysqlSide) stateLines() []string {
 			if engine == "MyISAM" {
 				action = "`ALTER TABLE " + schema + "." + table + " ENGINE=InnoDB`"
 			}
-			lines = append(lines, "| "+escapeCell(schema)+" | "+escapeCell(table)+" | "+escapeCell(engine)+" | "+escapeCell(action)+" |")
+			data, index := bytesOf(row["DATA_LENGTH"]), bytesOf(row["INDEX_LENGTH"])
+			total += data + index
+			lines = append(lines, "| "+strings.Join([]string{escapeCell(schema), escapeCell(table), escapeCell(engine),
+				escapeCell(orDash(row["ROW_FORMAT"])), escapeCell(orDash(row["TABLE_ROWS"])),
+				sizeOrDash(row["DATA_LENGTH"]), sizeOrDash(row["INDEX_LENGTH"]),
+				escapeCell(orDash(row["CREATE_TIME"])), escapeCell(orDash(row["UPDATE_TIME"])), escapeCell(action)}, " | ")+" |")
 		}
-		lines = append(lines, "")
+		lines = append(lines, "", fmt.Sprintf("合計サイズ（データ＋インデックス）: %s。InnoDB への変換はテーブルを作り直すため、この量に比例して時間がかかる。", humanBytes(total)), "")
 	}
 	return lines
 }
@@ -242,6 +311,7 @@ func (side mysqlSide) upgradeCheckLines() []string {
 		"|---|---|",
 		"| 収集日時 | " + escapeCell(text(u["collected_at"])) + " |",
 		"| 接続先 | `" + escapeCell(text(u["host"])) + ":" + escapeCell(text(u["port"])) + "` |",
+		"| チェッカーが見た接続先 | `" + escapeCell(text(report["serverAddress"])) + "` |",
 		"| サーバー | " + escapeCell(text(report["serverVersion"])) + " |",
 		"| 移行先バージョン | " + escapeCell(text(u["target_version"])) + " |",
 		"| Error / Warning / Notice | " + text(u["error_count"]) + " / " + text(u["warning_count"]) + " / " + text(u["notice_count"]) + " |",
@@ -251,55 +321,61 @@ func (side mysqlSide) upgradeCheckLines() []string {
 	}
 
 	checks := list(report, "checksPerformed")
-	lines = append(lines, "**検査項目**", "", "| 検査 | 状態 | 検出件数 |", "|---|---|---|")
-	type problem struct{ level, check, object, description string }
+	lines = append(lines, "**検査項目**", "", "| 検査 | 状態 | Error | Warning | Notice |", "|---|---|---|---|---|")
+	type problem struct{ level, check, objectType, object, description string }
 	var problems []problem
-	var detailed []map[string]any
 	for _, entry := range checks {
 		check := object(entry)
-		detected := list(check, "detectedProblems")
-		lines = append(lines, fmt.Sprintf("| %s（`%s`） | %s | %d |",
-			escapeCell(text(check["title"])), escapeCell(text(check["id"])), escapeCell(text(check["status"])), len(detected)))
-		for _, found := range detected {
+		levels := map[string]int{}
+		for _, found := range list(check, "detectedProblems") {
 			p := object(found)
-			problems = append(problems, problem{text(p["level"]), text(check["id"]), text(p["dbObject"]), text(p["description"])})
+			levels[text(p["level"])]++
+			problems = append(problems, problem{text(p["level"]), text(check["id"]), text(p["dbObjectType"]), text(p["dbObject"]), text(p["description"])})
 		}
-		if len(detected) > 0 {
-			detailed = append(detailed, check)
-		}
+		lines = append(lines, fmt.Sprintf("| %s（`%s`） | %s | %d | %d | %d |",
+			escapeCell(text(check["title"])), escapeCell(text(check["id"])), escapeCell(text(check["status"])),
+			levels["Error"], levels["Warning"], levels["Notice"]))
 	}
 	lines = append(lines, "")
 
-	lines = append(lines, "**検出された問題**（Error を先に並べる）", "")
+	// 既定値が変わる変数は、Blue の現在値を並べると影響の有無が読める。
+	variables := side.variables()
+	lines = append(lines, "**検出された問題**（Error を先に並べる。内容はチェッカーの出力のまま）", "")
 	if len(problems) == 0 {
 		lines = append(lines, "なし。", "")
 	} else {
 		rank := map[string]int{"Error": 0, "Warning": 1, "Notice": 2}
 		sort.SliceStable(problems, func(i, j int) bool { return rank[problems[i].level] < rank[problems[j].level] })
-		lines = append(lines, "| レベル | 検査 | 対象 | 内容 |", "|---|---|---|---|")
+		lines = append(lines, "| レベル | 検査 | 種別 | 対象 | 内容 | Blue の現在値 |", "|---|---|---|---|---|---|")
 		for _, p := range problems {
-			lines = append(lines, "| "+escapeCell(p.level)+" | `"+escapeCell(p.check)+"` | "+escapeCell(p.object)+" | "+escapeCell(p.description)+" |")
+			current := "—"
+			if p.objectType == "SystemVariable" {
+				if variables == nil {
+					current = "未収集"
+				} else if value, ok := variables[p.object]; ok {
+					current = "`" + escapeCell(text(value)) + "`"
+				} else {
+					current = "（変数なし）"
+				}
+			}
+			lines = append(lines, "| "+strings.Join([]string{escapeCell(p.level), "`" + escapeCell(p.check) + "`", escapeCell(p.objectType),
+				escapeCell(p.object), escapeCell(p.description), current}, " | ")+" |")
 		}
 		lines = append(lines, "")
+		if variables != nil {
+			lines = append(lines, "「既定値が変わる」変数は、パラメータグループで値を明示していなければ 8.4 で新しい既定値になる。Blue の現在値を 8.4 でも保ちたい場合は、Step 2 のパラメータグループに明示する。", "")
+		}
 	}
 
-	// 問題が見つかった検査について、チェッカー自身の説明・対処・資料を載せる。
-	if len(detailed) > 0 {
-		lines = append(lines, "**検出された検査の説明と対処**（チェッカーが返した内容）", "")
-		for _, check := range detailed {
-			lines = append(lines, "- **"+text(check["title"])+"**（`"+text(check["id"])+"`）")
-			if description := text(check["description"]); description != "" {
-				lines = append(lines, "  - 説明: "+oneLine(description))
-			}
-			for _, solution := range list(check, "solutions") {
-				lines = append(lines, "  - 対処: "+oneLine(text(solution)))
-			}
-			if link := text(check["documentationLink"]); link != "" {
-				lines = append(lines, "  - 資料: "+link)
-			}
-		}
-		lines = append(lines, "")
+	// すべての検査について、チェッカー自身の説明・対処・資料を載せる（英語のまま）。
+	lines = append(lines, "**各検査の説明と対処**（チェッカーが返した内容。英語のまま載せる）", "")
+	for _, entry := range checks {
+		check := object(entry)
+		lines = append(lines, fmt.Sprintf("- **%s**（`%s`。状態 %s、検出 %d 件）", text(check["title"]), text(check["id"]),
+			text(check["status"]), len(list(check, "detectedProblems"))))
+		lines = append(lines, checkDetails(check)...)
 	}
+	lines = append(lines, "")
 
 	manual := list(report, "manualChecks")
 	lines = append(lines, "**手動確認が要る項目**（チェッカーが自動では判定しないもの）", "")
@@ -308,14 +384,78 @@ func (side mysqlSide) upgradeCheckLines() []string {
 	} else {
 		for _, entry := range manual {
 			check := object(entry)
-			lines = append(lines, "- "+text(check["title"])+"（`"+text(check["id"])+"`）")
-			if description := text(check["description"]); description != "" {
-				lines = append(lines, "  - "+oneLine(description))
-			}
+			lines = append(lines, "- **"+text(check["title"])+"**（`"+text(check["id"])+"`）")
+			lines = append(lines, checkDetails(check)...)
 		}
 		lines = append(lines, "")
 	}
 	return lines
+}
+
+// checkDetails はチェッカーの検査 1 件の説明・対処・資料を箇条書きの子要素にする。
+func checkDetails(check map[string]any) []string {
+	var lines []string
+	if description := text(check["description"]); description != "" {
+		lines = append(lines, "  - 説明: "+oneLine(description))
+	}
+	for _, solution := range list(check, "solutions") {
+		lines = append(lines, "  - 対処: "+oneLine(text(solution)))
+	}
+	if link := text(check["documentationLink"]); link != "" {
+		lines = append(lines, "  - 資料: "+link)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "  - （説明・対処の記載なし）")
+	}
+	return lines
+}
+
+func sortedAnyKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func orDash(value any) string {
+	if s := text(value); s != "" {
+		return s
+	}
+	return "—"
+}
+
+func bytesOf(value any) float64 {
+	if n, ok := number(value); ok {
+		return n
+	}
+	f, err := strconv.ParseFloat(text(value), 64)
+	if err != nil {
+		return 0
+	}
+	return f
+}
+
+func sizeOrDash(value any) string {
+	if text(value) == "" {
+		return "—"
+	}
+	return humanBytes(bytesOf(value))
+}
+
+// humanBytes はバイト数を読みやすい単位にする（1024 基準）。
+func humanBytes(value float64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	i := 0
+	for value >= 1024 && i < len(units)-1 {
+		value /= 1024
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%.0f %s", value, units[i])
+	}
+	return fmt.Sprintf("%.1f %s", value, units[i])
 }
 
 func oneLine(value string) string {

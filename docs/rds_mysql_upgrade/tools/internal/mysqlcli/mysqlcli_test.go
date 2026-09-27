@@ -48,6 +48,20 @@ const variablesXML = `<?xml version="1.0"?>
 </resultset>
 `
 
+const globalsXML = `<?xml version="1.0"?>
+
+<resultset statement="SHOW GLOBAL VARIABLES" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <row>
+	<field name="Variable_name">gtid_mode</field>
+	<field name="Value">OFF</field>
+  </row>
+  <row>
+	<field name="Variable_name">innodb_io_capacity</field>
+	<field name="Value">200</field>
+  </row>
+</resultset>
+`
+
 const emptyXML = `<?xml version="1.0"?>
 
 <resultset statement="SHOW REPLICA STATUS" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -112,6 +126,7 @@ func (f *fakeRunner) run(_ context.Context, _ string, args, env []string, stdin 
 func TestCollectState(t *testing.T) {
 	fake := &fakeRunner{responses: map[string]Result{
 		"@@GLOBAL.binlog_format": {Stdout: []byte(variablesXML)},
+		"SHOW GLOBAL VARIABLES":  {Stdout: []byte(globalsXML)},
 		"SHOW REPLICA STATUS":    {Stdout: []byte(emptyXML)},
 		"information_schema":     {Stdout: []byte(tablesXML)},
 	}}
@@ -121,6 +136,9 @@ func TestCollectState(t *testing.T) {
 	}
 	if state.Version != "8.0.40" || state.BinlogFormat != "MIXED" {
 		t.Fatalf("変数の取り出しが違う: %+v", state)
+	}
+	if state.Variables["gtid_mode"] != "OFF" || state.Variables["innodb_io_capacity"] != "200" || len(state.Variables) != 2 {
+		t.Fatalf("SHOW GLOBAL VARIABLES の取り出しが違う: %v", state.Variables)
 	}
 	if len(state.ReplicaStatus) != 0 || len(state.NonInnoDBTables) != 2 {
 		t.Fatalf("行数が違う: %+v", state)
@@ -135,6 +153,7 @@ func TestCollectState(t *testing.T) {
 func TestCollectStateFailsOnAnyQuery(t *testing.T) {
 	fake := &fakeRunner{responses: map[string]Result{
 		"@@GLOBAL.binlog_format": {Stdout: []byte(variablesXML)},
+		"SHOW GLOBAL VARIABLES":  {Stdout: []byte(globalsXML)},
 		"SHOW REPLICA STATUS": {ExitCode: 1,
 			Stderr: []byte("ERROR 1227 (42000): Access denied; you need the REPLICATION CLIENT privilege")},
 	}}

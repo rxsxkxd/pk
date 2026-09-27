@@ -22,7 +22,7 @@
 
 ### 本リポジトリのスクリプトは同居構成で誤動作する
 
-`build_green.sh` と `switchover.sh` は、`source_db_instance_identifier` から ARN を引き、`describe-blue-green-deployments --filters Name=source,Values=<arn>` で Deployment を解決する。同居構成では `staging.yml` と `production.yml` が**同じインスタンス識別子**を持つため、次が起こる。
+`build_green.rb` と `switchover.rb` は、`source_db_instance_identifier` から ARN を引き、`describe-blue-green-deployments --filters Name=source,Values=<arn>` で Deployment を解決する。同居構成では `staging.yml` と `production.yml` が**同じインスタンス識別子**を持つため、次が起こる。
 
 | 操作 | 実際に起こること |
 |---|---|

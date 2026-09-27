@@ -116,7 +116,8 @@ MySQL へ接続する 3 本（`collect_blue_mysql_state`・`collect_blue_upgrade
 |---|---|
 | `version`・`binlog_format` の実効値 | 0-1-02（パラメータグループの値と食い違うことがある） |
 | `SHOW REPLICA STATUS` | 0-1-06 外部 binlog レプリカ（**AWS API では確認できない**。要 `REPLICATION CLIENT`） |
-| ユーザースキーマの InnoDB 以外のテーブル | 移行ガイドの 0-2（MyISAM の棚卸し） |
+| `SHOW GLOBAL VARIABLES` の全件 | 判定には使わない。レポートの「主要なサーバー変数」と、チェッカーが「既定値が変わる」と指摘した変数の現在値に使う |
+| ユーザースキーマの InnoDB 以外のテーブル（行形式・行数・データ／インデックスのサイズ・作成／更新日時つき） | 移行ガイドの 0-2（MyISAM の棚卸しと、変換にかかる時間の見積もり） |
 
 | オプション | 必須 | 既定値 | 内容 |
 |---|---|---|---|
@@ -152,7 +153,7 @@ go run ./tools/evaluate_blue_green_prereqs \
 | `--output FILE` | | Markdown レポートの出力先（省略時は標準出力の一覧だけ） |
 
 - **出力**: 標準出力に判定一覧と、MySQL 側のファイルの有無（`あり` / `省略`）。`--output` を付けると**ゲート①のレポート**（判定に加えて観測値と取得元）
-- **MySQL 側の収集結果**: 入力ディレクトリに `blue-mysql-state.json`（`collect_blue_mysql_state`）や `blue-upgrade-check.json`（`collect_blue_upgrade_check`）があれば、判定に使い、レポートの「MySQL 側の収集結果」に載せる（binlog_format の実効値、`SHOW REPLICA STATUS`、InnoDB 以外のテーブルと変換例、アップグレードチェッカーの件数・検査項目・検出された問題・チェッカーが示す対処と資料）。**ファイルが無い節は「省略した」と、どのコマンドで取れるかを明示する。**
+- **MySQL 側の収集結果**: 入力ディレクトリに `blue-mysql-state.json`（`collect_blue_mysql_state`）や `blue-upgrade-check.json`（`collect_blue_upgrade_check`）があれば、判定に使い、レポートの「MySQL 側の収集結果」に載せる（判定結果だけでなく中身も載せる: 主要なサーバー変数、`SHOW REPLICA STATUS` の全列、InnoDB 以外のテーブルの行数・サイズと変換例、アップグレードチェッカーの件数・検査ごとのレベル別件数・検出された問題と Blue の現在値・全検査の説明と対処と資料・手動確認項目。チェッカーが返す英語の説明は訳さずそのまま載せる）。**ファイルが無い節は「省略した」と、どのコマンドで取れるかを明示する。**
 
 | 項目 | ファイルがあるとき | 無いとき |
 |---|---|---|

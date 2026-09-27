@@ -6,7 +6,7 @@
 
 | 粒度 | 実行対象 | 確認できること | 向く用途 |
 |---|---|---|---|
-| スクリプト直接実行 | `scripts/*.sh` | AWS CLI 呼び出し、設定解析、RDS の判定ロジック | 日常的な確認、特定スクリプトの切り分け |
+| スクリプト直接実行 | `scripts/*.rb` | AWS CLI 呼び出し、設定解析、RDS の判定ロジック | 日常的な確認、特定スクリプトの切り分け |
 | CodeBuild Local Agent | `ci/codebuild/*.yml` | buildspec の install/build/artifacts、指定イメージ、環境変数、Docker 利用 | CodeBuild 実行前の互換性確認 |
 
 後者では AWS 提供の `codebuild_build.sh` と Local Agent を Docker で実行する。`-b` でリポジトリ直下以外にある buildspec を明示指定できる。AWS の Local Agent 手順とスクリプトのオプションは [公式ドキュメント](https://docs.aws.amazon.com/codebuild/latest/userguide/use-codebuild-agent.html) および [codebuild_build.sh](https://github.com/aws/aws-codebuild-docker-images/blob/master/local_builds/codebuild_build.sh) を参照する。
@@ -186,7 +186,7 @@ mkdir -p .local
 
 ## 2. BuildGreen 単体検証
 
-対象 buildspec は `ci/codebuild/build-green.yml`、実処理は `scripts/build_green.sh` である。
+対象 buildspec は `ci/codebuild/build-green.yml`、実処理は `scripts/build_green.rb` である。
 
 ### 変更を行わない検証
 
@@ -203,7 +203,7 @@ mkdir -p .local
   -c -p your-readonly-profile -m
 ```
 
-この状態では `build_green.sh` が `pending` を検出して終了するため、RDS API の変更操作は行わない。確認対象は Ruby と jq の存在、環境変数の受け渡し、buildspec の構文、成果物出力先である。
+この状態では `build_green.rb` が `pending` を検出して終了するため、RDS API の変更操作は行わない。確認対象は Ruby と jq の存在、環境変数の受け渡し、buildspec の構文、成果物出力先である。
 
 ### 実 AWS 操作を含む検証
 
@@ -211,7 +211,7 @@ mkdir -p .local
 
 ## 3. VerifyGreen 単体検証
 
-対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.sh` である。VerifyGreen は Go レポート生成器を同一イメージ内でビルドする（Docker は使わない）。**Local Agent のランナー image は `runtime-versions` を解決しない**ため、Go を含む image を使うか、あらかじめホストで `go build -o .tools/green-report/generate_green_verification_report ./scripts/generate_green_verification_report` したバイナリを `GREEN_REPORT_GENERATOR` で渡す。
+対象 buildspec は `ci/codebuild/verify-green.yml`、実処理は `scripts/verify_green.rb` である。VerifyGreen は Go レポート生成器を同一イメージ内でビルドする（Docker は使わない）。**Local Agent のランナー image は `runtime-versions` を解決しない**ため、Go を含む image を使うか、あらかじめホストで `go build -o .tools/green-report/generate_green_verification_report ./scripts/generate_green_verification_report` したバイナリを `GREEN_REPORT_GENERATOR` で渡す。
 
 ```bash
 ./ci/codebuild_build.sh \
@@ -238,7 +238,7 @@ COLLECT_MYSQL_RUNTIME_VALUES=true
 
 ## 4. Switchover 単体検証
 
-対象 buildspec は `ci/codebuild/switchover.yml`、実処理は `scripts/switchover.sh` である。buildspec は `--approve` を常に渡すが、`actions.switchover` が `pending` であればスクリプトは変更せず終了する。
+対象 buildspec は `ci/codebuild/switchover.yml`、実処理は `scripts/switchover.rb` である。buildspec は `--approve` を常に渡すが、`actions.switchover` が `pending` であればスクリプトは変更せず終了する。
 
 ```bash
 ./ci/codebuild_build.sh \
@@ -255,10 +255,10 @@ COLLECT_MYSQL_RUNTIME_VALUES=true
 
 ## 5. スクリプト直接実行との使い分け
 
-CodeBuild Local Agent の不具合とスクリプト本体の不具合を分けるため、同じ設定でシェルスクリプトを直接実行できる。構築前チェック（移行先パラメータグループ）、BuildGreen、VerifyGreen、Switchover、Cleanup を含む直接実行の一連手順は [direct-blue-green-execution.md](../docs/direct-blue-green-execution.md) を参照する。ここでは切り分け用の VerifyGreen 最小例だけを示す。
+CodeBuild Local Agent の不具合とスクリプト本体の不具合を分けるため、同じ設定でスクリプトを直接実行できる。構築前チェック（移行先パラメータグループ）、BuildGreen、VerifyGreen、Switchover、Cleanup を含む直接実行の一連手順は [direct-blue-green-execution.md](../docs/direct-blue-green-execution.md) を参照する。ここでは切り分け用の VerifyGreen 最小例だけを示す。
 
 ```bash
-scripts/verify_green.sh \
+scripts/verify_green.rb \
   --config config/blue-green/staging.deployment.yml \
   --service example-service \
   --profile your-readonly-profile \
@@ -267,7 +267,7 @@ scripts/verify_green.sh \
 
 ただしこの直接実行は CodeBuild の `runtime-versions` 解決と buildspec artifacts を検証しない。CodeBuild 導入前の最終確認には、各節の Local Agent コマンドを使う。
 
-直接実行では Ruby と jq があれば追加作業は要らない。ただし VerifyGreen のレポート生成器は Go 版だけなので、`GREEN_REPORT_GENERATOR` を指定しない場合は `verify_green.sh` がその場でビルドする（Go が必要）。
+直接実行では Ruby と jq があれば追加作業は要らない。ただし VerifyGreen のレポート生成器は Go 版だけなので、`GREEN_REPORT_GENERATOR` を指定しない場合は `verify_green.rb` がその場でビルドする（Go が必要）。
 
 ## 6. 実行しない確認項目
 
@@ -277,8 +277,8 @@ AWS へ接続せずに確認する場合は、以下だけを行う。
 # buildspec YAML の構文確認
 ruby -e 'require "yaml"; Dir["ci/codebuild/*.yml"].each { |f| YAML.load_file(f) }; puts "OK"'
 
-# シェル構文確認
-bash -n scripts/build_green.sh scripts/verify_green.sh scripts/switchover.sh
+# Ruby の構文確認
+for f in scripts/*.rb scripts/lib/*.rb; do ruby -c "$f" >/dev/null || echo "NG $f"; done
 ```
 
 これらは CodeBuild managed image・Python package・Docker・AWS API・IAM・ネットワークを検証しない。実行環境の互換性確認には Local Agent を用いる。

@@ -2,7 +2,7 @@
 // 宣言しているパラメータの**実効値**を performance_schema.global_variables から取る。
 //
 // AWS API は呼ばない。接続情報の解決（SSM Parameter Store からの取得など）は
-// 呼び出し元のシェル（scripts/lib/mysql_credentials.sh）が済ませ、パスワードは
+// 呼び出し元（scripts/collect_green_runtime_values.rb）が済ませ、パスワードは
 // 環境変数で渡される。**パスワードをコマンド引数に取らない。**
 //
 // MySQL クライアントの代わりにこれを使う理由:

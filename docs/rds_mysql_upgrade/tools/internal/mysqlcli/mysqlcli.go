@@ -253,16 +253,21 @@ func ParseXML(data []byte) ([]Row, error) {
 
 // 成立条件チェックで MySQL 側から取る項目。**読み取りだけで、設定を変更しない。**
 var stateQueries = struct {
-	variables, replicaStatus, nonInnoDB string
+	variables, globalVariables, replicaStatus, nonInnoDB string
 }{
 	// binlog_format の実効値（0-1-02。パラメータグループの値と食い違うことがある）。
 	variables: "SELECT @@GLOBAL.version AS version, @@GLOBAL.binlog_format AS binlog_format",
+	// サーバー変数の実効値すべて（レポートの参考値と、アップグレードチェッカーが
+	// 「既定値が変わる」と指摘した変数の現在値の確認に使う）。権限は要らない。
+	globalVariables: "SHOW GLOBAL VARIABLES",
 	// 外部 binlog レプリカでないこと（0-1-06。AWS API では確認できない）。
 	// 要 REPLICATION CLIENT 権限。
 	replicaStatus: "SHOW REPLICA STATUS",
 	// ユーザースキーマに InnoDB 以外のテーブルが無いこと（移行ガイドの 0-2。MyISAM の棚卸し）。
 	// mysql スキーマ等のシステムテーブルは対象外。
-	nonInnoDB: "SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE FROM information_schema.TABLES" +
+	// 対処（変換にかかる時間）の見積もりに使うため、行数とサイズも取る。
+	nonInnoDB: "SELECT TABLE_SCHEMA, TABLE_NAME, ENGINE, ROW_FORMAT, TABLE_ROWS, DATA_LENGTH, INDEX_LENGTH," +
+		" CREATE_TIME, UPDATE_TIME FROM information_schema.TABLES" +
 		" WHERE TABLE_TYPE = 'BASE TABLE' AND ENGINE <> 'InnoDB'" +
 		" AND TABLE_SCHEMA NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')" +
 		" ORDER BY TABLE_SCHEMA, TABLE_NAME",
@@ -270,16 +275,18 @@ var stateQueries = struct {
 
 // State は mysql コマンドで集めた Blue の状態である（blue-mysql-state.json）。
 type State struct {
-	CollectedAt     string `json:"collected_at"`
-	Host            string `json:"host"`
-	Port            int    `json:"port"`
-	Version         string `json:"version"`
-	BinlogFormat    string `json:"binlog_format"`
-	ReplicaStatus   []Row  `json:"replica_status"`
-	NonInnoDBTables []Row  `json:"non_innodb_tables"`
+	CollectedAt  string `json:"collected_at"`
+	Host         string `json:"host"`
+	Port         int    `json:"port"`
+	Version      string `json:"version"`
+	BinlogFormat string `json:"binlog_format"`
+	// Variables は SHOW GLOBAL VARIABLES の全件（変数名 → 値）。
+	Variables       map[string]string `json:"variables"`
+	ReplicaStatus   []Row             `json:"replica_status"`
+	NonInnoDBTables []Row             `json:"non_innodb_tables"`
 }
 
-// CollectState は mysql コマンドを 3 回実行して State を組み立てる。
+// CollectState は mysql コマンドを 4 回実行して State を組み立てる。
 // どれか 1 つでも失敗したら全体を失敗にする（欠けた収集結果で判定させないため）。
 func CollectState(ctx context.Context, run Runner, mysqlBin string, t Target, password string) (*State, error) {
 	query := func(label, sql string) ([]Row, error) {
@@ -297,6 +304,14 @@ func CollectState(ctx context.Context, run Runner, mysqlBin string, t Target, pa
 	if len(variables) != 1 {
 		return nil, fmt.Errorf("バージョンと binlog_format: 1 行を期待したが %d 行だった", len(variables))
 	}
+	globals, err := query("SHOW GLOBAL VARIABLES", stateQueries.globalVariables)
+	if err != nil {
+		return nil, err
+	}
+	all := make(map[string]string, len(globals))
+	for _, row := range globals {
+		all[deref(row["Variable_name"])] = deref(row["Value"])
+	}
 	replica, err := query("SHOW REPLICA STATUS", stateQueries.replicaStatus)
 	if err != nil {
 		return nil, err
@@ -310,6 +325,7 @@ func CollectState(ctx context.Context, run Runner, mysqlBin string, t Target, pa
 		Port:            t.Port,
 		Version:         deref(variables[0]["version"]),
 		BinlogFormat:    deref(variables[0]["binlog_format"]),
+		Variables:       all,
 		ReplicaStatus:   replica,
 		NonInnoDBTables: nonInnoDB,
 	}, nil

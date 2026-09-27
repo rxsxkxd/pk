@@ -37,7 +37,7 @@
 作成前に移行元が MySQL 8.0 であること、指定パラメータグループが `mysql8.4` ファミリーであることを読み取り API で検証してから変更操作に入る。
 作成後は Deployment が `AVAILABLE` になるまで待機して終了し、切替は行わない。
 
-- 実装: [`scripts/build_green.sh`](../scripts/build_green.sh) → [`scripts/create_blue_green_deployment.sh`](../scripts/create_blue_green_deployment.rb)
+- 実装: [`scripts/build_green.rb`](../scripts/build_green.rb)
 - 設定: [config/blue-green/production.deployment.yml](../config/blue-green/production.deployment.yml) ／ [config/blue-green/staging.deployment.yml](../config/blue-green/staging.deployment.yml)
 - 補足: 現行スクリプトは `--target-engine-version 8.4.x` を作成時に一括指定するワンショット方式。作成に失敗すると Deployment ごと作り直しになるため、同一 8.0 で作成 → Green のみ手動昇格する二段方式を選ぶ場合はスクリプトを分割する。
 
@@ -47,7 +47,7 @@
 あわせて Blue → Green のレプリケーション状態を確認し、`ReplicaLag` がほぼゼロで IO／SQL スレッドが動作していることを切替の前提条件とする。
 ここが切替可否を決める最後のゲートであり、不一致・遅延がある間は Step 5 を起動できないようにする。
 
-- 実装: [`scripts/verify_green.sh`](../scripts/verify_green.sh)
+- 実装: [`scripts/verify_green.rb`](../scripts/verify_green.rb)
 - 参照: [rds-mysql-84-migration-guide.md](rds-mysql-84-migration-guide.md) の「3-1. Phase 3: Green の検証」「3-3. Phase 4: スイッチオーバー直前」
 - 補足: AWS 側の構成確認（`describe-db-instances`／`describe-db-parameters`）は CI で自動化できるが、重いクエリの実行計画比較とアプリのドライバ接続試験は人手の検証として残す。切り戻し経路（binlog 保持 24 時間以上、逆レプリの準備）もこのステップで確認する。
 
@@ -57,7 +57,7 @@
 本番トラフィックに影響する唯一の変更操作であるため、設定ファイルで `switchover: approved` が宣言されていることを必須とし、直前に `AVAILABLE` 状態であることを再確認してから実行する。
 CI では自動実行せず、承認ステップ付きの手動ジョブとし、実行時刻・タイムアウト値・応答 JSON を証跡として保存する。
 
-- 実装: [`scripts/switchover.sh`](../scripts/switchover.sh) → [`scripts/switchover_blue_green_deployment.sh`](../scripts/switchover_blue_green_deployment.rb)
+- 実装: [`scripts/switchover.rb`](../scripts/switchover.rb)
 - 補足: `--switchover-timeout`（既定 300 秒、最大 60 分）の間、既存コネクションは切断される。ALB／nginx のアイドルタイムアウトより短く収まるかを事前に確認しておく。
 
 ## Step 6. Green のヘルスチェック
@@ -142,9 +142,9 @@ Green のヘルスチェックは DB へ接続して `SELECT VERSION()`、`@@rea
 | Step 1 | ローカル | `scripts/precheck.sh --config FILE --service NAME` | 収集 → 判定 → レポート出力 |
 | Step 2 | ローカル | `scripts/generate_parameter_group.sh --config FILE --service NAME` | 収集 → ルール突合 → レポートと CFn テンプレート生成 |
 | Step 2 適用 | ローカル | `scripts/deploy_parameter_group.sh --config FILE --service NAME` | Change Set 作成 → レビュー → 実行 → 作成結果の読み取り検証 |
-| Step 3 | CI | `scripts/build_green.sh --config FILE --service NAME` | 保護スナップショット取得 → Blue/Green 作成 → `AVAILABLE` 待機 |
-| Step 4 | CI | `scripts/verify_green.sh --config FILE --service NAME` | Green 構成の突合 → レプリカ同期確認 → 判定 |
-| Step 5 | CI | `scripts/switchover.sh --config FILE --service NAME` | 宣言と状態の突き合わせ → 切替 → 完了待機 |
+| Step 3 | CI | `ruby scripts/build_green.rb --config FILE --service NAME` | 保護スナップショット取得 → Blue/Green 作成 → `AVAILABLE` 待機 |
+| Step 4 | CI | `ruby scripts/verify_green.rb --config FILE --service NAME` | Green 構成の突合 → レプリカ同期確認 → 判定 |
+| Step 5 | CI | `ruby scripts/switchover.rb --config FILE --service NAME` | 宣言と状態の突き合わせ → 切替 → 完了待機 |
 | Step 6 | CI | `scripts/healthcheck_green_aws.sh --config FILE --service NAME` | エンドポイント・インスタンス状態の確認 → メトリクス比較 |
 | Step 6 | ローカル | `scripts/healthcheck_green_db.sh --config FILE --service NAME` | DB 接続 → バージョン・`read_only`・書き込み疎通の確認 |
 | Step 7 | CI | `go run ./tools/cleanup --config FILE --service NAME` | 宣言と状態の突き合わせ → Deployment 削除 → 旧 Blue の最終スナップショット付き削除 |
@@ -240,7 +240,7 @@ Step 4 と Step 6 は読み取りのみで環境を変更しないため、対�
 | `healthcheck-green-aws` | `switchover` 成功後に自動、以降は観測期間中に定期実行 | 不要 |
 | `cleanup` | 手動トリガー | 必須（`cleanup: approved` の PR ＋ ジョブ承認） |
 
-GitHub Actions に加え、CodePipeline / CodeBuild を実行基盤にする場合は、[ci/README.md](../ci/README.md) の定義を使用する。CodePipeline 版は `BuildGreen → VerifyGreen → ManualApproval → Switchover` を一つの手動開始パイプラインにし、同じ `scripts/build_green.sh`、`scripts/verify_green.sh`、`scripts/switchover.sh` を実行する。
+GitHub Actions に加え、CodePipeline / CodeBuild を実行基盤にする場合は、[ci/README.md](../ci/README.md) の定義を使用する。CodePipeline 版は `BuildGreen → VerifyGreen → ManualApproval → Switchover` を一つの手動開始パイプラインにし、同じ `scripts/build_green.rb`、`scripts/verify_green.rb`、`scripts/switchover.rb` を実行する。
 
 Step 1、Step 2（生成・適用とも）、Step 6 の DB 接続部分は CI ジョブにせず、作業手順としてローカルから実行し、結果を作業チケットへ証跡として残す。
 

@@ -14,9 +14,6 @@ phases:
       # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
       - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
       - ruby --version
-      # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
-      # 落ちていれば復元し、落ちていなければ何も変わらない。
-      - chmod +x scripts/*.sh
       - echo 'Entered install phase.'
       - aws --version
   build:

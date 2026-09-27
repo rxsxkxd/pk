@@ -16,6 +16,9 @@
 # 出るため原因がモジュール名に見えてしまう。実際の原因は構成のずれなので、
 # ここで構成として指摘する。
 #
+# **シェルのまま置いている。**ローカル検証の実行イメージ golang:1.25 は Ruby を持たない
+# （ci/build-report-tool-local-verification.md）ため、Ruby へは移せない。
+#
 # 使い方（ci/codebuild/build-report-tool.yml から。set -e 配下で）:
 #   module_dir=$(bash scripts/resolve_go_module_root.sh)
 #
@@ -59,21 +62,6 @@ if [ "$count" -gt 1 ]; then
 fi
 
 module_dir=$(cd "$(dirname "$found")" && pwd)
-
-# 旧構成（go.mod が scripts/ 配下）を名指しで拒否する。この形だと
-# scripts/ から親の internal/ が見えず、ビルド対象の指定も変わる。
-if [ "$(basename "$module_dir")" = scripts ]; then
-  echo '構成が古い: go.mod が scripts/ 配下にある。' >&2
-  echo "  見つかった go.mod: ${found}" >&2
-  echo 'go.mod と go.sum はプロジェクト直下へ置く構成に変わっている。' >&2
-  echo 'ビルド対象のブランチ／コミットが古い可能性が高い。' >&2
-  exit 1
-fi
-if [ -f "$module_dir/scripts/go.mod" ]; then
-  echo '構成が期待と違う: scripts/go.mod が残っている。' >&2
-  echo 'モジュールはプロジェクト直下の go.mod だけである。scripts/go.mod は削除する。' >&2
-  exit 1
-fi
 
 # ビルド対象のソースがあること（2 本とも）。
 for required in scripts/generate_green_verification_report/main.go \

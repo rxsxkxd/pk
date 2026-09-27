@@ -1,11 +1,16 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# Step 3 内部処理: build_green.sh から呼ばれる。**使える Blue/Green Deployment が
-# 存在する状態にする**（冪等）。切替は実施しない。
+# Step 3: 承認済みなら、**使える Blue/Green Deployment が存在する状態にする**（冪等）。
+# 切替は実施しない。buildspec（ci/codebuild/build-green.yml）から `ruby` で直接呼ぶ。
 #
-# build_green.sh がフェーズ判定（冪等性の第 1 層。移行元が移行前の姿であること）を
-# 済ませてから呼ぶ。ここは第 2 層で、移行元に対応する Deployment の Status で分岐する。
+# 冪等性の担保は二層で行う。
+#   ① フェーズガード: 移行元のエンジンバージョンとパラメータグループを見て
+#      （lib/migration_phase.rb）、既に切替済み（＝ build の対象ではない）なら何もしない。
+#      cleanup 完了後に build: approved のまま再実行しても、新規作成へ進まない。
+#   ② 状態機械: 移行元に対応する Deployment の Status で分岐する。
+#      PROVISIONING / AVAILABLE / INVALID_CONFIGURATION はいずれも移行元が 8.0 の
+#      まま起こるため ① では区別できない。このフェーズでは ② が本体である。
 #
 #   AVAILABLE        既に目的の状態。何もせず成功
 #   PROVISIONING     作成途中。二重作成せず AVAILABLE を待つ
@@ -17,7 +22,8 @@
 # Deployment ID は設定ファイルに持たず、移行元の ARN で毎回 AWS から引き当てる（中核ルール）。
 # 変更操作は `# [変更]` の 2 か所（保護スナップショットの作成、Blue/Green の作成）だけである。
 #
-# 終了コード: 0 AVAILABLE な Deployment がある / 1 到達しておらず自動では到達できない / 2 引数の誤り
+# 終了コード: 0 AVAILABLE な Deployment がある（または pending・切替済みで対象なし）
+#             1 到達しておらず自動では到達できない / 2 引数の誤り
 require 'fileutils'
 require 'optparse'
 require 'time'
@@ -25,9 +31,10 @@ require 'tmpdir'
 
 require_relative 'lib/aws_cli'
 require_relative 'lib/deployment_config'
+require_relative 'lib/migration_phase'
 
 USAGE = <<~USAGE
-  Usage: create_blue_green_deployment.rb --config FILE --service NAME [options]
+  Usage: build_green.rb --config FILE --service NAME [options]
     --config FILE               環境別設定ファイル（必須）
     --service NAME              config の services 配下に定義したサービス名（必須）
     --region REGION             AWS Region（設定ファイルの aws_region を上書き）
@@ -70,13 +77,14 @@ unless options[:poll_interval_seconds].match?(/\A[0-9]+\z/)
 end
 
 output_dir = options[:output_dir]
-output_dir = Dir.mktmpdir('rds-bg-create') if output_dir.to_s.empty?
+output_dir = Dir.mktmpdir('rds-bg-build') if output_dir.to_s.empty?
 FileUtils.mkdir_p(output_dir)
 
 # config のサービスに対応する作成設定を読み取る。AWS API は呼び出さない。
 begin
   config = DeploymentConfig.load(options[:config])
   service = config.service(options[:service])
+  build = service.optional('actions.build', 'pending')
   source_db_instance_identifier = service.required('source_db_instance_identifier')
   snapshot_identifier = service.required('protection_snapshot_identifier')
   target_engine_version = service.required('target_engine_version')
@@ -90,8 +98,34 @@ rescue DeploymentConfig::Error => e
   exit 1
 end
 
+# 承認の宣言が無ければ AWS を呼ばずに終わる。
+unless build == 'approved'
+  puts 'build: pending; no changes made.'
+  exit 0
+end
+
 aws = AwsCli.new(region: region, profile: profile)
 save = ->(name) { File.join(output_dir, name) }
+
+# --- 第 1 層: フェーズガード ---------------------------------------------------
+begin
+  seen = MigrationPhase.observe(config, options[:service], aws)
+rescue DeploymentConfig::Error, AwsCli::Error => e
+  warn e.message
+  exit 1
+end
+case seen.phase
+when MigrationPhase::POST
+  # 切替済み。Deployment が cleanup 済みで存在しなくても新規作成へ進まない。
+  puts "Migration already completed: #{seen.source_id} is #{seen.current_version} with #{seen.current_group}."
+  exit 0
+when MigrationPhase::UNKNOWN
+  warn '移行元が移行前・移行後のいずれの宣言とも一致しない。設定の誤りか想定外のドリフトである。'
+  warn MigrationPhase.describe_inputs(seen.current_version, seen.current_group, *seen.declared)
+  exit 1
+end
+
+# --- 第 2 層: Deployment の状態別分岐・保護スナップショット・作成 --------------
 
 # Deployment が AVAILABLE になるまで待つ。AWS CLI に Blue/Green 用の waiter は無い
 # （RDS の waiter は DBInstance / DBSnapshot 系のみ）ため、明示的にポーリングする。

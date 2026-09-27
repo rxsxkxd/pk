@@ -118,12 +118,12 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 
 | プロジェクト | buildspec | 実行するスクリプト | 特記 |
 |---|---|---|---|
-| `ReadApprovalsProject` | `read-approvals.yml` | `read_action_approvals.sh` | AWS API を呼ばない |
+| `ReadApprovalsProject` | `read-approvals.yml` | `lib/deployment_config.rb`（直接） | AWS API を呼ばない |
 | `PrecheckProject` | `precheck-target-parameter-group.yml` | `check_target_parameter_group.rb` | 読み取りのみ |
-| `BuildGreenProject` | `build-green.yml` | `build_green.sh` | **timeout 120 分**（Green の作成待ち） |
+| `BuildGreenProject` | `build-green.yml` | `build_green.rb` | **timeout 120 分**（Green の作成待ち） |
 | `BuildReportToolProject` | `build-report-tool.yml` | — | Go レポート生成器をビルドし artifact へ出す。AWS API を呼ばない。**外部ネットワークへ出るのはここだけ** |
-| `VerifyGreenProject` | `verify-green.yml` | `verify_green.sh` | artifact のバイナリを使うだけ。**Go も外部ネットワークも不要**（`PrivilegedMode` も不要） |
-| `SwitchoverProject` | `switchover.yml` | `switchover.sh` | **timeout 60 分**（切替完了待ち） |
+| `VerifyGreenProject` | `verify-green.yml` | `verify_green.rb` | artifact のバイナリを使うだけ。**Go も外部ネットワークも不要**（`PrivilegedMode` も不要） |
+| `SwitchoverProject` | `switchover.yml` | `switchover.rb` | **timeout 60 分**（切替完了待ち） |
 
 全プロジェクトで `Image: aws/codebuild/standard:7.0`、`ComputeType: BUILD_GENERAL1_SMALL`。
 

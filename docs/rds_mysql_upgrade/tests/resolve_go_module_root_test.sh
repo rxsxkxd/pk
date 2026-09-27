@@ -87,8 +87,8 @@ mkdir -p "$work/old/proj/scripts"
 printf 'module rds-mysql-upgrade\n' > "$work/old/proj/scripts/go.mod"
 CODEBUILD_SRC_DIR="$work/old" bash "$SCRIPT" >/dev/null 2>"$work/e6"; status=$?
 check_status '旧構成なら失敗' 1 "$status"
-check '古い構成だと名指しする' '構成が古い: go.mod が scripts/ 配下にある' "$(cat "$work/e6")"
-check 'ブランチを疑うよう促す' 'ブランチ／コミットが古い' "$(cat "$work/e6")"
+# 名指しの検査は持たないが、ビルド対象のソースが見つからないので止まる。
+check 'ビルド対象が無いと指摘する' '構成が期待と違う: scripts/generate_green_verification_report/main.go が無い' "$(cat "$work/e6")"
 
 # --- ⑦ scripts/go.mod の残骸 -------------------------------------------------
 make_layout "$work/stale/proj"

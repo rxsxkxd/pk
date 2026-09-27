@@ -1,6 +1,6 @@
 # AWS CodeBuild 実環境の外部接続先と認証
 
-この文書は、AWS 上で動く `BuildGreenProject`、`VerifyGreenProject`、`SwitchoverProject` の CodeBuild 実行だけを対象にする。CodeBuild Local Agent、開発者端末での `scripts/*.sh` 直接実行、GitHub Actions は対象外である。
+この文書は、AWS 上で動く `BuildGreenProject`、`VerifyGreenProject`、`SwitchoverProject` の CodeBuild 実行だけを対象にする。CodeBuild Local Agent、開発者端末での `scripts/*.rb` 直接実行、GitHub Actions は対象外である。
 
 CodePipeline の Source ステージが GitHub からソースを取得する通信も対象外とする。CodeBuild は CodePipeline から渡された source artifact と、`ci/codebuild/` 配下の buildspec を実行する。
 
@@ -58,7 +58,7 @@ MySQL 接続は、Secrets Manager secret の JSON にある `username` と `pass
 
 ## 3. AWS API 認証の解決手順
 
-AWS CLI を使う buildspec やシェルスクリプトは、`aws configure`、named profile、アクセスキーの静的環境変数を設定しない。認証は次の順で解決される。
+AWS CLI を使う buildspec や Ruby スクリプトは、`aws configure`、named profile、アクセスキーの静的環境変数を設定しない。認証は次の順で解決される。
 
 1. `CodeBuildServiceRoleArn` に指定する IAM role の信頼ポリシーで、`codebuild.amazonaws.com` に `sts:AssumeRole` を許可する。
 2. 各 CodeBuild project に設定済みの `ServiceRole` が、この IAM role を参照する。

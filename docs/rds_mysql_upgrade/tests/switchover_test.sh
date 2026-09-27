@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 5（switchover.sh → switchover_blue_green_deployment.rb）の分岐のテスト。
+# Step 5（scripts/switchover.rb）の分岐のテスト。
 # AWS へは接続しない（PATH 上の aws を偽物に差し替える）。
 #
 # 確かめること:
@@ -53,12 +53,8 @@ deployment() {  # $1=Status（空なら Deployment 無し）
   if [[ -z "$1" ]]; then echo '{"BlueGreenDeployments":[]}' > "$fake/deployments.json"
   else printf '{"BlueGreenDeployments":[{"BlueGreenDeploymentIdentifier":"bgd-1","Status":"%s"}]}\n' "$1" > "$fake/deployments.json"; fi
 }
-run_switchover() {
-  PATH="$fake:$PATH" bash scripts/switchover.sh --config "${1:-$config}" --service "$service" --approve \
-    --output-dir "$fake/out" >"$fake/stdout" 2>"$fake/stderr"
-}
-run_rb() {  # 待機を伴うケースは間隔 0 で直接呼ぶ
-  PATH="$fake:$PATH" ruby scripts/switchover_blue_green_deployment.rb --config "$config" --service "$service" --approve \
+run_switchover() {  # $1=設定（省略時は承認済みのもの）。待機は間隔 0 で回す
+  PATH="$fake:$PATH" ruby scripts/switchover.rb --config "${1:-$config}" --service "$service" --approve \
     --output-dir "$fake/out" --poll-interval-seconds 0 >"$fake/stdout" 2>"$fake/stderr"
 }
 expect() {  # $1=説明 $2=終了コード $3=期待 $4=切替を呼ぶか(yes/no) $5=出力に含むべき文字列
@@ -87,10 +83,10 @@ grep -q -- '--switchover-timeout 300' "$fake/calls.log" && ok 'RDS へ渡す切�
   || fail '切替タイムアウト' "$(grep switchover-blue-green "$fake/calls.log")"
 
 make_fake in-progress; deployment SWITCHOVER_IN_PROGRESS; printf 'SWITCHOVER_IN_PROGRESS\nSWITCHOVER_COMPLETED\n' > "$fake/statuses"
-run_rb; expect '進行中: 二重に切り替えず完了を待つ' $? 0 no 'Switchover completed: bgd-1'
+run_switchover; expect '進行中: 二重に切り替えず完了を待つ' $? 0 no 'Switchover completed: bgd-1'
 
 make_fake fails; printf 'SWITCHOVER_IN_PROGRESS\nSWITCHOVER_FAILED\n' > "$fake/statuses"
-run_rb; expect '切替が失敗に終われば止める' $? 1 yes 'Switchover did not complete; status: SWITCHOVER_FAILED'
+run_switchover; expect '切替が失敗に終われば止める' $? 1 yes 'Switchover did not complete; status: SWITCHOVER_FAILED'
 
 make_fake invalid; deployment INVALID_CONFIGURATION
 run_switchover; expect 'AVAILABLE 以外: 切り替えず止める' $? 1 no 'requires AVAILABLE status'
@@ -99,7 +95,7 @@ make_fake none; deployment ''
 run_switchover; expect 'Deployment が無い: 止める' $? 1 no 'Blue/Green Deployment not found'
 
 make_fake no-approve
-PATH="$fake:$PATH" ruby scripts/switchover_blue_green_deployment.rb --config "$config" --service "$service" >"$fake/stdout" 2>"$fake/stderr"
+PATH="$fake:$PATH" ruby scripts/switchover.rb --config "$config" --service "$service" >"$fake/stdout" 2>"$fake/stderr"
 expect '--approve が無ければ使い方の誤り' $? 2 no '--approve is required'
 
 echo

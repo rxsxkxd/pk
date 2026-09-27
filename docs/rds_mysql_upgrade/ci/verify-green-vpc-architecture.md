@@ -76,7 +76,7 @@ sequenceDiagram
     P->>V: SourceOutput（primary）+ ReportToolOutput を渡して起動
     S3-->>V: CODEBUILD_SRC_DIR_ReportToolOutput へ展開
     V->>V: chmod +x してバイナリを確定
-    V->>V: verify_green.sh を実行<br/>GREEN_REPORT_GENERATOR=そのバイナリ
+    V->>V: verify_green.rb を実行<br/>GREEN_REPORT_GENERATOR=そのバイナリ
 ```
 
 入力が複数になるため、アクションの `Configuration` に **`PrimarySource: SourceOutput`** を指定してどちらをソースとして展開するかを明示する。

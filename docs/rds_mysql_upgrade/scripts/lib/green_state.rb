@@ -3,7 +3,7 @@
 # Step 4 の検証に必要な AWS の状態を収集し、判定器
 # （generate_green_verification_report --input-dir）が読むファイル一式を書き出す。
 #
-# prepare_green_verification.rb（Step 4 の準備）から使う。
+# verify_green.rb（Step 4 の準備）から使う。
 #
 # **収集だけを行い、判定はしない。**適合・不適合の判断は判定器の --check が行う。
 # ここが返すエラーは「収集できなかった」ことだけである（Deployment が無い・AVAILABLE でない等）。
@@ -27,7 +27,7 @@ module GreenState
   ALL_PARAMETERS_FILE    = 'green-all-parameters.json'
   REPLICA_LAG_FILE       = 'replica-lag.json'
 
-  # 呼び出し側（シェル）が続きで使う値。
+  # 呼び出し側（verify_green.rb）が続きで使う値。
   Result = Struct.new(:deployment_id, :green_instance_id, :green_endpoint)
 
   module_function
@@ -57,7 +57,7 @@ module GreenState
     deployment = Array(deployments['BlueGreenDeployments']).first
     if deployment.nil?
       raise Error, "Blue/Green Deployment not found for #{source_id}\n" \
-                   'Step 3（build_green.sh）が未実行か、config の actions.build が pending の可能性がある。'
+                   'Step 3（build_green.rb）が未実行か、config の actions.build が pending の可能性がある。'
     end
     status = deployment['Status'].to_s
     raise Error, "Deployment is not AVAILABLE: #{status}" unless status == 'AVAILABLE'

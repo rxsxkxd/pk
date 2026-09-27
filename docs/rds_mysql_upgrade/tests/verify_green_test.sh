@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 4（verify_green.sh → prepare_green_verification.rb → Go の判定器）の通しのテスト。
+# Step 4（scripts/verify_green.rb → Go の判定器）の通しのテスト。
 # AWS へも DB へも接続しない（aws と実効値の収集バイナリを偽物に差し替える）。
 #
 # 確かめること:
@@ -56,7 +56,7 @@ FAKE
 }
 run() {  # $1=設定 残り=追加引数
   local cfg=$1; shift
-  PATH="$fake:$PATH" bash scripts/verify_green.sh --config "$cfg" --service example-service \
+  PATH="$fake:$PATH" ruby scripts/verify_green.rb --config "$cfg" --service example-service \
     --output-dir "$fake/out" "$@" >"$fake/stdout" 2>"$fake/stderr"
 }
 expect() {  # $1=説明 $2=終了コード $3=期待 $4=出力に含むべき文字列
@@ -88,7 +88,6 @@ printf '#!/bin/sh\nwhile [ $# -gt 0 ]; do [ "$1" = --output ] && cp "%s/green-ru
 chmod +x "$work/collector"
 GREEN_RUNTIME_COLLECTOR="$work/collector" run "$work/mysql.yml"; expect 'MySQL 有効: 収集して検証する' $? 0 'mysql_verification.enabled=true auth_method=plaintext'
 [[ "$(report)" != *'| 未収集 |'* ]] && ok 'MySQL 有効: 実効値の列が埋まる' || fail 'MySQL 有効' '未収集のまま'
-grep -q '^VERIFY=\|^DEPLOYMENT_ID=\|^TEMPLATE=' "$fake/stdout" && fail '準備の代入行が標準出力へ漏れていない' "$(cat "$fake/stdout")" || ok '準備の代入行は標準出力へ漏れない'
 
 make_fake none; echo '{"BlueGreenDeployments":[]}' > "$fake/deployments.json"
 run "$config"; expect 'Deployment が無ければ止める' $? 1 'Blue/Green Deployment not found'

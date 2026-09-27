@@ -209,7 +209,7 @@ func TestMySQLSideRendersResults(t *testing.T) {
 		`|  | external.example | 3306 | Yes | Yes |  | a\|b |  |`, // セル内の | はエスケープする
 		"**InnoDB 以外のテーブル**（0-2。ユーザースキーマのみ。MyISAM は binlog レプリケーションで整合性が保証されない）\n\nなし。",
 		"| Error / Warning / Notice | 1 / 1 / 0 |",
-		"- Manual（`m`）",
+		"- **Manual**（`m`）",
 	} {
 		if !strings.Contains(report, want) {
 			t.Errorf("レポートに %q が無い", want)
@@ -222,6 +222,55 @@ func TestMySQLSideRendersResults(t *testing.T) {
 	for item, want := range map[string]string{"0-1-06": "STOP", "0-3": "STOP"} {
 		if got := resultOf(t, evaluation, item).Status; got != want {
 			t.Errorf("%s: %s（期待 %s）", item, got, want)
+		}
+	}
+}
+
+// 判定だけでなく、収集した中身（変数・全列・行数とサイズ・チェッカーの説明）を載せること。
+func TestMySQLSideRendersDetails(t *testing.T) {
+	state := `{"collected_at":"T","host":"blue","port":3306,"version":"8.0.39","binlog_format":"ROW",
+	  "variables":{"log_bin":"ON","innodb_io_capacity":"200","time_zone":"Asia/Tokyo"},
+	  "replica_status":[{"Channel_Name":"","Source_Host":"external.example","Source_Port":"3306","Retrieved_Gtid_Set":"uuid:1-5"}],
+	  "non_innodb_tables":[{"TABLE_SCHEMA":"app","TABLE_NAME":"legacy","ENGINE":"MyISAM","ROW_FORMAT":"Dynamic",
+	    "TABLE_ROWS":"1200","DATA_LENGTH":"1048576","INDEX_LENGTH":"2048","CREATE_TIME":"2020-01-01 00:00:00","UPDATE_TIME":null}]}`
+	check := `{"collected_at":"T","host":"restored","port":3306,"target_version":"8.4.9","error_count":0,"warning_count":1,"notice_count":0,
+	  "report":{"serverAddress":"restored:3306","serverVersion":"8.0.39","summary":"s","checksPerformed":[
+	    {"id":"sysVarsNewDefaults","title":"New defaults","status":"OK","description":"Following variables change.",
+	     "documentationLink":"https://example/doc",
+	     "detectedProblems":[{"level":"Warning","dbObject":"innodb_io_capacity","dbObjectType":"SystemVariable","description":"default value will change from 200 to 10000."}]},
+	    {"id":"quiet","title":"Quiet check","status":"OK","solutions":["Do nothing."],"detectedProblems":[]}],
+	  "manualChecks":[{"id":"m","title":"Manual","description":"Check by hand.","documentationLink":"https://example/manual"}]}}`
+	report := withMySQLSide(t, state, check).Report()
+	for _, want := range []string{
+		"| サーバー変数（SHOW GLOBAL VARIABLES） | 3 件 |",
+		"| log_bin | `ON` |",
+		"| time_zone | `Asia/Tokyo` |",
+		"| gtid_mode | （この版には無い） |",
+		"| Retrieved_Gtid_Set | uuid:1-5 |", // SHOW REPLICA STATUS の全列
+		"| app | legacy | MyISAM | Dynamic | 1200 | 1.0 MiB | 2.0 KiB | 2020-01-01 00:00:00 | — |",
+		"合計サイズ（データ＋インデックス）: 1.0 MiB",
+		"| チェッカーが見た接続先 | `restored:3306` |",
+		"| New defaults（`sysVarsNewDefaults`） | OK | 0 | 1 | 0 |",
+		"| Warning | `sysVarsNewDefaults` | SystemVariable | innodb_io_capacity | default value will change from 200 to 10000. | `200` |",
+		// 問題が無い検査も説明・対処を載せる（英語のまま）。
+		"- **Quiet check**（`quiet`。状態 OK、検出 0 件）\n  - 対処: Do nothing.",
+		"  - 説明: Following variables change.\n  - 資料: https://example/doc",
+		"- **Manual**（`m`）\n  - 説明: Check by hand.\n  - 資料: https://example/manual",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("レポートに %q が無い", want)
+		}
+	}
+}
+
+// 変数を持たない古い収集結果でも落ちず、未収集と示すこと。
+func TestMySQLSideWithoutVariables(t *testing.T) {
+	check := `{"report":{"checksPerformed":[{"id":"sysVarsNewDefaults","title":"N","status":"OK",
+	  "detectedProblems":[{"level":"Warning","dbObject":"x","dbObjectType":"SystemVariable","description":"d"}]}]}}`
+	report := withMySQLSide(t, `{"version":"8.0.39","replica_status":[],"non_innodb_tables":[]}`, check).Report()
+	for _, want := range []string{"未収集（この収集結果にはサーバー変数が無い。", "| d | 未収集 |"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("レポートに %q が無い", want)
 		}
 	}
 }

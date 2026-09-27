@@ -11,19 +11,15 @@
 # 2 つの使い方がある。
 #
 #   ruby scripts/lib/resolve_green_tools.rb
-#     VerifyGreen（CI）用。2 本とも探し、**ビルドはしない。**VerifyGreen は Go も
+#     VerifyGreen（CI）の buildspec 用。2 本とも探し、**ビルドはしない。**VerifyGreen は Go も
 #     外部ネットワークも持たない前提なので、見つからなければ理由と対処を出して終了コード 1。
+#     出力は `KEY='値'` の行で、呼び出し側が変数へ受けてから eval する
+#     （eval "$(...)" と 1 行で書くと失敗をすり抜ける）。診断メッセージは stderr へ出す。
 #
-#   ruby scripts/lib/resolve_green_tools.rb --build-missing <名前>...
-#     verify_green.sh 用。指定した分だけ探し、見つからなければ **その場でビルドする**
-#     （ローカル実行で環境変数を渡していない場合）。ビルド先はリポジトリの
-#     .tools/green-report/（.gitignore 済み。GREEN_TOOLS_BUILD_DIR で変えられる）。
-#     Go のビルドキャッシュが効くので毎回ビルドしても速い。
-#
-# 出力は `KEY='値'` の行で、呼び出し側が変数へ受けてから eval する
-# （eval "$(...)" と 1 行で書くと失敗をすり抜ける）。診断メッセージは stderr へ出す。
-#
-# Ruby から使う場合は require_relative して GreenTools.resolve / resolve_or_build を呼ぶ。
+#   require_relative して GreenTools.resolve_or_build
+#     verify_green.rb 用。見つからなければ **その場でビルドする**（ローカル実行で環境変数を
+#     渡していない場合）。ビルド先はリポジトリの .tools/green-report/（.gitignore 済み。
+#     GREEN_TOOLS_BUILD_DIR で変えられる）。Go のビルドキャッシュが効くので毎回ビルドしても速い。
 require 'fileutils'
 require 'shellwords'
 
@@ -100,26 +96,17 @@ end
 if $PROGRAM_NAME == __FILE__
   assignments = {}
   begin
-    if ARGV.first == '--build-missing'
-      names = ARGV.drop(1)
-      abort 'Usage: resolve_green_tools.rb [--build-missing NAME...]' if names.empty?
-      names.each do |name|
-        tool = GreenTools.tool(name)
-        assignments[tool[:variable]] = GreenTools.resolve_or_build(tool)
+    missing = false
+    GreenTools::TOOLS.each do |tool|
+      path = GreenTools.resolve(tool)
+      if path.nil?
+        GreenTools.absent(tool)
+        missing = true
+        next
       end
-    else
-      missing = false
-      GreenTools::TOOLS.each do |tool|
-        path = GreenTools.resolve(tool)
-        if path.nil?
-          GreenTools.absent(tool)
-          missing = true
-          next
-        end
-        assignments[tool[:variable]] = path
-      end
-      exit 1 if missing
+      assignments[tool[:variable]] = path
     end
+    exit 1 if missing
   rescue GreenTools::Error => e
     warn e.message
     exit 1

@@ -9,7 +9,7 @@
 // どちらか一方、または両方を指定する。
 //
 // 突き合わせ（engine / instance class / パラメータグループの関連付けと適用状態 /
-// ReplicaLag）は以前 verify_green.sh が担っていた。判定ロジックをレポート生成と
+// ReplicaLag）は以前シェル版の verify_green.sh が担っていた。判定ロジックをレポート生成と
 // 同じ場所へ集約し、**同じ材料から同じ結論が出る**ようにしてある。
 //
 // MySQL 実効値（--runtime-values）は任意である。リモートでは Green DB へ到達できない
@@ -188,7 +188,7 @@ func main() {
 	replicaLagPath := flag.String("replica-lag", "", "ReplicaLag JSON")
 	runtimeValuesPath := flag.String("runtime-values", "", "optional MySQL runtime values JSON")
 	outputPath := flag.String("output", "", "Markdown レポートの出力先（--check と併用可）")
-	// 設定ファイルの宣言値。verify_green.sh が config から解決して渡す。
+	// 設定ファイルの宣言値。verify_green.rb が config から解決して渡す。
 	// 空にした項目はその検査を行わない。
 	expectEngineVersion := flag.String("expect-engine-version", "", "設定の target_engine_version（前方一致で照合）")
 	expectInstanceClass := flag.String("expect-instance-class", "", "設定の target_db_instance_class")

@@ -21,12 +21,11 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 | 場所 | 役割 | 言語 |
 |---|---|---|
 | `tools/` | 人が手で実行するもの（Step 1・2・7、設定生成） | **Go のみ**（ロジックは `tools/internal/`、`main` は配線だけ） |
-| `scripts/*.sh` | buildspec から呼ばれるエントリポイント | **シェル。できる限り簡素に**——引数・設定の読み取り・Ruby / Go の呼び出し・終了コードだけ |
-| `scripts/*.rb`・`scripts/lib/*.rb` | パイプラインの **AWS 操作**と設定 YAML の読み取り | **Ruby**（AWS は `scripts/lib/aws_cli.rb` 経由で AWS CLI を exec。SDK は使わない） |
+| `scripts/*.rb`・`scripts/lib/*.rb` | buildspec から呼ばれる Step 3〜5 のエントリポイント（`build_green` / `verify_green` / `switchover`）と、パイプラインの **AWS 操作**・設定 YAML の読み取り | **Ruby**（AWS は `scripts/lib/aws_cli.rb` 経由で AWS CLI を exec。SDK は使わない） |
 | `scripts/<名前>/`（Go） | パイプラインの **MySQL クエリ**と判定・レポート | **Go**（BuildReportTool がビルドし artifact で渡す） |
 
-- **シェルから `aws` / `mysql` を直接実行しない。**AWS 操作は Ruby、MySQL クエリは Go に置き、シェルはそれを呼ぶだけにする。フェーズ判定の観測も `ruby scripts/lib/migration_phase.rb observe` が行う。シェルが Ruby を呼ぶだけになるなら、シェルを作らず buildspec から `ruby scripts/<名前>.rb` を直接呼ぶ（例: `check_target_parameter_group.rb`）。
-- `.rb` は `ruby <パス>` で呼ぶ（CodePipeline の artifact で実行ビットが落ちるため。`tests/ruby_invocation_test.sh`）。同じ名前のシェル関数で包まない。
+- **パイプラインにシェルスクリプトを置かない。**buildspec は `ruby scripts/<名前>.rb` を直接呼ぶ。AWS 操作は Ruby、MySQL クエリは Go に置き、`aws` / `mysql` を buildspec から直接実行しない。唯一の例外は `scripts/resolve_go_module_root.sh`（BuildReportTool のローカル検証イメージ `golang:1.25` が Ruby を持たないため）。
+- `.rb` は `ruby <パス>` で呼ぶ（CodePipeline の artifact で実行ビットが落ちるため。`tests/ruby_invocation_test.sh`）。buildspec は chmod しない。
 - 外部コマンドの出力を `eval` するときは**変数へ受けてから 2 行で**。`eval "$(...)"` は失敗が `set -e` をすり抜ける。
 - `scripts/` と `tools/` はコードを共有しない。同じ規則を両側で持つもの（フェーズ判定・設定の読み取り・`cfn`）は、変えるときに両側を直す。
 - スクリプトに Python を書かない。背景は `docs/decisions/implementation-language-policy.md`。
@@ -42,7 +41,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - **RDS パラメータグループの変更は CloudFormation のみ。**変換ルールの正本は `config/mysql80-to-84-parameter-rules.yml`（コードではなくこれを直す）。
 - **破壊的 RDS 権限はパイプラインのどのロールも持たない。**Step 7 は人が `tools/cleanup` で行い、`actions.cleanup: approved` が無ければ何もしない。
 
-**CI**——主系は **CodePipeline + CodeBuild**（`ci/codebuild/*.yml`、`examples/rds-blue-green-deployment/codepipeline-all-in-one.yml`）。イメージは全プロジェクト `aws/codebuild/standard:7.0` 固定。`.github/workflows/` にも同じ `scripts/*.sh` を呼ぶ定義があるので、スクリプトの引数を変えたら併せて確認する。
+**CI**——主系は **CodePipeline + CodeBuild**（`ci/codebuild/*.yml`、`examples/rds-blue-green-deployment/codepipeline-all-in-one.yml`）。イメージは全プロジェクト `aws/codebuild/standard:7.0` 固定。`.github/workflows/` にも同じ `scripts/*.rb` を呼ぶ定義があるので、スクリプトの引数を変えたら併せて確認する。
 
 ## コマンド
 
@@ -54,9 +53,9 @@ go run ./tools/collect_mysql84_parameter_inputs --source-parameter-group <8.0-pg
 go run ./tools/generate_mysql84_parameter_group --input-dir <dir> --output-dir <out> --system <name> --environment <env>
 
 # Step 3〜5（CodeBuild と同じエントリポイント。pending なら何もせず正常終了）
-scripts/build_green.sh  --config config/blue-green/staging.deployment.yml --service example-service
-scripts/verify_green.sh --config config/blue-green/staging.deployment.yml --service example-service
-scripts/switchover.sh   --config config/blue-green/staging.deployment.yml --service example-service --approve
+ruby scripts/build_green.rb  --config config/blue-green/staging.deployment.yml --service example-service
+ruby scripts/verify_green.rb --config config/blue-green/staging.deployment.yml --service example-service
+ruby scripts/switchover.rb   --config config/blue-green/staging.deployment.yml --service example-service --approve
 
 # Step 7（ローカル。破壊的権限を持つロールで実行）
 go run ./tools/cleanup --config config/blue-green/staging.deployment.yml --service example-service
@@ -68,7 +67,7 @@ go run ./tools/cleanup --config config/blue-green/staging.deployment.yml --servi
 
 ```bash
 go vet ./... && go build ./... && go test ./...          # Go 全体（ゴールデンファイルとの一致を含む）
-bash -n scripts/*.sh tests/*.sh                           # シェルの構文
+bash -n scripts/*.sh tests/*.sh                           # シェルの構文（scripts/ は resolve_go_module_root.sh だけ）
 for t in tests/*_test.sh; do "$t" >/dev/null || echo "FAIL $t"; done   # シェル側のテスト一式
 tests/test_generate_blue_green_config.sh                  # 設定生成のテスト
 grep -nP '\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]' scripts/*.sh tests/*.sh   # `$VAR）` は set -u で落ちる。`${VAR}）` と書く

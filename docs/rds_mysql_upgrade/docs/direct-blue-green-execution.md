@@ -1,6 +1,6 @@
 # Blue/Green 移行スクリプトの直接実行手順
 
-本書は、CodeBuild Local Agent を使わずに `scripts/*.sh` を直接実行して、RDS for MySQL 8.0 から 8.4 への Blue/Green 移行を進める手順である。
+本書は、CodeBuild Local Agent を使わずに `scripts/*.rb` を `ruby` で直接実行して、RDS for MySQL 8.0 から 8.4 への Blue/Green 移行を進める手順である。
 
 CodeBuild Local Agent の buildspec 互換性確認は [ci/codebuild-local-verification.md](../ci/codebuild-local-verification.md) を参照する。本書は実運用の直接実行に必要な順序・安全ゲート・コマンドを対象とする。
 
@@ -20,11 +20,11 @@ CloudFormation で 8.4 パラメータグループを作成済み
   └─ 7. Cleanup（変更・旧 Blue 削除）
 ```
 
-`create_blue_green_deployment.rb` と `switchover_blue_green_deployment.rb` は、それぞれ `build_green.sh` と `switchover.sh` の内部実装である。通常運用では直接実行せず、上位スクリプトを入口とする。
+各 Step のスクリプトは、設定ファイルの `actions` が `approved` でなければ AWS を呼ばずに終わる。
 
 ## 2. 共通準備
 
-リポジトリのルートで実行する。直接実行には Bash、AWS CLI v2、Ruby、jq、GNU `date` が必要である。`verify_green.sh` は `date -d` を使うため、macOS の標準 `date` だけでは動作しない。Linux 環境または GNU coreutils を提供するコンテナで実行する。
+リポジトリのルートで実行する。直接実行には Bash、AWS CLI v2、Ruby、jq、GNU `date` が必要である。`verify_green.rb` は `date -d` を使うため、macOS の標準 `date` だけでは動作しない。Linux 環境または GNU coreutils を提供するコンテナで実行する。
 
 ```bash
 export CONFIG_FILE=config/blue-green/staging.deployment.yml
@@ -36,7 +36,7 @@ mkdir -p "$ARTIFACT_ROOT"
 # AWS の認証先・実行対象を確認する（読み取りのみ）。
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 
-# シェルスクリプトが設定 YAML を読むために必要。
+# スクリプトの実行と設定 YAML の読み取りに必要。
 # 設定 YAML の読み取りは Ruby の標準ライブラリで行う（追加導入は不要）。
 ruby --version
 # JSON の読み取りに jq を使う。無い場合は該当スクリプトが起動直後に停止する。
@@ -83,7 +83,7 @@ ruby scripts/check_target_parameter_group.rb \
 最初に `actions.build: pending` のまま実行する。保護スナップショット作成・Blue/Green 作成が行われないことを確認する。
 
 ```bash
-scripts/build_green.sh \
+scripts/build_green.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -97,7 +97,7 @@ scripts/build_green.sh \
 Step 1・2 のレビューが完了し、保護スナップショットと Green を作成してよい時点で、対象サービスの `actions.build` を `approved` に変更する。その後、同じコマンドを実行する。
 
 ```bash
-scripts/build_green.sh \
+scripts/build_green.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -116,14 +116,14 @@ Green 作成中・作成後も、切替は実行しない。`AVAILABLE` を確�
 
 ## 5. Step 3 相当: VerifyGreen
 
-`verify_green.sh` は、Green のエンジンバージョン、DB インスタンスクラス、関連付けパラメータグループ、`Source=user` 値、`ReplicaLag` を確認し、Markdown レポートを出力する。
+`verify_green.rb` は、Green のエンジンバージョン、DB インスタンスクラス、関連付けパラメータグループ、`Source=user` 値、`ReplicaLag` を確認し、Markdown レポートを出力する。
 
 ### 5-1. レポート生成器
 
-レポート生成器は Go 版だけである。**`GREEN_REPORT_GENERATOR` を指定しなければ `verify_green.sh` が一時ファイルへビルドして使う**ため、通常は何も用意しなくてよい（Go が必要）。
+レポート生成器は Go 版だけである。**`GREEN_REPORT_GENERATOR` を指定しなければ `verify_green.rb` が一時ファイルへビルドして使う**ため、通常は何も用意しなくてよい（Go が必要）。
 
 ```bash
-scripts/verify_green.sh \
+scripts/verify_green.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -136,7 +136,7 @@ scripts/verify_green.sh \
 go build -o .tools/green-report/generate_green_verification_report ./scripts/generate_green_verification_report
 
 GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" \
-  scripts/verify_green.sh \
+  scripts/verify_green.rb \
     --config "$CONFIG_FILE" \
     --service "$SERVICE_NAME" \
     --profile "$AWS_PROFILE" \
@@ -147,7 +147,7 @@ GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_rep
 
 ### 5-2. MySQL 実効値を含める場合
 
-`mysql_verification.enabled: true` にすると、`verify_green.sh` が Green DB へ接続して実効値を収集し、同じレポートの「MySQL 実効値」列を埋める。**リモート（CodeBuild）では VPC 構成が別途必要になるため、この確認はローカルから行う運用を想定している**（[decisions/implementation-language-policy.md](decisions/implementation-language-policy.md)）。実効値なしでもレポートは出力され、判定内容は変わらない。
+`mysql_verification.enabled: true` にすると、`verify_green.rb` が Green DB へ接続して実効値を収集し、同じレポートの「MySQL 実効値」列を埋める。**リモート（CodeBuild）では VPC 構成が別途必要になるため、この確認はローカルから行う運用を想定している**（[decisions/implementation-language-policy.md](decisions/implementation-language-policy.md)）。実効値なしでもレポートは出力され、判定内容は変わらない。
 
 ### 5-3. MySQL 実効値をレポートへ加える場合
 
@@ -158,7 +158,7 @@ read -rs -p 'Green DB password: ' MYSQL_PASSWORD; echo
 export MYSQL_PASSWORD
 
 GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" \
-  scripts/verify_green.sh \
+  scripts/verify_green.rb \
     --config "$CONFIG_FILE" \
     --service "$SERVICE_NAME" \
     --profile "$AWS_PROFILE" \
@@ -168,7 +168,7 @@ GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_rep
 unset MYSQL_PASSWORD
 ```
 
-MySQL 実効値収集の有効・無効、接続方式、TLS の CA（`ssl_ca`）は config の `mysql_verification` で指定し、`verify_green.sh` がそのまま使う。別途作成した収集結果 JSON を使う場合は `verify_green.sh --runtime-values-file <file>` を渡す。
+MySQL 実効値収集の有効・無効、接続方式、TLS の CA（`ssl_ca`）は config の `mysql_verification` で指定し、`verify_green.rb` がそのまま使う。別途作成した収集結果 JSON を使う場合は `verify_green.rb --runtime-values-file <file>` を渡す。
 
 ## 6. Step 4 相当: 切替前の人手検証
 
@@ -186,7 +186,7 @@ MySQL 実効値収集の有効・無効、接続方式、TLS の CA（`ssl_ca`�
 `actions.switchover: pending` のまま、必ず `--approve` を付けて実行する。`--approve` は CLI の安全ゲート、`actions.switchover` は設定上の安全ゲートであり、両方が必要である。
 
 ```bash
-scripts/switchover.sh \
+scripts/switchover.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -201,7 +201,7 @@ scripts/switchover.sh \
 切替前の検証完了を承認した後にのみ `actions.switchover` を `approved` に変更し、同じコマンドを実行する。
 
 ```bash
-scripts/switchover.sh \
+scripts/switchover.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -259,16 +259,16 @@ unset MYSQL_PASSWORD
 
 この処理は `SWITCHOVER_COMPLETED`、旧 Blue の削除保護、旧 Blue の逆方向レプリケーション停止を確認してから、deployment の削除と旧 Blue の最終スナップショット付き削除を開始する。`--mysql-user` を省略すると逆方向レプリケーション確認をスキップして警告だけを出すため、削除実行では指定することを推奨する。成果物の `delete-*.json` と最終スナップショット識別子を保存する。
 
-## 10. 収集スクリプト・内部スクリプトの扱い
+## 10. 各スクリプトの扱い
 
 | スクリプト | 直接実行する場面 |
 | --- | --- |
 | `collect_blue_green_prereqs` | Step 1 の成立条件チェック（収集）。一括収集や個別の読み取り確認は [tools/collect_blue_green_prereqs.md](../tools/collect_blue_green_prereqs.md) を参照。 |
 | `collect_mysql84_parameter_inputs` | Step 2 のパラメータグループ生成入力の収集。Phase 1 手順書を参照。 |
 | `check_target_parameter_group.rb` | 本書の Step 1。BuildGreen の直前に実行。 |
-| `build_green.sh` | 本書の Step 2 の入口。内部で `create_blue_green_deployment.rb` を呼ぶ。 |
-| `verify_green.sh` | 本書の Step 3 の入口。準備（フェーズの観測・AWS の状態・MySQL 実効値の収集）は `prepare_green_verification.rb`、判定とレポートは Go の判定器が行う。 |
-| `switchover.sh` | 本書の Step 5 の入口。内部で `switchover_blue_green_deployment.rb` を呼ぶ。 |
+| `build_green.rb` | 本書の Step 2。 |
+| `verify_green.rb` | 本書の Step 3。フェーズの観測・AWS の状態・MySQL 実効値の収集までを行い、判定とレポートは Go の判定器が行う。 |
+| `switchover.rb` | 本書の Step 5。 |
 | `cleanup`（`tools/cleanup/`。Go） | 本書の Step 7 の入口。 |
 
 ## 11. 実行後に保管するもの

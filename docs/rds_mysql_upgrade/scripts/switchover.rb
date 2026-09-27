@@ -1,15 +1,19 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# Step 5 内部処理: switchover.sh から呼ばれる。移行元に対応する Blue/Green Deployment を
-# 切り替え、**切替完了まで待つ**（冪等）。本番トラフィックに影響するため --approve を必須とする。
+# Step 5: 設定ファイルの switchover: approved を前提に、Blue/Green Deployment を切り替え、
+# **切替完了まで待つ**（冪等）。本番トラフィックに影響するため --approve を必須とする。
+# buildspec（ci/codebuild/switchover.yml）から `ruby` で直接呼ぶ。
 #
-# switchover.sh がフェーズ判定（冪等性の第 1 層。切替済みなら何もしない）を済ませてから呼ぶ。
-# ここは第 2 層（安全弁）で、Deployment の Status で分岐する。
+# 冪等性の担保は二層で行う。
+#   ① 結果の観測: 移行元インスタンスのエンジンバージョンとパラメータグループ
+#      （lib/migration_phase.rb）。切替後は <source_id> が green（8.4 + 新 PG）を指すため、
+#      切替の有無が直接現れる。Deployment が cleanup で削除された後も判定できる。
+#   ② 安全弁: Deployment の Status で分岐する。
 #
 #   AVAILABLE               切り替え、SWITCHOVER_COMPLETED まで待つ
 #   SWITCHOVER_IN_PROGRESS  既に切替が走っている。API を二重に呼ばず完了だけを待つ
-#                           （リネームは完了時に行われるため、進行中は第 1 層だけでは
+#                           （リネームは完了時に行われるため、進行中は ① だけでは
 #                           「まだ切替前」と誤認する）
 #   それ以外                止める
 #   存在しない              止める（Step 3 が未実行か、誤って削除されている）
@@ -17,16 +21,18 @@
 # Deployment ID は設定ファイルに持たず、移行元の ARN で毎回 AWS から引き当てる（中核ルール）。
 # 変更操作は `# [変更]` の 1 か所（switchover-blue-green-deployment）だけである。
 #
-# 終了コード: 0 切替完了に到達 / 1 到達しておらず自動では到達できない / 2 引数の誤り
+# 終了コード: 0 切替完了に到達（実行したかは問わない。pending なら何もせず 0）
+#             1 到達しておらず自動では到達できない / 2 引数の誤り
 require 'fileutils'
 require 'optparse'
 require 'tmpdir'
 
 require_relative 'lib/aws_cli'
 require_relative 'lib/deployment_config'
+require_relative 'lib/migration_phase'
 
 USAGE = <<~USAGE
-  Usage: switchover_blue_green_deployment.rb --config FILE --service NAME --approve [options]
+  Usage: switchover.rb --config FILE --service NAME --approve [options]
     --config FILE                環境別設定ファイル（必須）
     --service NAME               config の services 配下に定義したサービス名（必須）
     --approve                    本番トラフィックに影響する操作を明示承認する必須フラグ
@@ -82,6 +88,7 @@ save = ->(name) { File.join(output_dir, name) }
 begin
   config = DeploymentConfig.load(options[:config])
   service = config.service(options[:service])
+  approved = service.optional('actions.switchover', 'pending')
   source_id = service.required('source_db_instance_identifier')
   # RDS に渡す切替タイムアウト（秒）。切替そのものの上限で、待機の上限とは別物である。
   switchover_timeout = service.optional('actions.switchover_timeout', '300')
@@ -96,8 +103,32 @@ unless switchover_timeout.match?(/\A[0-9]+\z/)
   exit 1
 end
 
+# 承認の宣言が無ければ AWS を呼ばずに終わる。
+unless approved == 'approved'
+  puts 'switchover: pending; no changes made.'
+  exit 0
+end
+
 aws = AwsCli.new(region: region, profile: profile)
 
+# --- 第 1 層: 結果の観測 -------------------------------------------------------
+begin
+  seen = MigrationPhase.observe(config, options[:service], aws)
+rescue DeploymentConfig::Error, AwsCli::Error => e
+  warn e.message
+  exit 1
+end
+case seen.phase
+when MigrationPhase::POST
+  puts "Switchover already completed: #{seen.source_id} is #{seen.current_version} with #{seen.current_group}."
+  exit 0
+when MigrationPhase::UNKNOWN
+  warn '移行元が移行前・移行後のいずれの宣言とも一致しない。設定の誤りか想定外のドリフトである。'
+  warn MigrationPhase.describe_inputs(seen.current_version, seen.current_group, *seen.declared)
+  exit 1
+end
+
+# --- 第 2 層: 安全弁（Deployment の状態）と切替・完了待ち -----------------
 # SWITCHOVER_COMPLETED になるまで待つ。AWS CLI に Blue/Green 用の waiter は無い。
 # SWITCHOVER_IN_PROGRESS 以外になったら、待っても完了しないので打ち切る。
 wait_for_switchover = lambda do |deployment_identifier|
@@ -142,7 +173,7 @@ begin
   deployment = deployments.dig('BlueGreenDeployments', 0)
   if deployment.nil?
     warn "Blue/Green Deployment not found for #{source_id} (phase: pre_switchover)."
-    warn 'Step 3（build_green.sh）が完了しているか確認する。'
+    warn 'Step 3（build_green.rb）が完了しているか確認する。'
     exit 1
   end
   deployment_identifier = deployment['BlueGreenDeploymentIdentifier']

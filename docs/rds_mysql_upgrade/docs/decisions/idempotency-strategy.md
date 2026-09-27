@@ -43,7 +43,7 @@ PROVISIONING → AVAILABLE → SWITCHOVER_IN_PROGRESS → SWITCHOVER_COMPLETED �
 | 切替前 | 8.0 ＋ 旧パラメータグループ |
 | 切替後 | **8.4 ＋ 新パラメータグループ** |
 
-これは Deployment というリソースの状態ではなく、**達成したい結果そのものを直接観測している。** 決定的な利点は、**Deployment が削除された後も判定できる**ことである。cleanup 実行後は `describe-blue-green-deployments` が何も返さないため、状態機械だけに頼る現行の `switchover.sh` は `exit 1`（Deployment not found）になる。バージョン基準なら「既に 8.4 なので完了済み」と正しく `exit 0` を返せる。
+これは Deployment というリソースの状態ではなく、**達成したい結果そのものを直接観測している。** 決定的な利点は、**Deployment が削除された後も判定できる**ことである。cleanup 実行後は `describe-blue-green-deployments` が何も返さないため、状態機械だけに頼る現行の `switchover.rb` は `exit 1`（Deployment not found）になる。バージョン基準なら「既に 8.4 なので完了済み」と正しく `exit 0` を返せる。
 
 ### 既存の暗黙のガードを明示化することでもある
 
@@ -71,13 +71,13 @@ services:
 
 **エンジンバージョンは `major.minor` へ正規化してから比較する。** 厳密一致にすると、RDS の自動マイナーバージョンアップグレードで `8.0.44` が `8.0.46` になった瞬間にパイプラインが止まる。
 
-当初は前方一致（`verify_green.sh` の `[[ "$green" == "$target"* ]]` に倣う）を想定したが、**テーブル駆動テストで破綻が見つかった。** `target_engine_version` は `create-blue-green-deployment` の `--target-engine-version` へ渡す都合で完全なパッチ版（`8.4.10`）を宣言する必要があり、前方一致では切替後のパッチ更新（`8.4.11`）を弾いてしまう。
+当初は前方一致（`verify_green.rb` の `[[ "$green" == "$target"* ]]` に倣う）を想定したが、**テーブル駆動テストで破綻が見つかった。** `target_engine_version` は `create-blue-green-deployment` の `--target-engine-version` へ渡す都合で完全なパッチ版（`8.4.10`）を宣言する必要があり、前方一致では切替後のパッチ更新（`8.4.11`）を弾いてしまう。
 
 ```
 移行後・自動パッチ更新後   8.4.11 vs 8.4.10*  -> unknown（誤判定）
 ```
 
-本判定の目的は「旧メジャーバージョンか新メジャーバージョンか」の判別であり、`major.minor` がちょうど必要な粒度である。パッチレベルの厳密な検証は `create_blue_green_deployment.sh` と `verify_green.sh` が別途行うため、ここで担う必要はない。
+本判定の目的は「旧メジャーバージョンか新メジャーバージョンか」の判別であり、`major.minor` がちょうど必要な粒度である。パッチレベルの厳密な検証は `build_green.rb` と `verify_green.rb` が別途行うため、ここで担う必要はない。
 
 パラメータグループ名は正規化の余地がないため厳密一致とする。移行と無関係に blue の PG を差し替えた場合は止まるが、その場合は止まるべきである。
 
@@ -105,7 +105,7 @@ services:
 | あるべき姿 | 冪等性の議論対象外。代わりに**結果の鮮度**を管理する |
 | 基準 | 変更しないこと自体が保証。判定入力を保存し、同じ判定を再現できること |
 
-実際の課題は冪等性ではなく鮮度である。`metadata.json` は `collected_at` を持つが、**後続の `build_green.sh` はこれを参照しない。** 1 か月前の成立条件チェックの結果のまま build を実行できてしまう。
+実際の課題は冪等性ではなく鮮度である。`metadata.json` は `collected_at` を持つが、**後続の `build_green.rb` はこれを参照しない。** 1 か月前の成立条件チェックの結果のまま build を実行できてしまう。
 
 収集（`collect_blue_green_prereqs`）と判定（`evaluate_blue_green_prereqs`）を分離している設計は既に正しく、同じ JSON に対して何度でも同じ判定が出る。これは冪等性より価値のある性質である。
 
@@ -217,7 +217,7 @@ aws ... rds delete-db-instance ...             # ② ここで失敗したら？
 final_snapshot_id="${source_id}-final-$(date -u +%Y%m%d%H%M%S)"
 ```
 
-再実行のたびに別名になるため、リトライで複数のスナップショットが作られうる。`build_green.sh` が `protection_snapshot_identifier` を固定名で持ち存在確認できるのと対照的である。
+再実行のたびに別名になるため、リトライで複数のスナップショットが作られうる。`build_green.rb` が `protection_snapshot_identifier` を固定名で持ち存在確認できるのと対照的である。
 
 **あるべき姿**: 望ましい終了状態を「Deployment が存在せず、**かつ**旧 Blue が存在しない」と定義し、**リソースごとに独立して判定する。**
 

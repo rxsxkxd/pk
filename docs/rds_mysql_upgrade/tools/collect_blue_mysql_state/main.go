@@ -2,8 +2,9 @@
 //
 // 集めるもの（読み取りだけで、設定を変更しない）:
 //   - version / binlog_format の実効値（0-1-02）
+//   - SHOW GLOBAL VARIABLES の全件（判定には使わない。レポートの参考値）
 //   - SHOW REPLICA STATUS（0-1-06 外部 binlog レプリカ。要 REPLICATION CLIENT 権限）
-//   - ユーザースキーマの InnoDB 以外のテーブル（移行ガイドの 0-2。MyISAM の棚卸し）
+//   - ユーザースキーマの InnoDB 以外のテーブル（移行ガイドの 0-2。MyISAM の棚卸し。行数・サイズつき）
 //
 // 収集ロジックは internal/mysqlcli にある。ここは CLI の配線だけを持つ。**判定はしない。**
 // 出力は --output-dir へ blue-mysql-state.json として書く。collect_blue_green_prereqs の

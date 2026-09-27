@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 3（build_green.sh → create_blue_green_deployment.rb）の分岐のテスト。
+# Step 3（scripts/build_green.rb）の分岐のテスト。
 # AWS へは接続しない（PATH 上の aws を偽物に差し替える）。
 #
 # 確かめること:
@@ -68,12 +68,8 @@ existing() {  # $1=Status
   printf '{"BlueGreenDeployments":[{"BlueGreenDeploymentIdentifier":"bgd-old","Status":"%s"}]}\n' "$1" > "$fake/deployments.json"
 }
 
-run_build() {
-  PATH="$fake:$PATH" bash scripts/build_green.sh --config "$1" --service "$service" \
-    --output-dir "$fake/out" >"$fake/stdout" 2>"$fake/stderr"
-}
-run_create() {
-  PATH="$fake:$PATH" ruby scripts/create_blue_green_deployment.rb --config "$config" --service "$service" \
+run_build() {  # $1=設定（省略時は承認済みのもの）。待機は間隔 0 で回す
+  PATH="$fake:$PATH" ruby scripts/build_green.rb --config "${1:-$config}" --service "$service" \
     --output-dir "$fake/out" --poll-interval-seconds 0 >"$fake/stdout" 2>"$fake/stderr"
 }
 
@@ -93,10 +89,9 @@ expect() {  # $1=説明 $2=実際の終了コード $3=期待 $4=作成を呼ぶ
   fi
 }
 
-# --- 第 1 層（build_green.sh）---------------------------------------------
+# --- 第 1 層（承認とフェーズガード）------------------------------------------
 make_fake pending
-PATH="$fake:$PATH" bash scripts/build_green.sh --config config/blue-green/staging.deployment.yml \
-  --service "$service" --output-dir "$fake/out" >"$fake/stdout" 2>"$fake/stderr"
+run_build config/blue-green/staging.deployment.yml
 st=$?; [[ -f "$fake/calls.log" ]] && fail 'pending: AWS を呼ばない' "$(cat "$fake/calls.log")" || expect 'pending: 何もせず成功' $st 0 no no 'no changes made'
 
 make_fake post
@@ -112,10 +107,10 @@ make_fake available; existing AVAILABLE
 run_build "$config"; expect '既存 AVAILABLE: 作成しない' $? 0 no no 'already available: bgd-old'
 
 make_fake provisioning; existing PROVISIONING; printf 'PROVISIONING\nAVAILABLE\n' > "$fake/statuses"
-run_create; expect '既存 PROVISIONING: 作成せず AVAILABLE を待つ' $? 0 no no 'Deployment identifier: bgd-old'
+run_build; expect '既存 PROVISIONING: 作成せず AVAILABLE を待つ' $? 0 no no 'Deployment identifier: bgd-old'
 
 make_fake provisioning-fails; existing PROVISIONING; printf 'PROVISIONING\nINVALID_CONFIGURATION\n' > "$fake/statuses"
-run_create; expect '既存 PROVISIONING → 失敗: 止める' $? 1 no no 'did not become available'
+run_build; expect '既存 PROVISIONING → 失敗: 止める' $? 1 no no 'did not become available'
 
 make_fake invalid; existing INVALID_CONFIGURATION
 run_build "$config"; expect '既存 INVALID_CONFIGURATION: 作成せず止める' $? 1 no no 'not usable: bgd-old'
@@ -149,10 +144,15 @@ run_build "$config"; expect '新規・パラメータグループが 8.4 でな�
 
 make_fake not80
 set_source 5.7.44 "$spg"
-run_create; expect '新規・移行元が 8.0 でない: 作成しない' $? 1 no no 'must be MySQL 8.0'
+run_build; expect '新規・移行元が 8.0 でない: フェーズガードで止める' $? 1 no no 'いずれの宣言とも一致しない'
+# 設定まで 5.7 と宣言していればフェーズガードは通る。作成前の検査が 2 段目として止めること。
+sed "s/source_engine_version: .*/source_engine_version: \"5.7\"/" "$config" > "$work/config-57.yml"
+make_fake not80-declared
+set_source 5.7.44 "$spg"
+run_build "$work/config-57.yml"; expect '新規・設定も 5.7: 作成前の検査で止める' $? 1 no no 'must be MySQL 8.0'
 
 make_fake new-fails; printf 'PROVISIONING\nINVALID_CONFIGURATION\n' > "$fake/statuses"
-run_create; expect '新規作成後に失敗: 止める' $? 1 yes yes 'did not become available'
+run_build; expect '新規作成後に失敗: 止める' $? 1 yes yes 'did not become available'
 
 echo
 if [[ "$failed" -eq 0 ]]; then echo 'すべて期待どおり。'; exit 0; fi

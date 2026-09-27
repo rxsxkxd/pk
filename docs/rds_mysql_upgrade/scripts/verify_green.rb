@@ -1,39 +1,35 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 #
-# Step 4 の準備: verify_green.sh から呼ばれ、判定器（Go の generate_green_verification_report）へ
-# 渡す材料をそろえる。**判定はしない。**
+# Step 4: Green の RDS 構成と ReplicaLag を検証する。buildspec（ci/codebuild/verify-green.yml）
+# から `ruby` で直接呼ぶ。**判定はここでは持たない**——材料をそろえて Go の判定器へ渡す。
 #
 #   1. 設定を読む（宣言値・テンプレートのパス・リージョン）
 #   2. 移行フェーズを観測する（lib/migration_phase.rb）。切替済みなら検証対象は無いので、
-#      VERIFY=skip を返して終わる（後始末フェーズで再実行しても落ちないように）
+#      何もせず成功する（後始末フェーズで再実行しても落ちないように）
 #   3. 検証に要る AWS の状態を集めて --output-dir へ書く（lib/green_state.rb）。
 #      Deployment が無い／AVAILABLE でなければここで止まる
 #   4. Green の MySQL 実効値を集める（collect_green_runtime_values.rb。任意）。
 #      --runtime-values-file を渡せば収集しない
-#
-# 標準出力には、呼び出し側が変数へ受けてから eval する代入行だけを出す。
-# 進み具合と理由は標準エラーへ出す（実効値の収集が出す案内や対話入力も標準エラーへ回す）。
-#
-#   VERIFY                   run / skip
-#   DEPLOYMENT_ID            引き当てた Blue/Green Deployment
-#   TEMPLATE                 移行先パラメータグループの CloudFormation テンプレート
-#   EXPECT_ENGINE_VERSION / EXPECT_INSTANCE_CLASS / EXPECT_PARAMETER_GROUP  設定の宣言値
-#   RUNTIME_VALUES           MySQL 実効値の JSON（収集しなかったら空）
+#   5. 判定器（Go の generate_green_verification_report）を --check と --output で呼ぶ。
+#      不適合ならレポートの「0. 検証結果」に出たうえで終了コード 1。バイナリの場所は
+#      lib/resolve_green_tools.rb が決める（CI は GREEN_REPORT_GENERATOR で受け取り、
+#      指定の無いローカル実行でだけその場でビルドする）
 #
 # AWS は読み取りだけで、SDK ではなく AWS CLI を exec する（lib/aws_cli.rb）。
-# 終了コード: 0 材料がそろった、または検証対象なし / 1 そろわない / 2 引数の誤り
+# 終了コード: 0 検証を通った、または検証対象なし / 1 不適合・材料がそろわない / 2 引数の誤り
 require 'fileutils'
 require 'optparse'
 require 'rbconfig'
-require 'shellwords'
+require 'tmpdir'
 
 require_relative 'lib/aws_cli'
 require_relative 'lib/deployment_config'
 require_relative 'lib/green_state'
 require_relative 'lib/migration_phase'
+require_relative 'lib/resolve_green_tools'
 
-USAGE = 'Usage: prepare_green_verification.rb --config FILE --service NAME --output-dir DIR ' \
+USAGE = 'Usage: verify_green.rb --config FILE --service NAME [--output-dir DIR] ' \
         '[--region REGION] [--profile PROFILE] [--runtime-values-file FILE | --mysql-user USER [--mysql-password-env NAME]]'
 
 options = { region: '', profile: '', runtime_values_file: '', mysql_user: '', mysql_password_env: 'MYSQL_PASSWORD' }
@@ -56,19 +52,16 @@ rescue OptionParser::ParseError => e
   warn USAGE
   exit 2
 end
-%i[config service output_dir].each do |key|
+%i[config service].each do |key|
   next unless options[key].to_s.empty?
 
   warn "--#{key.to_s.tr('_', '-')} is required."
   warn USAGE
   exit 2
 end
-output_dir = options[:output_dir]
+output_dir = options[:output_dir].to_s
+output_dir = Dir.mktmpdir('rds-bg-verify') if output_dir.empty?
 FileUtils.mkdir_p(output_dir)
-
-def emit(values)
-  values.each { |name, value| puts "#{name}=#{Shellwords.escape(value.to_s)}" }
-end
 
 begin
   # --- 1. 設定 -------------------------------------------------------------
@@ -86,9 +79,8 @@ begin
   # 切替後は移行元識別子が green（新 Blue）を指し、Deployment は既に SWITCHOVER_COMPLETED である。
   seen = MigrationPhase.observe(config, options[:service], aws, save: File.join(output_dir, 'source.json'))
   if seen.phase == MigrationPhase::POST
-    warn "Already switched over: #{seen.source_id} is #{seen.current_version} with #{seen.current_group}."
-    warn 'Green の検証は切替前に行うものであり、検証対象はない。'
-    emit('VERIFY' => 'skip')
+    puts "Already switched over: #{seen.source_id} is #{seen.current_version} with #{seen.current_group}."
+    puts 'Green の検証は切替前に行うものであり、検証対象はない。'
     exit 0
   end
   if seen.phase == MigrationPhase::UNKNOWN
@@ -107,8 +99,7 @@ end
 
 # --- 4. MySQL 実効値（任意） ---------------------------------------------------
 # 収集するか・接続情報の解決は collect_green_runtime_values.rb が設定の mysql_verification を
-# 読んで決める。無効なら何もせず、出力ファイルも作らない。対話入力があり得るので別プロセスにし、
-# その標準出力は標準エラーへ回す（こちらの標準出力は代入行専用のため）。
+# 読んで決める。無効なら何もせず、出力ファイルも作らない。対話入力があり得るので別プロセスにする。
 runtime_values = options[:runtime_values_file]
 if runtime_values.empty?
   runtime_path = File.join(output_dir, 'green-runtime-values.json')
@@ -117,13 +108,32 @@ if runtime_values.empty?
              '--config', options[:config], '--service', options[:service], '--host', state.green_endpoint,
              '--region', region, '--profile', profile, '--output', runtime_path]
   command += ['--mysql-user', options[:mysql_user], '--mysql-password-env', options[:mysql_password_env]] unless options[:mysql_user].empty?
-  unless system(*command, out: $stderr)
+  unless system(*command)
     warn 'MySQL 実効値の収集に失敗した。'
     exit 1
   end
   runtime_values = File.exist?(runtime_path) ? runtime_path : ''
 end
 
-emit('VERIFY' => 'run', 'DEPLOYMENT_ID' => state.deployment_id, 'TEMPLATE' => template,
-     'EXPECT_ENGINE_VERSION' => target_engine_version, 'EXPECT_INSTANCE_CLASS' => target_instance_class,
-     'EXPECT_PARAMETER_GROUP' => target_parameter_group, 'RUNTIME_VALUES' => runtime_values)
+# --- 5. 判定とレポート（Go。--check と --output の併用） -------------------------
+# CloudFormation テンプレートの読み取り（scripts/internal/cfn）を実効値の収集器と
+# 共有するため、判定は Go に置いている。
+begin
+  generator = GreenTools.resolve_or_build(GreenTools.tool('generate_green_verification_report'))
+rescue GreenTools::Error => e
+  warn e.message
+  exit 1
+end
+report_args = ['--check', '--input-dir', output_dir, '--template', template,
+               '--expect-engine-version', target_engine_version,
+               '--expect-instance-class', target_instance_class,
+               '--expect-parameter-group', target_parameter_group,
+               '--output', File.join(output_dir, 'green-verification-report.md')]
+report_args += ['--runtime-values', runtime_values] unless runtime_values.empty?
+passed = system(generator, *report_args)
+puts "Artifacts: #{output_dir}"
+unless passed
+  warn 'VERIFY FAILED: レポートの「0. 検証結果」を確認する。'
+  exit 1
+end
+puts "VERIFY PASSED: #{state.deployment_id}"

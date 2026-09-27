@@ -24,9 +24,6 @@ phases:
       # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
       - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
       - ruby --version
-      # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
-      # 落ちていれば復元し、落ちていなければ何も変わらない。
-      - chmod +x scripts/*.sh
   build:
     commands:
       # eval で shell 変数にした後、exported-variables として拾わせるため export する。
@@ -36,7 +33,10 @@ phases:
       # いったん変数へ受けて失敗を捕まえる。
       - |
         set -eu
-        approvals=$(scripts/read_action_approvals.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME")
+        # 未定義のアクションは pending として扱う（承認されていない側に倒す）。
+        approvals=$(ruby scripts/lib/deployment_config.rb vars "$CONFIG_FILE" "$SERVICE_NAME" \
+          BUILD_APPROVED=optional:service.actions.build=pending \
+          SWITCHOVER_APPROVED=optional:service.actions.switchover=pending)
         eval "$approvals"
         export BUILD_APPROVED SWITCHOVER_APPROVED
       - |

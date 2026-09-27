@@ -56,7 +56,7 @@ Step の詳細を掘り下げる際に参照する:
 - [config-blue-green-generation-design.md](docs/config-blue-green-generation-design.md) — RDS インベントリと人が管理する対応表から Blue/Green 設定 YAML を生成する支援ツールの最小設計
 - [report-generation-flows.md](report-generation-flows.md) — **レポート生成の全体像**。3 つの生成器（設定レビュー / パラメータ変換 / Green 検証）の役割・入力・実行タイミングを図で整理
 - [migration-catalog-er.md](docs/migration-catalog-er.md) — 移行カタログ(アプリケーション、接続、環境、パラメータグループ)の ER 図。YAML 構造の正本
-- [direct-blue-green-execution.md](docs/direct-blue-green-execution.md) — `scripts/*.sh` を直接実行する場合の、構築前チェック（移行先パラメータグループの確認）から後始末までの一連手順
+- [direct-blue-green-execution.md](docs/direct-blue-green-execution.md) — `scripts/*.rb` を直接実行する場合の、構築前チェック（移行先パラメータグループの確認）から後始末までの一連手順
 - [ci/verify-green-vpc-architecture.md](ci/verify-green-vpc-architecture.md) — Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だけを RDS のある VPC 内へ置く構成（図つき）
 - [ci/verify-green-security-group-setup.md](ci/verify-green-security-group-setup.md) — 上記構成で必要なセキュリティグループの設定手順（テンプレートは SG を作らない）
 - [ci/build-report-tool-troubleshooting.md](ci/build-report-tool-troubleshooting.md) — Go ビルド（BuildReportTool）が失敗したときの切り分け。ログの何を見て何をするかの対応表
@@ -67,11 +67,11 @@ Step の詳細を掘り下げる際に参照する:
 
 ## Step 3〜5 の実行方式
 
-BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、実行目的に応じて次の三つの方式を使い分ける。実行方式が違っても、各 Step が呼び出すシェルスクリプトと設定 YAML は共通である。
+BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、実行目的に応じて次の三つの方式を使い分ける。実行方式が違っても、各 Step が呼び出す Ruby スクリプトと設定 YAML は共通である。
 
 | 実行方式 | 主な用途 | 実行対象 | 起動元 |
 |---|---|---|---|
-| スクリプト直接ローカル実行 | 個別スクリプトの切り分け・日常確認 | `scripts/{build_green,verify_green,switchover}.sh` | シェルスクリプトを直接起動 |
+| スクリプト直接ローカル実行 | 個別スクリプトの切り分け・日常確認 | `scripts/{build_green,verify_green,switchover}.rb` | `ruby` で直接起動 |
 | CodeBuild Local Agent | buildspec・環境変数・artifact・Docker を含む CodeBuild 互換性確認 | `ci/codebuild/{build-green,verify-green,switchover}.yml` | Local Agent 経由で buildspec を起動 |
 | AWS CodeBuild / GitHub Actions | CI 上の継続的な検証 | CodeBuild buildspec / GitHub Actions workflow | リモート CI から起動 |
 

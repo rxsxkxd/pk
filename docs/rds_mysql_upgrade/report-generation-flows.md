@@ -164,11 +164,11 @@ AWS を実際に叩くのは収集側だけである。
 
 | 収集するもの | AWS CLI の呼び出し回数 |
 |---|---|
-| `scripts/verify_green.sh` | 1（フェーズ判定のみ） |
-| `scripts/lib/green_state.rb`（Ruby。`prepare_green_verification.rb` から使う） | 7 |
+| `scripts/verify_green.rb` | 1（フェーズ判定のみ） |
+| `scripts/lib/green_state.rb`（Ruby。`verify_green.rb` から使う） | 7 |
 | `tools/cleanup/` | 12 |
 | `go run ./tools/collect_blue_green_prereqs` | 12 |
-| `scripts/build_green.sh` | 10 |
+| `scripts/build_green.rb` | 10 |
 | `go run ./tools/collect_mysql84_parameter_inputs` | 6 |
 | `tools/internal/collect`（Go。`exec.Command("aws", ...)`） | インスタンス数に依存 |
 
@@ -238,7 +238,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    AWS[("AWS")] -->|"describe-db-instances<br/>describe-blue-green-deployments<br/>describe-db-parameters<br/>get-metric-statistics<br/>計 14 回"| VG["scripts/verify_green.sh"]
+    AWS[("AWS")] -->|"describe-db-instances<br/>describe-blue-green-deployments<br/>describe-db-parameters<br/>get-metric-statistics<br/>計 14 回"| VG["scripts/verify_green.rb"]
     VG --> J1[("green-db-instance.json")]
     VG --> J2[("deployment.json")]
     VG --> J3[("green-user-parameters.json<br/>green-system-parameters.json<br/>green-all-parameters.json")]
@@ -271,7 +271,7 @@ flowchart TB
 
 ### 検証とレポートをフラグで選ぶ
 
-**この生成器は突き合わせも行う。**以前は `verify_green.sh` がシェルで判定していたが、**レポートと同じ場所へ集約**した。同じ材料から同じ結論が出るようにするためである。
+**この生成器は突き合わせも行う。**以前はシェル版の `verify_green.sh` が判定していたが、**レポートと同じ場所へ集約**した。同じ材料から同じ結論が出るようにするためである。
 
 | フラグ | 動作 |
 |---|---|

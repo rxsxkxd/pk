@@ -15,25 +15,25 @@ Blue/Green Deployment は CloudFormation カスタムリソースを使わず、
 ## Green の作成
 
 ```bash
-scripts/build_green.sh \
+scripts/build_green.rb \
   --config config/blue-green/staging.deployment.yml \
   --service example-service
 ```
 
-設定の `actions.build: approved` が無ければ何もしない。移行元に対応する Deployment があれば作り直さず、無ければ保護スナップショットを確保してから作成し、`AVAILABLE` になるまで待機して終了する（内部で `scripts/create_blue_green_deployment.rb` を呼ぶ）。応答 JSON は一時ディレクトリに保存される。完了後に Green の接続、レプリケーション、アプリケーション、性能を検証する。
+設定の `actions.build: approved` が無ければ何もしない。移行元に対応する Deployment があれば作り直さず、無ければ保護スナップショットを確保してから作成し、`AVAILABLE` になるまで待機して終了する（内部で `scripts/build_green.rb` を呼ぶ）。応答 JSON は一時ディレクトリに保存される。完了後に Green の接続、レプリケーション、アプリケーション、性能を検証する。
 
 ## 切替
 
 検証完了後のみ実行する。Deployment 識別子は指定しない（移行元から毎回引き当てる）。
 
 ```bash
-scripts/switchover.sh \
+scripts/switchover.rb \
   --config config/blue-green/staging.deployment.yml \
   --service example-service \
   --approve
 ```
 
-設定の `actions.switchover: approved` と `--approve` の両方が無ければ、切替操作は実行されない。切替済みなら何もせず成功し、実行した場合は切替完了まで待つ（内部で `scripts/switchover_blue_green_deployment.rb` を呼ぶ）。
+設定の `actions.switchover: approved` と `--approve` の両方が無ければ、切替操作は実行されない。切替済みなら何もせず成功し、実行した場合は切替完了まで待つ（内部で `scripts/switchover.rb` を呼ぶ）。
 
 `aws_region` は環境設定から取得する。ローカルで名前付きプロファイルを使う場合だけ、コマンドの `--profile` を指定する。GitHub Actions では OIDC で取得した一時認証情報を使用する。
 
@@ -74,6 +74,6 @@ curl -o /absolute/path/to/act-assets/awscli/awscli-exe-linux-aarch64.zip \
 
 Step 3 と Step 5 は設定ファイルの `actions.build`／`actions.switchover` が `approved` の場合だけ変更操作を実行する。Step 5 は GitHub Environment の Required reviewers も設定する。
 
-Step 4 の `verify_green.sh` は成果物 `green-verification-report.md` を出力する。このレポートには CloudFormation YAML の宣言値、RDS パラメータグループの `Source=user`／`Source=system`、Green DB へのパラメータグループ関連付け・適用状態、MySQL クライアントが収集した実効値、ReplicaLag を掲載する。YAML と比較バリデーションするのは `Source=user` だけであり、実効値・system 値は人がレビューする。
+Step 4 の `verify_green.rb` は成果物 `green-verification-report.md` を出力する。このレポートには CloudFormation YAML の宣言値、RDS パラメータグループの `Source=user`／`Source=system`、Green DB へのパラメータグループ関連付け・適用状態、MySQL クライアントが収集した実効値、ReplicaLag を掲載する。YAML と比較バリデーションするのは `Source=user` だけであり、実効値・system 値は人がレビューする。
 
 `verify-green` の `collect_mysql_runtime_values` は既定で `false` である。この場合は Green DB への MySQL 接続を行わず、AWS API による構成・パラメータグループ・レプリカ遅延の確認だけを実行する。`true` を明示して起動した場合だけ、GitHub Environment ごとの Secrets `RDS_MYSQL_USER` と `RDS_MYSQL_PASSWORD` を使用して実効値を収集する。この任意実行には Green DB へネットワーク接続できる GitHub-hosted runner または self-hosted runner が必要である。パスワードは `MYSQL_PASSWORD` として MySQL クライアントの実行プロセスにだけ渡し、コマンド引数・成果物・レポートには出力しない。

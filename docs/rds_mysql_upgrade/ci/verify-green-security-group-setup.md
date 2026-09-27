@@ -211,7 +211,7 @@ aws ec2 describe-security-groups --group-ids "$SG_B" \
   --query 'SecurityGroups[0].IpPermissions[?FromPort==`3306`].UserIdGroupPairs'
 ```
 
-**Green インスタンスに実際に付いた SG も確認する。** Blue/Green Deployment の Green は Blue の設定を引き継いで作られるため通常は同じ SG になるが、`verify_green.sh` が接続するのは Green のエンドポイントなので、実測しておく。
+**Green インスタンスに実際に付いた SG も確認する。** Blue/Green Deployment の Green は Blue の設定を引き継いで作られるため通常は同じ SG になるが、`verify_green.rb` が接続するのは Green のエンドポイントなので、実測しておく。
 
 ```bash
 aws rds describe-db-instances \

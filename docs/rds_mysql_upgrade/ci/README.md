@@ -50,11 +50,11 @@ codepipeline-all-in-one.yml:
 
 ## Step 3〜5 の三つの実行方式
 
-BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、実行目的に合わせて三つの経路で使用する。実行方式が違っても、各 Step が呼び出すシェルスクリプトと設定 YAML は共通である。
+BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、実行目的に合わせて三つの経路で使用する。実行方式が違っても、各 Step が呼び出す Ruby スクリプトと設定 YAML は共通である。
 
 | 実行方式 | 主な用途 | 実行対象 | 起動元 |
 |---|---|---|---|
-| スクリプト直接ローカル実行 | 個別の AWS API 呼び出し・設定解析・判定ロジックの切り分け | `scripts/{build_green,verify_green,switchover}.sh` | シェルスクリプトを直接起動 |
+| スクリプト直接ローカル実行 | 個別の AWS API 呼び出し・設定解析・判定ロジックの切り分け | `scripts/{build_green,verify_green,switchover}.rb` | `ruby` で直接起動 |
 | CodeBuild Local Agent | CodeBuild 実行前の buildspec・artifact・Docker・環境変数の互換性確認 | `ci/codebuild/{build-green,verify-green,switchover}.yml` | Local Agent 経由で buildspec を起動 |
 | AWS CodeBuild / GitHub Actions | CI 上の継続的な検証 | CodeBuild buildspec / GitHub Actions workflow | リモート CI から起動 |
 
@@ -66,12 +66,12 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 
 | CodeBuild プロジェクト | buildspec | 既存スクリプト | 実行条件 |
 |---|---|---|---|
-| `ReadApprovalsProject` | `ci/codebuild/read-approvals.yml` | `scripts/read_action_approvals.sh` | AWS API を呼ばない。config を読むだけ |
+| `ReadApprovalsProject` | `ci/codebuild/read-approvals.yml` | `scripts/lib/deployment_config.rb`（buildspec から直接） | AWS API を呼ばない。config を読むだけ |
 | `PrecheckProject` | `ci/codebuild/precheck-target-parameter-group.yml` | `scripts/check_target_parameter_group.rb` | **構築前チェック。**読み取りのみ。常に実行 |
-| `BuildGreenProject` | `ci/codebuild/build-green.yml` | `scripts/build_green.sh` | `actions.build: approved` の場合だけ作成 |
+| `BuildGreenProject` | `ci/codebuild/build-green.yml` | `scripts/build_green.rb` | `actions.build: approved` の場合だけ作成 |
 | `BuildReportToolProject` | `ci/codebuild/build-report-tool.yml` | — | Step 4 の Go レポート生成器をビルドするだけ。AWS API を呼ばない。**外部ネットワークへ出るのはここだけ** |
-| `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.sh` | 常に AWS API 検証を実行 |
-| `SwitchoverProject` | `ci/codebuild/switchover.yml` | `scripts/switchover.sh` | 手動承認済みかつ `actions.switchover: approved` の場合だけ切替 |
+| `VerifyGreenProject` | `ci/codebuild/verify-green.yml` | `scripts/verify_green.rb` | 常に AWS API 検証を実行 |
+| `SwitchoverProject` | `ci/codebuild/switchover.yml` | `scripts/switchover.rb` | 手動承認済みかつ `actions.switchover: approved` の場合だけ切替 |
 
 `PrecheckProject` は [codepipeline-all-in-one.yml](../examples/rds-blue-green-deployment/codepipeline-all-in-one.yml) だけが定義する。既存の `codepipeline.yml` は BuildGreen / VerifyGreen / Switchover の 3 つのみである。
 
@@ -85,7 +85,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 
 `BuildReportTool` は `scripts/resolve_go_module_root.sh` で Go モジュールルートを突き止め、**期待する構成になっているかを先に検査する**（`go.mod` の位置・重複・ビルド対象のソースと `go.sum` の有無）。外れていれば `構成が…` で始まるメッセージを出して停止し、黙って別のものをビルドしない。
 
-Step 4 が使うビルド済みバイナリ 2 本（DB の実効値収集・判定とレポート。AWS の状態収集は Ruby の `scripts/lib/green_state.rb`）の場所は `scripts/lib/resolve_green_tools.rb` が決める。呼び出し側の指定 → `BuildReportTool` の artifact → ソースツリー の順に探し、見つからなければ理由と探索先を出して停止する（**VerifyGreen ではビルドしない**）。ローカルで `verify_green.sh` を直接実行し環境変数を渡していない場合だけ、`--build-missing` でその場でビルドする（出力先は `.tools/green-report/`）。
+Step 4 が使うビルド済みバイナリ 2 本（DB の実効値収集・判定とレポート。AWS の状態収集は Ruby の `scripts/lib/green_state.rb`）の場所は `scripts/lib/resolve_green_tools.rb` が決める。呼び出し側の指定 → `BuildReportTool` の artifact → ソースツリー の順に探し、見つからなければ理由と探索先を出して停止する（**VerifyGreen ではビルドしない**）。ローカルで `verify_green.rb` を直接実行し環境変数を渡していない場合だけ、その場でビルドする（出力先は `.tools/green-report/`）。
 
 解決は `scripts/collect_green_runtime_values.rb` が行い、値はログ・コマンド引数・成果物へ出さず、環境変数で実効値収集バイナリのプロセスにだけ渡す。上表以外の値（`secrets_manager`、`iam` など）は不正な `auth_method` として拒否する。
 
@@ -93,7 +93,7 @@ Step 4 が使うビルド済みバイナリ 2 本（DB の実効値収集・判�
 
 CFn の `MySqlCredentialsParameterPath` に、SSM パラメータを置いた**階層**（例 `/rds-bg/staging`）を渡す。指定したときだけ、その配下への `ssm:GetParameter` が `VerifyGreenRole` に付く。
 
-Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERATOR` として `verify_green.sh` に渡す。
+Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERATOR` として `verify_green.rb` に渡す。
 
 **リモートでは MySQL へ接続しない構成を前提にできる。**Green DB へ到達するには CodeBuild を VPC 内へ配置する必要があり、それが運用上難しい場合は `mysql_verification.enabled: false` のまま AWS API による検証だけを行う。MySQL 実効値を含めた確認はローカルから実施する。**同じレポート生成器が両方を賄い**、実効値が無い場合はレポートの該当列が `未収集` になるだけである（判定は AWS API の値で行うため内容は変わらない）。方針は [decisions/implementation-language-policy.md](../docs/decisions/implementation-language-policy.md) にある。
 
@@ -106,7 +106,7 @@ Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERAT
 
 CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定）が必要なツールチェーンを取得する。VPC 内で実行する場合は、その取得経路も確保する。Ruby ランタイムは CodeBuild に不要である。
 
-各 buildspec は設定 YAML を読むために、install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（CodeBuild image 同梱の rbenv を使う。`rbenv` が無い環境では何もしない）。**YAML / JSON は Ruby の標準ライブラリなので、パッケージの追加導入は無く、PyPI へも到達しない。**ローカルで Step 3・4・5 のシェルスクリプトを実行する場合も、Ruby があれば追加作業は要らない。
+各 buildspec は設定 YAML を読むために、install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（CodeBuild image 同梱の rbenv を使う。`rbenv` が無い環境では何もしない）。**YAML / JSON は Ruby の標準ライブラリなので、パッケージの追加導入は無く、PyPI へも到達しない。**ローカルで Step 3・4・5 のスクリプトを実行する場合も、Ruby があれば追加作業は要らない。
 
 設定 YAML の読み取りは `scripts/lib/deployment_config.rb` が **Ruby の標準ライブラリ（psych）**で行い、各スクリプトは取り出す項目だけを宣言する（`変数名=種別:パス[=既定値]`）。AWS CLI の応答（JSON）の取り出しには `jq` を使う。CodeBuild の managed image と GitHub Actions のランナーには jq が同梱されているため導入手順は無いが、ローカル実行では別途用意する（無ければ該当スクリプトが起動直後に明示エラーで停止する）。
 

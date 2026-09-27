@@ -32,9 +32,6 @@ phases:
       # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
       - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
       - ruby --version
-      # CodePipeline のソースアーティファクト（ZIP）では実行ビットが失われることがある。
-      # 落ちていれば復元し、落ちていなければ何も変わらない。
-      - chmod +x scripts/*.sh
 
   pre_build:
     commands:
@@ -62,13 +59,14 @@ phases:
     commands:
       # 3. 検証本体。Step 4 の判定はこのスクリプトが行う。
       #    実効値収集の有効・無効と接続方式（parameter_store / plaintext / prompt）は
-      #    config の mysql_verification が決め、verify_green.sh が読んでログへ出す。
+      #    config の mysql_verification が決め、verify_green.rb が読んでログへ出す。
       #    **buildspec では設定を読まない。**
       #
       #    **MySQL クライアントは要らない。**収集は collect_green_runtime_values
       #    （静的リンクの Go バイナリ）が行い、RDS のトラストストアも焼き込んである。
       #    そのため apt-get も、MySQL 入りのカスタムイメージも不要である。
-      - scripts/verify_green.sh --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
+      # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。
+      - ruby scripts/verify_green.rb --config "$CONFIG_FILE" --service "$SERVICE_NAME" --output-dir artifacts
 
 artifacts:
   files:

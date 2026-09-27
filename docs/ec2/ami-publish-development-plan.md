@@ -189,6 +189,13 @@ flowchart TD
 
 ### リポジトリのディレクトリ構成（案）
 
+> **実装済み**: [`ami-publish/`](../../ami-publish/README.md)（workspace 直下の独立したプロジェクト。別リポジトリへ切り出せる構成）。下の案からの変更点:
+> - CloudFormation テンプレートは環境ごとに `generated/cloudformation/<環境>/` へ出力する（buildspec は全環境で共通のため `generated/codebuild/` 直下）
+> - 出力順の固定は、構造体ではなく順序付きのマップ型（`internal/definitions/ordered_map.go`）で行う
+> - Ruby 側に共通部品を追加: `errors.rb`、`poller.rb`（待機処理）、`image_cleanup.rb`（失敗した AMI の削除）、`run_context.rb`、`steps/base_step.rb`、`steps/find_published_image.rb`（rollback 用）
+> - 起動テンプレートの UserData は `config/user_data/<環境>.sh` に置き、設定値ファイルから参照する
+
+
 Go の仕組み生成ツールと Ruby の AMI 公開ツールを同じリポジトリに置き、設定値ファイル `config/ami_publish.yml` を両方から参照する。
 
 ```

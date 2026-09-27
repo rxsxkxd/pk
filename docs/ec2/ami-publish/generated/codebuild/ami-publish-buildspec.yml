@@ -1,0 +1,17 @@
+# このファイルは cmd/generate-definitions が config/ami_publish.yml から生成した。手で編集しない。
+# 変更するときは internal/definitions/ か config/ を直し、再生成して差分をレビューする。
+version: 0.2
+env:
+  exported-variables:
+    - AMI_ID
+    - LAUNCH_TEMPLATE_VERSION
+phases:
+  install:
+    runtime-versions:
+      ruby: "3.4"
+    commands:
+      - bundle config set --local deployment true && bundle config set --local without "development test" && bundle install
+  build:
+    commands:
+      - bundle exec ruby bin/ami_publish run --environment "$AMI_PUBLISH_ENVIRONMENT" --version "$VERSION" --verified "$VERIFIED" --pipeline-execution-id "$PIPELINE_EXECUTION_ID" --output-env-file ami_publish_outputs.env
+      - set -a && . ./ami_publish_outputs.env && set +a

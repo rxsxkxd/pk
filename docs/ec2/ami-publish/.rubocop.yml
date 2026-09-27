@@ -1,0 +1,27 @@
+AllCops:
+  TargetRubyVersion: 3.4
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "vendor/**/*"
+
+Layout/LineLength:
+  Max: 120
+
+# 日本語のコメントでクラスの役割を書いているため、英語のドキュメンテーションコメントは求めない
+Style/Documentation:
+  Enabled: false
+
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+
+# ステップの処理は「確認 → 実行 → 待機 → 失敗時の後始末」を 1 メソッドで追えるほうが読みやすい
+Metrics/MethodLength:
+  Max: 30
+Metrics/AbcSize:
+  Max: 30
+Metrics/ClassLength:
+  Max: 200
+Metrics/BlockLength:
+  Exclude:
+    - "spec/**/*"

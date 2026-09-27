@@ -1,0 +1,99 @@
+# このファイルは cmd/generate-definitions が config/ami_publish.yml から生成した。手で編集しない。
+# 変更するときは internal/definitions/ か config/ を直し、再生成して差分をレビューする。
+AWSTemplateFormatVersion: "2010-09-09"
+Description: myapp launch template (staging). ImageId is updated by the AMI publish pipeline.
+Parameters:
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: AMI created by the AMI publish pipeline
+  AppVersion:
+    Type: String
+    AllowedPattern: ^v[0-9]+\.[0-9]+\.[0-9]+$
+    Description: Application release version contained in the AMI (e.g. v1.2.3)
+Resources:
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-application-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:myapp/staging/env-AbCdEf
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: InstanceRole
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: myapp-staging
+      VersionDescription:
+        Fn::Sub: myapp ${AppVersion}
+      LaunchTemplateData:
+        ImageId:
+          Ref: AmiId
+        InstanceType: t3.small
+        IamInstanceProfile:
+          Arn:
+            Fn::GetAtt:
+              - InstanceProfile
+              - Arn
+        SecurityGroupIds:
+          - sg-0123456789abcdef0
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: App
+                Value: myapp
+              - Key: AppVersion
+                Value:
+                  Ref: AppVersion
+          - ResourceType: volume
+            Tags:
+              - Key: App
+                Value: myapp
+              - Key: AppVersion
+                Value:
+                  Ref: AppVersion
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            # 起動テンプレートの UserData（本番インスタンスの起動時に実行される）。
+            # 環境固有の設定・シークレットは AMI に含めず、起動時に Secrets Manager から取得して Passenger に渡す。
+            set -euo pipefail
+
+            TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+            REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+
+            SECRET=$(aws secretsmanager get-secret-value --region "$REGION" --secret-id myapp/staging/env \
+              --query SecretString --output text)
+            echo "$SECRET" | python3 -c 'import json,sys; [print(f"passenger_env_var {k} \"{v}\";") for k,v in json.load(sys.stdin).items()]' \
+              > /etc/nginx/snippets/myapp-env.conf
+            chmod 600 /etc/nginx/snippets/myapp-env.conf
+            systemctl restart nginx
+Outputs:
+  LaunchTemplateId:
+    Value:
+      Ref: LaunchTemplate
+  LaunchTemplateVersion:
+    Value:
+      Fn::GetAtt:
+        - LaunchTemplate
+        - LatestVersionNumber

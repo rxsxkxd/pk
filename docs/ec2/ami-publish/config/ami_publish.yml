@@ -1,0 +1,52 @@
+# AMI 公開パイプラインの環境ごとの設定値。
+#
+# Go の仕組み生成ツール（cmd/generate-definitions。パイプラインの作成時）と、
+# Ruby の AMI 公開ツール（bin/ami_publish。パイプラインの実行時）の両方が読み込む。
+# 値を変えたら、仕組み生成ツールで generated/ を再生成し、差分をレビューしてからデプロイする。
+environments:
+  staging:
+    aws_region: ap-northeast-1
+    # AMI・起動テンプレート・インスタンスのタグ App の値。リソース名の接頭辞にも使う
+    application_name: myapp
+    # AMI の作成元になるリリース用 EC2 インスタンス（常時起動）
+    release_instance_id: i-0123456789abcdef0
+
+    pipeline:
+      stack_name: myapp-staging-ami-publish-pipeline
+      pipeline_name: myapp-staging-ami-publish
+      codebuild_project_name: myapp-staging-ami-publish
+      # Ruby 3.4 を提供する CodeBuild 標準イメージを指定する（M5 で確認する）
+      codebuild_image: aws/codebuild/standard:7.0
+      codebuild_timeout_minutes: 120
+      # このリポジトリ（ami-publish）を取得するための CodeConnections の接続
+      source_connection_arn: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/00000000-0000-0000-0000-000000000000
+      source_repository_id: example-org/ami-publish
+      source_branch_name: main
+      # CodeBuild のログと、SSM Run Command（ヘルスチェック）の出力の保存先
+      log_group_name: /myapp/staging/ami-publish
+      log_retention_days: 90
+
+    launch_template:
+      stack_name: myapp-staging-launch-template
+      launch_template_name: myapp-staging
+      instance_type: t3.small
+      security_group_ids:
+        - sg-0123456789abcdef0
+      # 本番インスタンスのロールが起動時に読み取る Secrets Manager のシークレット（UserData で使う）
+      secret_arns:
+        - arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:myapp/staging/env-AbCdEf
+      # 起動テンプレートに入れる UserData のファイル（リポジトリのルートからの相対パス。省略可）
+      user_data_file: config/user_data/staging.sh
+
+    ssm_documents:
+      stack_name: myapp-staging-ssm-documents
+      health_check_document_name: MyApp-Staging-HealthCheck
+      health_check_url: http://localhost/up
+
+    # AMI 公開ツールの待機時間（秒）
+    timeouts:
+      image_available_seconds: 3600
+      instance_online_seconds: 900
+      health_check_seconds: 300
+      stack_update_seconds: 1800
+      poll_interval_seconds: 15

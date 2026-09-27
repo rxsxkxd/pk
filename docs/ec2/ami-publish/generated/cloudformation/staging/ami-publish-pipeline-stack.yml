@@ -1,0 +1,329 @@
+# このファイルは cmd/generate-definitions が config/ami_publish.yml から生成した。手で編集しない。
+# 変更するときは internal/definitions/ か config/ を直し、再生成して差分をレビューする。
+AWSTemplateFormatVersion: "2010-09-09"
+Description: myapp AMI publish pipeline (staging)
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpirePipelineArtifacts
+            Status: Enabled
+            ExpirationInDays: 30
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /myapp/staging/ami-publish
+      RetentionInDays: 90
+  LaunchTemplateStackServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: manage-launch-template-stack
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ManageLaunchTemplate
+                Effect: Allow
+                Action:
+                  - ec2:CreateLaunchTemplate
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:ModifyLaunchTemplate
+                  - ec2:DeleteLaunchTemplate
+                  - ec2:DeleteLaunchTemplateVersions
+                  - ec2:CreateTags
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*
+              - Sid: ReadEc2
+                Effect: Allow
+                Action:
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                  - ec2:DescribeImages
+                  - ec2:DescribeSecurityGroups
+                Resource: '*'
+              - Sid: ManageInstanceRole
+                Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PassRole
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/myapp-staging-launch-template-*
+              - Sid: ManageInstanceProfile
+                Effect: Allow
+                Action:
+                  - iam:GetInstanceProfile
+                  - iam:CreateInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/myapp-staging-launch-template-*
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: publish-ami
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteBuildLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  Fn::GetAtt:
+                    - LogGroup
+                    - Arn
+              - Sid: ReadWritePipelineArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: ${ArtifactBucket.Arn}/*
+              - Sid: CreateImage
+                Effect: Allow
+                Action: ec2:CreateImage
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0123456789abcdef0
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*
+              - Sid: TagImage
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*
+              - Sid: DescribeImages
+                Effect: Allow
+                Action: ec2:DescribeImages
+                Resource: '*'
+              - Sid: DeleteFailedImage
+                Effect: Allow
+                Action:
+                  - ec2:DeregisterImage
+                  - ec2:DeleteSnapshot
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/App: myapp
+              - Sid: RunHealthCheck
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0123456789abcdef0
+                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/MyApp-Staging-HealthCheck
+              - Sid: ReadCommandAndInstanceStatus
+                Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:DescribeInstanceInformation
+                Resource: '*'
+              - Sid: UpdateLaunchTemplateStack
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/myapp-staging-launch-template/*
+              - Sid: ReadOwnStackOutputs
+                Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource:
+                  Ref: AWS::StackId
+              - Sid: PassLaunchTemplateStackServiceRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  Fn::GetAtt:
+                    - LaunchTemplateStackServiceRole
+                    - Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: cloudformation.amazonaws.com
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: myapp-staging-ami-publish
+      Description: Create an AMI from the release instance and update the launch template stack
+      ServiceRole:
+        Fn::GetAtt:
+          - CodeBuildServiceRole
+          - Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: generated/codebuild/ami-publish-buildspec.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        EnvironmentVariables:
+          - Name: AMI_PUBLISH_ENVIRONMENT
+            Value: staging
+            Type: PLAINTEXT
+      TimeoutInMinutes: 120
+      ConcurrentBuildLimit: 1
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName:
+            Ref: LogGroup
+          StreamName: codebuild
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: run-ami-publish-pipeline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadWritePipelineArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: ${ArtifactBucket.Arn}/*
+              - Sid: ReadArtifactBucket
+                Effect: Allow
+                Action:
+                  - s3:GetBucketVersioning
+                  - s3:GetBucketLocation
+                Resource:
+                  Fn::GetAtt:
+                    - ArtifactBucket
+                    - Arn
+              - Sid: UseSourceConnection
+                Effect: Allow
+                Action:
+                  - codeconnections:UseConnection
+                  - codestar-connections:UseConnection
+                Resource: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/00000000-0000-0000-0000-000000000000
+              - Sid: RunCodeBuild
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource:
+                  Fn::GetAtt:
+                    - CodeBuildProject
+                    - Arn
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: myapp-staging-ami-publish
+      PipelineType: V2
+      ExecutionMode: QUEUED
+      RoleArn:
+        Fn::GetAtt:
+          - CodePipelineServiceRole
+          - Arn
+      ArtifactStore:
+        Type: S3
+        Location:
+          Ref: ArtifactBucket
+      Variables:
+        - Name: VERSION
+          Description: Application release version to publish as an AMI (e.g. v1.2.3). Required.
+        - Name: VERIFIED
+          DefaultValue: manual
+          Description: 'How the release was verified: manual (phase 1) or automated (release verification pipeline)'
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: "1"
+              Configuration:
+                ConnectionArn: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/00000000-0000-0000-0000-000000000000
+                FullRepositoryId: example-org/ami-publish
+                BranchName: main
+                DetectChanges: false
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: SourceOutput
+        - Name: Publish
+          Actions:
+            - Name: PublishAmi
+              Namespace: Publish
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: "1"
+              InputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                ProjectName:
+                  Ref: CodeBuildProject
+                EnvironmentVariables: '[{"name":"VERSION","type":"PLAINTEXT","value":"#{variables.VERSION}"},{"name":"VERIFIED","type":"PLAINTEXT","value":"#{variables.VERIFIED}"},{"name":"PIPELINE_EXECUTION_ID","type":"PLAINTEXT","value":"#{codepipeline.PipelineExecutionId}"}]'
+Outputs:
+  PipelineName:
+    Value:
+      Ref: Pipeline
+  CodeBuildProjectName:
+    Value:
+      Ref: CodeBuildProject
+  LaunchTemplateStackServiceRoleArn:
+    Value:
+      Fn::GetAtt:
+        - LaunchTemplateStackServiceRole
+        - Arn
+  ArtifactBucketName:
+    Value:
+      Ref: ArtifactBucket

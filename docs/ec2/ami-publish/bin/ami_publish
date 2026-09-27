@@ -1,0 +1,15 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# AMI 公開ツールの実行コマンド。AMI 公開パイプラインの CodeBuild 上で動く（担当者が手元から実行することもできる）。
+#
+#   ruby bin/ami_publish run      --environment ENV --version vX.Y.Z [--verified manual|automated]
+#                                 [--pipeline-execution-id ID] [--output-env-file PATH]
+#   ruby bin/ami_publish plan     --environment ENV --version vX.Y.Z
+#   ruby bin/ami_publish rollback --environment ENV --to-version vX.Y.Z [--dry-run] [--output-env-file PATH]
+#
+# 終了コード: 0 成功、1 ステップが望ましい状態に到達できなかった、2 使い方・設定値の誤り、3 想定外の AWS エラー
+
+require_relative "../lib/ami_publish"
+
+exit AmiPublish::CommandLineInterface.new(ARGV).run

@@ -1,0 +1,31 @@
+# このファイルは cmd/generate-definitions が config/ami_publish.yml から生成した。手で編集しない。
+# 変更するときは internal/definitions/ か config/ を直し、再生成して差分をレビューする。
+AWSTemplateFormatVersion: "2010-09-09"
+Description: myapp SSM documents for the AMI publish pipeline (staging)
+Resources:
+  HealthCheckDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name: MyApp-Staging-HealthCheck
+      DocumentType: Command
+      UpdateMethod: NewVersion
+      Content:
+        schemaVersion: "2.2"
+        description: Check that the application responds after the instance reboot
+        mainSteps:
+          - action: aws:runShellScript
+            name: healthCheck
+            inputs:
+              timeoutSeconds: "240"
+              runCommand:
+                - set -u
+                - for attempt in $(seq 1 30); do
+                - '  if curl -fsS -o /dev/null http://localhost/up; then echo ''health check passed''; exit 0; fi'
+                - '  sleep 5'
+                - done
+                - 'echo ''health check failed: http://localhost/up did not respond'''
+                - exit 1
+Outputs:
+  HealthCheckDocumentName:
+    Value:
+      Ref: HealthCheckDocument

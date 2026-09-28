@@ -32,7 +32,7 @@
 | PASS | 0-1-13 RDS Proxy | このリージョンに Proxy なし | `db-proxies.json / db-proxy-targets-*.json` |
 | PASS | 0-1-14 IAM DB 認証 | 無効 | `db-instance.json` |
 | PASS | 0-2 InnoDB 以外のテーブル | ユーザースキーマに InnoDB 以外のテーブルなし | `blue-mysql-state.json` |
-| REVIEW | 0-3 アップグレードチェッカー | Error=0 / Warning=20 / Notice=2（target=8.4.9）。Warning は個別に判断する | `blue-upgrade-check.json` |
+| REVIEW | 0-3 アップグレードチェッカー | Error=0 / Warning=20 / Notice=2（target=8.4.9）。検出内容を確認し、実際に移行を妨げるものだけを解消する（Error も含めて自動では止めない） | `blue-upgrade-check.json` |
 
 ## MySQL 側の収集結果
 
@@ -180,7 +180,7 @@ Blue へ接続して集めた、AWS API では見えない情報である。0-1-
 ## REVIEW — 人の確認が要る
 
 - **0-1-02 binlog_format** … MIXED（Blue/Green 作成の阻害要因ではない。ROW 統一は別変更として判断）。実効値=MIXED（`db-parameters.json`）
-- **0-3 アップグレードチェッカー** … Error=0 / Warning=20 / Notice=2（target=8.4.9）。Warning は個別に判断する（`blue-upgrade-check.json`）
+- **0-3 アップグレードチェッカー** … Error=0 / Warning=20 / Notice=2（target=8.4.9）。検出内容を確認し、実際に移行を妨げるものだけを解消する（Error も含めて自動では止めない）（`blue-upgrade-check.json`）
 
 ## 補足事項
 
@@ -216,7 +216,7 @@ Blue へ接続して集めた、AWS API では見えない情報である。0-1-
 | PASS | 0-1-13 RDS Proxy | Proxy が無い、または Blue が事前に対象 Proxy へ登録済み | Blue/Green 作成後は新規登録できないため、作成前に登録し、制約を関係者と共有する | `docs/phase-0-precheck.md` |
 | PASS | 0-1-14 IAM DB 認証 | 無効、または切替後の Green 用 DB リソース ID / ARN を IAM ポリシーへ追加する手順と権限が準備済み | IAM ポリシーの更新手順を用意する | `docs/phase-0-precheck.md` |
 | PASS | 0-2 InnoDB 以外のテーブル | ユーザースキーマに InnoDB 以外のテーブルが無い（`mysql` スキーマのシステムテーブルは対象外） | MyISAM は binlog レプリケーションで整合性が保証されないため `ALTER TABLE <db>.<table> ENGINE=InnoDB` で変換する。それ以外のエンジンは用途を確認する | `docs/rds-mysql-84-migration-guide.md の 0-2` |
-| REVIEW | 0-3 アップグレードチェッカー | MySQL Shell のアップグレードチェッカーで Error が 0 件（Warning は個別判断） | Error は移行ガイドの対処表に従って解消する。**本番ではなくスナップショット復元機で実行し**、RDS 固有の項目は試験アップグレードの `PrePatchCompatibility.log` で確認する | `docs/rds-mysql-84-migration-guide.md の 0-3` |
+| REVIEW | 0-3 アップグレードチェッカー | MySQL Shell のアップグレードチェッカーの検出が 0 件（検出があればレベルを問わず人が確認する。STOP にはしない） | 検出内容を 1 件ずつ確認し、実際に移行を妨げるもの（主に Error）は移行ガイドの対処表に従って解消する。問題にならないと判断したものは理由を記録する。**本番ではなくスナップショット復元機で実行し**、RDS 固有の項目は試験アップグレードの `PrePatchCompatibility.log` で確認する | `docs/rds-mysql-84-migration-guide.md の 0-3` |
 
 ## この結果の読み方
 

@@ -87,6 +87,8 @@ mysqlsh -- util check-for-server-upgrade \
 
 判定は Error（アップグレードを阻害）／ Warning（個別判断）／ Notice（情報）の 3 段階。
 
+成立条件チェックのレポート（`evaluate_blue_green_prereqs`）は、**どのレベルもブロッカー（STOP）にせず**、検出があれば REVIEW として人が内容を確認する。Error であっても、内容によっては実際には問題にならないと判断されることがあるためである。実際に移行を妨げると判断したものは、下の対処表に従って解消する。
+
 **Error になりやすい項目と対処:**
 
 | 検出項目 | 内容 | 対処 |

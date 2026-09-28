@@ -19,7 +19,9 @@ import (
 //	0-1-06 外部 binlog レプリカ   SHOW REPLICA STATUS が空なら PASS、行があれば STOP
 //	0-1-02 binlog_format          実効値がパラメータグループの値と違えば REVIEW（両方を示す）
 //	0-2    InnoDB 以外のテーブル  無ければ PASS、MyISAM があれば STOP、他のエンジンだけなら REVIEW
-//	0-3    アップグレードチェッカー Error があれば STOP、Warning があれば REVIEW、無ければ PASS
+//	0-3    アップグレードチェッカー 検出が 1 件でもあれば（Error / Warning / Notice を問わず）REVIEW、
+//	                              無ければ PASS。**STOP にはしない**——Error でも実際には問題に
+//	                              ならないと判断されることがあるため、人が内容を見て決める
 
 // mysqlSide は MySQL 側の収集結果である（ファイルが無ければ nil）。
 type mysqlSide struct {
@@ -126,13 +128,12 @@ func (side mysqlSide) checkerResult() Result {
 	}
 	u := side.UpgradeCheck
 	detail := fmt.Sprintf("Error=%s / Warning=%s / Notice=%s（target=%s）", text(u["error_count"]), text(u["warning_count"]), text(u["notice_count"]), text(u["target_version"]))
+	// どのレベルもブロッカーにしない。検出があれば件数を示して人の確認に回す。
 	errors, _ := number(u["error_count"])
 	warnings, _ := number(u["warning_count"])
-	switch {
-	case errors > 0:
-		return Result{"STOP", item, detail, mysqlcli.UpgradeCheckFileName}
-	case warnings > 0:
-		return Result{"REVIEW", item, detail + "。Warning は個別に判断する", mysqlcli.UpgradeCheckFileName}
+	notices, _ := number(u["notice_count"])
+	if errors+warnings+notices > 0 {
+		return Result{"REVIEW", item, detail + "。検出内容を確認し、実際に移行を妨げるものだけを解消する（Error も含めて自動では止めない）", mysqlcli.UpgradeCheckFileName}
 	}
 	return Result{"PASS", item, detail, mysqlcli.UpgradeCheckFileName}
 }

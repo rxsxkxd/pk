@@ -218,8 +218,8 @@ func TestMySQLSideRendersResults(t *testing.T) {
 	if strings.Index(report, "| Error | `b` |") > strings.Index(report, "| Warning | `a` |") {
 		t.Errorf("Error を Warning より先に並べること")
 	}
-	// 外部レプリカがあれば 0-1-06 は STOP、チェッカーの Error があれば 0-3 も STOP。
-	for item, want := range map[string]string{"0-1-06": "STOP", "0-3": "STOP"} {
+	// 外部レプリカがあれば 0-1-06 は STOP。チェッカーは Error があっても STOP にせず REVIEW。
+	for item, want := range map[string]string{"0-1-06": "STOP", "0-3": "REVIEW"} {
 		if got := resultOf(t, evaluation, item).Status; got != want {
 			t.Errorf("%s: %s（期待 %s）", item, got, want)
 		}
@@ -291,8 +291,8 @@ func TestMySQLSideVerdicts(t *testing.T) {
 		return `{"collected_at":"2026-09-17T00:05:00Z","host":"h","version":"8.0.39","binlog_format":"` + binlog +
 			`","replica_status":[],"non_innodb_tables":[` + tables + `]}`
 	}
-	check := func(errors, warnings int) string {
-		return fmt.Sprintf(`{"collected_at":"2026-09-17T00:10:00Z","host":"restored","target_version":"8.4.9","error_count":%d,"warning_count":%d,"notice_count":0,"report":{}}`, errors, warnings)
+	check := func(errors, warnings, notices int) string {
+		return fmt.Sprintf(`{"collected_at":"2026-09-17T00:10:00Z","host":"restored","target_version":"8.4.9","error_count":%d,"warning_count":%d,"notice_count":%d,"report":{}}`, errors, warnings, notices)
 	}
 	for _, tc := range []struct {
 		name, state, check, item, want, detail string
@@ -303,8 +303,11 @@ func TestMySQLSideVerdicts(t *testing.T) {
 		{"レプリカでなければ 0-1-06 は PASS", state("MIXED", ""), "", "0-1-06", "PASS", "空"},
 		{"MyISAM があれば 0-2 は STOP", state("MIXED", `{"TABLE_SCHEMA":"app","TABLE_NAME":"t","ENGINE":"MyISAM"}`), "", "0-2", "STOP", "MyISAM=1"},
 		{"MyISAM 以外だけなら 0-2 は REVIEW", state("MIXED", `{"TABLE_SCHEMA":"app","TABLE_NAME":"t","ENGINE":"MEMORY"}`), "", "0-2", "REVIEW", "MEMORY=1"},
-		{"Error が無く Warning があれば 0-3 は REVIEW", "", check(0, 3), "0-3", "REVIEW", "Warning=3"},
-		{"どちらも無ければ 0-3 は PASS", "", check(0, 0), "0-3", "PASS", "Error=0"},
+		// チェッカーはどのレベルもブロッカーにしない（実際には問題にならないことがあるため）。
+		{"Error があっても 0-3 は REVIEW（STOP にしない）", "", check(2, 0, 0), "0-3", "REVIEW", "Error=2"},
+		{"Warning があれば 0-3 は REVIEW", "", check(0, 3, 0), "0-3", "REVIEW", "Warning=3"},
+		{"Notice だけでも 0-3 は REVIEW", "", check(0, 0, 1), "0-3", "REVIEW", "Notice=1"},
+		{"検出が無ければ 0-3 は PASS", "", check(0, 0, 0), "0-3", "PASS", "Error=0"},
 		{"実効値がパラメータグループと違えば 0-1-02 は REVIEW", state("ROW", ""), "", "0-1-02", "REVIEW", "食い違っている"},
 	} {
 		result := resultOf(t, withMySQLSide(t, tc.state, tc.check), tc.item)

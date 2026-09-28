@@ -36,6 +36,6 @@ var guidanceByItem = map[string]guidance{
 	"0-1-14": {"無効、または切替後の Green 用 DB リソース ID / ARN を IAM ポリシーへ追加する手順と権限が準備済み", "IAM ポリシーの更新手順を用意する", precheckDoc},
 	"0-2": {"ユーザースキーマに InnoDB 以外のテーブルが無い（`mysql` スキーマのシステムテーブルは対象外）",
 		"MyISAM は binlog レプリケーションで整合性が保証されないため `ALTER TABLE <db>.<table> ENGINE=InnoDB` で変換する。それ以外のエンジンは用途を確認する", guideDoc + " の 0-2"},
-	"0-3": {"MySQL Shell のアップグレードチェッカーで Error が 0 件（Warning は個別判断）",
-		"Error は移行ガイドの対処表に従って解消する。**本番ではなくスナップショット復元機で実行し**、RDS 固有の項目は試験アップグレードの `PrePatchCompatibility.log` で確認する", guideDoc + " の 0-3"},
+	"0-3": {"MySQL Shell のアップグレードチェッカーの検出が 0 件（検出があればレベルを問わず人が確認する。STOP にはしない）",
+		"検出内容を 1 件ずつ確認し、実際に移行を妨げるもの（主に Error）は移行ガイドの対処表に従って解消する。問題にならないと判断したものは理由を記録する。**本番ではなくスナップショット復元機で実行し**、RDS 固有の項目は試験アップグレードの `PrePatchCompatibility.log` で確認する", guideDoc + " の 0-3"},
 }

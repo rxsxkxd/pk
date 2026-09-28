@@ -15,7 +15,7 @@ go run ./tools/evaluate_blue_green_prereqs \
   --output examples/blue-green-prereqs/output/prereqs-evaluation-report.md
 ```
 
-このサンプルは STOP が 0 件・REVIEW が 2 件（0-1-02 binlog_format と 0-3 アップグレードチェッカーの Warning）なので、**終了コードは 0** である。
+このサンプルは STOP が 0 件・REVIEW が 2 件（0-1-02 binlog_format と 0-3 アップグレードチェッカーの検出〔Warning 20・Notice 2〕。チェッカーはどのレベルも STOP にしない）なので、**終了コードは 0** である。
 
 ## 何を固定しているか
 

@@ -160,7 +160,7 @@ go run ./tools/evaluate_blue_green_prereqs \
 | 0-1-06 外部 binlog レプリカ | `SHOW REPLICA STATUS` が空なら PASS、行があれば STOP | REVIEW（未収集） |
 | 0-1-02 binlog_format | 実効値がパラメータグループの値と違えば REVIEW（両方を示す） | パラメータグループの値だけで判定 |
 | 0-2 InnoDB 以外のテーブル | 無ければ PASS、MyISAM があれば STOP、他のエンジンだけなら REVIEW | REVIEW（未収集） |
-| 0-3 アップグレードチェッカー | Error があれば STOP、Warning があれば REVIEW、無ければ PASS | REVIEW（未収集） |
+| 0-3 アップグレードチェッカー | 検出があれば（Error / Warning / Notice を問わず）REVIEW、無ければ PASS。**STOP にはしない**（Error でも実際には問題にならないと判断されることがあるため、人が確認する） | REVIEW（未収集） |
 
 - **補足事項**: レポートの末尾に、収集の網羅状況と収集日時、注意点（AWS 側と MySQL 側の収集日時が 24 時間以上離れている／状態の接続先が Blue と違う／チェッカーを本番に対して実行した／binlog_format の実効値の食い違い／RDS 固有の項目は `PrePatchCompatibility.log` で確認すること）、**全項目の合格条件・満たさないときの対処・参照**を載せる
 - **終了コード**: `0` `STOP` なし / `1` `STOP` が 1 件以上。`REVIEW` は終了コードに影響しない（人が確認する）

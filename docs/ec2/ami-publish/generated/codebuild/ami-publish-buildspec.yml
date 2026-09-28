@@ -7,9 +7,11 @@ env:
     - LAUNCH_TEMPLATE_VERSION
 phases:
   install:
-    runtime-versions:
-      ruby: "3.4"
     commands:
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
+      - ruby --version
+      - echo 'Entered install phase.'
+      - aws --version
       - bundle config set --local deployment true && bundle config set --local without "development test" && bundle install
   build:
     commands:

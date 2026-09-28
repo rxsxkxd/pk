@@ -4,6 +4,7 @@ module AmiPublish
   module Steps
     # ステップ 3: AMI 作成時の再起動の後、リリース用インスタンスの SSM Agent が接続（Online）するまで待つ。
     # 待機時間を過ぎた場合は、AMI とスナップショットを削除して失敗にする（決定事項 D5）。
+    # 待っている間は、SSM から見たインスタンスの状態（PingStatus）と最後に接続した時刻を進捗として出す。
     class WaitInstanceOnline < BaseStep
       def call(context)
         if context.image_id.nil?
@@ -11,9 +12,10 @@ module AmiPublish
           return
         end
 
+        progress = progress_logger("再起動後の SSM Agent の接続")
         poller.wait(timeout_seconds: configuration.instance_online_timeout_seconds,
                     description: "リリース用インスタンスの SSM Agent の接続") do
-          ping_status == "Online"
+          online?(progress)
         end
         logger.info("instance_online", instance_id: configuration.release_instance_id)
       rescue Poller::TimeoutError => e
@@ -23,9 +25,22 @@ module AmiPublish
 
       private
 
-      def ping_status
+      def online?(progress)
         filters = [{ key: "InstanceIds", values: [configuration.release_instance_id] }]
-        clients.ssm.describe_instance_information(filters: filters).instance_information_list.first&.ping_status
+        information = clients.ssm.describe_instance_information(filters: filters).instance_information_list.first
+        return true if information&.ping_status == "Online"
+
+        progress.report do
+          { instance_id: configuration.release_instance_id,
+            ping_status: information&.ping_status || "（SSM に未登録）",
+            last_ping: last_ping(information) }
+        end
+        false
+      end
+
+      def last_ping(information)
+        time = information&.last_ping_date_time
+        time&.utc&.iso8601
       end
     end
   end

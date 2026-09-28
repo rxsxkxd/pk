@@ -16,8 +16,10 @@ type Configuration struct {
 	Environments map[string]Environment `yaml:"environments"`
 }
 
-// Environment は 1 環境分の設定値。
+// Environment は 1 環境分の設定値。リソースの名前は naming.go の命名規則で自動で決める。
 type Environment struct {
+	// Name は環境名（environments のキー）。読み込み時に設定する
+	Name              string                 `yaml:"-"`
 	AWSRegion         string                 `yaml:"aws_region"`
 	ApplicationName   string                 `yaml:"application_name"`
 	ReleaseInstanceID string                 `yaml:"release_instance_id"`
@@ -29,53 +31,47 @@ type Environment struct {
 
 // PipelineSettings は AMI 公開パイプラインのスタックの設定値。
 type PipelineSettings struct {
-	StackName               string `yaml:"stack_name"`
-	PipelineName            string `yaml:"pipeline_name"`
-	CodeBuildProjectName    string `yaml:"codebuild_project_name"`
-	CodeBuildImage          string `yaml:"codebuild_image"`
-	CodeBuildTimeoutMinutes int    `yaml:"codebuild_timeout_minutes"`
-	SourceConnectionARN     string `yaml:"source_connection_arn"`
-	SourceRepositoryID      string `yaml:"source_repository_id"`
-	SourceBranchName        string `yaml:"source_branch_name"`
-	LogGroupName            string `yaml:"log_group_name"`
-	LogRetentionDays        int    `yaml:"log_retention_days"`
+	SourceConnectionARN string `yaml:"source_connection_arn"`
+	SourceRepositoryID  string `yaml:"source_repository_id"`
+	SourceBranchName    string `yaml:"source_branch_name"`
+	LogRetentionDays    int    `yaml:"log_retention_days"`
 }
 
 // LaunchTemplateSettings は起動テンプレートのスタックの設定値。
 type LaunchTemplateSettings struct {
-	StackName          string   `yaml:"stack_name"`
-	LaunchTemplateName string   `yaml:"launch_template_name"`
-	InstanceType       string   `yaml:"instance_type"`
-	SecurityGroupIDs   []string `yaml:"security_group_ids"`
+	InstanceType     string   `yaml:"instance_type"`
+	SecurityGroupIDs []string `yaml:"security_group_ids"`
 }
 
 // HealthCheckSettings は、再起動後のヘルスチェック（SSM ドキュメントとして登録する）のスタックの設定値。
 type HealthCheckSettings struct {
-	StackName       string `yaml:"stack_name"`
-	SSMDocumentName string `yaml:"ssm_document_name"`
-	URL             string `yaml:"url"`
+	URL string `yaml:"url"`
 }
 
-// TimeoutSettings は AMI 公開ツールの待機時間（秒）。生成には使わないが、値の検証はここでも行う。
+// TimeoutSettings は待機時間。CodeBuildMinutes は CodeBuild プロジェクトのタイムアウト（生成に使う）。
+// それ以外は AMI 公開ツールの待機時間（秒）で、生成には使わないが、値の検証はここでも行う。
 type TimeoutSettings struct {
+	CodeBuildMinutes      int `yaml:"codebuild_minutes"`
 	ImageAvailableSeconds int `yaml:"image_available_seconds"`
 	InstanceOnlineSeconds int `yaml:"instance_online_seconds"`
 	HealthCheckSeconds    int `yaml:"health_check_seconds"`
 	StackUpdateSeconds    int `yaml:"stack_update_seconds"`
 	PollIntervalSeconds   int `yaml:"poll_interval_seconds"`
+	// ProgressLogIntervalSeconds は、待っている間に進捗をログに出す間隔
+	ProgressLogIntervalSeconds int `yaml:"progress_log_interval_seconds"`
 }
+
+// 自動で決める名前のうち最も長い「<アプリ>-<環境>-ami-publish-pipeline」などを、各サービスの名前の上限に収めるための上限。
+const maxNamePrefixLength = 60
 
 var (
 	environmentNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	resourceNamePattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*$`)
+	applicationNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 	instanceIDPattern      = regexp.MustCompile(`^i-[0-9a-f]{8,17}$`)
 	securityGroupIDPattern = regexp.MustCompile(`^sg-[0-9a-f]{8,17}$`)
-	logGroupNamePattern    = regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
-	documentNamePattern    = regexp.MustCompile(`^[A-Za-z0-9_.-]{3,128}$`)
 	healthCheckURLPattern  = regexp.MustCompile(`^https?://[A-Za-z0-9._:/-]+$`)
 	repositoryIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	arnPattern             = regexp.MustCompile(`^arn:aws[a-z-]*:[a-z0-9-]+:`)
-	codeBuildImagePattern  = regexp.MustCompile(`^[A-Za-z0-9._/:-]+$`)
 )
 
 // LoadConfiguration は設定値ファイルを読み、値を検証する。
@@ -90,6 +86,10 @@ func LoadConfiguration(path string) (Configuration, error) {
 	var configuration Configuration
 	if err := decoder.Decode(&configuration); err != nil {
 		return Configuration{}, fmt.Errorf("%s: %w", path, err)
+	}
+	for name, environment := range configuration.Environments {
+		environment.Name = name
+		configuration.Environments[name] = environment
 	}
 	if err := configuration.Validate(); err != nil {
 		return Configuration{}, fmt.Errorf("%s: %w", path, err)
@@ -144,22 +144,22 @@ func (e Environment) problems() []string {
 	}
 
 	check("aws_region", e.AWSRegion, regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d$`))
-	check("application_name", e.ApplicationName, resourceNamePattern)
+	// 名前はアプリケーション名から自動で決めるため、ロググループや SSM ドキュメントの名前にも使える文字に限る
+	check("application_name", e.ApplicationName, applicationNamePattern)
+	if strings.HasPrefix(e.ApplicationName, "aws") || strings.HasPrefix(e.ApplicationName, "amazon") {
+		problems = append(problems, "application_name は aws / amazon で始めない（SSM ドキュメントの名前に使えないため）")
+	}
+	if length := len(e.ApplicationName) + len(e.Name); length > maxNamePrefixLength {
+		problems = append(problems, fmt.Sprintf(
+			"application_name と環境名の長さの合計は %d 文字以下にする（%d 文字）", maxNamePrefixLength, length))
+	}
 	check("release_instance_id", e.ReleaseInstanceID, instanceIDPattern)
 
-	check("pipeline.stack_name", e.Pipeline.StackName, resourceNamePattern)
-	check("pipeline.pipeline_name", e.Pipeline.PipelineName, resourceNamePattern)
-	check("pipeline.codebuild_project_name", e.Pipeline.CodeBuildProjectName, resourceNamePattern)
-	check("pipeline.codebuild_image", e.Pipeline.CodeBuildImage, codeBuildImagePattern)
-	positive("pipeline.codebuild_timeout_minutes", e.Pipeline.CodeBuildTimeoutMinutes)
 	check("pipeline.source_connection_arn", e.Pipeline.SourceConnectionARN, arnPattern)
 	check("pipeline.source_repository_id", e.Pipeline.SourceRepositoryID, repositoryIDPattern)
 	check("pipeline.source_branch_name", e.Pipeline.SourceBranchName, regexp.MustCompile(`^[A-Za-z0-9_./-]+$`))
-	check("pipeline.log_group_name", e.Pipeline.LogGroupName, logGroupNamePattern)
 	positive("pipeline.log_retention_days", e.Pipeline.LogRetentionDays)
 
-	check("launch_template.stack_name", e.LaunchTemplate.StackName, resourceNamePattern)
-	check("launch_template.launch_template_name", e.LaunchTemplate.LaunchTemplateName, resourceNamePattern)
 	check("launch_template.instance_type", e.LaunchTemplate.InstanceType, regexp.MustCompile(`^[a-z0-9-]+\.[a-z0-9]+$`))
 	if len(e.LaunchTemplate.SecurityGroupIDs) == 0 {
 		problems = append(problems, "launch_template.security_group_ids が空")
@@ -168,10 +168,9 @@ func (e Environment) problems() []string {
 		check("launch_template.security_group_ids", id, securityGroupIDPattern)
 	}
 
-	check("health_check.stack_name", e.HealthCheck.StackName, resourceNamePattern)
-	check("health_check.ssm_document_name", e.HealthCheck.SSMDocumentName, documentNamePattern)
 	check("health_check.url", e.HealthCheck.URL, healthCheckURLPattern)
 
+	positive("timeouts.codebuild_minutes", e.Timeouts.CodeBuildMinutes)
 	positive("timeouts.image_available_seconds", e.Timeouts.ImageAvailableSeconds)
 	positive("timeouts.instance_online_seconds", e.Timeouts.InstanceOnlineSeconds)
 	if e.Timeouts.HealthCheckSeconds <= healthCheckCommandTimeoutSeconds {
@@ -182,6 +181,9 @@ func (e Environment) problems() []string {
 	positive("timeouts.stack_update_seconds", e.Timeouts.StackUpdateSeconds)
 	if e.Timeouts.PollIntervalSeconds < 0 {
 		problems = append(problems, "timeouts.poll_interval_seconds は 0 以上にする")
+	}
+	if e.Timeouts.ProgressLogIntervalSeconds < 0 {
+		problems = append(problems, "timeouts.progress_log_interval_seconds は 0 以上にする")
 	}
 	return problems
 }

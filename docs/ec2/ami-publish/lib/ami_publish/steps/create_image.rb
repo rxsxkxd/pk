@@ -5,6 +5,7 @@ module AmiPublish
     # ステップ 1: リリース用インスタンスから AMI を作成する。
     #
     # create-image は既定でインスタンスを再起動し、ファイルシステムの整合性を保った状態で AMI を作る。
+    # インスタンスが停止中なら再起動は起きず、停止したままの状態で AMI を作る。
     # 同じパイプライン実行で作成済みの AMI（タグ PipelineExecutionId が一致）があれば、作らずに再利用する。
     class CreateImage < BaseStep
       UNUSABLE_STATES = %w[failed deregistered error invalid].freeze

@@ -43,11 +43,15 @@ module AmiPublish
 
       def wait_for_invocation(command_id)
         invocation = nil
+        progress = progress_logger("ヘルスチェック")
         poller.wait(timeout_seconds: configuration.health_check_timeout_seconds, description: "ヘルスチェック") do
           invocation = clients.ssm.get_command_invocation(command_id: command_id,
                                                           instance_id: configuration.release_instance_id)
-          TERMINAL_STATUSES.include?(invocation.status)
+          terminal = TERMINAL_STATUSES.include?(invocation.status)
+          progress.report { { command_id: command_id, status: invocation.status } } unless terminal
+          terminal
         rescue Aws::SSM::Errors::InvocationDoesNotExist
+          progress.report { { command_id: command_id, status: "（実行結果が未登録）" } }
           false # 送信直後は実行結果がまだ登録されていない
         end
         invocation

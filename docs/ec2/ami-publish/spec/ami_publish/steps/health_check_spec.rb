@@ -21,11 +21,12 @@ RSpec.describe AmiPublish::Steps::HealthCheck do
     expect { step.call(context(image_id: "ami-1")) }.not_to raise_error
 
     params = requests(clients.ssm, :send_command).first[:params]
-    expect(params[:document_name]).to eq("MyApp-Staging-HealthCheck")
+    expect(params[:document_name]).to eq("myapp-staging-health-check")
     expect(params[:instance_ids]).to eq(["i-0123456789abcdef0"])
     expect(params[:cloud_watch_output_config]).to eq(cloud_watch_output_enabled: true,
                                                      cloud_watch_log_group_name: "/myapp/staging/ami-publish")
     expect(requests(clients.ec2, :deregister_image)).to be_empty
+    expect(waiting_logs.map { |record| record["status"] }).to eq(["（実行結果が未登録）", "InProgress"])
   end
 
   it "ヘルスチェックが失敗したら、AMI を削除して失敗にする" do

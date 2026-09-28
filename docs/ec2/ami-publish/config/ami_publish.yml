@@ -3,32 +3,27 @@
 # Go の仕組み生成ツール（cmd/generate-definitions。パイプラインの作成時）と、
 # Ruby の AMI 公開ツール（bin/ami_publish。パイプラインの実行時）の両方が読み込む。
 # 値を変えたら、仕組み生成ツールで generated/ を再生成し、差分をレビューしてからデプロイする。
+#
+# スタック・パイプライン・ロググループなどの名前は書かない。application_name と環境名（environments のキー）
+# から自動で決まる（例: myapp / staging → myapp-staging-launch-template）。
+# 決まった名前は、仕組み生成ツールの実行時に表示される。命名規則は internal/definitions/naming.go。
 environments:
   staging:
     aws_region: ap-northeast-1
-    # AMI・起動テンプレート・インスタンスのタグ App の値。リソース名の接頭辞にも使う
+    # 名前の接頭辞と、AMI・起動テンプレート・インスタンスのタグ App の値（英小文字・数字・ハイフン）
     application_name: myapp
     # AMI の作成元になるリリース用 EC2 インスタンス（常時起動）
     release_instance_id: i-0123456789abcdef0
 
     pipeline:
-      stack_name: myapp-staging-ami-publish-pipeline
-      pipeline_name: myapp-staging-ami-publish
-      codebuild_project_name: myapp-staging-ami-publish
-      # Ruby 3.4 を提供する CodeBuild 標準イメージを指定する（M5 で確認する）
-      codebuild_image: aws/codebuild/standard:7.0
-      codebuild_timeout_minutes: 120
       # このリポジトリ（ami-publish）を取得するための CodeConnections の接続
       source_connection_arn: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/00000000-0000-0000-0000-000000000000
       source_repository_id: example-org/ami-publish
       source_branch_name: main
-      # CodeBuild のログと、SSM Run Command（ヘルスチェック）の出力の保存先
-      log_group_name: /myapp/staging/ami-publish
+      # CodeBuild のログと、ヘルスチェックの出力の保存期間（日）
       log_retention_days: 90
 
     launch_template:
-      stack_name: myapp-staging-launch-template
-      launch_template_name: myapp-staging
       instance_type: t3.small
       security_group_ids:
         - sg-0123456789abcdef0
@@ -36,14 +31,17 @@ environments:
     # AMI 作成時の再起動の後に、アプリが自動で起動して応答するかの確認。
     # AWS 上では SSM ドキュメントとして登録し、SSM Run Command でリリース用インスタンス上で実行する
     health_check:
-      stack_name: myapp-staging-health-check
-      ssm_document_name: MyApp-Staging-HealthCheck
       url: http://localhost/up
 
-    # AMI 公開ツールの待機時間（秒）
+    # 待機時間。単位は項目名のとおり（_seconds は秒、_minutes は分）。
+    # 待っている間は progress_log_interval_seconds ごとに進捗をログに出す
     timeouts:
+      # CodeBuild のビルド全体のタイムアウト（CodeBuild の指定が分単位のため分）。
+      # 下の各待機時間は上限で、通常はその合計よりずっと短く終わる。実測の所要時間に余裕を持たせた値にする
+      codebuild_minutes: 60
       image_available_seconds: 3600
       instance_online_seconds: 900
       health_check_seconds: 300
       stack_update_seconds: 1800
       poll_interval_seconds: 15
+      progress_log_interval_seconds: 60

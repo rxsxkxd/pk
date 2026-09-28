@@ -13,7 +13,7 @@
 ## ディレクトリ構成
 
 ```
-config/ami_publish.yml                 環境ごとの設定値（Go と Ruby の両方が読む）
+config/ami_publish.yml                 環境ごとの設定値（Go と Ruby の両方が読む）。リソースの名前は書かない（下記）
 generated/                             仕組みの生成ツールの出力（コミットする。手で編集しない）
   codebuild/ami-publish-buildspec.yml                    CodeBuild の buildspec（全環境で共通）
   cloudformation/<環境>/launch-template-stack.yml        起動テンプレートのスタック
@@ -38,12 +38,25 @@ spec/                                  AMI 公開ツールのテスト（RSpec�
 
 - CodeConnections の接続（このリポジトリへの接続。コンソールで承認まで済ませる）→ `pipeline.source_connection_arn`
 - リリース用インスタンス（SSM Agent が動き、インスタンスプロファイルに `AmazonSSMManagedInstanceCore` があること）
-- 起動テンプレートのスタックを初めて作るときに指定する既存の AMI
 
 ### 2. 仕組みのための定義の生成
 
 ```bash
 go run ./cmd/generate-definitions
+```
+
+スタック・パイプライン・ロググループ・SSM ドキュメントなどの名前は、`application_name` と環境名から自動で決まる（命名規則は `internal/definitions/naming.go`。Ruby 側は `lib/ami_publish/configuration.rb` に同じ規則を実装）。生成時に一覧が表示される。
+
+```
+環境 staging の名前（自動）:
+  myapp-staging-ami-publish-pipeline       AMI 公開パイプラインのスタック
+  myapp-staging-ami-publish                CodePipeline のパイプライン
+  myapp-staging-ami-publish                CodeBuild プロジェクト
+  /myapp/staging/ami-publish               CloudWatch Logs のロググループ
+  myapp-staging-launch-template            起動テンプレートのスタック
+  myapp-staging                            起動テンプレート
+  myapp-staging-health-check               ヘルスチェックのスタック
+  myapp-staging-health-check               ヘルスチェックの SSM ドキュメント
 ```
 
 ### 3. 生成物のレビュー
@@ -67,11 +80,11 @@ ENV=staging
 aws cloudformation deploy --stack-name myapp-staging-health-check \
   --template-file generated/cloudformation/$ENV/health-check-stack.yml --no-execute-changeset
 
-# 起動テンプレート（初回だけ AmiId / AppVersion を指定する。2 回目以降は指定しない＝現在の値を引き継ぐ）
+# 起動テンプレート（AmiId / AppVersion は指定しない。初回は空のまま作られ、最初のパイプラインの実行で AMI が入る。
+# 2 回目以降も指定しない＝現在の値を引き継ぐ）
 aws cloudformation deploy --stack-name myapp-staging-launch-template \
   --template-file generated/cloudformation/$ENV/launch-template-stack.yml \
-  --capabilities CAPABILITY_IAM --no-execute-changeset \
-  --parameter-overrides AmiId=ami-xxxxxxxx AppVersion=v0.0.0
+  --capabilities CAPABILITY_IAM --no-execute-changeset
 
 # AMI 公開パイプライン
 aws cloudformation deploy --stack-name myapp-staging-ami-publish-pipeline \
@@ -83,7 +96,7 @@ aws cloudformation describe-change-set --stack-name <スタック名> --change-s
 aws cloudformation execute-change-set  --stack-name <スタック名> --change-set-name <変更セット名>
 ```
 
-- 起動テンプレートのスタックのパラメータ `AmiId` / `AppVersion` は、2 回目以降はパイプラインが更新する。手動のデプロイで上書きしない。
+- 起動テンプレートのスタックのパラメータ `AmiId` / `AppVersion` はパイプラインが更新する。手動のデプロイで指定しない（初回は空のまま作られ、起動テンプレートに AMI が入っていない状態になる。AMI が入るまでは、この起動テンプレートでインスタンスを起動するには AMI の指定が必要）。
 - パイプラインは作成直後に 1 回自動で実行されることがある。変数 `VERSION` が未指定のため AMI 公開ツールが使い方の誤り（終了コード 2）で止まり、AWS には何も変更しない。
 
 ## パイプラインの実行
@@ -99,14 +112,31 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 
 | # | ステップ | 失敗時 |
 |---|---|---|
-| 1 | CreateImage: AMI を作成（インスタンスが再起動する）。同じ実行の AMI があれば再利用 | 失敗 |
+| 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ） | 失敗（何も変更しない） |
+| 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用 | 失敗 |
 | 2 | WaitImageAvailable: available まで待つ | AMI とスナップショットを削除 |
-| 3 | WaitInstanceOnline: 再起動後に SSM Agent が接続するまで待つ | AMI とスナップショットを削除 |
+| 2a | StartInstanceIfStopped: **開始時に停止中だった場合だけ**、確認のためにインスタンスを起動する（停止には戻さない） | AMI とスナップショットを削除 |
+| 3 | WaitInstanceOnline: 再起動（または起動）後に SSM Agent が接続するまで待つ | AMI とスナップショットを削除 |
 | 4 | HealthCheck: SSM ドキュメントでアプリの応答を確認 | AMI とスナップショットを削除 |
 | 5 | UpdateLaunchTemplateStack: 変更セット → 差分の検証（起動テンプレートの変更以外があれば中止）→ 実行 | AMI は残す（同じ実行の再実行で再利用） |
 | 6 | PublishOutputs: AMI に `Status=published`、`AMI_ID` / `LAUNCH_TEMPLATE_VERSION` を出力 | — |
 
 どのステップで失敗しても、起動テンプレートは更新されない。
+
+開始時に停止中だったリリース用インスタンスは、パイプラインが終わった後も起動したまま残る（成功・失敗とも）。停止に戻す場合は、パイプラインの外で行う。停止中のインスタンスから作る AMI は、ディスクへの書き込みがない状態で作られ、その後の起動で AMI と同じディスクの状態から OS を起動して確認する。
+
+### 進捗ログ
+
+時間のかかる処理は、待っている間も `timeouts.progress_log_interval_seconds`（既定 60 秒）ごとに進捗をログに出す。止まって見えるときは、最後の進捗ログでどこを何を待っているかがわかる。
+
+| どこで | 進捗ログ | 主な項目 |
+|---|---|---|
+| ステップ 0 インスタンスの状態の確定 | `{"event":"waiting","description":"リリース用インスタンスの状態が落ち着くまで",...}` | 経過秒数、インスタンスの状態（`pending` / `stopping`） |
+| ステップ 2a インスタンスの起動（停止中だった場合） | `{"event":"waiting","description":"リリース用インスタンスの起動",...}` | 経過秒数、インスタンスの状態 |
+| ステップ 2 AMI の作成 | `{"event":"waiting","description":"AMI の作成（スナップショットの取得）",...}` | 経過秒数、AMI の状態、スナップショットの進み具合（例: `snap-0123 45%`） |
+| ステップ 3 SSM Agent の接続待ち | `{"event":"waiting","description":"再起動後の SSM Agent の接続",...}` | 経過秒数、`ping_status`（`ConnectionLost` など）、最後に接続した時刻 |
+| ステップ 4 ヘルスチェック | `{"event":"waiting","description":"ヘルスチェック",...}` | 経過秒数、コマンドの状態 |
+| ステップ 5 変更セットの作成・スタックの更新 | `{"event":"waiting","description":"起動テンプレートのスタックの更新",...}` など | 経過秒数、変更セット・スタックの状態 |
 
 ## ロールバック（担当者が手元から実行する）
 
@@ -156,11 +186,14 @@ AWS_PROFILE=<プロファイル名> bundle exec ruby bin/ami_publish rollback --
 
 CodeBuild と同じ x86_64 の Linux で、buildspec の install と build のコマンドを流す。C コンパイラが必要なため、`ruby:3.4-slim` ではなく `ruby:3.4` を使う。
 
+`ruby:3.4` には rbenv が入っていないため、buildspec の `rbenv local` は実行されず（`if` で飛ばす）、コンテナの Ruby 3.4 がそのまま使われる。
+
 ```bash
 tar --exclude=./vendor --exclude=./.bundle -cf - . | docker run --rm -i --platform linux/amd64 \
   -e AMI_PUBLISH_ENVIRONMENT=staging -e VERIFIED=manual -e PIPELINE_EXECUTION_ID=exec-local \
   ruby:3.4 bash -c '
     mkdir /work && cd /work && tar -xf -
+    ruby --version
     bundle config set --local deployment true && bundle config set --local without "development test" && bundle install
     bundle exec ruby bin/ami_publish run --environment "$AMI_PUBLISH_ENVIRONMENT" --version v1.2.3 \
       --verified "$VERIFIED" --pipeline-execution-id "$PIPELINE_EXECUTION_ID" --output-env-file ami_publish_outputs.env
@@ -181,16 +214,17 @@ LocalStack などで EC2 や SSM を模擬する方法もあるが、AMI の作�
 | Ruby: `rspec`（41 件、AWS には接続しない）/ `rubocop` | 通過。テストが失敗を検出できることも、実装を一時的に壊して確認済み |
 | `cfn-lint`（生成した CloudFormation テンプレート） | 指摘なし |
 | buildspec の手順を Linux（`ruby:3.4`、x86_64）で実行 | install 成功。`VERSION` 未指定で終了コード 2、認証情報なしで終了コード 3、出力ファイルは作られない |
-| CodeBuild 標準イメージの Ruby 3.4 | `aws/codebuild/standard:7.0` が Ruby 3.4 を提供（[公式のイメージ定義](https://github.com/aws/aws-codebuild-docker-images/blob/master/ubuntu/standard/7.0/runtimes.yml)） |
+| CodeBuild 標準イメージ | `aws/codebuild/standard:8.0`（Ubuntu 24.04。Ubuntu 系の最新）を使う。rbenv（`/usr/local/rbenv`）と Ruby 3.4.10 が入っている（[公式のイメージ定義](https://github.com/aws/aws-codebuild-docker-images/blob/master/ubuntu/standard/8.0/Dockerfile)）。buildspec は `runtime-versions` を使わず、`rbenv local 3.4.10` でイメージの Ruby を選ぶ（Ruby のビルドは行わない）。手元の `.ruby-version`（3.4.11）とはパッチバージョンが異なるが、deployment モードの `bundle install` が問題なく通ることを確認済み。イメージと Ruby のバージョンは頻繁に変えないため、設定値ファイルではなく `internal/definitions/ami_publish_buildspec.go` の定数 `codeBuildImage` / `codeBuildRubyVersion` で固定している。イメージの更新で 3.4.10 がなくなったら `codeBuildRubyVersion` を上げる |
 
 - `Gemfile.lock` には Linux のプラットフォーム（`x86_64-linux`・`aarch64-linux`）を含めている。macOS だけで `bundle lock` し直すと CodeBuild の `bundle install` が失敗するので、プラットフォームを消さない
 - ネイティブ拡張（`bigdecimal`）のビルドに C コンパイラが必要。CodeBuild の標準イメージには入っている
+- `.ruby-version` を変えたら、手元の `vendor/bundle` のネイティブ拡張を作り直す（`bundle pristine`）。古い Ruby に対してビルドされたままだと、読み込み時に `linked to incompatible libruby` で失敗する
 
 ## 未実施（AWS 環境が必要）
 
 稼働環境での作業と確認手順は [確認手順書: AMI 公開パイプラインの稼働環境での確認](../ami-publish-environment-verification.md) にまとめてある。
 
 - ソースにするリポジトリの用意（このディレクトリの中身をルートとするリポジトリ。決定事項 D2）
-- AWS 側の事前準備（リリース用インスタンス、セキュリティグループ、初回用の AMI、CodeConnections の接続）
+- AWS 側の事前準備（リリース用インスタンス、セキュリティグループ、CodeConnections の接続）
 - `config/ami_publish.yml` のダミーの値を実際の値に置き換え、再生成・レビュー
 - 開発アカウントへのデプロイ、初回の AMI 公開、障害試験（開発計画の M5〜M7）

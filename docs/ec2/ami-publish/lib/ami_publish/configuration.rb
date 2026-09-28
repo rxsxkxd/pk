@@ -4,14 +4,17 @@ module AmiPublish
   # config/ami_publish.yml の 1 環境分の設定値。
   # 同じファイルを Go の仕組み生成ツールも読む。値の形式の詳細な検証は仕組み生成ツールが行い、
   # ここでは AMI 公開ツールが使う値の有無と基本的な形式だけを確認する。
+  #
+  # リソースの名前は application_name と環境名から自動で決める（下の「命名規則」）。
+  # Go の仕組み生成ツール（internal/definitions/naming.go）も同じ規則で名前を決めている。
+  # 規則を変えるときは両方を直し、両方のテストで同じ名前になることを確かめる。
   class Configuration
     VERSION_PATTERN = /\Av\d+\.\d+\.\d+\z/
     INSTANCE_ID_PATTERN = /\Ai-[0-9a-f]{8,17}\z/
+    APPLICATION_NAME_PATTERN = /\A[a-z][a-z0-9-]*\z/
 
     attr_reader :environment_name, :aws_region, :application_name, :release_instance_id,
-                :pipeline_stack_name, :log_group_name,
-                :launch_template_stack_name, :health_check_document_name,
-                :image_available_timeout_seconds, :instance_online_timeout_seconds,
+                :image_available_timeout_seconds, :progress_log_interval_seconds, :instance_online_timeout_seconds,
                 :health_check_timeout_seconds, :stack_update_timeout_seconds, :poll_interval_seconds
 
     def self.load(path:, environment_name:)
@@ -33,16 +36,28 @@ module AmiPublish
     def initialize(environment_name, settings)
       @environment_name = environment_name
       @aws_region = required(settings, "aws_region")
-      @application_name = required(settings, "application_name")
+      @application_name = required(settings, "application_name", pattern: APPLICATION_NAME_PATTERN)
       @release_instance_id = required(settings, "release_instance_id", pattern: INSTANCE_ID_PATTERN)
-      @pipeline_stack_name = required(settings, "pipeline", "stack_name")
-      @log_group_name = required(settings, "pipeline", "log_group_name")
-      @launch_template_stack_name = required(settings, "launch_template", "stack_name")
-      @health_check_document_name = required(settings, "health_check", "ssm_document_name")
       load_timeouts(settings)
     end
 
+    # 命名規則（Go の internal/definitions/naming.go と同じ）
+
+    # AMI 公開パイプラインのスタック（出力からスタック用サービスロールの ARN を取る）
+    def pipeline_stack_name = "#{name_prefix}-ami-publish-pipeline"
+
+    # CodeBuild のログと、ヘルスチェックの出力を保存する CloudWatch Logs のロググループ
+    def log_group_name = "/#{application_name}/#{environment_name}/ami-publish"
+
+    # 起動テンプレートのスタック
+    def launch_template_stack_name = "#{name_prefix}-launch-template"
+
+    # ヘルスチェックの SSM ドキュメント
+    def health_check_document_name = "#{name_prefix}-health-check"
+
     private
+
+    def name_prefix = "#{application_name}-#{environment_name}"
 
     def load_timeouts(settings)
       @image_available_timeout_seconds = positive_integer(settings, "timeouts", "image_available_seconds")
@@ -50,6 +65,8 @@ module AmiPublish
       @health_check_timeout_seconds = positive_integer(settings, "timeouts", "health_check_seconds")
       @stack_update_timeout_seconds = positive_integer(settings, "timeouts", "stack_update_seconds")
       @poll_interval_seconds = positive_integer(settings, "timeouts", "poll_interval_seconds", allow_zero: true)
+      @progress_log_interval_seconds =
+        positive_integer(settings, "timeouts", "progress_log_interval_seconds", allow_zero: true)
     end
 
     def required(settings, *keys, pattern: nil)

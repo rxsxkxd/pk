@@ -13,7 +13,7 @@ AWS を使わない確認（生成・テスト・`cfn-lint`・Docker での buil
 | # | 作業 | 内容 | 開発計画 |
 |---|---|---|---|
 | 0 | 前提の決定 | ソースにするリポジトリの用意（**必須。下記の注意を参照**） | D2 |
-| 1 | AWS 側の事前準備 | リリース用インスタンス、セキュリティグループ、初回用の AMI、CodeConnections の接続 | M2・M5 |
+| 1 | AWS 側の事前準備 | リリース用インスタンス、セキュリティグループ、CodeConnections の接続 | M2・M5 |
 | 2 | 設定値の記入と再生成 | `config/ami_publish.yml` のダミーの値を実際の値に置き換え、生成・レビューする | M2・M5 |
 | 3 | 仕組みのデプロイ | 3 つのスタックを AWS CLI でデプロイする | M2・M5 |
 | 4 | デプロイ結果の確認 | スタック・SSM ドキュメント・起動テンプレート・パイプラインの確認、ヘルスチェックの単体実行、`plan` | M5 |
@@ -44,7 +44,6 @@ AMI 公開パイプラインは、CodeConnections でリポジトリを取得し
 | 〃 アプリの状態 | リリースバージョンが配置・起動済みで、`curl http://localhost/up` が成功する。**再起動後に自動で起動する**（nginx などが `systemctl enable` 済み） | Session Manager で接続し、`curl -fsS http://localhost/up` と `systemctl is-enabled nginx` |
 | 〃 `curl` | ヘルスチェックの SSM ドキュメントが使う | `command -v curl` |
 | セキュリティグループ | 起動テンプレートで使うもの | `aws ec2 describe-security-groups --group-ids <ID>` |
-| 初回用の AMI | 起動テンプレートのスタックを初めて作るときに `AmiId` に指定する。リリース用インスタンスから手動で作ったもの、または任意の AMI | `aws ec2 describe-images --image-ids <ID> --query 'Images[0].State'` → `available` |
 | CodeConnections の接続 | 手順 0 のリポジトリへの接続。**コンソールで承認し、状態が `AVAILABLE` になっていること** | `aws codeconnections get-connection --connection-arn <ARN> --query 'Connection.ConnectionStatus'` |
 | デプロイする人の権限 | CloudFormation で IAM ロール・S3・CodePipeline・CodeBuild・SSM ドキュメント・起動テンプレートを作成できる | — |
 
@@ -61,7 +60,9 @@ AMI 公開パイプラインは、CodeConnections でリポジトリを取得し
 | `pipeline.source_branch_name` | `main` | パイプラインが取得するブランチ |
 | `launch_template.security_group_ids` | `sg-0123456789abcdef0` | 手順 1 のセキュリティグループ |
 | `launch_template.instance_type` | `t3.small` | 本番で使うインスタンスタイプ |
-| 各 `stack_name` / 名前 | `myapp-staging-...` | 命名規則に合わせる（任意） |
+| `application_name` | `myapp` | アプリケーション名（英小文字・数字・ハイフン）。スタックなどの名前はこれと環境名から自動で決まる |
+
+スタック・パイプライン・ロググループ・SSM ドキュメントなどの名前は書かない。`application_name` と環境名から自動で決まり、仕組みの生成ツールの実行時に一覧が表示される（以降の手順の `myapp-staging-...` は `application_name: myapp`・環境 `staging` の場合の名前）。
 
 置き換えたら、パイプラインの作成の 2・3 段階を行う。
 
@@ -86,8 +87,7 @@ aws cloudformation deploy --stack-name myapp-staging-health-check \
 
 aws cloudformation deploy --stack-name myapp-staging-launch-template \
   --template-file generated/cloudformation/$ENV/launch-template-stack.yml \
-  --capabilities CAPABILITY_IAM --no-execute-changeset \
-  --parameter-overrides AmiId=<初回用の AMI> AppVersion=v0.0.0
+  --capabilities CAPABILITY_IAM --no-execute-changeset   # AmiId / AppVersion は指定しない（初回は空）
 
 aws cloudformation deploy --stack-name myapp-staging-ami-publish-pipeline \
   --template-file generated/cloudformation/$ENV/ami-publish-pipeline-stack.yml \
@@ -105,17 +105,17 @@ aws cloudformation deploy --stack-name myapp-staging-ami-publish-pipeline \
 | # | 確認 | コマンド | 期待結果 |
 |---|---|---|---|
 | 4-1 | スタックの状態 | `aws cloudformation describe-stacks --stack-name <各スタック> --query 'Stacks[0].StackStatus'` | 3 つとも `CREATE_COMPLETE` |
-| 4-2 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].LaunchTemplateData.ImageId'` | 初回用の AMI の ID |
+| 4-2 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].[VersionDescription,LaunchTemplateData.ImageId]'` | `myapp (AMI not set)` と `null`（初回はまだ AMI が入っていない） |
 | 4-3 | パイプラインの出力 | `aws cloudformation describe-stacks --stack-name myapp-staging-ami-publish-pipeline --query 'Stacks[0].Outputs'` | `LaunchTemplateStackServiceRoleArn` などがある |
 | 4-4 | 作成直後の自動実行 | `aws codepipeline list-pipeline-executions --pipeline-name myapp-staging-ami-publish` | 作成直後に 1 回実行されていれば `Failed`（`VERSION` 未指定で終了コード 2）。CodeBuild のログに「--version を指定する」。AMI は作られていない |
-| 4-5 | CodeBuild の Ruby | 4-4 の CodeBuild のログ | `Installing Ruby version 3.4` と `bundle install` の成功が出ている |
+| 4-5 | CodeBuild の Ruby | 4-4 の CodeBuild のログ | `ruby --version` が 3.4.10、`bundle install` が成功している（`rbenv local 3.4.10` が失敗した場合は、イメージに 3.4.10 がない。`codeBuildRubyVersion` をイメージにあるバージョンに上げる） |
 | 4-6 | ヘルスチェックの単体実行 | 下記 | `Success` |
 | 4-7 | `plan` | 下記 | 終了コード 0。`create_image_planned`、`launch_template_stack_update_planned` がログに出る。AWS に変更がない |
 
 4-6 ヘルスチェックの単体実行（SSM ドキュメントがリリース用インスタンスで動くか）:
 
 ```bash
-COMMAND_ID=$(aws ssm send-command --document-name MyApp-Staging-HealthCheck \
+COMMAND_ID=$(aws ssm send-command --document-name myapp-staging-health-check \
   --instance-ids <リリース用インスタンス ID> --query Command.CommandId --output text)
 aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id <リリース用インスタンス ID> \
   --query '[Status,StandardOutputContent]'
@@ -137,7 +137,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
   --variables name=VERSION,value=v1.0.0
 ```
 
-進行状況は、パイプラインの画面、または CodeBuild のログ（CloudWatch Logs `/myapp/staging/ami-publish`、ストリーム `codebuild/...`）で確認する。ログは JSON 形式で、`step_started` / `step_finished` がステップ 1〜6 の順に出る。
+進行状況は、パイプラインの画面、または CodeBuild のログ（CloudWatch Logs `/myapp/staging/ami-publish`、ストリーム `codebuild/...`）で確認する。ログは JSON 形式で、`step_started` / `step_finished` がステップ 1〜6 の順に出る。待っている間は 60 秒ごとに進捗ログ（`"event":"waiting"`）が出る（[進捗ログ](./ami-publish/README.md#進捗ログ)）。進捗ログが出ているのに先へ進まない場合は、その項目（ステップ 3 なら `ping_status` など）で原因を切り分ける。
 
 | # | 確認 | コマンド | 期待結果 |
 |---|---|---|---|
@@ -149,7 +149,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 | 5-6 | 出力変数 | パイプラインの実行詳細で、アクション `PublishAmi` の出力変数 | `AMI_ID`、`LAUNCH_TEMPLATE_VERSION` |
 | 5-7 | リリース用インスタンス | `describe-instance-information` の `PingStatus` と `curl http://localhost/up` | 再起動後も `Online`、アプリが応答する |
 | 5-8 | ヘルスチェックの出力 | CloudWatch Logs `/myapp/staging/ami-publish` の SSM のストリーム | `health check passed` |
-| 5-9 | 所要時間 | CodeBuild のログの `duration_seconds` | 各ステップの時間を記録し、`config/ami_publish.yml` の `timeouts` とビルドのタイムアウト（120 分）に余裕があるか確認する |
+| 5-9 | 所要時間 | CodeBuild のログの `duration_seconds` | 各ステップの時間を記録し、`config/ami_publish.yml` の `timeouts` とビルドのタイムアウト（`timeouts.codebuild_minutes`、60 分）に余裕があるか確認する |
 
 ## 6. 障害試験
 
@@ -199,6 +199,17 @@ AMI 公開ツールはテンプレート本体を変えないため、通常は�
 
 CodeBuild のサービスロールから権限を 1 つずつ外して実行し、該当するステップで AWS のエラー（終了コード 3）として止まることを確認する。IAM の変更が必要なため、行うかどうかは運用方針で決める。
 
+### 6-7. 停止中のリリース用インスタンスからの公開
+
+1. リリース用インスタンスを停止する（`aws ec2 stop-instances --instance-ids <ID>`、`stopped` になるまで待つ）。
+2. パイプラインを実行する。
+3. 期待結果:
+   - ログに `instance_state_checked`（状態 `stopped`）が出る
+   - AMI の作成時にインスタンスは起動しない（停止したまま AMI が作られる）
+   - AMI が available になった後、`instance_started` が出てインスタンスが起動し、SSM の接続とヘルスチェックを経て、起動テンプレートが更新される
+   - パイプラインの終了後も、インスタンスは起動したまま（停止に戻す場合はパイプラインの外で行う）
+4. リリース用インスタンスの EBS をカスタマー管理の KMS キーで暗号化している場合、起動に KMS の権限が必要になることがある。起動に失敗したら、CodeBuild のロールと KMS キーのポリシーを確認する。
+
 ## 7. 後片付けと記録
 
 ### 試験で作った AMI の削除
@@ -232,5 +243,6 @@ aws ec2 delete-snapshot --snapshot-id <上で表示されたスナップショ�
 | 6-4 ロールバック | | | |
 | 6-5 想定外の差分（任意） | | | |
 | 6-6 権限（任意） | | | |
+| 6-7 停止中からの公開 | | | |
 
 所要時間の実測値をもとに、`config/ami_publish.yml` の `timeouts` と CodeBuild のタイムアウトを見直す（開発計画のリスク「SSM Agent の再接続が遅い」「AMI 作成の長時間化」）。

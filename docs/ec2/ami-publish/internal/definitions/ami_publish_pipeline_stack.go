@@ -18,23 +18,23 @@ const BuildspecPath = "generated/codebuild/ami-publish-buildspec.yml"
 //
 // ソースはこのリポジトリで、push による自動起動は行わない（DetectChanges: false）。
 // パイプラインは担当者が変数 VERSION を指定して起動する。
-func AMIPublishPipelineStack(environmentName string, environment Environment) Map {
+func AMIPublishPipelineStack(environment Environment) Map {
 	pipeline := environment.Pipeline
 	return M(
 		"AWSTemplateFormatVersion", "2010-09-09",
-		"Description", fmt.Sprintf("%s AMI publish pipeline (%s)", environment.ApplicationName, environmentName),
+		"Description", fmt.Sprintf("%s AMI publish pipeline (%s)", environment.ApplicationName, environment.Name),
 		"Resources", M(
 			"ArtifactBucket", artifactBucket(),
 			"LogGroup", M(
 				"Type", "AWS::Logs::LogGroup",
 				"Properties", M(
-					"LogGroupName", pipeline.LogGroupName,
+					"LogGroupName", environment.LogGroupName(),
 					"RetentionInDays", pipeline.LogRetentionDays,
 				),
 			),
 			"LaunchTemplateStackServiceRole", launchTemplateStackServiceRole(environment),
 			"CodeBuildServiceRole", codeBuildServiceRole(environment),
-			"CodeBuildProject", codeBuildProject(environmentName, environment),
+			"CodeBuildProject", codeBuildProject(environment),
 			"CodePipelineServiceRole", codePipelineServiceRole(environment),
 			"Pipeline", codePipeline(environment),
 		),
@@ -76,7 +76,7 @@ func artifactBucket() Map {
 // launchTemplateStackServiceRole は、AMI 公開ツールが起動テンプレートのスタックを変更セットで更新するときに
 // CloudFormation に渡すサービスロール。CodeBuild 自身には起動テンプレートや IAM の変更権限を持たせない。
 func launchTemplateStackServiceRole(environment Environment) Map {
-	stackName := environment.LaunchTemplate.StackName
+	stackName := environment.LaunchTemplateStackName()
 	return M(
 		"Type", "AWS::IAM::Role",
 		"Properties", M(
@@ -155,7 +155,7 @@ func codeBuildServiceRole(environment Environment) Map {
 	imageARN := "arn:${AWS::Partition}:ec2:${AWS::Region}::image/*"
 	snapshotARN := "arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*"
 	launchTemplateStackARN := "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/" +
-		environment.LaunchTemplate.StackName + "/*"
+		environment.LaunchTemplateStackName() + "/*"
 	applicationTagCondition := M("StringEquals", M("ec2:ResourceTag/App", application))
 
 	return M(
@@ -186,15 +186,27 @@ func codeBuildServiceRole(environment Environment) Map {
 							"Resource", []any{Sub(instanceARN), Sub(imageARN), Sub(snapshotARN)},
 						),
 						M(
+							"Sid", "ReadInstanceState",
+							"Effect", "Allow",
+							"Action", "ec2:DescribeInstances",
+							"Resource", "*",
+						),
+						M(
+							"Sid", "StartStoppedReleaseInstance",
+							"Effect", "Allow",
+							"Action", "ec2:StartInstances",
+							"Resource", Sub(instanceARN),
+						),
+						M(
 							"Sid", "TagImage",
 							"Effect", "Allow",
 							"Action", "ec2:CreateTags",
 							"Resource", []any{Sub(imageARN), Sub(snapshotARN)},
 						),
 						M(
-							"Sid", "DescribeImages",
+							"Sid", "DescribeImagesAndSnapshots",
 							"Effect", "Allow",
-							"Action", "ec2:DescribeImages",
+							"Action", []any{"ec2:DescribeImages", "ec2:DescribeSnapshots"},
 							"Resource", "*",
 						),
 						M(
@@ -211,7 +223,7 @@ func codeBuildServiceRole(environment Environment) Map {
 							"Resource", []any{
 								Sub(instanceARN),
 								Sub("arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/" +
-									environment.HealthCheck.SSMDocumentName),
+									environment.HealthCheckDocumentName()),
 							},
 						),
 						M(
@@ -252,12 +264,11 @@ func codeBuildServiceRole(environment Environment) Map {
 	)
 }
 
-func codeBuildProject(environmentName string, environment Environment) Map {
-	pipeline := environment.Pipeline
+func codeBuildProject(environment Environment) Map {
 	return M(
 		"Type", "AWS::CodeBuild::Project",
 		"Properties", M(
-			"Name", pipeline.CodeBuildProjectName,
+			"Name", environment.CodeBuildProjectName(),
 			"Description", "Create an AMI from the release instance and update the launch template stack",
 			"ServiceRole", GetAtt("CodeBuildServiceRole", "Arn"),
 			"Artifacts", M("Type", "CODEPIPELINE"),
@@ -268,12 +279,12 @@ func codeBuildProject(environmentName string, environment Environment) Map {
 			"Environment", M(
 				"Type", "LINUX_CONTAINER",
 				"ComputeType", "BUILD_GENERAL1_SMALL",
-				"Image", pipeline.CodeBuildImage,
+				"Image", codeBuildImage,
 				"EnvironmentVariables", []any{
-					M("Name", "AMI_PUBLISH_ENVIRONMENT", "Value", environmentName, "Type", "PLAINTEXT"),
+					M("Name", "AMI_PUBLISH_ENVIRONMENT", "Value", environment.Name, "Type", "PLAINTEXT"),
 				},
 			),
-			"TimeoutInMinutes", pipeline.CodeBuildTimeoutMinutes,
+			"TimeoutInMinutes", environment.Timeouts.CodeBuildMinutes,
 			"ConcurrentBuildLimit", 1,
 			"LogsConfig", M(
 				"CloudWatchLogs", M(
@@ -346,7 +357,7 @@ func codePipeline(environment Environment) Map {
 	return M(
 		"Type", "AWS::CodePipeline::Pipeline",
 		"Properties", M(
-			"Name", pipeline.PipelineName,
+			"Name", environment.PipelineName(),
 			"PipelineType", "V2",
 			"ExecutionMode", "QUEUED",
 			"RoleArn", GetAtt("CodePipelineServiceRole", "Arn"),

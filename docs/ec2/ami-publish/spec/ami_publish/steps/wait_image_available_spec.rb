@@ -14,6 +14,20 @@ RSpec.describe AmiPublish::Steps::WaitImageAvailable do
     expect(requests(clients.ec2, :deregister_image)).to be_empty
   end
 
+  it "待っている間は、AMI の状態とスナップショットの進み具合を進捗として出す" do
+    mapping = { device_name: "/dev/xvda", ebs: { snapshot_id: "snap-1" } }
+    pending = { image_id: "ami-1", state: "pending", block_device_mappings: [mapping] }
+    clients.ec2.stub_responses(:describe_images, [{ images: [pending] },
+                                                  { images: [{ image_id: "ami-1", state: "available" }] }])
+    clients.ec2.stub_responses(:describe_snapshots, snapshots: [{ snapshot_id: "snap-1", progress: "45%" }])
+
+    step.call(context(image_id: "ami-1"))
+
+    expect(waiting_logs.first).to include("description" => "AMI の作成（スナップショットの取得）",
+                                          "image_id" => "ami-1", "state" => "pending",
+                                          "snapshots" => ["snap-1 45%"])
+  end
+
   it "AMI が failed になったら、AMI とスナップショットを削除して失敗にする" do
     mapping = { device_name: "/dev/xvda", ebs: { snapshot_id: "snap-1" } }
     clients.ec2.stub_responses(:describe_images,

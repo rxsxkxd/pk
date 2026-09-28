@@ -8,6 +8,7 @@ module AmiPublish
   #   dry_run                 true なら AWS に書き込まず、実行予定の操作をログに出す
   #   image_id                作成した（または戻し先の）AMI の ID
   #   launch_template_version 作成された起動テンプレートのバージョン番号
+  #   instance_state_at_start 開始時のリリース用インスタンスの状態（running / stopped）
   RunContext = Struct.new(:version, :verified, :pipeline_execution_id, :dry_run,
-                          :image_id, :launch_template_version, keyword_init: true)
+                          :image_id, :launch_template_version, :instance_state_at_start, keyword_init: true)
 end

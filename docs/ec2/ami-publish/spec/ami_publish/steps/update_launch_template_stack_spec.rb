@@ -32,7 +32,12 @@ RSpec.describe AmiPublish::Steps::UpdateLaunchTemplateStack do
       if request.params[:stack_name] == "myapp-staging-ami-publish-pipeline"
         { stacks: [pipeline_stack] }
       else
-        status = state[:executed] ? "UPDATE_COMPLETE" : launch_template_stack_status
+        status = launch_template_stack_status
+        if state[:executed]
+          # 実行直後の 1 回は更新中、その後に完了（進捗ログの確認のため）
+          state[:polls] = state.fetch(:polls, 0) + 1
+          status = state[:polls] == 1 ? "UPDATE_IN_PROGRESS" : "UPDATE_COMPLETE"
+        end
         version = state[:executed] ? "4" : "3"
         { stacks: [stack("myapp-staging-launch-template", status: status, parameters: current_parameters,
                                                           outputs: { "LaunchTemplateVersion" => version })] }
@@ -61,6 +66,8 @@ RSpec.describe AmiPublish::Steps::UpdateLaunchTemplateStack do
     )
     expect(requests(cloudformation, :execute_change_set).size).to eq(1)
     expect(run_context.launch_template_version).to eq("4")
+    expect(waiting_logs.first).to include("description" => "起動テンプレートのスタックの更新",
+                                          "stack_status" => "UPDATE_IN_PROGRESS")
   end
 
   context "起動テンプレート以外の変更が含まれている場合" do
@@ -88,6 +95,20 @@ RSpec.describe AmiPublish::Steps::UpdateLaunchTemplateStack do
     it "中止する" do
       expect { step.call(context(image_id: "ami-new")) }.to raise_error(AmiPublish::StepFailedError)
       expect(requests(cloudformation, :execute_change_set)).to be_empty
+    end
+  end
+
+  context "初回のデプロイで AmiId / AppVersion が空の場合" do
+    let(:current_parameters) { { "AmiId" => "", "AppVersion" => "" } }
+
+    it "最初の公開で AMI とバージョンを設定する" do
+      step.call(context(image_id: "ami-new"))
+
+      expect(requests(cloudformation, :create_change_set).first[:params][:parameters]).to contain_exactly(
+        { parameter_key: "AmiId", parameter_value: "ami-new" },
+        { parameter_key: "AppVersion", parameter_value: "v1.2.3" }
+      )
+      expect(requests(cloudformation, :execute_change_set).size).to eq(1)
     end
   end
 

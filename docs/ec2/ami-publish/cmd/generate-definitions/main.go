@@ -67,6 +67,13 @@ func main() {
 	for _, file := range files {
 		fmt.Printf("生成: %s/%s\n", *outputDirectory, file.Path)
 	}
+	// 名前は application_name と環境名から自動で決まる。デプロイコマンドのスタック名などに使う
+	for _, name := range configuration.EnvironmentNames() {
+		fmt.Printf("\n環境 %s の名前（自動）:\n", name)
+		for _, pair := range configuration.Environments[name].DerivedNames() {
+			fmt.Printf("  %-40s %s\n", pair[1], pair[0])
+		}
+	}
 	stale, err := definitions.StaleFiles(*outputDirectory, files)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

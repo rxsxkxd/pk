@@ -14,17 +14,17 @@ const healthCheckCommandTimeoutSeconds = 240
 // ヘルスチェックの SSM ドキュメントは、AMI 作成時の再起動の後に、アプリが自動で起動して
 // 応答するかをリリース用インスタンス上で確認する。AMI 公開ツールはこのドキュメントだけを実行し、
 // 任意のコマンドを送る AWS-RunShellScript は使わない。
-func HealthCheckStack(environmentName string, environment Environment) Map {
+func HealthCheckStack(environment Environment) Map {
 	settings := environment.HealthCheck
 	return M(
 		"AWSTemplateFormatVersion", "2010-09-09",
 		"Description", fmt.Sprintf("%s health check (SSM document) for the AMI publish pipeline (%s)",
-			environment.ApplicationName, environmentName),
+			environment.ApplicationName, environment.Name),
 		"Resources", M(
 			"HealthCheckDocument", M(
 				"Type", "AWS::SSM::Document",
 				"Properties", M(
-					"Name", settings.SSMDocumentName,
+					"Name", environment.HealthCheckDocumentName(),
 					"DocumentType", "Command",
 					"UpdateMethod", "NewVersion",
 					"Content", M(

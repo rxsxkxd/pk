@@ -125,15 +125,26 @@ Resources:
                   - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0123456789abcdef0
                   - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
                   - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*
+              - Sid: ReadInstanceState
+                Effect: Allow
+                Action: ec2:DescribeInstances
+                Resource: '*'
+              - Sid: StartStoppedReleaseInstance
+                Effect: Allow
+                Action: ec2:StartInstances
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0123456789abcdef0
               - Sid: TagImage
                 Effect: Allow
                 Action: ec2:CreateTags
                 Resource:
                   - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
                   - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*
-              - Sid: DescribeImages
+              - Sid: DescribeImagesAndSnapshots
                 Effect: Allow
-                Action: ec2:DescribeImages
+                Action:
+                  - ec2:DescribeImages
+                  - ec2:DescribeSnapshots
                 Resource: '*'
               - Sid: DeleteFailedImage
                 Effect: Allow
@@ -151,7 +162,7 @@ Resources:
                 Action: ssm:SendCommand
                 Resource:
                   - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0123456789abcdef0
-                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/MyApp-Staging-HealthCheck
+                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/myapp-staging-health-check
               - Sid: ReadCommandAndInstanceStatus
                 Effect: Allow
                 Action:
@@ -200,12 +211,12 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:7.0
+        Image: aws/codebuild/standard:8.0
         EnvironmentVariables:
           - Name: AMI_PUBLISH_ENVIRONMENT
             Value: staging
             Type: PLAINTEXT
-      TimeoutInMinutes: 120
+      TimeoutInMinutes: 60
       ConcurrentBuildLimit: 1
       LogsConfig:
         CloudWatchLogs:

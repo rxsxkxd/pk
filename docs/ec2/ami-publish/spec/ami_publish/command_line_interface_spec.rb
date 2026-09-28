@@ -21,6 +21,12 @@ RSpec.describe AmiPublish::CommandLineInterface do
                         stdout: stdout, stderr: stderr, client_factory: ->(_) { clients }).run
   end
 
+  def stub_instance_state(name)
+    clients.ec2.stub_responses(:describe_instances, reservations: [{ instances: [{
+                                 instance_id: "i-0123456789abcdef0", state: { name: name }
+                               }] }])
+  end
+
   def stub_launch_template_stack
     clients.cloudformation.stub_responses(:describe_stacks, stacks: [{
                                             stack_name: "myapp-staging-launch-template", creation_time: Time.now,
@@ -61,6 +67,7 @@ RSpec.describe AmiPublish::CommandLineInterface do
   end
 
   it "plan は AWS に書き込まずに成功する" do
+    stub_instance_state("running")
     clients.ec2.stub_responses(:describe_images, images: [])
     stub_launch_template_stack
 
@@ -70,7 +77,18 @@ RSpec.describe AmiPublish::CommandLineInterface do
     expect(requests(clients.ssm, :send_command)).to be_empty
   end
 
+  it "plan で停止中のインスタンスは、起動もしない" do
+    stub_instance_state("stopped")
+    clients.ec2.stub_responses(:describe_images, images: [])
+    stub_launch_template_stack
+
+    expect(run_cli("plan", "--environment", "staging", "--version", "v1.2.3")).to eq(0)
+    expect(requests(clients.ec2, :start_instances)).to be_empty
+    expect(stdout.string).to include('"event":"start_instance_planned"')
+  end
+
   it "run で AMI の作成に失敗したら終了コード 1 を返し、起動テンプレートのスタックは更新しない" do
+    stub_instance_state("running")
     clients.ec2.stub_responses(:describe_images, [
                                  { images: [] },
                                  { images: [{ image_id: "ami-new", state: "failed" }] }
@@ -83,13 +101,14 @@ RSpec.describe AmiPublish::CommandLineInterface do
   end
 
   it "想定外の AWS エラーは終了コード 3 を返す" do
-    clients.ec2.stub_responses(:describe_images, "UnauthorizedOperation")
+    clients.ec2.stub_responses(:describe_instances, "UnauthorizedOperation")
 
     expect(run_cli("run", "--environment", "staging", "--version", "v1.2.3")).to eq(3)
   end
 
   it "AWS に接続できない場合も終了コード 3 を返す" do
-    clients.ec2.stub_responses(:describe_images, Seahorse::Client::NetworkingError.new(StandardError.new("down")))
+    clients.ec2.stub_responses(:describe_instances,
+                               Seahorse::Client::NetworkingError.new(StandardError.new("down")))
 
     expect(run_cli("run", "--environment", "staging", "--version", "v1.2.3")).to eq(3)
   end

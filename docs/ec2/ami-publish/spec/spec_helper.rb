@@ -8,13 +8,10 @@ module SpecHelpers
     "aws_region" => "ap-northeast-1",
     "application_name" => "myapp",
     "release_instance_id" => "i-0123456789abcdef0",
-    "pipeline" => { "stack_name" => "myapp-staging-ami-publish-pipeline",
-                    "log_group_name" => "/myapp/staging/ami-publish" },
-    "launch_template" => { "stack_name" => "myapp-staging-launch-template" },
-    "health_check" => { "ssm_document_name" => "MyApp-Staging-HealthCheck" },
     "timeouts" => { "image_available_seconds" => 60, "instance_online_seconds" => 60,
                     "health_check_seconds" => 60, "stack_update_seconds" => 60,
-                    "poll_interval_seconds" => 0 }
+                    "poll_interval_seconds" => 0,
+                    "progress_log_interval_seconds" => 0 }
   }.freeze
 
   def configuration(overrides = {})
@@ -36,6 +33,11 @@ module SpecHelpers
 
   def log_events
     log_output.string.lines.map { |line| JSON.parse(line)["event"] }
+  end
+
+  # 進捗ログ（event: waiting）だけを取り出す
+  def waiting_logs
+    log_output.string.lines.map { |line| JSON.parse(line) }.select { |record| record["event"] == "waiting" }
   end
 
   # 1 回目の確認で待機時間を使い切る Poller（タイムアウトの試験用）。

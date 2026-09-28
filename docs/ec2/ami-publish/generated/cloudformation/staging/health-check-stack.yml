@@ -6,7 +6,7 @@ Resources:
   HealthCheckDocument:
     Type: AWS::SSM::Document
     Properties:
-      Name: MyApp-Staging-HealthCheck
+      Name: myapp-staging-health-check
       DocumentType: Command
       UpdateMethod: NewVersion
       Content:

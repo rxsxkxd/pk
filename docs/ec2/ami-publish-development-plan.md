@@ -43,7 +43,7 @@ flowchart TD
         S2 -- failed / タイムアウト --> F2[AMI とスナップショットを削除] --> Fail
         S2 -- available --> S3[3. WaitInstanceOnline<br>再起動後の SSM 接続待ち]
         S3 -- タイムアウト --> F3[AMI を登録解除し<br>スナップショットを削除] --> Fail
-        S3 --> S4[4. HealthCheck<br>SSM: MyApp-HealthCheck]
+        S3 --> S4[4. HealthCheck<br>SSM: myapp-staging-health-check]
         S4 -- 失敗 --> F3
         S4 -- 成功 --> S5[5. UpdateLaunchTemplateStack<br>変更セット作成 → 差分の検証 → 実行]
         S5 -- 想定外の差分 / 更新失敗 --> F5[変更セットを削除<br>AMI は残す（同じ実行の再実行で再利用）] --> Fail
@@ -56,10 +56,12 @@ flowchart TD
 
 | # | ステップ | 主な API | 失敗時 |
 |---|---|---|---|
+| 0 | CheckInstanceState（開始前の確認） | `ec2:DescribeInstances`。起動中か停止中かを記録し、起動処理中・停止処理中なら落ち着くまで待つ | そのまま失敗（何も変更しない） |
 | 1 | CreateImage | `ec2:CreateImage`（タグ: `App`、`AppVersion`、`Verified`、`PipelineExecutionId`、`Status=creating`） | そのまま失敗 |
 | 2 | WaitImageAvailable | `ec2:DescribeImages`（waiter） | `failed` またはタイムアウトなら AMI を登録解除し、スナップショットを削除 |
+| 2a | StartInstanceIfStopped（開始時に停止中だった場合だけ） | `ec2:StartInstances`、`instance_running` の待機。起動したまま終わる（停止はパイプラインの外で行う） | AMI とスナップショットを削除 |
 | 3 | WaitInstanceOnline | `ssm:DescribeInstanceInformation`（`PingStatus=Online` まで） | AMI を登録解除し、スナップショットを削除する（[D5](#決定事項)。原因調査は起動したままのリリース用インスタンスで行う） |
-| 4 | HealthCheck | `ssm:SendCommand`（`MyApp-HealthCheck`）、`ssm:GetCommandInvocation` | 同上 |
+| 4 | HealthCheck | `ssm:SendCommand`（`myapp-staging-health-check`）、`ssm:GetCommandInvocation` | 同上 |
 | 5 | UpdateLaunchTemplateStack | `cloudformation:CreateChangeSet` / `DescribeChangeSet` / `ExecuteChangeSet`、waiter | 想定外の差分なら変更セットを削除して中止。更新失敗（スタックがロールバック）でも中止。AMI 自体は正常なので残し、同じ実行を再実行したときに再利用する |
 | 6 | 出力 | `ec2:CreateTags`（`Status=published`） | — |
 
@@ -111,7 +113,7 @@ flowchart TD
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "20px"}, "flowchart": {"nodeSpacing": 40, "rankSpacing": 60, "wrappingWidth": 420}}}%%
 flowchart TD
-    Step1["1. 仕組みのための構成元と設定の用意（担当者）<br>internal/definitions/: CloudFormation テンプレート・buildspec・SSM ドキュメントの内容を Go の構造体で定義<br>config/ami_publish.yml: インスタンス ID、スタック名、タグ名などの環境ごとの設定値"]
+    Step1["1. 仕組みのための構成元と設定の用意（担当者）<br>internal/definitions/: CloudFormation テンプレート・buildspec・SSM ドキュメントの内容を Go の構造体で定義<br>config/ami_publish.yml: アプリケーション名、インスタンス ID、タグ名などの環境ごとの設定値"]
     Step1 -->|"担当者が Go の仕組み生成ツールを実行（go run ./cmd/generate-definitions）"| Step2
 
     Step2["2. 仕組みのための定義の生成<br>generated/cloudformation/: 起動テンプレートのスタック / AMI 公開パイプラインのスタック / ヘルスチェック（SSM ドキュメント）のスタックの CloudFormation テンプレート<br>generated/codebuild/: CodeBuild プロジェクト ami-publish の buildspec<br>（生成された YAML ファイルはリポジトリにコミットし、手で編集しない）"]
@@ -121,7 +123,7 @@ flowchart TD
     Step3 -->|"承認後、担当者が AWS CLI でデプロイ"| Step4
 
     Step4["4. 仕組みのデプロイ（担当者）<br>aws cloudformation deploy --no-execute-changeset で変更セットを作成<br>→ 変更内容を確認 → 変更セットを実行"]
-    Step4 --> HealthCheckStack["ヘルスチェックのスタック<br>SSM ドキュメント MyApp-HealthCheck"]
+    Step4 --> HealthCheckStack["ヘルスチェックのスタック<br>SSM ドキュメント myapp-staging-health-check"]
     Step4 --> LaunchTemplateStack["起動テンプレートのスタック<br>起動テンプレート・本番インスタンス用 IAM ロール"]
     Step4 --> PipelineStack["AMI 公開パイプラインのスタック<br>CodePipeline・CodeBuild プロジェクト・IAM ロール"]
 ```
@@ -171,7 +173,7 @@ flowchart TD
 
     Tool["Ruby 製ツール ami_publish<br>AWS SDK for Ruby で AWS の各サービスを操作する"]
     Tool -->|"ステップ 1・2: AMI の作成と作成完了（available）の待機"| EC2
-    Tool -->|"ステップ 3・4: 再起動後の SSM Agent 接続待ちと<br>SSM ドキュメント MyApp-HealthCheck によるヘルスチェック"| SSM
+    Tool -->|"ステップ 3・4: 再起動後の SSM Agent 接続待ちと<br>SSM ドキュメント myapp-staging-health-check によるヘルスチェック"| SSM
     Tool -->|"ステップ 5: 変更セットの作成・変更内容の検証・実行"| CloudFormation
 
     EC2["Amazon EC2 API<br>create-image（AMI 作成時にインスタンスを再起動する）"]
@@ -194,6 +196,7 @@ flowchart TD
 > - 出力順の固定は、構造体ではなく順序付きのマップ型（`internal/definitions/ordered_map.go`）で行う
 > - Ruby 側に共通部品を追加: `errors.rb`、`poller.rb`（待機処理）、`image_cleanup.rb`（失敗した AMI の削除）、`run_context.rb`、`steps/base_step.rb`、`steps/find_published_image.rb`（rollback 用）
 > - 起動テンプレートには UserData を指定しない
+> - スタック・パイプライン・ロググループ・SSM ドキュメントなどの名前は設定値に書かず、`application_name` と環境名から自動で決める（命名規則は `internal/definitions/naming.go` と `lib/ami_publish/configuration.rb` の両方に実装し、両方のテストで一致を確認する）
 
 
 Go の仕組み生成ツールと Ruby の AMI 公開ツールを同じリポジトリに置き、設定値ファイル `config/ami_publish.yml` を両方から参照する。
@@ -203,13 +206,13 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │
 │  ── 共通 ──
 ├── config/
-│   └── ami_publish.yml                       # 環境ごとの設定値: リリース用インスタンス ID、起動テンプレートのスタック名、AMI のタグ名、各待機処理のタイムアウト
+│   └── ami_publish.yml                       # 環境ごとの設定値: アプリケーション名、リリース用インスタンス ID、各待機処理のタイムアウトなど（リソースの名前はアプリケーション名と環境名から自動で決める）
 │                                             #   Go の仕組み生成ツール（生成時）と Ruby の AMI 公開ツール（実行時）の両方が読み込む
 ├── generated/                                # Go の仕組み生成ツールが出力した YAML ファイル（コミットする。手で編集しない）
 │   ├── cloudformation/
 │   │   ├── launch-template-stack.yml                   # 起動テンプレートのスタックの CloudFormation テンプレート
 │   │   ├── ami-publish-pipeline-stack.yml              # AMI 公開パイプライン（CodePipeline・CodeBuild・IAM）の CloudFormation テンプレート
-│   │   └── health-check-stack.yml                      # 再起動後のヘルスチェック（SSM ドキュメント MyApp-HealthCheck）の CloudFormation テンプレート
+│   │   └── health-check-stack.yml                      # 再起動後のヘルスチェック（SSM ドキュメント myapp-staging-health-check）の CloudFormation テンプレート
 │   └── codebuild/
 │       └── ami-publish-buildspec.yml                   # CodeBuild プロジェクト ami-publish の buildspec
 │
@@ -224,7 +227,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │       ├── configuration.go                            # config/ami_publish.yml の読み込みと値の検証
 │       ├── launch_template_stack.go                    # 起動テンプレートのスタックの CloudFormation テンプレート
 │       ├── ami_publish_pipeline_stack.go               # AMI 公開パイプライン（CodePipeline・CodeBuild・IAM）の CloudFormation テンプレート
-│       ├── health_check_stack.go                       # 再起動後のヘルスチェック（SSM ドキュメント MyApp-HealthCheck）の CloudFormation テンプレート
+│       ├── health_check_stack.go                       # 再起動後のヘルスチェック（SSM ドキュメント myapp-staging-health-check）の CloudFormation テンプレート
 │       ├── ami_publish_buildspec.go                    # CodeBuild プロジェクト ami-publish の buildspec
 │       ├── yaml_writer.go                              # YAML への書き出しと、--check 時のコミット済みファイルとの比較
 │       └── *_test.go                                   # 生成された YAML ファイルの構造テスト（go test。必須のリソースや設定値が含まれているか）
@@ -232,7 +235,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │  ── AMI 公開ツール（Ruby。AMI 公開パイプラインの CodeBuild 上で動く）──
 ├── Gemfile                                   # 使用する gem の定義（aws-sdk-ec2 / aws-sdk-ssm / aws-sdk-cloudformation / rspec / rubocop）
 ├── Gemfile.lock                              # gem のバージョン固定
-├── .ruby-version                             # 使用する Ruby のバージョン（3.4。CodeBuild の buildspec の runtime-versions と合わせる）
+├── .ruby-version                             # 手元で使う Ruby のバージョン（3.4 系の最新）。CodeBuild はイメージにある 3.4 系を rbenv local で使う
 ├── .rubocop.yml                              # Ruby のコード規約チェック（RuboCop）の設定
 ├── bin/
 │   └── ami_publish                           # AMI 公開ツールの実行コマンド。run = 実行、plan = AWS に書き込まずに実行予定の操作を表示（dry-run）、rollback = 起動テンプレートを公開済みの前の AMI に戻す
@@ -251,7 +254,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │           ├── create_image.rb                         # ステップ 1: AMI の作成（作成済みなら再利用）
 │           ├── wait_image_available.rb                 # ステップ 2: AMI が使える状態（available）になるまで待機
 │           ├── wait_instance_online.rb                 # ステップ 3: 再起動後に SSM Agent が接続するまで待機
-│           ├── health_check.rb                         # ステップ 4: SSM ドキュメント MyApp-HealthCheck でアプリの応答を確認
+│           ├── health_check.rb                         # ステップ 4: SSM ドキュメント myapp-staging-health-check でアプリの応答を確認
 │           ├── update_launch_template_stack.rb         # ステップ 5: 変更セットで起動テンプレートのスタックを更新
 │           └── publish_outputs.rb                      # ステップ 6: AMI ID と起動テンプレートのバージョンを出力し、AMI に Status=published を付与
 └── spec/                                     # AMI 公開ツールの RSpec のテスト
@@ -277,7 +280,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 
 ### CodeBuild の buildspec（generated/codebuild/ami-publish-buildspec.yml の生成イメージ）
 
-シェルで書くのは、Ruby の依存 gem のインストール、Ruby 製ツールの実行、ツールの出力値の受け渡しの 3 つだけにする。
+シェルで書くのは、Ruby の選択（rbenv）、Ruby の依存 gem のインストール、Ruby 製ツールの実行、ツールの出力値の受け渡しだけにする。Ruby は `runtime-versions` ではなく、CodeBuild 標準イメージに入っている rbenv で、イメージにある 3.4 系を選ぶ（Ruby のビルドはしない）。
 
 ```yaml
 version: 0.2
@@ -287,9 +290,11 @@ env:
     - LAUNCH_TEMPLATE_VERSION  # 作成された起動テンプレートのバージョン番号
 phases:
   install:
-    runtime-versions:
-      ruby: 3.4
     commands:
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi   # イメージにある 3.4 系を選ぶ
+      - ruby --version
+      - echo 'Entered install phase.'
+      - aws --version
       - bundle config set --local deployment true && bundle install
   build:
     commands:
@@ -327,7 +332,7 @@ flowchart LR
 | タスク | 内容 |
 |---|---|
 | Go の仕組み生成ツール | `go.mod`、`cmd/generate-definitions`、設定値ファイルの読み込み、YAML の書き出しと `--check`、`go test`・`go vet` |
-| Ruby のプロジェクト作成 | Gemfile（`aws-sdk-ec2`、`aws-sdk-ssm`、`aws-sdk-cloudformation`、`rspec`、`rubocop`）、`.ruby-version`（3.4） |
+| Ruby のプロジェクト作成 | Gemfile（`aws-sdk-ec2`、`aws-sdk-ssm`、`aws-sdk-cloudformation`、`rspec`、`rubocop`）、`.ruby-version`（3.4 系の最新） |
 | 設定読み込み | `config/ami_publish.yml` + 環境変数での上書き、必須項目と形式（`VERSION` の正規表現など）の検証 |
 | 実行基盤 | ステップの順次実行、dry-run、JSON 構造化ログ（ステップ名、所要時間、対象リソース ID） |
 | CLI | `bin/ami_publish run` / `plan`（dry-run）、終了コードの定義（成功 0、確認 NG、AWS エラー等を区別） |
@@ -342,7 +347,7 @@ flowchart LR
 | 定義 | `internal/definitions/launch_template_stack.go`（[テンプレート例](./ami-build-pipeline.md#テンプレート例)を Go の定義に移す） |
 | 生成・検証 | `go run ./cmd/generate-definitions`、`--check`、`go test`、`cfn-lint` |
 | サービスロール | スタック用の CloudFormation サービスロール（起動テンプレート・IAM の操作権限） |
-| 初回デプロイ | 開発アカウントで、既存の AMI を指定して AWS CLI でスタックを作成（[仕組みのデプロイ](#仕組みのデプロイaws-cli)の手順） |
+| 初回デプロイ | 開発アカウントで、AMI を指定せずに（`AmiId` は空）AWS CLI でスタックを作成（[仕組みのデプロイ](#仕組みのデプロイaws-cli)の手順） |
 
 **完了条件**: 開発アカウントに起動テンプレートのスタックがあり、手動で `AmiId` を変えて更新すると新しいバージョンができる。
 
@@ -353,9 +358,9 @@ flowchart LR
 | CreateImage | タグ付きで作成、`PipelineExecutionId` による再利用 |
 | WaitImageAvailable | waiter（回数・間隔を設定値に）、失敗時の登録解除とスナップショット削除 |
 | WaitInstanceOnline | `PingStatus=Online` の待機 |
-| HealthCheck | `MyApp-HealthCheck` の実行と結果取得 |
+| HealthCheck | `myapp-staging-health-check` の実行と結果取得 |
 | 失敗時の削除 | ステップ 3・4 の失敗時に AMI の登録解除とスナップショット削除 |
-| SSM ドキュメント | `MyApp-HealthCheck` の定義（`internal/definitions/health_check_stack.go` → `generated/cloudformation/<環境>/health-check-stack.yml`） |
+| SSM ドキュメント | `myapp-staging-health-check` の定義（`internal/definitions/health_check_stack.go` → `generated/cloudformation/<環境>/health-check-stack.yml`） |
 | 単体テスト | 正常系、`failed`、タイムアウト、再実行（作成済み AMI の再利用） |
 
 **完了条件**: 開発アカウントのリリース用インスタンスに対してローカルから `run` を実行し、AMI 作成とヘルスチェックまで通る。失敗系は単体テストで網羅されている。
@@ -378,8 +383,8 @@ flowchart LR
 
 | タスク | 内容 |
 |---|---|
-| buildspec の定義 | `internal/definitions/ami_publish_buildspec.go`（`runtime-versions` に Ruby 3.4） |
-| ビルド環境 | Ruby 3.4 を提供する CodeBuild 標準イメージのバージョンを確認し、CodeBuild プロジェクトに指定する |
+| buildspec の定義 | `internal/definitions/ami_publish_buildspec.go`（Ruby はイメージにある 3.4 系を `rbenv local` で選ぶ） |
+| ビルド環境 | CodeBuild 標準イメージに入っている Ruby 3.4 系のバージョンを確認し、buildspec の `rbenv local` に指定する |
 | パイプラインのスタック | CodeBuild プロジェクト（同時実行数 1、タイムアウト）、AMI 公開パイプライン（V2、パイプライン変数 `VERSION`、実行モード `QUEUED`）の定義。ソースはインフラ用リポジトリの `main` ブランチで、push による自動起動は無効にする |
 | IAM | CodeBuild サービスロール（[権限一覧](./ami-build-pipeline.md#iam-権限)の AMI 作成側）、`iam:PassRole` の対象をスタックのサービスロールに限定 |
 | ログ | CodeBuild のログを CloudWatch Logs に保存、SSM コマンドの出力も同じロググループへ |
@@ -437,11 +442,11 @@ flowchart LR
 | D3 | AMI 公開パイプラインの起動方法 | S3 の manifest 更新 / 手動実行（パイプライン変数で `VERSION`） | — | **決定: 起動する人がパイプライン変数 `VERSION` を指定して起動コマンドを実行**。実行モードは `QUEUED`。フェーズ 2 ではリリース検証パイプラインの最後のアクションが同じコマンドを実行する |
 | D4 | （欠番）Auto Scaling グループの配置 | — | — | **スコープ外**。起動テンプレートを使った実際のインスタンス構築は本計画の対象外。起動テンプレートのスタックには本番のリソースを含めない（ステップ 5 の差分検証で担保） |
 | D5 | 再起動後の確認に失敗した AMI | タグを付けて残す / すぐ削除 | — | **決定: すぐ削除する**（原因調査は起動したままのリリース用インスタンスで行う） |
-| D6 | Ruby のバージョン | CodeBuild の標準イメージが提供するバージョン / カスタムイメージ | — | **決定: 標準イメージで `runtime-versions` に Ruby 3.4 を指定**（3.4 を提供する標準イメージのバージョンを M5 で確認する） |
+| D6 | Ruby のバージョン | CodeBuild の標準イメージが提供するバージョン / カスタムイメージ | — | **決定: 手元は `.ruby-version` の 3.4 系の最新（3.4.11）。CodeBuild は標準イメージに入っている rbenv で、イメージにある 3.4 系（3.4.10）を `rbenv local` で選ぶ**（`runtime-versions` は使わず、Ruby のビルドもしない） |
 | D7 | ロールバックをツールに含めるか | サブコマンドとして実装 / 手順書で CLI 操作 | — | **決定: AMI 公開ツールのサブコマンド `rollback` として実装** |
 | D8 | AMI の保持数 | 世代数・期間 / 管理しない | — | **決定: このパイプラインでは保持数を管理しない**（古い AMI の整理は対象外） |
 | D9 | 仕組み（パイプライン・起動テンプレートのスタック本体・SSM ドキュメント）のデプロイ方法 | 担当者が AWS CLI で実行 / デプロイ用 Ruby コマンド / インフラ用 CI パイプライン | — | **決定: 担当者（または CLI 経由でエージェント）が AWS CLI で実行**。生成スクリプトの実行を含め、ツールの操作はすべて人が行う |
-| D10 | 実装言語 | — | — | **決定: 仕組みの生成ツールは Go、CI パイプライン（AMI 公開パイプライン）上で動くツールは Ruby** |
+| D10 | 実装言語 | — | — | **決定: クライアント PC で実行するクライアント・CLI ツールは Go、パイプラインの処理（CodeBuild 上）は Ruby、シェルスクリプトは最小限** |
 
 ## リスク
 

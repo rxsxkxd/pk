@@ -17,6 +17,7 @@ RSpec.describe AmiPublish::Steps::WaitInstanceOnline do
 
     expect { step.call(context(image_id: "ami-1")) }.not_to raise_error
     expect(requests(clients.ssm, :describe_instance_information).size).to eq(3)
+    expect(waiting_logs.map { |record| record["ping_status"] }).to eq(["（SSM に未登録）", "ConnectionLost"])
   end
 
   it "待機時間内に Online にならなければ、AMI を削除して失敗にする" do

@@ -59,6 +59,20 @@ func Ref(logicalName string) Map { return M("Ref", logicalName) }
 // Sub は Fn::Sub を返す。
 func Sub(format string) Map { return M("Fn::Sub", format) }
 
+// If は Fn::If を返す。
+func If(condition string, whenTrue, whenFalse any) Map {
+	return M("Fn::If", []any{condition, whenTrue, whenFalse})
+}
+
+// Equals は Fn::Equals を返す。
+func Equals(left, right any) Map { return M("Fn::Equals", []any{left, right}) }
+
+// Not は Fn::Not を返す。
+func Not(condition any) Map { return M("Fn::Not", []any{condition}) }
+
+// NoValue は、Fn::If でプロパティを省略するための AWS::NoValue を返す。
+func NoValue() Map { return Ref("AWS::NoValue") }
+
 // GetAtt は Fn::GetAtt を返す。
 func GetAtt(logicalName, attribute string) Map {
 	return M("Fn::GetAtt", []any{logicalName, attribute})

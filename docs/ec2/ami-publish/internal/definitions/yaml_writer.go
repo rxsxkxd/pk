@@ -41,13 +41,13 @@ func GenerateAll(configuration Configuration) ([]File, error) {
 	for _, name := range configuration.EnvironmentNames() {
 		environment := configuration.Environments[name]
 		directory := "cloudformation/" + name + "/"
-		if err := add(directory+"launch-template-stack.yml", LaunchTemplateStack(name, environment)); err != nil {
+		if err := add(directory+"launch-template-stack.yml", LaunchTemplateStack(environment)); err != nil {
 			return nil, err
 		}
-		if err := add(directory+"ami-publish-pipeline-stack.yml", AMIPublishPipelineStack(name, environment)); err != nil {
+		if err := add(directory+"ami-publish-pipeline-stack.yml", AMIPublishPipelineStack(environment)); err != nil {
 			return nil, err
 		}
-		if err := add(directory+"health-check-stack.yml", HealthCheckStack(name, environment)); err != nil {
+		if err := add(directory+"health-check-stack.yml", HealthCheckStack(environment)); err != nil {
 			return nil, err
 		}
 	}

@@ -17,31 +17,23 @@ environments:
     application_name: myapp
     release_instance_id: i-0123456789abcdef0
     pipeline:
-      stack_name: myapp-staging-ami-publish-pipeline
-      pipeline_name: myapp-staging-ami-publish
-      codebuild_project_name: myapp-staging-ami-publish
-      codebuild_image: aws/codebuild/standard:7.0
-      codebuild_timeout_minutes: 120
       source_connection_arn: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/abc
       source_repository_id: example-org/ami-publish
       source_branch_name: main
-      log_group_name: /myapp/staging/ami-publish
       log_retention_days: 90
     launch_template:
-      stack_name: myapp-staging-launch-template
-      launch_template_name: myapp-staging
       instance_type: t3.small
       security_group_ids: [sg-0123456789abcdef0]
     health_check:
-      stack_name: myapp-staging-health-check
-      ssm_document_name: MyApp-Staging-HealthCheck
       url: http://localhost/up
     timeouts:
+      codebuild_minutes: 120
       image_available_seconds: 3600
       instance_online_seconds: 900
       health_check_seconds: 300
       stack_update_seconds: 1800
       poll_interval_seconds: 15
+      progress_log_interval_seconds: 60
 `
 
 // setUpRepository は、設定値ファイルを置いた一時ディレクトリを作る。
@@ -169,8 +161,16 @@ func TestLaunchTemplateStack(t *testing.T) {
 	}
 
 	data := dig(t, document, "Resources", "LaunchTemplate", "Properties", "LaunchTemplateData").(map[string]any)
-	if got := dig(t, data, "ImageId", "Ref"); got != "AmiId" {
-		t.Errorf("ImageId = %v, want Ref AmiId", got)
+	// 初回は AmiId を省略でき、そのときは ImageId を入れない（Fn::If と AWS::NoValue）。
+	for _, name := range []string{"AmiId", "AppVersion"} {
+		if got := dig(t, document, "Parameters", name, "Default"); got != "" {
+			t.Errorf("%s の既定値 = %v, want 空（初回は省略できる）", name, got)
+		}
+	}
+	dig(t, document, "Conditions", "HasAmiId")
+	imageID := dig(t, data, "ImageId", "Fn::If").([]any)
+	if imageID[0] != "HasAmiId" || dig(t, imageID[1], "Ref") != "AmiId" || dig(t, imageID[2], "Ref") != "AWS::NoValue" {
+		t.Errorf("ImageId = %v, want Fn::If [HasAmiId, Ref AmiId, AWS::NoValue]", imageID)
 	}
 	if got := dig(t, data, "MetadataOptions", "HttpTokens"); got != "required" {
 		t.Errorf("HttpTokens = %v, want required（IMDSv2 必須）", got)
@@ -219,6 +219,12 @@ func TestPipelineStack(t *testing.T) {
 	}
 
 	project := dig(t, document, "Resources", "CodeBuildProject", "Properties")
+	if got := dig(t, project, "Environment", "Image"); got != codeBuildImage {
+		t.Errorf("Image = %v, want %s", got, codeBuildImage)
+	}
+	if got := dig(t, project, "TimeoutInMinutes"); got != 120 {
+		t.Errorf("TimeoutInMinutes = %v, want 120（timeouts.codebuild_minutes）", got)
+	}
 	if got := dig(t, project, "ConcurrentBuildLimit"); got != 1 {
 		t.Errorf("ConcurrentBuildLimit = %v, want 1", got)
 	}
@@ -231,7 +237,14 @@ func TestPipelineStack(t *testing.T) {
 	if strings.Contains(content, "AWS-RunShellScript") {
 		t.Error("CodeBuild のロールに AWS-RunShellScript を許可しない")
 	}
-	if !strings.Contains(content, "document/MyApp-Staging-HealthCheck") {
+	// 停止中のリリース用インスタンスは確認のために起動するが、停止はパイプラインの外で行う。
+	if !strings.Contains(content, "ec2:StartInstances") {
+		t.Error("停止中のリリース用インスタンスを起動する権限がない")
+	}
+	if strings.Contains(content, "ec2:StopInstances") {
+		t.Error("パイプラインにインスタンスを停止する権限を与えない")
+	}
+	if !strings.Contains(content, "document/myapp-staging-health-check") {
 		t.Error("ヘルスチェックの SSM ドキュメントの実行が許可されていない")
 	}
 	dig(t, document, "Outputs", "LaunchTemplateStackServiceRoleArn")
@@ -241,7 +254,7 @@ func TestHealthCheckStack(t *testing.T) {
 	files, _ := generate(t)
 	document := parse(t, files["cloudformation/staging/health-check-stack.yml"])
 	properties := dig(t, document, "Resources", "HealthCheckDocument", "Properties")
-	if got := dig(t, properties, "Name"); got != "MyApp-Staging-HealthCheck" {
+	if got := dig(t, properties, "Name"); got != "myapp-staging-health-check" {
 		t.Errorf("Name = %v", got)
 	}
 	steps := dig(t, properties, "Content", "mainSteps").([]any)
@@ -258,8 +271,14 @@ func TestHealthCheckStack(t *testing.T) {
 func TestBuildspec(t *testing.T) {
 	files, _ := generate(t)
 	document := parse(t, files["codebuild/ami-publish-buildspec.yml"])
-	if got := dig(t, document, "phases", "install", "runtime-versions", "ruby"); got != "3.4" {
-		t.Errorf("ruby = %v, want 3.4", got)
+	// Ruby は runtime-versions ではなく、イメージに入っている rbenv でイメージにある 3.4 系を選ぶ。
+	install := dig(t, document, "phases", "install").(map[string]any)
+	if _, ok := install["runtime-versions"]; ok {
+		t.Error("runtime-versions を使わない")
+	}
+	installCommands := dig(t, install, "commands").([]any)
+	if !strings.Contains(installCommands[0].(string), "rbenv local "+codeBuildRubyVersion) {
+		t.Errorf("install の最初で rbenv local %s を実行する: %v", codeBuildRubyVersion, installCommands)
 	}
 	exported := dig(t, document, "env", "exported-variables").([]any)
 	if len(exported) != 2 || exported[0] != "AMI_ID" || exported[1] != "LAUNCH_TEMPLATE_VERSION" {
@@ -330,6 +349,9 @@ func TestLoadConfigurationRejectsInvalidValues(t *testing.T) {
 		"インスタンス ID の形式": {"i-0123456789abcdef0", "instance-1", "release_instance_id の形式が不正"},
 		"ヘルスチェックの待機時間":  {"health_check_seconds: 300", "health_check_seconds: 60", "timeouts.health_check_seconds"},
 		"URL に使えない文字":   {"http://localhost/up", "http://localhost/up;rm", "health_check.url の形式が不正"},
+		"アプリケーション名の大文字": {"application_name: myapp", "application_name: MyApp", "application_name の形式が不正"},
+		"aws で始まる":      {"application_name: myapp", "application_name: awsapp", "aws / amazon で始めない"},
+		"名前として使わない旧項目":  {"      url: http://localhost/up", "      stack_name: x\n      url: http://localhost/up", "stack_name"},
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -355,5 +377,35 @@ func TestMapPanicsOnInvalidDefinition(t *testing.T) {
 			}()
 			M(arguments...)
 		})
+	}
+}
+
+// 名前は application_name と環境名から自動で決まる。Ruby の AMI 公開ツールのテスト
+// （spec/ami_publish/configuration_spec.rb）も同じ名前を期待しており、両方で命名規則が一致していることを確かめる。
+func TestDerivedNames(t *testing.T) {
+	_, configPath := setUpRepository(t, testConfiguration)
+	configuration, err := LoadConfiguration(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environment := configuration.Environments["staging"]
+	want := map[string]string{
+		"AMI 公開パイプラインのスタック":       "myapp-staging-ami-publish-pipeline",
+		"CodePipeline のパイプライン":    "myapp-staging-ami-publish",
+		"CodeBuild プロジェクト":        "myapp-staging-ami-publish",
+		"CloudWatch Logs のロググループ": "/myapp/staging/ami-publish",
+		"起動テンプレートのスタック":           "myapp-staging-launch-template",
+		"起動テンプレート":                "myapp-staging",
+		"ヘルスチェックのスタック":            "myapp-staging-health-check",
+		"ヘルスチェックの SSM ドキュメント":     "myapp-staging-health-check",
+	}
+	names := environment.DerivedNames()
+	if len(names) != len(want) {
+		t.Fatalf("名前の数 = %d, want %d", len(names), len(want))
+	}
+	for _, pair := range names {
+		if want[pair[0]] != pair[1] {
+			t.Errorf("%s = %q, want %q", pair[0], pair[1], want[pair[0]])
+		}
 	}
 }

@@ -87,9 +87,12 @@ module AmiPublish
 
       # 変更がなければ nil を返す（変更セットは削除する）。
       def wait_for_change_set(change_set_name)
+        progress = progress_logger("変更セットの作成")
         clients.cloudformation.wait_until(:change_set_create_complete, stack_name: stack_name,
                                                                        change_set_name: change_set_name) do |waiter|
-          configure_waiter(waiter, configuration.stack_update_timeout_seconds)
+          configure_waiter(waiter, configuration.stack_update_timeout_seconds, progress: progress) do |response|
+            { change_set_name: change_set_name, status: response.data&.status }
+          end
         end
         all_changes(change_set_name)
       rescue Aws::Waiters::Errors::WaiterFailed => e
@@ -134,8 +137,12 @@ module AmiPublish
       def execute_change_set(change_set_name)
         # [変更] 変更セットを実行し、起動テンプレートの新しいバージョンを作る
         clients.cloudformation.execute_change_set(stack_name: stack_name, change_set_name: change_set_name)
+        progress = progress_logger("起動テンプレートのスタックの更新")
         clients.cloudformation.wait_until(:stack_update_complete, stack_name: stack_name) do |waiter|
-          configure_waiter(waiter, configuration.stack_update_timeout_seconds)
+          configure_waiter(waiter, configuration.stack_update_timeout_seconds, progress: progress) do |response|
+            stack = response.data&.stacks&.first
+            { stack_name: stack_name, stack_status: stack&.stack_status }
+          end
         end
       rescue Aws::Waiters::Errors::WaiterFailed => e
         status = describe_stack(stack_name).stack_status

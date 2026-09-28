@@ -4,12 +4,21 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: myapp launch template (staging). ImageId is updated by the AMI publish pipeline.
 Parameters:
   AmiId:
-    Type: AWS::EC2::Image::Id
-    Description: AMI created by the AMI publish pipeline
+    Type: String
+    Default: ""
+    AllowedPattern: ^(ami-[0-9a-f]{8,17})?$
+    Description: AMI created by the AMI publish pipeline. Leave empty on the first deployment.
   AppVersion:
     Type: String
-    AllowedPattern: ^v[0-9]+\.[0-9]+\.[0-9]+$
-    Description: Application release version contained in the AMI (e.g. v1.2.3)
+    Default: ""
+    AllowedPattern: ^(v[0-9]+\.[0-9]+\.[0-9]+)?$
+    Description: Application release version contained in the AMI (e.g. v1.2.3). Leave empty on the first deployment.
+Conditions:
+  HasAmiId:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AmiId
+          - ""
 Resources:
   InstanceRole:
     Type: AWS::IAM::Role
@@ -33,10 +42,16 @@ Resources:
     Properties:
       LaunchTemplateName: myapp-staging
       VersionDescription:
-        Fn::Sub: myapp ${AppVersion}
+        Fn::If:
+          - HasAmiId
+          - Fn::Sub: myapp ${AppVersion}
+          - myapp (AMI not set)
       LaunchTemplateData:
         ImageId:
-          Ref: AmiId
+          Fn::If:
+            - HasAmiId
+            - Ref: AmiId
+            - Ref: AWS::NoValue
         InstanceType: t3.small
         IamInstanceProfile:
           Arn:
@@ -55,14 +70,20 @@ Resources:
                 Value: myapp
               - Key: AppVersion
                 Value:
-                  Ref: AppVersion
+                  Fn::If:
+                    - HasAmiId
+                    - Ref: AppVersion
+                    - none
           - ResourceType: volume
             Tags:
               - Key: App
                 Value: myapp
               - Key: AppVersion
                 Value:
-                  Ref: AppVersion
+                  Fn::If:
+                    - HasAmiId
+                    - Ref: AppVersion
+                    - none
 Outputs:
   LaunchTemplateId:
     Value:

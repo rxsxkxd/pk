@@ -7,7 +7,7 @@
 ```mermaid
 flowchart TD
     subgraph pre["移行前（ローカル）"]
-        R0["⓪ 成立条件チェック<br/>evaluate_blue_green_prereqs --output<br/><b>Go</b>"]
+        R0["⓪ 成立条件チェック<br/>evaluate_blue_green_prereqs<br/><b>Go</b>"]
         R1["① 設定レビュー<br/>generate_blue_green_config_report<br/><b>Go</b>"]
         R2["② パラメータ変換<br/>generate_mysql84_parameter_group<br/><b>Go</b>"]
     end
@@ -30,7 +30,7 @@ flowchart TD
 
 | # | 生成器 | Step | 何を判断するため | 言語 | 判定するか |
 |---|---|---|---|---|---|
-| ⓪ | `tools/evaluate_blue_green_prereqs/ --output` | **1** | **移行できるか・対象選定**（ゲート①） | **Go** | **する**（STOP が残れば exit 1） |
+| ⓪ | `tools/evaluate_blue_green_prereqs/` | **1** | **移行できるか・対象選定**（ゲート①） | **Go** | **する**（STOP が残れば exit 1） |
 | ① | `tools/generate_blue_green_config_report/` | 3 の前準備 | **この移行設定でよいか**（ゲート②） | **Go** | **しない**（材料を並べるだけ） |
 | ② | `tools/generate_mysql84_parameter_group/` | **2** | **移行できるか・対象選定**（ゲート①） | **Go** | **する**（要レビューが残れば exit 1） |
 | ③ | `scripts/generate_green_verification_report/` | **4** | **切り替えてよいか**（ゲート③） | **Go** | **する**（構成の突き合わせとドリフト検出。`--check`） |
@@ -71,7 +71,7 @@ flowchart TD
 
 | 材料 | 出どころ | 形式 |
 |---|---|---|
-| 成立条件チェックの結果 | Step 1（`tools/evaluate_blue_green_prereqs/ --output`） | `prereqs-evaluation-report.md` |
+| 成立条件チェックの結果 | Step 1（`tools/evaluate_blue_green_prereqs/`） | `prereqs-evaluation-report.md` |
 | パラメータ変換のレビュー報告 | Step 2（②の生成器） | `mysql80-to-mysql84-parameter-report.md` |
 
 **ここを通らないと先へ進めない。**Step 1 に `STOP` が残る間は移行できず、Step 2 に「要レビュー」が残ると生成器が exit 1 を返す。
@@ -358,9 +358,9 @@ flowchart LR
 
 ここでも収集（probe）と判定（レポート生成）は分離されている。
 
-## 8. Step 1 のレポート（任意出力）
+## 8. Step 1 のレポート
 
-`tools/evaluate_blue_green_prereqs/`（Step 1、Go）は **`--output` を指定したときだけ** `.md` を出す。省略時は標準出力へ表形式で出すだけである。いずれの場合も STOP が残れば exit 1 を返す。
+`tools/evaluate_blue_green_prereqs/`（Step 1、Go）は標準出力の一覧に加えて、**必ず** `.md` を出す。出力先は `--output`、省略時は入力ディレクトリの `prereqs-evaluation-report.md` である（MySQL 側の収集結果などの詳細はレポートにしか載らないため、付け忘れで失われないようにしている）。STOP が残れば exit 1 を返す。
 
 入力ディレクトリに MySQL 側の収集結果（`blue-mysql-state.json` / `blue-upgrade-check.json`）があれば、0-1-06（外部 binlog レプリカ）・0-2（InnoDB 以外のテーブル）・0-3（アップグレードチェッカー）の判定に使い、レポートの「MySQL 側の収集結果」節に載せる。**無いファイルは該当項目を REVIEW（未収集）とし、節は省略したことを明示する。**末尾の「補足事項」には収集の網羅状況・注意点・全項目の合格条件と対処が載る。
 

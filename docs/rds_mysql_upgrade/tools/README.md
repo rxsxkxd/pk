@@ -150,9 +150,9 @@ go run ./tools/evaluate_blue_green_prereqs \
 | オプション | 必須 | 内容 |
 |---|---|---|
 | `--input-dir DIR` | ○ | `collect_blue_green_prereqs` の出力先 |
-| `--output FILE` | | Markdown レポートの出力先（省略時は標準出力の一覧だけ） |
+| `--output FILE` | | Markdown レポートの出力先（省略時は `<input-dir>/prereqs-evaluation-report.md`） |
 
-- **出力**: 標準出力に判定一覧と、MySQL 側のファイルの有無（`あり` / `省略`）。`--output` を付けると**ゲート①のレポート**（判定に加えて観測値と取得元）
+- **出力**: 標準出力に判定一覧と、MySQL 側のファイルの有無（`あり` / `省略`）、レポートの場所。**ゲート①のレポート**（判定に加えて観測値と取得元）は `--output` を省略しても必ず書く（詳細はレポートにしか載らないため）
 - **MySQL 側の収集結果**: 入力ディレクトリに `blue-mysql-state.json`（`collect_blue_mysql_state`）や `blue-upgrade-check.json`（`collect_blue_upgrade_check`）があれば、判定に使い、レポートの「MySQL 側の収集結果」に載せる（判定結果だけでなく中身も載せる: 主要なサーバー変数、`SHOW REPLICA STATUS` の全列、InnoDB 以外のテーブルの行数・サイズと変換例、アップグレードチェッカーの件数・検査ごとのレベル別件数・検出された問題と Blue の現在値・全検査の説明と対処と資料・手動確認項目。チェッカーが返す英語の説明は訳さずそのまま載せる）。**ファイルが無い節は「省略した」と、どのコマンドで取れるかを明示する。**
 
 | 項目 | ファイルがあるとき | 無いとき |

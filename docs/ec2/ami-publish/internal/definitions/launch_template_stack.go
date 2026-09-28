@@ -9,7 +9,8 @@ import "fmt"
 // パラメータ AmiId / AppVersion は AMI 公開パイプラインが更新し、テンプレート本体は担当者がデプロイする。
 //
 // 後から Auto Scaling グループで使えるよう、サブネットや固定のプライベート IP は指定しない。
-func LaunchTemplateStack(environmentName string, environment Environment, userData string) Map {
+// UserData は指定しない（起動時に必要な処理は AMI 側に持たせる）。
+func LaunchTemplateStack(environmentName string, environment Environment) Map {
 	settings := environment.LaunchTemplate
 	application := environment.ApplicationName
 
@@ -26,19 +27,6 @@ func LaunchTemplateStack(environmentName string, environment Environment, userDa
 			Sub("arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"),
 		},
 	)
-	if len(settings.SecretARNs) > 0 {
-		instanceRoleProperties = append(instanceRoleProperties, Entry{Key: "Policies", Value: []any{M(
-			"PolicyName", "read-application-secrets",
-			"PolicyDocument", M(
-				"Version", "2012-10-17",
-				"Statement", []any{M(
-					"Effect", "Allow",
-					"Action", "secretsmanager:GetSecretValue",
-					"Resource", stringsToAny(settings.SecretARNs),
-				)},
-			),
-		)}})
-	}
 
 	launchTemplateData := M(
 		"ImageId", Ref("AmiId"),
@@ -54,9 +42,6 @@ func LaunchTemplateStack(environmentName string, environment Environment, userDa
 			M("ResourceType", "volume", "Tags", applicationTags(application)),
 		},
 	)
-	if userData != "" {
-		launchTemplateData = append(launchTemplateData, Entry{Key: "UserData", Value: Base64(userData)})
-	}
 
 	return M(
 		"AWSTemplateFormatVersion", "2010-09-09",

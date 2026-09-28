@@ -114,21 +114,21 @@ flowchart TD
     Step1["1. 仕組みのための構成元と設定の用意（担当者）<br>internal/definitions/: CloudFormation テンプレート・buildspec・SSM ドキュメントの内容を Go の構造体で定義<br>config/ami_publish.yml: インスタンス ID、スタック名、タグ名などの環境ごとの設定値"]
     Step1 -->|"担当者が Go の仕組み生成ツールを実行（go run ./cmd/generate-definitions）"| Step2
 
-    Step2["2. 仕組みのための定義の生成<br>generated/cloudformation/: 起動テンプレートのスタック / AMI 公開パイプラインのスタック / SSM ドキュメントのスタックの CloudFormation テンプレート<br>generated/codebuild/: CodeBuild プロジェクト ami-publish の buildspec<br>（生成された YAML ファイルはリポジトリにコミットし、手で編集しない）"]
+    Step2["2. 仕組みのための定義の生成<br>generated/cloudformation/: 起動テンプレートのスタック / AMI 公開パイプラインのスタック / ヘルスチェック（SSM ドキュメント）のスタックの CloudFormation テンプレート<br>generated/codebuild/: CodeBuild プロジェクト ami-publish の buildspec<br>（生成された YAML ファイルはリポジトリにコミットし、手で編集しない）"]
     Step2 --> Step3
 
     Step3["3. 生成物のレビュー（担当者）<br>・go run ./cmd/generate-definitions --check: Go の定義と生成された YAML ファイルが一致しているか<br>・cfn-lint: CloudFormation テンプレートの構文・設定の検証<br>・go test ./...: 生成された YAML ファイルの構造テスト<br>・プルリクエストで生成された YAML ファイルの差分をレビューし、承認を得る"]
     Step3 -->|"承認後、担当者が AWS CLI でデプロイ"| Step4
 
     Step4["4. 仕組みのデプロイ（担当者）<br>aws cloudformation deploy --no-execute-changeset で変更セットを作成<br>→ 変更内容を確認 → 変更セットを実行"]
-    Step4 --> SsmDocumentsStack["SSM ドキュメントのスタック<br>MyApp-HealthCheck など"]
+    Step4 --> HealthCheckStack["ヘルスチェックのスタック<br>SSM ドキュメント MyApp-HealthCheck"]
     Step4 --> LaunchTemplateStack["起動テンプレートのスタック<br>起動テンプレート・本番インスタンス用 IAM ロール"]
     Step4 --> PipelineStack["AMI 公開パイプラインのスタック<br>CodePipeline・CodeBuild プロジェクト・IAM ロール"]
 ```
 
 #### 仕組みのデプロイ（AWS CLI）
 
-依存関係の順（SSM ドキュメント → 起動テンプレート → AMI 公開パイプライン）にデプロイする。各スタックとも、変更セットを作って内容を確認してから実行する。
+依存関係の順（ヘルスチェック（SSM ドキュメント）→ 起動テンプレート → AMI 公開パイプライン）にデプロイする。各スタックとも、変更セットを作って内容を確認してから実行する。
 
 ```bash
 # 変更セットを作成（まだ反映しない）
@@ -149,7 +149,7 @@ aws cloudformation execute-change-set \
   --change-set-name <変更セット名>
 ```
 
-- 起動テンプレートのスタックでは、テンプレート本体の変更（インスタンスタイプ、UserData など）だけをこの手順で反映する。パラメータ `AmiId` / `AppVersion` は AMI 公開パイプラインが更新するため、この手順では `--parameter-overrides` で上書きしない（`aws cloudformation deploy` は指定しないパラメータの現在値を引き継ぐ）。
+- 起動テンプレートのスタックでは、テンプレート本体の変更（インスタンスタイプ、セキュリティグループなど）だけをこの手順で反映する。パラメータ `AmiId` / `AppVersion` は AMI 公開パイプラインが更新するため、この手順では `--parameter-overrides` で上書きしない（`aws cloudformation deploy` は指定しないパラメータの現在値を引き継ぐ）。
 - 実行する具体的なコマンド（スタック名・パラメータ・デプロイ順）は、M7 の運用ドキュメントに手順としてまとめる。
 
 ### パイプラインの実行
@@ -189,11 +189,11 @@ flowchart TD
 
 ### リポジトリのディレクトリ構成（案）
 
-> **実装済み**: [`ami-publish/`](../../ami-publish/README.md)（workspace 直下の独立したプロジェクト。別リポジトリへ切り出せる構成）。下の案からの変更点:
+> **実装済み**: [`ami-publish/`](./ami-publish/README.md)（`docs/ec2/ami-publish/` に配置した独立したプロジェクト。別リポジトリへ切り出せる構成）。下の案からの変更点:
 > - CloudFormation テンプレートは環境ごとに `generated/cloudformation/<環境>/` へ出力する（buildspec は全環境で共通のため `generated/codebuild/` 直下）
 > - 出力順の固定は、構造体ではなく順序付きのマップ型（`internal/definitions/ordered_map.go`）で行う
 > - Ruby 側に共通部品を追加: `errors.rb`、`poller.rb`（待機処理）、`image_cleanup.rb`（失敗した AMI の削除）、`run_context.rb`、`steps/base_step.rb`、`steps/find_published_image.rb`（rollback 用）
-> - 起動テンプレートの UserData は `config/user_data/<環境>.sh` に置き、設定値ファイルから参照する
+> - 起動テンプレートには UserData を指定しない
 
 
 Go の仕組み生成ツールと Ruby の AMI 公開ツールを同じリポジトリに置き、設定値ファイル `config/ami_publish.yml` を両方から参照する。
@@ -209,7 +209,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │   ├── cloudformation/
 │   │   ├── launch-template-stack.yml                   # 起動テンプレートのスタックの CloudFormation テンプレート
 │   │   ├── ami-publish-pipeline-stack.yml              # AMI 公開パイプライン（CodePipeline・CodeBuild・IAM）の CloudFormation テンプレート
-│   │   └── ssm-documents-stack.yml                     # SSM ドキュメント（MyApp-HealthCheck など）の CloudFormation テンプレート
+│   │   └── health-check-stack.yml                      # 再起動後のヘルスチェック（SSM ドキュメント MyApp-HealthCheck）の CloudFormation テンプレート
 │   └── codebuild/
 │       └── ami-publish-buildspec.yml                   # CodeBuild プロジェクト ami-publish の buildspec
 │
@@ -224,7 +224,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │       ├── configuration.go                            # config/ami_publish.yml の読み込みと値の検証
 │       ├── launch_template_stack.go                    # 起動テンプレートのスタックの CloudFormation テンプレート
 │       ├── ami_publish_pipeline_stack.go               # AMI 公開パイプライン（CodePipeline・CodeBuild・IAM）の CloudFormation テンプレート
-│       ├── ssm_documents_stack.go                      # SSM ドキュメント（MyApp-HealthCheck など）の CloudFormation テンプレート
+│       ├── health_check_stack.go                       # 再起動後のヘルスチェック（SSM ドキュメント MyApp-HealthCheck）の CloudFormation テンプレート
 │       ├── ami_publish_buildspec.go                    # CodeBuild プロジェクト ami-publish の buildspec
 │       ├── yaml_writer.go                              # YAML への書き出しと、--check 時のコミット済みファイルとの比較
 │       └── *_test.go                                   # 生成された YAML ファイルの構造テスト（go test。必須のリソースや設定値が含まれているか）
@@ -355,7 +355,7 @@ flowchart LR
 | WaitInstanceOnline | `PingStatus=Online` の待機 |
 | HealthCheck | `MyApp-HealthCheck` の実行と結果取得 |
 | 失敗時の削除 | ステップ 3・4 の失敗時に AMI の登録解除とスナップショット削除 |
-| SSM ドキュメント | `MyApp-HealthCheck` の定義（`internal/definitions/ssm_documents_stack.go` → `generated/cloudformation/ssm-documents-stack.yml`） |
+| SSM ドキュメント | `MyApp-HealthCheck` の定義（`internal/definitions/health_check_stack.go` → `generated/cloudformation/<環境>/health-check-stack.yml`） |
 | 単体テスト | 正常系、`failed`、タイムアウト、再実行（作成済み AMI の再利用） |
 
 **完了条件**: 開発アカウントのリリース用インスタンスに対してローカルから `run` を実行し、AMI 作成とヘルスチェックまで通る。失敗系は単体テストで網羅されている。

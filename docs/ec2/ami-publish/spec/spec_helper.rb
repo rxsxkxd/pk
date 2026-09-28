@@ -11,7 +11,7 @@ module SpecHelpers
     "pipeline" => { "stack_name" => "myapp-staging-ami-publish-pipeline",
                     "log_group_name" => "/myapp/staging/ami-publish" },
     "launch_template" => { "stack_name" => "myapp-staging-launch-template" },
-    "ssm_documents" => { "health_check_document_name" => "MyApp-Staging-HealthCheck" },
+    "health_check" => { "ssm_document_name" => "MyApp-Staging-HealthCheck" },
     "timeouts" => { "image_available_seconds" => 60, "instance_online_seconds" => 60,
                     "health_check_seconds" => 60, "stack_update_seconds" => 60,
                     "poll_interval_seconds" => 0 }

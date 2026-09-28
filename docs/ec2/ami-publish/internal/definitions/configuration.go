@@ -23,7 +23,7 @@ type Environment struct {
 	ReleaseInstanceID string                 `yaml:"release_instance_id"`
 	Pipeline          PipelineSettings       `yaml:"pipeline"`
 	LaunchTemplate    LaunchTemplateSettings `yaml:"launch_template"`
-	SSMDocuments      SSMDocumentsSettings   `yaml:"ssm_documents"`
+	HealthCheck       HealthCheckSettings    `yaml:"health_check"`
 	Timeouts          TimeoutSettings        `yaml:"timeouts"`
 }
 
@@ -47,15 +47,13 @@ type LaunchTemplateSettings struct {
 	LaunchTemplateName string   `yaml:"launch_template_name"`
 	InstanceType       string   `yaml:"instance_type"`
 	SecurityGroupIDs   []string `yaml:"security_group_ids"`
-	SecretARNs         []string `yaml:"secret_arns"`
-	UserDataFile       string   `yaml:"user_data_file"`
 }
 
-// SSMDocumentsSettings は SSM ドキュメントのスタックの設定値。
-type SSMDocumentsSettings struct {
-	StackName               string `yaml:"stack_name"`
-	HealthCheckDocumentName string `yaml:"health_check_document_name"`
-	HealthCheckURL          string `yaml:"health_check_url"`
+// HealthCheckSettings は、再起動後のヘルスチェック（SSM ドキュメントとして登録する）のスタックの設定値。
+type HealthCheckSettings struct {
+	StackName       string `yaml:"stack_name"`
+	SSMDocumentName string `yaml:"ssm_document_name"`
+	URL             string `yaml:"url"`
 }
 
 // TimeoutSettings は AMI 公開ツールの待機時間（秒）。生成には使わないが、値の検証はここでも行う。
@@ -68,17 +66,16 @@ type TimeoutSettings struct {
 }
 
 var (
-	environmentNamePattern  = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	resourceNamePattern     = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*$`)
-	instanceIDPattern       = regexp.MustCompile(`^i-[0-9a-f]{8,17}$`)
-	securityGroupIDPattern  = regexp.MustCompile(`^sg-[0-9a-f]{8,17}$`)
-	logGroupNamePattern     = regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
-	documentNamePattern     = regexp.MustCompile(`^[A-Za-z0-9_.-]{3,128}$`)
-	healthCheckURLPattern   = regexp.MustCompile(`^https?://[A-Za-z0-9._:/-]+$`)
-	repositoryIDPattern     = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
-	arnPattern              = regexp.MustCompile(`^arn:aws[a-z-]*:[a-z0-9-]+:`)
-	codeBuildImagePattern   = regexp.MustCompile(`^[A-Za-z0-9._/:-]+$`)
-	userDataFilePathPattern = regexp.MustCompile(`^[A-Za-z0-9_./-]+$`)
+	environmentNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	resourceNamePattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*$`)
+	instanceIDPattern      = regexp.MustCompile(`^i-[0-9a-f]{8,17}$`)
+	securityGroupIDPattern = regexp.MustCompile(`^sg-[0-9a-f]{8,17}$`)
+	logGroupNamePattern    = regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
+	documentNamePattern    = regexp.MustCompile(`^[A-Za-z0-9_.-]{3,128}$`)
+	healthCheckURLPattern  = regexp.MustCompile(`^https?://[A-Za-z0-9._:/-]+$`)
+	repositoryIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	arnPattern             = regexp.MustCompile(`^arn:aws[a-z-]*:[a-z0-9-]+:`)
+	codeBuildImagePattern  = regexp.MustCompile(`^[A-Za-z0-9._/:-]+$`)
 )
 
 // LoadConfiguration は設定値ファイルを読み、値を検証する。
@@ -170,16 +167,10 @@ func (e Environment) problems() []string {
 	for _, id := range e.LaunchTemplate.SecurityGroupIDs {
 		check("launch_template.security_group_ids", id, securityGroupIDPattern)
 	}
-	for _, arn := range e.LaunchTemplate.SecretARNs {
-		check("launch_template.secret_arns", arn, arnPattern)
-	}
-	if e.LaunchTemplate.UserDataFile != "" {
-		check("launch_template.user_data_file", e.LaunchTemplate.UserDataFile, userDataFilePathPattern)
-	}
 
-	check("ssm_documents.stack_name", e.SSMDocuments.StackName, resourceNamePattern)
-	check("ssm_documents.health_check_document_name", e.SSMDocuments.HealthCheckDocumentName, documentNamePattern)
-	check("ssm_documents.health_check_url", e.SSMDocuments.HealthCheckURL, healthCheckURLPattern)
+	check("health_check.stack_name", e.HealthCheck.StackName, resourceNamePattern)
+	check("health_check.ssm_document_name", e.HealthCheck.SSMDocumentName, documentNamePattern)
+	check("health_check.url", e.HealthCheck.URL, healthCheckURLPattern)
 
 	positive("timeouts.image_available_seconds", e.Timeouts.ImageAvailableSeconds)
 	positive("timeouts.instance_online_seconds", e.Timeouts.InstanceOnlineSeconds)

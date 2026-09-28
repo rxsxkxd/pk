@@ -32,12 +32,10 @@ environments:
       launch_template_name: myapp-staging
       instance_type: t3.small
       security_group_ids: [sg-0123456789abcdef0]
-      secret_arns: [arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:myapp/staging/env-AbCdEf]
-      user_data_file: user_data.sh
-    ssm_documents:
-      stack_name: myapp-staging-ssm-documents
-      health_check_document_name: MyApp-Staging-HealthCheck
-      health_check_url: http://localhost/up
+    health_check:
+      stack_name: myapp-staging-health-check
+      ssm_document_name: MyApp-Staging-HealthCheck
+      url: http://localhost/up
     timeouts:
       image_available_seconds: 3600
       instance_online_seconds: 900
@@ -46,15 +44,12 @@ environments:
       poll_interval_seconds: 15
 `
 
-// setUpRepository は、設定値ファイルと UserData ファイルを置いた一時ディレクトリを作る。
+// setUpRepository は、設定値ファイルを置いた一時ディレクトリを作る。
 func setUpRepository(t *testing.T, configuration string) (root string, configPath string) {
 	t.Helper()
 	root = t.TempDir()
 	configPath = filepath.Join(root, "ami_publish.yml")
 	if err := os.WriteFile(configPath, []byte(configuration), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "user_data.sh"), []byte("#!/bin/bash\necho hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root, configPath
@@ -67,7 +62,7 @@ func generate(t *testing.T) (map[string][]byte, string) {
 	if err != nil {
 		t.Fatalf("LoadConfiguration: %v", err)
 	}
-	files, err := GenerateAll(configuration, root)
+	files, err := GenerateAll(configuration)
 	if err != nil {
 		t.Fatalf("GenerateAll: %v", err)
 	}
@@ -110,7 +105,7 @@ func TestGenerateAllProducesExpectedFiles(t *testing.T) {
 		"codebuild/ami-publish-buildspec.yml",
 		"cloudformation/staging/launch-template-stack.yml",
 		"cloudformation/staging/ami-publish-pipeline-stack.yml",
-		"cloudformation/staging/ssm-documents-stack.yml",
+		"cloudformation/staging/health-check-stack.yml",
 	} {
 		content, ok := files[path]
 		if !ok {
@@ -181,13 +176,11 @@ func TestLaunchTemplateStack(t *testing.T) {
 		t.Errorf("HttpTokens = %v, want required（IMDSv2 必須）", got)
 	}
 	// 後から Auto Scaling グループで使えるよう、サブネットやネットワークインターフェイスを指定しない。
-	for _, key := range []string{"NetworkInterfaces", "SubnetId"} {
+	// UserData も指定しない。
+	for _, key := range []string{"NetworkInterfaces", "SubnetId", "UserData"} {
 		if _, ok := data[key]; ok {
 			t.Errorf("起動テンプレートに %s を指定しない", key)
 		}
-	}
-	if got := dig(t, data, "UserData", "Fn::Base64"); got != "#!/bin/bash\necho hello\n" {
-		t.Errorf("UserData = %q", got)
 	}
 	dig(t, document, "Outputs", "LaunchTemplateVersion")
 }
@@ -244,9 +237,9 @@ func TestPipelineStack(t *testing.T) {
 	dig(t, document, "Outputs", "LaunchTemplateStackServiceRoleArn")
 }
 
-func TestSSMDocumentsStack(t *testing.T) {
+func TestHealthCheckStack(t *testing.T) {
 	files, _ := generate(t)
-	document := parse(t, files["cloudformation/staging/ssm-documents-stack.yml"])
+	document := parse(t, files["cloudformation/staging/health-check-stack.yml"])
 	properties := dig(t, document, "Resources", "HealthCheckDocument", "Properties")
 	if got := dig(t, properties, "Name"); got != "MyApp-Staging-HealthCheck" {
 		t.Errorf("Name = %v", got)
@@ -284,7 +277,7 @@ func TestDifferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := GenerateAll(configuration, root)
+	files, err := GenerateAll(configuration)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +329,7 @@ func TestLoadConfigurationRejectsInvalidValues(t *testing.T) {
 		"未知のキー":         {"    aws_region:", "    unknown_key: x\n    aws_region:", "unknown_key"},
 		"インスタンス ID の形式": {"i-0123456789abcdef0", "instance-1", "release_instance_id の形式が不正"},
 		"ヘルスチェックの待機時間":  {"health_check_seconds: 300", "health_check_seconds: 60", "timeouts.health_check_seconds"},
-		"URL に使えない文字":   {"http://localhost/up", "http://localhost/up;rm", "health_check_url の形式が不正"},
+		"URL に使えない文字":   {"http://localhost/up", "http://localhost/up;rm", "health_check.url の形式が不正"},
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {

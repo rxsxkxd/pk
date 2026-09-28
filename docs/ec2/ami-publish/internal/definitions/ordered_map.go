@@ -63,6 +63,3 @@ func Sub(format string) Map { return M("Fn::Sub", format) }
 func GetAtt(logicalName, attribute string) Map {
 	return M("Fn::GetAtt", []any{logicalName, attribute})
 }
-
-// Base64 は Fn::Base64 を返す。
-func Base64(value any) Map { return M("Fn::Base64", value) }

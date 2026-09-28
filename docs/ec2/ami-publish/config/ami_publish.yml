@@ -32,16 +32,13 @@ environments:
       instance_type: t3.small
       security_group_ids:
         - sg-0123456789abcdef0
-      # 本番インスタンスのロールが起動時に読み取る Secrets Manager のシークレット（UserData で使う）
-      secret_arns:
-        - arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:myapp/staging/env-AbCdEf
-      # 起動テンプレートに入れる UserData のファイル（リポジトリのルートからの相対パス。省略可）
-      user_data_file: config/user_data/staging.sh
 
-    ssm_documents:
-      stack_name: myapp-staging-ssm-documents
-      health_check_document_name: MyApp-Staging-HealthCheck
-      health_check_url: http://localhost/up
+    # AMI 作成時の再起動の後に、アプリが自動で起動して応答するかの確認。
+    # AWS 上では SSM ドキュメントとして登録し、SSM Run Command でリリース用インスタンス上で実行する
+    health_check:
+      stack_name: myapp-staging-health-check
+      ssm_document_name: MyApp-Staging-HealthCheck
+      url: http://localhost/up
 
     # AMI 公開ツールの待機時間（秒）
     timeouts:

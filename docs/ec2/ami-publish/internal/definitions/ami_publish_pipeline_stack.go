@@ -211,7 +211,7 @@ func codeBuildServiceRole(environment Environment) Map {
 							"Resource", []any{
 								Sub(instanceARN),
 								Sub("arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/" +
-									environment.SSMDocuments.HealthCheckDocumentName),
+									environment.HealthCheck.SSMDocumentName),
 							},
 						),
 						M(

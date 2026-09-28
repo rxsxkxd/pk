@@ -24,8 +24,7 @@ type File struct {
 }
 
 // GenerateAll は全環境分の CloudFormation テンプレートと、共通の buildspec を生成する。
-// repositoryRoot は UserData ファイルなど、設定値が参照するファイルの基準ディレクトリ。
-func GenerateAll(configuration Configuration, repositoryRoot string) ([]File, error) {
+func GenerateAll(configuration Configuration) ([]File, error) {
 	var files []File
 	add := func(path string, definition Map) error {
 		content, err := Render(definition)
@@ -41,18 +40,14 @@ func GenerateAll(configuration Configuration, repositoryRoot string) ([]File, er
 	}
 	for _, name := range configuration.EnvironmentNames() {
 		environment := configuration.Environments[name]
-		userData, err := readUserData(repositoryRoot, environment.LaunchTemplate.UserDataFile)
-		if err != nil {
-			return nil, fmt.Errorf("environments.%s: %w", name, err)
-		}
 		directory := "cloudformation/" + name + "/"
-		if err := add(directory+"launch-template-stack.yml", LaunchTemplateStack(name, environment, userData)); err != nil {
+		if err := add(directory+"launch-template-stack.yml", LaunchTemplateStack(name, environment)); err != nil {
 			return nil, err
 		}
 		if err := add(directory+"ami-publish-pipeline-stack.yml", AMIPublishPipelineStack(name, environment)); err != nil {
 			return nil, err
 		}
-		if err := add(directory+"ssm-documents-stack.yml", SSMDocumentsStack(name, environment)); err != nil {
+		if err := add(directory+"health-check-stack.yml", HealthCheckStack(name, environment)); err != nil {
 			return nil, err
 		}
 	}
@@ -148,15 +143,4 @@ func staleFiles(outputDirectory string, expected map[string]bool) ([]string, err
 	})
 	sort.Strings(stale)
 	return stale, err
-}
-
-func readUserData(repositoryRoot, path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	content, err := os.ReadFile(filepath.Join(repositoryRoot, filepath.FromSlash(path)))
-	if err != nil {
-		return "", fmt.Errorf("launch_template.user_data_file を読めない: %w", err)
-	}
-	return string(content), nil
 }

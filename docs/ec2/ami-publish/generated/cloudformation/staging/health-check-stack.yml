@@ -1,7 +1,7 @@
 # このファイルは cmd/generate-definitions が config/ami_publish.yml から生成した。手で編集しない。
 # 変更するときは internal/definitions/ か config/ を直し、再生成して差分をレビューする。
 AWSTemplateFormatVersion: "2010-09-09"
-Description: myapp SSM documents for the AMI publish pipeline (staging)
+Description: myapp health check (SSM document) for the AMI publish pipeline (staging)
 Resources:
   HealthCheckDocument:
     Type: AWS::SSM::Document

@@ -38,7 +38,7 @@ module AmiPublish
       @pipeline_stack_name = required(settings, "pipeline", "stack_name")
       @log_group_name = required(settings, "pipeline", "log_group_name")
       @launch_template_stack_name = required(settings, "launch_template", "stack_name")
-      @health_check_document_name = required(settings, "ssm_documents", "health_check_document_name")
+      @health_check_document_name = required(settings, "health_check", "ssm_document_name")
       load_timeouts(settings)
     end
 

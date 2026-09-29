@@ -112,7 +112,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 
 | # | ステップ | 失敗時 |
 |---|---|---|
-| 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ） | 失敗（何も変更しない） |
+| 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ）。あわせて SSM の管理対象かを確認（起動中なら SSM Agent が Online になるまで待つ。停止中なら登録されていること） | 失敗（AMI を作らず、何も変更しない） |
 | 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用 | 失敗 |
 | 2 | WaitImageAvailable: available まで待つ | AMI とスナップショットを削除 |
 | 2a | StartInstanceIfStopped: **開始時に停止中だった場合だけ**、確認のためにインスタンスを起動する（停止には戻さない） | AMI とスナップショットを削除 |
@@ -132,6 +132,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 | どこで | 進捗ログ | 主な項目 |
 |---|---|---|
 | ステップ 0 インスタンスの状態の確定 | `{"event":"waiting","description":"リリース用インスタンスの状態が落ち着くまで",...}` | 経過秒数、インスタンスの状態（`pending` / `stopping`） |
+| ステップ 0 SSM の接続確認（起動中の場合） | `{"event":"waiting","description":"SSM Agent の接続（AMI 作成前の確認）",...}` | 経過秒数、`ping_status`（「SSM に未登録」なら SSM の管理対象になっていない） |
 | ステップ 2a インスタンスの起動（停止中だった場合） | `{"event":"waiting","description":"リリース用インスタンスの起動",...}` | 経過秒数、インスタンスの状態 |
 | ステップ 2 AMI の作成 | `{"event":"waiting","description":"AMI の作成（スナップショットの取得）",...}` | 経過秒数、AMI の状態、スナップショットの進み具合（例: `snap-0123 45%`） |
 | ステップ 3 SSM Agent の接続待ち | `{"event":"waiting","description":"再起動後の SSM Agent の接続",...}` | 経過秒数、`ping_status`（`ConnectionLost` など）、最後に接続した時刻 |
@@ -222,7 +223,7 @@ LocalStack などで EC2 や SSM を模擬する方法もあるが、AMI の作�
 
 ## 未実施（AWS 環境が必要）
 
-稼働環境での作業と確認手順は [確認手順書: AMI 公開パイプラインの稼働環境での確認](../ami-publish-environment-verification.md) にまとめてある。
+稼働環境での作業と確認手順は [確認手順書: AMI 公開パイプラインの稼働環境での確認](../ami-publish-environment-verification.md)、失敗したときの対処は [トラブルシューティング](../ami-publish-troubleshooting.md) にまとめてある。
 
 - ソースにするリポジトリの用意（このディレクトリの中身をルートとするリポジトリ。決定事項 D2）
 - AWS 側の事前準備（リリース用インスタンス、セキュリティグループ、CodeConnections の接続）

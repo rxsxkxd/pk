@@ -26,8 +26,7 @@ module AmiPublish
       private
 
       def online?(progress)
-        filters = [{ key: "InstanceIds", values: [configuration.release_instance_id] }]
-        information = clients.ssm.describe_instance_information(filters: filters).instance_information_list.first
+        information = ssm_instance_information
         return true if information&.ping_status == "Online"
 
         progress.report do

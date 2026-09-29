@@ -35,6 +35,12 @@ module AmiPublish
                            interval_seconds: configuration.progress_log_interval_seconds)
       end
 
+      # SSM から見たリリース用インスタンスの情報（PingStatus など）。SSM の管理対象でなければ nil。
+      def ssm_instance_information
+        filters = [{ key: "InstanceIds", values: [configuration.release_instance_id] }]
+        clients.ssm.describe_instance_information(filters: filters).instance_information_list.first
+      end
+
       def application_tag_filters
         [{ name: "tag:App", values: [configuration.application_name] }]
       end

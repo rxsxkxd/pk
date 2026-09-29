@@ -4,7 +4,7 @@
 >
 > スコープ外: コードの修正、AWS を使わない確認（済み。[検証状況](./ami-publish/README.md#検証状況)）
 >
-> 関連: [開発計画: AMI 作成以降](./ami-publish-development-plan.md)
+> 関連: [開発計画: AMI 作成以降](./ami-publish-development-plan.md) / 失敗したときは [トラブルシューティング](./ami-publish-troubleshooting.md)
 
 ## 残っている作業の一覧
 
@@ -110,7 +110,7 @@ aws cloudformation deploy --stack-name myapp-staging-ami-publish-pipeline \
 | 4-4 | 作成直後の自動実行 | `aws codepipeline list-pipeline-executions --pipeline-name myapp-staging-ami-publish` | 作成直後に 1 回実行されていれば `Failed`（`VERSION` 未指定で終了コード 2）。CodeBuild のログに「--version を指定する」。AMI は作られていない |
 | 4-5 | CodeBuild の Ruby | 4-4 の CodeBuild のログ | `ruby --version` が 3.4.10、`bundle install` が成功している（`rbenv local 3.4.10` が失敗した場合は、イメージに 3.4.10 がない。`codeBuildRubyVersion` をイメージにあるバージョンに上げる） |
 | 4-6 | ヘルスチェックの単体実行 | 下記 | `Success` |
-| 4-7 | `plan` | 下記 | 終了コード 0。`create_image_planned`、`launch_template_stack_update_planned` がログに出る。AWS に変更がない |
+| 4-7 | `plan` | 下記 | 終了コード 0。`ssm_managed`、`create_image_planned`、`launch_template_stack_update_planned` がログに出る。AWS に変更がない。リリース用インスタンスが SSM の管理対象でなければ、ここで終了コード 1（「SSM の管理対象になっていない」）になる |
 
 4-6 ヘルスチェックの単体実行（SSM ドキュメントがリリース用インスタンスで動くか）:
 

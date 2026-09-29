@@ -25,6 +25,10 @@ RSpec.describe AmiPublish::CommandLineInterface do
     clients.ec2.stub_responses(:describe_instances, reservations: [{ instances: [{
                                  instance_id: "i-0123456789abcdef0", state: { name: name }
                                }] }])
+    ping_status = name == "running" ? "Online" : "ConnectionLost"
+    clients.ssm.stub_responses(:describe_instance_information, instance_information_list: [{
+                                 instance_id: "i-0123456789abcdef0", ping_status: ping_status
+                               }])
   end
 
   def stub_launch_template_stack
@@ -98,6 +102,16 @@ RSpec.describe AmiPublish::CommandLineInterface do
     expect(run_cli("run", "--environment", "staging", "--version", "v1.2.3")).to eq(1)
     expect(requests(clients.cloudformation, :create_change_set)).to be_empty
     expect(requests(clients.ec2, :deregister_image).size).to eq(1)
+  end
+
+  it "SSM の管理対象でないインスタンスは、AMI を作らずに終了コード 1 を返す" do
+    clients.ec2.stub_responses(:describe_instances, reservations: [{ instances: [{
+                                 instance_id: "i-0123456789abcdef0", state: { name: "stopped" }
+                               }] }])
+    clients.ssm.stub_responses(:describe_instance_information, instance_information_list: [])
+
+    expect(run_cli("run", "--environment", "staging", "--version", "v1.2.3")).to eq(1)
+    expect(requests(clients.ec2, :create_image)).to be_empty
   end
 
   it "想定外の AWS エラーは終了コード 3 を返す" do

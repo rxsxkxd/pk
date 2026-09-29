@@ -22,7 +22,7 @@
 | CodeBuild プロジェクト | 担当 | 導入時期 |
 |---|---|---|
 | `myapp-ami-publish` | AMI 作成前の最低限の確認 → 後片付け → AMI 作成 → 再起動後の確認 → 起動テンプレートのスタック更新 | **フェーズ 1（先行）** |
-| `myapp-release-verify` | チェックアウト → RSpec → 任意で E2E → アプリの切り替え・起動 → ヘルスチェック | フェーズ 2（後から追加） |
+| `myapp-release-verify` | チェックアウト → RSpec → 任意で E2E → アプリの切り替え・起動 → ヘルスチェック | フェーズ 3（後から追加） |
 
 この構成で特に注意すべき点は次のとおり。
 
@@ -39,12 +39,14 @@
 
 ### フェーズの分け方
 
+フェーズの番号は開発の優先順位で付けている。フェーズ 1 が AMI と起動テンプレートの用意（中段）、フェーズ 2 が起動テンプレートを使ったインスタンスの構築（後段。このドキュメントの対象外）、フェーズ 3 がリリース検証の自動化（前段）。全体像は [README](./README.md#全体像)。
+
 | フェーズ | 運用するもの | リリース用インスタンスへのアプリ配置 | AMI 作成の起動 |
 |---|---|---|---|
 | **フェーズ 1（先行）** | `myapp-ami-publish` のみ | 当面は手動（または既存の手順）で、チェックアウト・起動・動作確認まで済ませる | 担当者が手動で `start-build`（`VERSION` を指定） |
-| フェーズ 2 | `myapp-release-verify` を追加し、`myapp-ami-publish` と連結 | `myapp-release-verify` が自動で行う | タグ push → 検証が成功したら自動で AMI 作成へ |
+| フェーズ 3 | `myapp-release-verify` を追加し、`myapp-ami-publish` と連結 | `myapp-release-verify` が自動で行う | タグ push → 検証が成功したら自動で AMI 作成へ |
 
-`myapp-ami-publish` は、フェーズ 1 でもフェーズ 2 でも**同じものをそのまま使う**。フェーズ 2 では前段を追加して連結するだけで、AMI 作成側を作り直す必要はない。
+`myapp-ami-publish` は、フェーズ 1 でもフェーズ 3 でも**同じものをそのまま使う**。フェーズ 3 では前段を追加して連結するだけで、AMI 作成側を作り直す必要はない。
 
 ### フェーズ 1 の流れ
 
@@ -75,9 +77,9 @@ flowchart TD
 
 - **配置済みバージョンの一致**: `current` が指すリリース（`/var/www/myapp/releases/<version>`）が、指定した `VERSION` と一致するか。取り違えたバージョンの AMI を作らないため。手動の配置でも[ディレクトリ構成](#ディレクトリ構成)に従う必要がある。
 - **ヘルスチェック**: `http://localhost/up` が応答するか。
-- AMI には `Verified` タグを付け、フェーズ 1 の AMI（`manual`）とフェーズ 2 の AMI（`automated`）を区別できるようにする。
+- AMI には `Verified` タグを付け、フェーズ 1 の AMI（`manual`）とフェーズ 3 の AMI（`automated`）を区別できるようにする。
 
-### フェーズ 2 の連結
+### フェーズ 3 の連結
 
 ```mermaid
 flowchart LR
@@ -102,7 +104,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     Dev([開発者]) -->|リリースタグを push<br>v1.2.3| Repo[(Git リポジトリ)]
-    Repo -->|トリガー| CB1[CodeBuild<br>myapp-release-verify<br>※フェーズ 2]
+    Repo -->|トリガー| CB1[CodeBuild<br>myapp-release-verify<br>※フェーズ 3]
     CB1 -->|成功したら連結| CB2[CodeBuild<br>myapp-ami-publish<br>※フェーズ 1 から]
     Ops([担当者<br>フェーズ 1]) -.->|手動で start-build| CB2
 
@@ -124,7 +126,7 @@ flowchart LR
     ASG -. 起動時に UserData で<br>本番の設定・シークレットを取得 .-> Prod[(本番 DB 等)]
 ```
 
-## 処理の流れ（フェーズ 2 完了後）
+## 処理の流れ（フェーズ 3 完了後）
 
 ```mermaid
 sequenceDiagram
@@ -138,7 +140,7 @@ sequenceDiagram
     participant CFN as CloudFormation
 
     rect rgba(128,128,128,0.08)
-    Note over Git,RI: フェーズ 2 で追加（フェーズ 1 では手動で配置・起動）
+    Note over Git,RI: フェーズ 3 で追加（フェーズ 1 では手動で配置・起動）
     Git->>V: タグ push（v1.2.3）で起動
     V->>SSM: send-command（MyApp-Release, Version=v1.2.3, RunE2E=false）
     SSM->>RI: release.sh v1.2.3 false
@@ -212,7 +214,7 @@ flowchart TD
 |---|---|---|---|
 | `prepare-image.sh <version>` | `myapp-ami-publish` | **1** | 配置済みバージョンの一致とヘルスチェックの確認、AMI 作成前の後片付け |
 | `healthcheck.sh` | `myapp-ami-publish` | **1** | `/up` の応答確認（AMI 作成の再起動後に使う） |
-| `release.sh <version> <run_e2e>` | `myapp-release-verify` | 2 | チェックアウト、RSpec、任意で E2E、切り替え・起動、ヘルスチェック |
+| `release.sh <version> <run_e2e>` | `myapp-release-verify` | 3 | チェックアウト、RSpec、任意で E2E、切り替え・起動、ヘルスチェック |
 
 ### スクリプト例: prepare-image.sh / healthcheck.sh（フェーズ 1）
 
@@ -254,7 +256,7 @@ rm -f "/home/$APP_USER/.bash_history" /root/.bash_history
 
 フェーズ 1 で手動配置する場合も、`/var/www/myapp/releases/<version>` と `current` のディレクトリ構成に従う。後片付けの対象は、手動の配置手順で作られるもの（手元で使った鍵、作業ファイルなど）に合わせて追加する。
 
-### スクリプト例: release.sh（フェーズ 2）
+### スクリプト例: release.sh（フェーズ 3）
 
 ```bash
 #!/bin/bash
@@ -375,7 +377,7 @@ CodeBuild から任意のシェルコマンドを送るのではなく、パラ�
               runCommand:
                 - /opt/release/healthcheck.sh
 
-  # --- フェーズ 2 ---
+  # --- フェーズ 3 ---
   ReleaseDocument:
     Type: AWS::SSM::Document
     Properties:
@@ -410,8 +412,8 @@ CodeBuild から任意のシェルコマンドを送るのではなく、パラ�
 
 | プロジェクト | フェーズ | トリガー | ソース |
 |---|---|---|---|
-| `myapp-ami-publish` | **1** | フェーズ 1: 手動 `aws codebuild start-build --project-name myapp-ami-publish --environment-variables-override name=VERSION,value=v1.2.3`<br>フェーズ 2: CodePipeline から（`VERSION` を受け取る） | なし（`NO_SOURCE`、buildspec はプロジェクトに埋め込む） |
-| `myapp-release-verify` | 2 | CodePipeline V2 の Git タグトリガー（`v*`） | Git リポジトリ（タグ名の取得にだけ使う） |
+| `myapp-ami-publish` | **1** | フェーズ 1: 手動 `aws codebuild start-build --project-name myapp-ami-publish --environment-variables-override name=VERSION,value=v1.2.3`<br>フェーズ 3: CodePipeline から（`VERSION` を受け取る） | なし（`NO_SOURCE`、buildspec はプロジェクトに埋め込む） |
+| `myapp-release-verify` | 3 | CodePipeline V2 の Git タグトリガー（`v*`） | Git リポジトリ（タグ名の取得にだけ使う） |
 
 - どちらのプロジェクトも**同時実行数（`ConcurrentBuildLimit`）を 1 に設定**し、リリース処理・AMI 作成が重ならないようにする。
 - どちらもアプリのビルドは行わず、SSM Run Command と AWS API を呼ぶだけなので、最小のコンピューティングタイプで足りる。
@@ -424,7 +426,7 @@ env:
   variables:
     INSTANCE_ID: i-0123456789abcdef0
     LT_STACK: myapp-launch-template
-    VERIFIED: manual            # フェーズ 2 の CodePipeline からは automated を渡す
+    VERIFIED: manual            # フェーズ 3 の CodePipeline からは automated を渡す
 phases:
   build:
     commands:
@@ -488,7 +490,7 @@ phases:
         echo "AMI: $AMI_ID / launch template version: $LT_VERSION"
 ```
 
-### buildspec: myapp-release-verify（フェーズ 2）
+### buildspec: myapp-release-verify（フェーズ 3）
 
 ```yaml
 version: 0.2

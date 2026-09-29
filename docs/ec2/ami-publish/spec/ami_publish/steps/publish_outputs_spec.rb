@@ -15,14 +15,24 @@ RSpec.describe AmiPublish::Steps::PublishOutputs do
 
   attr_reader :output_path
 
-  it "AMI に Status=published を付け、出力値をファイルに書き出す" do
+  it "AMI に Status=published と HealthCheck=passed を付け、出力値をファイルに書き出す" do
     step = described_class.new(output_env_file: output_path, **step_dependencies(clients))
 
     step.call(context(image_id: "ami-new", launch_template_version: "4"))
 
     expect(requests(clients.ec2, :create_tags).first[:params])
-      .to eq(resources: ["ami-new"], tags: [{ key: "Status", value: "published" }])
+      .to eq(resources: ["ami-new"], tags: [{ key: "Status", value: "published" },
+                                            { key: "HealthCheck", value: "passed" }])
     expect(File.read(output_path)).to eq("AMI_ID=ami-new\nLAUNCH_TEMPLATE_VERSION=4\n")
+  end
+
+  it "ヘルスチェックを省略した実行では HealthCheck=skipped を付ける" do
+    step = described_class.new(**step_dependencies(clients))
+
+    step.call(context(image_id: "ami-new", launch_template_version: "4", health_check: false))
+
+    expect(requests(clients.ec2, :create_tags).first[:params][:tags])
+      .to include({ key: "HealthCheck", value: "skipped" })
   end
 
   it "tag_image: false（rollback）ではタグを変えない" do

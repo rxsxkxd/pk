@@ -14,13 +14,14 @@ module AmiPublish
     #   起動中: SSM Agent が Online になるまで待つ（起動直後の一時的な未接続を吸収する）
     #   停止中: 接続はしていなくてよいが、SSM の管理対象として登録されていること
     # 確かめられなければ、AMI を作らず、インスタンスも再起動せずに失敗にする。
+    # ヘルスチェックを省略する実行では、SSM を使わないため、この確認も行わない。
     class CheckInstanceState < BaseStep
       STABLE_STATES = %w[running stopped].freeze
       TRANSITIONAL_STATES = %w[pending stopping].freeze
 
       def call(context)
         state = wait_for_stable_state
-        verify_managed_by_ssm(state)
+        verify_managed_by_ssm(state) unless skipped_without_health_check?(context, "ssm_check_skipped")
         context.instance_state_at_start = state
         logger.info("instance_state_checked", instance_id: instance_id, state: state, flow: flow_description(state))
       end

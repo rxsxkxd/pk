@@ -16,6 +16,10 @@ module AmiPublish
       @ssm ||= Aws::SSM::Client.new(region: @region, **@client_options)
     end
 
+    def iam
+      @iam ||= Aws::IAM::Client.new(region: @region, **@client_options)
+    end
+
     def cloudformation
       @cloudformation ||= Aws::CloudFormation::Client.new(region: @region, **@client_options)
     end

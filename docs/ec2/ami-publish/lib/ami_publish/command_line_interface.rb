@@ -13,8 +13,8 @@ module AmiPublish
     USAGE = <<~TEXT
       使い方:
         ruby bin/ami_publish run      --environment ENV --version vX.Y.Z [--verified manual|automated]
-                                      [--pipeline-execution-id ID] [--output-env-file PATH]
-        ruby bin/ami_publish plan     --environment ENV --version vX.Y.Z
+                                      [--health-check true|false] [--pipeline-execution-id ID] [--output-env-file PATH]
+        ruby bin/ami_publish plan     --environment ENV --version vX.Y.Z [--health-check true|false]
         ruby bin/ami_publish rollback --environment ENV --to-version vX.Y.Z [--dry-run] [--output-env-file PATH]
 
         run       リリース用インスタンスから AMI を作成し、起動テンプレートのスタックを更新する
@@ -22,7 +22,8 @@ module AmiPublish
         rollback  起動テンプレートを、公開済みの前のバージョンの AMI に戻す
 
       共通オプション:
-        --config PATH   設定値ファイル（既定: config/ami_publish.yml）
+        --config PATH          設定値ファイル（既定: config/ami_publish.yml）
+        --health-check VALUE   false でヘルスチェックを省略する（既定: true）
     TEXT
 
     def initialize(argv, stdout: $stdout, stderr: $stderr, client_factory: nil)
@@ -64,13 +65,14 @@ module AmiPublish
       else
         Commands::PublishCommand.new(**dependencies).run(
           RunContext.new(version: options[:version], verified: options[:verified],
-                         pipeline_execution_id: options[:pipeline_execution_id], dry_run: subcommand == "plan")
+                         pipeline_execution_id: options[:pipeline_execution_id], dry_run: subcommand == "plan",
+                         health_check: options[:health_check] == "true")
         )
       end
     end
 
     def parse_options(subcommand)
-      options = { config: "config/ami_publish.yml", verified: "manual", dry_run: false }
+      options = { config: "config/ami_publish.yml", verified: "manual", health_check: "true", dry_run: false }
       option_parser(options).parse!(@argv)
       raise ConfigurationError, "余分な引数がある: #{@argv.join(' ')}" unless @argv.empty?
 
@@ -86,6 +88,7 @@ module AmiPublish
         parser.on("--version VERSION") { |value| options[:version] = value }
         parser.on("--to-version VERSION") { |value| options[:to_version] = value }
         parser.on("--verified VALUE") { |value| options[:verified] = value }
+        parser.on("--health-check VALUE") { |value| options[:health_check] = value }
         parser.on("--pipeline-execution-id ID") { |value| options[:pipeline_execution_id] = value unless value.empty? }
         parser.on("--output-env-file PATH") { |value| options[:output_env_file] = value }
         parser.on("--dry-run") { options[:dry_run] = true }
@@ -98,6 +101,9 @@ module AmiPublish
         raise ConfigurationError, "rollback では --version ではなく --to-version を指定する" if options[:version]
       else
         require_version(options[:version], "--version")
+        unless %w[true false].include?(options[:health_check])
+          raise ConfigurationError, "--health-check は true / false のどちらかにする"
+        end
         unless VERIFIED_VALUES.include?(options[:verified])
           raise ConfigurationError, "--verified は #{VERIFIED_VALUES.join(' / ')} のどちらかにする"
         end

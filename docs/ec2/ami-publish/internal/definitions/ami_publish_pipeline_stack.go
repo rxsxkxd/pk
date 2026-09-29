@@ -192,6 +192,21 @@ func codeBuildServiceRole(environment Environment) Map {
 							"Resource", "*",
 						),
 						M(
+							"Sid", "CheckReleaseInstanceRolePermissions",
+							"Effect", "Allow",
+							"Action", []any{"iam:GetInstanceProfile", "iam:SimulatePrincipalPolicy"},
+							"Resource", []any{
+								Sub("arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*"),
+								Sub("arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*"),
+							},
+						),
+						M(
+							"Sid", "FindBasicAuthParameterKey",
+							"Effect", "Allow",
+							"Action", "ssm:DescribeParameters",
+							"Resource", "*",
+						),
+						M(
 							"Sid", "StartStoppedReleaseInstance",
 							"Effect", "Allow",
 							"Action", "ec2:StartInstances",
@@ -343,6 +358,7 @@ func codeBuildEnvironmentVariables() string {
 	variables := []map[string]string{
 		{"name": "VERSION", "value": "#{variables.VERSION}", "type": "PLAINTEXT"},
 		{"name": "VERIFIED", "value": "#{variables.VERIFIED}", "type": "PLAINTEXT"},
+		{"name": "HEALTH_CHECK", "value": "#{variables.HEALTH_CHECK}", "type": "PLAINTEXT"},
 		{"name": "PIPELINE_EXECUTION_ID", "value": "#{codepipeline.PipelineExecutionId}", "type": "PLAINTEXT"},
 	}
 	encoded, err := json.Marshal(variables)
@@ -366,6 +382,11 @@ func codePipeline(environment Environment) Map {
 				M(
 					"Name", "VERSION",
 					"Description", "Application release version to publish as an AMI (e.g. v1.2.3). Required.",
+				),
+				M(
+					"Name", "HEALTH_CHECK",
+					"DefaultValue", "true",
+					"Description", "true: check that the application starts after the reboot (default). false: skip the health check",
 				),
 				M(
 					"Name", "VERIFIED",

@@ -35,6 +35,14 @@ module AmiPublish
                            interval_seconds: configuration.progress_log_interval_seconds)
       end
 
+      # ヘルスチェックを省略する実行なら、理由をログに出して true を返す（ステップの先頭で使う）
+      def skipped_without_health_check?(context, event)
+        return false if context.health_check?
+
+        logger.info(event, reason: "ヘルスチェックを省略する実行のため（--health-check false）")
+        true
+      end
+
       # SSM から見たリリース用インスタンスの情報（PingStatus など）。SSM の管理対象でなければ nil。
       def ssm_instance_information
         filters = [{ key: "InstanceIds", values: [configuration.release_instance_id] }]

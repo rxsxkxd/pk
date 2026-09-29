@@ -129,6 +129,18 @@ Resources:
                 Effect: Allow
                 Action: ec2:DescribeInstances
                 Resource: '*'
+              - Sid: CheckReleaseInstanceRolePermissions
+                Effect: Allow
+                Action:
+                  - iam:GetInstanceProfile
+                  - iam:SimulatePrincipalPolicy
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*
+                  - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+              - Sid: FindBasicAuthParameterKey
+                Effect: Allow
+                Action: ssm:DescribeParameters
+                Resource: '*'
               - Sid: StartStoppedReleaseInstance
                 Effect: Allow
                 Action: ec2:StartInstances
@@ -288,6 +300,9 @@ Resources:
       Variables:
         - Name: VERSION
           Description: Application release version to publish as an AMI (e.g. v1.2.3). Required.
+        - Name: HEALTH_CHECK
+          DefaultValue: "true"
+          Description: 'true: check that the application starts after the reboot (default). false: skip the health check'
         - Name: VERIFIED
           DefaultValue: manual
           Description: 'How the release was verified: manual (phase 1) or automated (release verification pipeline)'
@@ -322,7 +337,7 @@ Resources:
               Configuration:
                 ProjectName:
                   Ref: CodeBuildProject
-                EnvironmentVariables: '[{"name":"VERSION","type":"PLAINTEXT","value":"#{variables.VERSION}"},{"name":"VERIFIED","type":"PLAINTEXT","value":"#{variables.VERIFIED}"},{"name":"PIPELINE_EXECUTION_ID","type":"PLAINTEXT","value":"#{codepipeline.PipelineExecutionId}"}]'
+                EnvironmentVariables: '[{"name":"VERSION","type":"PLAINTEXT","value":"#{variables.VERSION}"},{"name":"VERIFIED","type":"PLAINTEXT","value":"#{variables.VERIFIED}"},{"name":"HEALTH_CHECK","type":"PLAINTEXT","value":"#{variables.HEALTH_CHECK}"},{"name":"PIPELINE_EXECUTION_ID","type":"PLAINTEXT","value":"#{codepipeline.PipelineExecutionId}"}]'
 Outputs:
   PipelineName:
     Value:

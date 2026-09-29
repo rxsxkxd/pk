@@ -10,6 +10,7 @@ module AmiPublish
         @logger = logger
         @runner = StepRunner.new(logger: logger, steps: [
                                    Steps::CheckInstanceState.new(**dependencies),
+                                   Steps::CheckReleaseInstancePermissions.new(**dependencies),
                                    Steps::CreateImage.new(**dependencies),
                                    Steps::WaitImageAvailable.new(**dependencies),
                                    Steps::StartInstanceIfStopped.new(**dependencies),
@@ -22,6 +23,7 @@ module AmiPublish
 
       def run(context)
         @logger.info("publish_started", version: context.version, verified: context.verified,
+                                        health_check: context.health_check?,
                                         pipeline_execution_id: context.pipeline_execution_id, dry_run: context.dry_run)
         @runner.run(context)
       end

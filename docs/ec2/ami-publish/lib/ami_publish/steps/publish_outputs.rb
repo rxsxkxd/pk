@@ -3,7 +3,8 @@
 module AmiPublish
   module Steps
     # ステップ 6: 結果を出力する。
-    #   - AMI にタグ Status=published を付ける（ロールバックの戻し先を探すときに使う。tag_image: false なら付けない）
+    #   - AMI にタグ Status=published と HealthCheck=passed / skipped を付ける
+    #     （Status はロールバックの戻し先を探すときに使う。tag_image: false なら付けない）
     #   - AMI_ID と LAUNCH_TEMPLATE_VERSION をファイルに書き出す（buildspec が exported-variables として公開する）
     class PublishOutputs < BaseStep
       SAFE_VALUE_PATTERN = /\A[A-Za-z0-9._:-]+\z/
@@ -20,7 +21,7 @@ module AmiPublish
           return
         end
 
-        tag_published(context.image_id) if @tag_image
+        tag_published(context) if @tag_image
         write_env_file(context) if @output_env_file
         logger.info("published", image_id: context.image_id, version: context.version,
                                  launch_template_version: context.launch_template_version)
@@ -28,9 +29,12 @@ module AmiPublish
 
       private
 
-      def tag_published(image_id)
-        # [変更] AMI のタグを Status=published にする
-        clients.ec2.create_tags(resources: [image_id], tags: [{ key: "Status", value: "published" }])
+      # HealthCheck タグで、ヘルスチェックを行ったか（passed）省略したか（skipped）を残す
+      def tag_published(context)
+        health_check = context.health_check? ? "passed" : "skipped"
+        # [変更] AMI のタグを Status=published、HealthCheck=passed / skipped にする
+        clients.ec2.create_tags(resources: [context.image_id], tags: [{ key: "Status", value: "published" },
+                                                                      { key: "HealthCheck", value: health_check }])
       end
 
       def write_env_file(context)

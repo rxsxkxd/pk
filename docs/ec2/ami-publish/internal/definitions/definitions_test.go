@@ -201,7 +201,7 @@ func TestPipelineStack(t *testing.T) {
 	for _, variable := range variables {
 		names = append(names, dig(t, variable, "Name").(string))
 	}
-	if strings.Join(names, ",") != "VERSION,VERIFIED" {
+	if strings.Join(names, ",") != "VERSION,HEALTH_CHECK,VERIFIED" {
 		t.Errorf("パイプライン変数 = %v", names)
 	}
 
@@ -212,7 +212,7 @@ func TestPipelineStack(t *testing.T) {
 	}
 	publish := dig(t, stages[1], "Actions").([]any)[0]
 	environmentVariables := dig(t, publish, "Configuration", "EnvironmentVariables").(string)
-	for _, want := range []string{"#{variables.VERSION}", "#{variables.VERIFIED}", "#{codepipeline.PipelineExecutionId}"} {
+	for _, want := range []string{"#{variables.VERSION}", "#{variables.VERIFIED}", "#{variables.HEALTH_CHECK}", "#{codepipeline.PipelineExecutionId}"} {
 		if !strings.Contains(environmentVariables, want) {
 			t.Errorf("CodeBuild に %s が渡されていない: %s", want, environmentVariables)
 		}
@@ -240,6 +240,12 @@ func TestPipelineStack(t *testing.T) {
 	// 停止中のリリース用インスタンスは確認のために起動するが、停止はパイプラインの外で行う。
 	if !strings.Contains(content, "ec2:StartInstances") {
 		t.Error("停止中のリリース用インスタンスを起動する権限がない")
+	}
+	// リリース用インスタンスのロールの許可を、ポリシーシミュレーターで確認する（ステップ 0 の後）。
+	for _, action := range []string{"iam:GetInstanceProfile", "iam:SimulatePrincipalPolicy"} {
+		if !strings.Contains(content, action) {
+			t.Errorf("リリース用インスタンスのロールの許可を確認する権限 %s がない", action)
+		}
 	}
 	if strings.Contains(content, "ec2:StopInstances") {
 		t.Error("パイプラインにインスタンスを停止する権限を与えない")

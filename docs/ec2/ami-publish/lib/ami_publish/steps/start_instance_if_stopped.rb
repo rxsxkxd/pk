@@ -9,6 +9,9 @@ module AmiPublish
     # 起動できなかった場合は、確認できない AMI になるため、AMI とスナップショットを削除して失敗にする（決定事項 D5）。
     class StartInstanceIfStopped < BaseStep
       def call(context)
+        # ヘルスチェックを省略するなら起動しない（停止したまま AMI を作って終わる）
+        return if skipped_without_health_check?(context, "start_instance_skipped")
+
         unless context.instance_state_at_start == "stopped"
           logger.info("start_instance_skipped", reason: "開始時に起動中だったため（AMI 作成時の再起動で確認する）")
           return

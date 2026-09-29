@@ -23,12 +23,29 @@ RSpec.describe AmiPublish::CommandLineInterface do
 
   def stub_instance_state(name)
     clients.ec2.stub_responses(:describe_instances, reservations: [{ instances: [{
-                                 instance_id: "i-0123456789abcdef0", state: { name: name }
+                                 instance_id: "i-0123456789abcdef0", state: { name: name },
+                                 iam_instance_profile: { arn: "arn:aws:iam::123456789012:instance-profile/release" }
                                }] }])
+    stub_release_instance_role
     ping_status = name == "running" ? "Online" : "ConnectionLost"
     clients.ssm.stub_responses(:describe_instance_information, instance_information_list: [{
                                  instance_id: "i-0123456789abcdef0", ping_status: ping_status
                                }])
+  end
+
+  # リリース用インスタンスのロールと、許可がすべてある判定結果
+  def stub_release_instance_role
+    clients.iam.stub_responses(:get_instance_profile, instance_profile: {
+                                 path: "/", instance_profile_name: "release", instance_profile_id: "id",
+                                 arn: "arn:aws:iam::123456789012:instance-profile/release", create_date: Time.now,
+                                 roles: [{ path: "/", role_name: "release", role_id: "id", create_date: Time.now,
+                                           arn: "arn:aws:iam::123456789012:role/release" }]
+                               })
+    clients.iam.stub_responses(:simulate_principal_policy, lambda { |request|
+      { is_truncated: false, evaluation_results: request.params[:action_names].map do |action|
+        { eval_action_name: action, eval_decision: "allowed" }
+      end }
+    })
   end
 
   def stub_launch_template_stack
@@ -63,6 +80,10 @@ RSpec.describe AmiPublish::CommandLineInterface do
     it "設定値ファイルにない環境" do
       expect(run_cli("run", "--environment", "production", "--version", "v1.2.3")).to eq(2)
       expect(stderr.string).to include("環境 production")
+    end
+
+    it "--health-check が true / false 以外" do
+      expect(run_cli("run", "--environment", "staging", "--version", "v1.2.3", "--health-check", "no")).to eq(2)
     end
 
     it "rollback に --version を指定した" do

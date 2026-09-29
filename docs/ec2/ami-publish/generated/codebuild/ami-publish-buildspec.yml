@@ -15,5 +15,5 @@ phases:
       - bundle config set --local deployment true && bundle config set --local without "development test" && bundle install
   build:
     commands:
-      - bundle exec ruby bin/ami_publish run --environment "$AMI_PUBLISH_ENVIRONMENT" --version "$VERSION" --verified "$VERIFIED" --pipeline-execution-id "$PIPELINE_EXECUTION_ID" --output-env-file ami_publish_outputs.env
+      - bundle exec ruby bin/ami_publish run --environment "$AMI_PUBLISH_ENVIRONMENT" --version "$VERSION" --verified "$VERIFIED" --health-check "$HEALTH_CHECK" --pipeline-execution-id "$PIPELINE_EXECUTION_ID" --output-env-file ami_publish_outputs.env
       - set -a && . ./ami_publish_outputs.env && set +a

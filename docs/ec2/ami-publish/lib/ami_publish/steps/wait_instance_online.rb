@@ -7,6 +7,8 @@ module AmiPublish
     # 待っている間は、SSM から見たインスタンスの状態（PingStatus）と最後に接続した時刻を進捗として出す。
     class WaitInstanceOnline < BaseStep
       def call(context)
+        return if skipped_without_health_check?(context, "wait_instance_online_skipped")
+
         if context.image_id.nil?
           logger.info("wait_instance_online_skipped", reason: "dry-run のため AMI を作成していない")
           return

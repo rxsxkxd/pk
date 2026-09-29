@@ -6,6 +6,7 @@ ruby "~> 3.4.0"
 
 gem "aws-sdk-cloudformation", "~> 1.0"
 gem "aws-sdk-ec2", "~> 1.0"
+gem "aws-sdk-iam", "~> 1.0"
 gem "aws-sdk-ssm", "~> 1.0"
 
 group :development, :test do

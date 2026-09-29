@@ -45,6 +45,7 @@ CodeBuild の `Command did not exit successfully bin/ami_publish run ... exit st
 | 症状 | 節 |
 |---|---|
 | `ping_status` が「SSM に未登録」のまま / 「SSM の管理対象になっていない」 | [1](#1-ssm-の管理対象になっていない) |
+| 「リリース用インスタンスのロール ... に必要な許可が足りない」/「インスタンスプロファイル（IAM ロール）が付いていない」 | [1a](#1a-リリース用インスタンスのロールの許可が足りない) |
 | `ping_status` が `ConnectionLost` のまま / 「SSM Agent が接続していない」 | [2](#2-ssm-agent-が接続しない) |
 | ステップ 4 で `ヘルスチェックが失敗した` | [3](#3-ヘルスチェックが失敗する) |
 | ステップ 2 で長時間待つ / `available にならなかった` / 60 分で強制終了 | [4](#4-ami-の作成が終わらない失敗する) |
@@ -86,6 +87,29 @@ aws ec2 describe-instances --instance-ids <インスタンス ID> \
 SSM に接続できない状態では Session Manager でインスタンスに入れない。インスタンス上を調べるには、EC2 シリアルコンソール（事前に有効化が必要）か SSH を使う。
 
 **確認のしかた**: 対処後、上の `describe-instance-information` で `Online` になることを確認してから、パイプラインを再実行する（`plan` でも確認できる）。
+
+## 1a. リリース用インスタンスのロールの許可が足りない
+
+**症状**: ステップ 0b（CheckReleaseInstancePermissions）で「リリース用インスタンスのロール ... に必要な許可が足りない。AMI は作成していない。不足: ...」、または「インスタンスプロファイル（IAM ロール）が付いていない」で失敗する。
+
+**意味**: IAM のポリシーシミュレーターで判定した結果、ロールのポリシー上で許可されていない操作がある（A・C の不足で止まる。B の不足は止まらず、ログに `release_instance_permissions_warning` の警告が出る）。`不足:` の後に「区分: 操作（判定）」の形で並ぶ（例: `B. ヘルスチェックの出力を CloudWatch Logs に送る: logs:PutLogEvents（implicitDeny）`）。AMI は作っておらず、インスタンスも変更していない。
+
+| 判定 | 意味 |
+|---|---|
+| `implicitDeny` | どのポリシーでも許可されていない。許可を付ける |
+| `explicitDeny` | どこかのポリシー（許可の境界や組織の SCP を含む）で明示的に拒否されている。拒否している側を確認する |
+
+**対処**: [リリース用インスタンスの IAM ロール](./ami-publish-release-instance-iam.md) の、区分（A〜C）に対応する許可を付ける。付けた後は、手元から `bin/ami_publish plan` で判定し直せる。
+
+Basic 認証のパラメーターの前提を満たしていない場合も、このステップで止まる。
+
+| メッセージ | 対処 |
+|---|---|
+| `Basic 認証のパラメーター ... がない` | `health_check.basic_auth_parameter_name` のパラメーターが SSM Parameter Store にない（名前の誤り、未作成）。作成する |
+| `... は SecureString にする` | 平文（String）で作られている。SecureString で作り直す |
+| `... は、既定の aws/ssm キーで暗号化する` | カスタマー管理の KMS キーで暗号化されている。`--key-id` を指定せずに作り直す |
+
+CodeBuild 側が判定の権限を持っていない場合は、`iam:SimulatePrincipalPolicy` などで終了コード 3（AccessDenied）になる。パイプラインのスタックが古い（判定の追加前）ので、仕組みを再デプロイする。
 
 ## 2. SSM Agent が接続しない
 
@@ -136,7 +160,7 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 | nginx（Passenger）の自動起動が無効（手作業で起動していた） | `sudo systemctl enable nginx`。リリース検証の手順に自動起動の確認を入れる |
 | アプリの起動時のエラー（設定・シークレットの不足、DB に接続できない） | エラーログを確認して直す |
 | `last HTTP status: 401`（`HTTP 401: the basic auth credentials were rejected or not sent`） | Basic 認証が必要なのに設定していない（`health_check.basic_auth_parameter_name` を設定する）、またはパラメーターの認証情報が誤っている（`ユーザー名:パスワード` の形式で置き直す） |
-| `cannot read the basic auth parameter ...` | リリース用インスタンスのロールに、ヘルスチェックのスタックの管理ポリシー（`BasicAuthParameterReadPolicyArn`）がアタッチされていない。パラメーターがない、名前が違う。カスタマー管理の KMS キーで暗号化している場合は `kms:Decrypt` も必要 |
+| `cannot read the basic auth parameter ...` | リリース用インスタンスのロールに、ヘルスチェックのスタックの管理ポリシー（`BasicAuthParameterReadPolicyArn`）がアタッチされていない。パラメーターがない、名前が違う |
 | `AWS CLI is not installed` | Basic 認証の情報を取り出すために、リリース用インスタンスに AWS CLI が必要。インストールする |
 | `/up` 以外のパスで確認すべき | `config/ami_publish.yml` の `health_check.url` を直し、ヘルスチェックのスタックを再生成・再デプロイする |
 

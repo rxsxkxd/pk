@@ -39,14 +39,14 @@ spec/                                  AMI 公開ツールのテスト（RSpec�
 `config/ami_publish.yml` と `internal/definitions/` を編集する。事前に AWS 側で用意するもの:
 
 - CodeConnections の接続（このリポジトリへの接続。コンソールで承認まで済ませる）→ `pipeline.source_connection_arn`
-- リリース用インスタンス（SSM Agent が動き、インスタンスプロファイルに `AmazonSSMManagedInstanceCore` があること）
+- リリース用インスタンス（SSM Agent が動き、インスタンスプロファイル（IAM ロール）に必要な許可があること。許可の一覧と設定方法は [リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md)）
 - ヘルスチェックに Basic 認証が必要な場合: 「ユーザー名:パスワード」を置いた SSM Parameter Store の SecureString（`health_check.basic_auth_parameter_name`）。CloudFormation では SecureString を作れないため、担当者が作成する:
 
   ```bash
   aws ssm put-parameter --type SecureString --name /myapp/staging/health-check/basic-auth --value 'ユーザー名:パスワード'
   ```
 
-  ヘルスチェックのスタックをデプロイした後、出力 `BasicAuthParameterReadPolicyArn` の管理ポリシーを、リリース用インスタンスの IAM ロールにアタッチする（`aws iam attach-role-policy --role-name <ロール名> --policy-arn <ARN>`）。リリース用インスタンスには AWS CLI が必要。パラメーターをカスタマー管理の KMS キーで暗号化している場合は、そのロールに `kms:Decrypt` も必要
+  ヘルスチェックのスタックをデプロイした後、出力 `BasicAuthParameterReadPolicyArn` の管理ポリシーを、リリース用インスタンスの IAM ロールにアタッチする（`aws iam attach-role-policy --role-name <ロール名> --policy-arn <ARN>`）。リリース用インスタンスには AWS CLI が必要。パラメーターは `--key-id` を指定せず、既定の `aws/ssm` キーで暗号化する（カスタマー管理の KMS キーには対応しない。パイプラインは開始時に確かめて止まる）
 
 ### 2. 仕組みのための定義の生成
 
@@ -117,11 +117,31 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
   --variables name=VERSION,value=v1.2.3
 ```
 
+**ヘルスチェックの省略**: 既定ではヘルスチェック（再起動後にアプリが自動で起動して応答するかの確認）を行う。省略する場合は、パイプライン変数 `HEALTH_CHECK` に `false` を指定する（手元の `run` / `plan` では `--health-check false`）。
+
+```bash
+aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
+  --variables name=VERSION,value=v1.2.3 name=HEALTH_CHECK,value=false
+```
+
+省略すると、ヘルスチェックのためだけに行っている処理もまとめて行わない（SSM に依存しなくなる）。
+
+| 処理 | 既定（`HEALTH_CHECK=true`） | 省略（`HEALTH_CHECK=false`） |
+|---|---|---|
+| 0 SSM の管理対象の確認 | 行う | 行わない |
+| 0b ロールの許可の確認 | 行う | 行わない |
+| 2a 停止中のインスタンスの起動 | 行う | 行わない（停止したまま AMI を作って終わる） |
+| 3 再起動後の SSM の接続待ち・4 ヘルスチェック | 行う | 行わない |
+| AMI のタグ `HealthCheck` | `passed` | `skipped` |
+
+省略した AMI は、「その AMI から起動してアプリが動くか」を確かめていない。タグ `HealthCheck=skipped` で区別できる。
+
 処理の流れ（`lib/ami_publish/steps/`）:
 
 | # | ステップ | 失敗時 |
 |---|---|---|
 | 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ）。あわせて SSM の管理対象かを確認（起動中なら SSM Agent が Online になるまで待つ。停止中なら登録されていること） | 失敗（AMI を作らず、何も変更しない） |
+| 0b | CheckReleaseInstancePermissions: リリース用インスタンスのロールに必要な許可（[一覧](../ami-publish-release-instance-iam.md)）があるかを、IAM のポリシーシミュレーターで判定する。停止中でも判定できる | A・C の不足は失敗（不足している許可を一覧にする。AMI を作らず、何も変更しない）。B（CloudWatch Logs への出力）の不足は警告を出して先に進む。Basic 認証のパラメーターが既定の `aws/ssm` キーの SecureString でなければ失敗 |
 | 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用 | 失敗 |
 | 2 | WaitImageAvailable: available まで待つ | AMI とスナップショットを削除 |
 | 2a | StartInstanceIfStopped: **開始時に停止中だった場合だけ**、確認のためにインスタンスを起動する（停止には戻さない） | AMI とスナップショットを削除 |

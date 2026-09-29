@@ -14,6 +14,7 @@ module AmiPublish
     APPLICATION_NAME_PATTERN = /\A[a-z][a-z0-9-]*\z/
 
     attr_reader :environment_name, :aws_region, :application_name, :release_instance_id,
+                :basic_auth_parameter_name,
                 :image_available_timeout_seconds, :progress_log_interval_seconds, :instance_online_timeout_seconds,
                 :health_check_timeout_seconds, :stack_update_timeout_seconds, :poll_interval_seconds
 
@@ -38,6 +39,8 @@ module AmiPublish
       @aws_region = required(settings, "aws_region")
       @application_name = required(settings, "application_name", pattern: APPLICATION_NAME_PATTERN)
       @release_instance_id = required(settings, "release_instance_id", pattern: INSTANCE_ID_PATTERN)
+      # Basic 認証のパラメーター名（省略可。ヘルスチェックの許可の確認に使う）
+      @basic_auth_parameter_name = settings.dig("health_check", "basic_auth_parameter_name")
       load_timeouts(settings)
     end
 

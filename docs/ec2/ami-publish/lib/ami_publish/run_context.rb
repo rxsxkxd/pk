@@ -9,6 +9,13 @@ module AmiPublish
   #   image_id                作成した（または戻し先の）AMI の ID
   #   launch_template_version 作成された起動テンプレートのバージョン番号
   #   instance_state_at_start 開始時のリリース用インスタンスの状態（running / stopped）
+  #   health_check            false ならヘルスチェックと、そのためだけの処理（SSM の確認、停止中のインスタンスの起動など）を省略する
   RunContext = Struct.new(:version, :verified, :pipeline_execution_id, :dry_run,
-                          :image_id, :launch_template_version, :instance_state_at_start, keyword_init: true)
+                          :image_id, :launch_template_version, :instance_state_at_start, :health_check,
+                          keyword_init: true) do
+    # 既定ではヘルスチェックを行う（明示的に false を指定したときだけ省略する）
+    def health_check?
+      health_check != false
+    end
+  end
 end

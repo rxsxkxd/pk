@@ -4,7 +4,7 @@
 >
 > スコープ外: コードの修正、AWS を使わない確認（済み。[検証状況](./ami-publish/README.md#検証状況)）
 >
-> 関連: [開発計画: AMI 作成以降](./ami-publish-development-plan.md) / 失敗したときは [トラブルシューティング](./ami-publish-troubleshooting.md)
+> 関連: [開発計画: AMI 作成以降](./ami-publish-development-plan.md) / 失敗したときは [トラブルシューティング](./ami-publish-troubleshooting.md) / リリース用インスタンスのロールの許可は [リリース用インスタンスの IAM ロール](./ami-publish-release-instance-iam.md)
 
 ## 残っている作業の一覧
 
@@ -44,7 +44,7 @@ AMI 公開パイプラインは、CodeConnections でリポジトリを取得し
 | 〃 アプリの状態 | リリースバージョンが配置・起動済みで、`curl http://localhost/up` が成功する。**再起動後に自動で起動する**（nginx などが `systemctl enable` 済み） | Session Manager で接続し、`curl -fsS http://localhost/up` と `systemctl is-enabled nginx` |
 | 〃 `curl` | ヘルスチェックの SSM ドキュメントが使う | `command -v curl` |
 | 〃 AWS CLI | Basic 認証を使う場合、ヘルスチェックが SSM Parameter Store から認証情報を取り出すのに使う | `command -v aws` |
-| Basic 認証のパラメーター（必要な場合） | 「ユーザー名:パスワード」を SSM Parameter Store の SecureString に置く（`aws ssm put-parameter --type SecureString ...`）。名前を `health_check.basic_auth_parameter_name` に書く | `aws ssm get-parameter --name <名前> --query Parameter.Type` → `SecureString` |
+| Basic 認証のパラメーター（必要な場合） | 「ユーザー名:パスワード」を SSM Parameter Store の SecureString に置く（`aws ssm put-parameter --type SecureString ...`。`--key-id` は指定せず、既定の `aws/ssm` キーで暗号化する）。名前を `health_check.basic_auth_parameter_name` に書く | `aws ssm get-parameter --name <名前> --query Parameter.Type` → `SecureString` |
 | セキュリティグループ | 起動テンプレートで使うもの | `aws ec2 describe-security-groups --group-ids <ID>` |
 | CodeConnections の接続 | 手順 0 のリポジトリへの接続。**コンソールで承認し、状態が `AVAILABLE` になっていること** | `aws codeconnections get-connection --connection-arn <ARN> --query 'Connection.ConnectionStatus'` |
 | デプロイする人の権限 | CloudFormation で IAM ロール・S3・CodePipeline・CodeBuild・SSM ドキュメント・起動テンプレートを作成できる | — |
@@ -120,7 +120,7 @@ aws iam attach-role-policy --role-name <リリース用インスタンスのロ�
 | 4-4 | 作成直後の自動実行 | `aws codepipeline list-pipeline-executions --pipeline-name myapp-staging-ami-publish` | 作成直後に 1 回実行されていれば `Failed`（`VERSION` 未指定で終了コード 2）。CodeBuild のログに「--version を指定する」。AMI は作られていない |
 | 4-5 | CodeBuild の Ruby | 4-4 の CodeBuild のログ | `ruby --version` が 3.4.10、`bundle install` が成功している（`rbenv local 3.4.10` が失敗した場合は、イメージに 3.4.10 がない。`codeBuildRubyVersion` をイメージにあるバージョンに上げる） |
 | 4-6 | ヘルスチェックの単体実行 | 下記 | `Success` |
-| 4-7 | `plan` | 下記 | 終了コード 0。`ssm_managed`、`create_image_planned`、`launch_template_stack_update_planned` がログに出る。AWS に変更がない。リリース用インスタンスが SSM の管理対象でなければ、ここで終了コード 1（「SSM の管理対象になっていない」）になる |
+| 4-7 | `plan` | 下記 | 終了コード 0。`ssm_managed`、`release_instance_permissions_checked`（`missing` が空）、`create_image_planned`、`launch_template_stack_update_planned` がログに出る。AWS に変更がない。リリース用インスタンスが SSM の管理対象でなければ、ここで終了コード 1（「SSM の管理対象になっていない」）になる |
 
 4-6 ヘルスチェックの単体実行（SSM ドキュメントがリリース用インスタンスで動くか）:
 
@@ -152,7 +152,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 | # | 確認 | コマンド | 期待結果 |
 |---|---|---|---|
 | 5-1 | パイプライン | `aws codepipeline get-pipeline-state --name myapp-staging-ami-publish --query 'stageStates[].latestExecution.status'` | `Succeeded` |
-| 5-2 | AMI | `aws ec2 describe-images --owners self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Images[].[ImageId,State,Tags]'` | `available`。タグ `Name`（AMI 名と同じ値）/ `App` / `Environment` / `AppVersion` / `Verified=manual` / `PipelineExecutionId` / `Status=published` |
+| 5-2 | AMI | `aws ec2 describe-images --owners self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Images[].[ImageId,State,Tags]'` | `available`。タグ `Name`（AMI 名と同じ値）/ `App` / `Environment` / `AppVersion` / `Verified=manual` / `PipelineExecutionId` / `Status=published` / `HealthCheck=passed` |
 | 5-3 | スナップショットのタグ | `aws ec2 describe-snapshots --owner-ids self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Snapshots[].Tags'` | AMI と同じタグ（`Status` は `creating` のまま） |
 | 5-4 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].[VersionNumber,VersionDescription,LaunchTemplateData.ImageId]'` | 新しいバージョン、説明 `myapp v1.0.0`、5-2 の AMI |
 | 5-5 | スタックのパラメータ | `aws cloudformation describe-stacks --stack-name myapp-staging-launch-template --query 'Stacks[0].Parameters'` | `AmiId` が 5-2 の AMI、`AppVersion=v1.0.0` |
@@ -220,6 +220,14 @@ CodeBuild のサービスロールから権限を 1 つずつ外して実行し�
    - パイプラインの終了後も、インスタンスは起動したまま（停止に戻す場合はパイプラインの外で行う）
 4. リリース用インスタンスの EBS をカスタマー管理の KMS キーで暗号化している場合、起動に KMS の権限が必要になることがある。起動に失敗したら、CodeBuild のロールと KMS キーのポリシーを確認する。
 
+### 6-8. ヘルスチェックの省略
+
+1. パイプラインを `--variables name=VERSION,value=v1.0.3 name=HEALTH_CHECK,value=false` で実行する。
+2. 期待結果:
+   - ログに `ssm_check_skipped`、`release_instance_permissions_check_skipped`、`start_instance_skipped`、`wait_instance_online_skipped`、`health_check_skipped` が出る
+   - 起動テンプレートの新しいバージョンができ、AMI にタグ `HealthCheck=skipped` が付く
+   - 開始時に停止中だった場合は、インスタンスは停止したまま
+
 ## 7. 後片付けと記録
 
 ### 試験で作った AMI の削除
@@ -254,5 +262,6 @@ aws ec2 delete-snapshot --snapshot-id <上で表示されたスナップショ�
 | 6-5 想定外の差分（任意） | | | |
 | 6-6 権限（任意） | | | |
 | 6-7 停止中からの公開 | | | |
+| 6-8 ヘルスチェックの省略 | | | |
 
 所要時間の実測値をもとに、`config/ami_publish.yml` の `timeouts` と CodeBuild のタイムアウトを見直す（開発計画のリスク「SSM Agent の再接続が遅い」「AMI 作成の長時間化」）。

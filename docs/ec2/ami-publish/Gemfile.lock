@@ -19,6 +19,9 @@ GEM
     aws-sdk-ec2 (1.652.0)
       aws-sdk-core (~> 3, >= 3.256.0)
       aws-sigv4 (~> 1.5)
+    aws-sdk-iam (1.154.0)
+      aws-sdk-core (~> 3, >= 3.256.0)
+      aws-sigv4 (~> 1.5)
     aws-sdk-ssm (1.222.0)
       aws-sdk-core (~> 3, >= 3.256.0)
       aws-sigv4 (~> 1.5)
@@ -82,6 +85,7 @@ PLATFORMS
 DEPENDENCIES
   aws-sdk-cloudformation (~> 1.0)
   aws-sdk-ec2 (~> 1.0)
+  aws-sdk-iam (~> 1.0)
   aws-sdk-ssm (~> 1.0)
   rspec (~> 3.13)
   rubocop (~> 1.0)

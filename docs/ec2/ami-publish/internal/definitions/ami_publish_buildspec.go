@@ -38,7 +38,7 @@ func AMIPublishBuildspec() Map {
 			),
 			"build", M(
 				"commands", []any{
-					`bundle exec ruby bin/ami_publish run --environment "$AMI_PUBLISH_ENVIRONMENT" --version "$VERSION" --verified "$VERIFIED" --pipeline-execution-id "$PIPELINE_EXECUTION_ID" --output-env-file ` + OutputsEnvironmentFile,
+					`bundle exec ruby bin/ami_publish run --environment "$AMI_PUBLISH_ENVIRONMENT" --version "$VERSION" --verified "$VERIFIED" --health-check "$HEALTH_CHECK" --pipeline-execution-id "$PIPELINE_EXECUTION_ID" --output-env-file ` + OutputsEnvironmentFile,
 					"set -a && . ./" + OutputsEnvironmentFile + " && set +a",
 				},
 			),

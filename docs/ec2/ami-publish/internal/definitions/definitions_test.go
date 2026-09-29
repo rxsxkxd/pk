@@ -250,22 +250,81 @@ func TestPipelineStack(t *testing.T) {
 	dig(t, document, "Outputs", "LaunchTemplateStackServiceRoleArn")
 }
 
-func TestHealthCheckStack(t *testing.T) {
-	files, _ := generate(t)
-	document := parse(t, files["cloudformation/staging/health-check-stack.yml"])
+// healthCheckScript は、ヘルスチェックのスタックの SSM ドキュメントのコマンドを 1 つの文字列にする。
+func healthCheckScript(t *testing.T, content []byte) (string, map[string]any) {
+	t.Helper()
+	document := parse(t, content)
 	properties := dig(t, document, "Resources", "HealthCheckDocument", "Properties")
 	if got := dig(t, properties, "Name"); got != "myapp-staging-health-check" {
 		t.Errorf("Name = %v", got)
 	}
 	steps := dig(t, properties, "Content", "mainSteps").([]any)
-	commands := dig(t, steps[0], "inputs", "runCommand").([]any)
 	joined := ""
-	for _, command := range commands {
+	for _, command := range dig(t, steps[0], "inputs", "runCommand").([]any) {
 		joined += command.(string) + "\n"
 	}
-	if !strings.Contains(joined, "curl -fsS -o /dev/null http://localhost/up") {
-		t.Errorf("ヘルスチェックの URL が使われていない:\n%s", joined)
+	return joined, document
+}
+
+func TestHealthCheckStackWithoutBasicAuth(t *testing.T) {
+	files, _ := generate(t)
+	script, document := healthCheckScript(t, files["cloudformation/staging/health-check-stack.yml"])
+
+	if !strings.Contains(script, "curl -sS -o /dev/null -w '%{http_code}' http://localhost/up") {
+		t.Errorf("ヘルスチェックの URL が使われていない:\n%s", script)
 	}
+	if strings.Contains(script, "get-parameter") || strings.Contains(script, "-K -") {
+		t.Errorf("Basic 認証を指定していないのに認証の処理がある:\n%s", script)
+	}
+	if _, ok := dig(t, document, "Resources").(map[string]any)["BasicAuthParameterReadPolicy"]; ok {
+		t.Error("Basic 認証を指定していないのに管理ポリシーがある")
+	}
+}
+
+// Basic 認証の情報は SSM Parameter Store から実行時に取り出し、curl には標準入力（-K -）で渡す。
+func TestHealthCheckStackWithBasicAuth(t *testing.T) {
+	_, configPath := setUpRepository(t, strings.Replace(testConfiguration,
+		"      url: http://localhost/up\n",
+		"      url: http://localhost/up\n      basic_auth_parameter_name: /myapp/staging/health-check/basic-auth\n", 1))
+	configuration, err := LoadConfiguration(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := GenerateAll(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content []byte
+	for _, file := range files {
+		if file.Path == "cloudformation/staging/health-check-stack.yml" {
+			content = file.Content
+		}
+	}
+	script, document := healthCheckScript(t, content)
+
+	for _, want := range []string{
+		"aws ssm get-parameter --region ap-northeast-1 --name '/myapp/staging/health-check/basic-auth' --with-decryption",
+		"basic_auth | curl -K - -sS",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("%q がない:\n%s", want, script)
+		}
+	}
+	// 認証情報をコマンドライン引数（curl -u）で渡さない。
+	if strings.Contains(script, " -u ") {
+		t.Errorf("認証情報を curl -u で渡さない:\n%s", script)
+	}
+
+	policy := dig(t, document, "Resources", "BasicAuthParameterReadPolicy", "Properties", "PolicyDocument")
+	statement := dig(t, policy, "Statement").([]any)[0]
+	if got := dig(t, statement, "Action"); got != "ssm:GetParameter" {
+		t.Errorf("Action = %v", got)
+	}
+	resource := dig(t, statement, "Resource", "Fn::Sub").(string)
+	if !strings.HasSuffix(resource, ":parameter/myapp/staging/health-check/basic-auth") {
+		t.Errorf("Resource = %v", resource)
+	}
+	dig(t, document, "Outputs", "BasicAuthParameterReadPolicyArn")
 }
 
 func TestBuildspec(t *testing.T) {
@@ -345,13 +404,14 @@ func TestLoadConfigurationRejectsInvalidValues(t *testing.T) {
 	cases := map[string]struct {
 		replace, with, wantMessage string
 	}{
-		"未知のキー":         {"    aws_region:", "    unknown_key: x\n    aws_region:", "unknown_key"},
-		"インスタンス ID の形式": {"i-0123456789abcdef0", "instance-1", "release_instance_id の形式が不正"},
-		"ヘルスチェックの待機時間":  {"health_check_seconds: 300", "health_check_seconds: 60", "timeouts.health_check_seconds"},
-		"URL に使えない文字":   {"http://localhost/up", "http://localhost/up;rm", "health_check.url の形式が不正"},
-		"アプリケーション名の大文字": {"application_name: myapp", "application_name: MyApp", "application_name の形式が不正"},
-		"aws で始まる":      {"application_name: myapp", "application_name: awsapp", "aws / amazon で始めない"},
-		"名前として使わない旧項目":  {"      url: http://localhost/up", "      stack_name: x\n      url: http://localhost/up", "stack_name"},
+		"未知のキー":             {"    aws_region:", "    unknown_key: x\n    aws_region:", "unknown_key"},
+		"インスタンス ID の形式":     {"i-0123456789abcdef0", "instance-1", "release_instance_id の形式が不正"},
+		"ヘルスチェックの待機時間":      {"health_check_seconds: 300", "health_check_seconds: 60", "timeouts.health_check_seconds"},
+		"URL に使えない文字":       {"http://localhost/up", "http://localhost/up;rm", "health_check.url の形式が不正"},
+		"パラメーター名が / で始まらない": {"      url: http://localhost/up\n", "      url: http://localhost/up\n      basic_auth_parameter_name: myapp/basic-auth\n", "basic_auth_parameter_name の形式が不正"},
+		"アプリケーション名の大文字":     {"application_name: myapp", "application_name: MyApp", "application_name の形式が不正"},
+		"aws で始まる":          {"application_name: myapp", "application_name: awsapp", "aws / amazon で始めない"},
+		"名前として使わない旧項目":      {"      url: http://localhost/up", "      stack_name: x\n      url: http://localhost/up", "stack_name"},
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {

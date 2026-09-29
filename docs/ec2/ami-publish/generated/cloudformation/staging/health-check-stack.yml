@@ -19,13 +19,35 @@ Resources:
               timeoutSeconds: "240"
               runCommand:
                 - set -u
-                - for attempt in $(seq 1 30); do
-                - '  if curl -fsS -o /dev/null http://localhost/up; then echo ''health check passed''; exit 0; fi'
+                - 'if ! command -v aws >/dev/null 2>&1; then echo ''health check failed: AWS CLI is not installed (needed to read the basic auth parameter)''; exit 1; fi'
+                - 'if ! credentials=$(aws ssm get-parameter --region ap-northeast-1 --name ''/myapp/staging/health-check/basic-auth'' --with-decryption --query Parameter.Value --output text); then echo ''health check failed: cannot read the basic auth parameter /myapp/staging/health-check/basic-auth (check the release instance role)''; exit 1; fi'
+                - escaped=$(printf '%s' "$credentials" | sed 's/[\\"]/\\&/g')
+                - basic_auth() { printf 'user = "%s"\n' "$escaped"; }
+                - status=none
+                - for _ in $(seq 1 30); do
+                - '  status=$(basic_auth | curl -K - -sS -o /dev/null -w ''%{http_code}'' http://localhost/up || true)'
+                - '  case "$status" in 2??) echo ''health check passed''; exit 0 ;; esac'
                 - '  sleep 5'
                 - done
-                - 'echo ''health check failed: http://localhost/up did not respond'''
+                - 'echo "health check failed: http://localhost/up did not respond with 2xx (last HTTP status: $status)"'
+                - 'if [ "$status" = 401 ]; then echo ''HTTP 401: the basic auth credentials were rejected or not sent''; fi'
                 - exit 1
+  BasicAuthParameterReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: 'Attach to the release instance role: read the basic auth parameter for the health check'
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: ssm:GetParameter
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/myapp/staging/health-check/basic-auth
 Outputs:
   HealthCheckDocumentName:
     Value:
       Ref: HealthCheckDocument
+  BasicAuthParameterReadPolicyArn:
+    Description: Attach this managed policy to the IAM role of the release instance
+    Value:
+      Ref: BasicAuthParameterReadPolicy

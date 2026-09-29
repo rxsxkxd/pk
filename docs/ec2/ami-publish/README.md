@@ -40,6 +40,13 @@ spec/                                  AMI 公開ツールのテスト（RSpec�
 
 - CodeConnections の接続（このリポジトリへの接続。コンソールで承認まで済ませる）→ `pipeline.source_connection_arn`
 - リリース用インスタンス（SSM Agent が動き、インスタンスプロファイルに `AmazonSSMManagedInstanceCore` があること）
+- ヘルスチェックに Basic 認証が必要な場合: 「ユーザー名:パスワード」を置いた SSM Parameter Store の SecureString（`health_check.basic_auth_parameter_name`）。CloudFormation では SecureString を作れないため、担当者が作成する:
+
+  ```bash
+  aws ssm put-parameter --type SecureString --name /myapp/staging/health-check/basic-auth --value 'ユーザー名:パスワード'
+  ```
+
+  ヘルスチェックのスタックをデプロイした後、出力 `BasicAuthParameterReadPolicyArn` の管理ポリシーを、リリース用インスタンスの IAM ロールにアタッチする（`aws iam attach-role-policy --role-name <ロール名> --policy-arn <ARN>`）。リリース用インスタンスには AWS CLI が必要。パラメーターをカスタマー管理の KMS キーで暗号化している場合は、そのロールに `kms:Decrypt` も必要
 
 ### 2. 仕組みのための定義の生成
 

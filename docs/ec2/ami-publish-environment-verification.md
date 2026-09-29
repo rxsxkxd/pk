@@ -43,6 +43,8 @@ AMI 公開パイプラインは、CodeConnections でリポジトリを取得し
 | リリース用インスタンス | 起動中。インスタンスプロファイルに `AmazonSSMManagedInstanceCore`。SSM Agent が接続済み | `aws ssm describe-instance-information --filters Key=InstanceIds,Values=<ID> --query 'InstanceInformationList[0].PingStatus'` → `Online` |
 | 〃 アプリの状態 | リリースバージョンが配置・起動済みで、`curl http://localhost/up` が成功する。**再起動後に自動で起動する**（nginx などが `systemctl enable` 済み） | Session Manager で接続し、`curl -fsS http://localhost/up` と `systemctl is-enabled nginx` |
 | 〃 `curl` | ヘルスチェックの SSM ドキュメントが使う | `command -v curl` |
+| 〃 AWS CLI | Basic 認証を使う場合、ヘルスチェックが SSM Parameter Store から認証情報を取り出すのに使う | `command -v aws` |
+| Basic 認証のパラメーター（必要な場合） | 「ユーザー名:パスワード」を SSM Parameter Store の SecureString に置く（`aws ssm put-parameter --type SecureString ...`）。名前を `health_check.basic_auth_parameter_name` に書く | `aws ssm get-parameter --name <名前> --query Parameter.Type` → `SecureString` |
 | セキュリティグループ | 起動テンプレートで使うもの | `aws ec2 describe-security-groups --group-ids <ID>` |
 | CodeConnections の接続 | 手順 0 のリポジトリへの接続。**コンソールで承認し、状態が `AVAILABLE` になっていること** | `aws codeconnections get-connection --connection-arn <ARN> --query 'Connection.ConnectionStatus'` |
 | デプロイする人の権限 | CloudFormation で IAM ロール・S3・CodePipeline・CodeBuild・SSM ドキュメント・起動テンプレートを作成できる | — |
@@ -100,6 +102,14 @@ aws cloudformation deploy --stack-name myapp-staging-ami-publish-pipeline \
 - 起動テンプレート: `AWS::IAM::Role`、`AWS::IAM::InstanceProfile`、`AWS::EC2::LaunchTemplate` の 3 つだけ
 - パイプライン: S3 バケット、ロググループ、IAM ロール 3 つ、CodeBuild プロジェクト、CodePipeline
 
+Basic 認証を使う場合は、ヘルスチェックのスタックのデプロイ後に、出力 `BasicAuthParameterReadPolicyArn` の管理ポリシーを、リリース用インスタンスの IAM ロールにアタッチする。
+
+```bash
+aws cloudformation describe-stacks --stack-name myapp-staging-health-check \
+  --query "Stacks[0].Outputs[?OutputKey=='BasicAuthParameterReadPolicyArn'].OutputValue" --output text
+aws iam attach-role-policy --role-name <リリース用インスタンスのロール名> --policy-arn <上の ARN>
+```
+
 ## 4. デプロイ結果の確認
 
 | # | 確認 | コマンド | 期待結果 |
@@ -142,7 +152,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 | # | 確認 | コマンド | 期待結果 |
 |---|---|---|---|
 | 5-1 | パイプライン | `aws codepipeline get-pipeline-state --name myapp-staging-ami-publish --query 'stageStates[].latestExecution.status'` | `Succeeded` |
-| 5-2 | AMI | `aws ec2 describe-images --owners self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Images[].[ImageId,State,Tags]'` | `available`。タグ `App` / `Environment` / `AppVersion` / `Verified=manual` / `PipelineExecutionId` / `Status=published` |
+| 5-2 | AMI | `aws ec2 describe-images --owners self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Images[].[ImageId,State,Tags]'` | `available`。タグ `Name`（AMI 名と同じ値）/ `App` / `Environment` / `AppVersion` / `Verified=manual` / `PipelineExecutionId` / `Status=published` |
 | 5-3 | スナップショットのタグ | `aws ec2 describe-snapshots --owner-ids self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Snapshots[].Tags'` | AMI と同じタグ（`Status` は `creating` のまま） |
 | 5-4 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].[VersionNumber,VersionDescription,LaunchTemplateData.ImageId]'` | 新しいバージョン、説明 `myapp v1.0.0`、5-2 の AMI |
 | 5-5 | スタックのパラメータ | `aws cloudformation describe-stacks --stack-name myapp-staging-launch-template --query 'Stacks[0].Parameters'` | `AmiId` が 5-2 の AMI、`AppVersion=v1.0.0` |

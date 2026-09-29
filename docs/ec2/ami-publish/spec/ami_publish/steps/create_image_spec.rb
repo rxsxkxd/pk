@@ -20,6 +20,8 @@ RSpec.describe AmiPublish::Steps::CreateImage do
     expect(params[:no_reboot]).to be(false)
     expect(params[:tag_specifications].map { |spec| spec[:resource_type] }).to eq(%w[image snapshot])
     tags = params[:tag_specifications].first[:tags].to_h { |tag| [tag[:key], tag[:value]] }
+    expect(tags["Name"]).to eq(params[:name])
+    expect(params[:tag_specifications].last[:tags]).to include({ key: "Name", value: params[:name] })
     expect(tags).to include("App" => "myapp", "Environment" => "staging", "AppVersion" => "v1.2.3",
                             "Verified" => "manual", "PipelineExecutionId" => "exec-1", "Status" => "creating")
   end

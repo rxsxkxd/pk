@@ -32,6 +32,10 @@ environments:
     # AWS 上では SSM ドキュメントとして登録し、SSM Run Command でリリース用インスタンス上で実行する
     health_check:
       url: http://localhost/up
+      # Basic 認証が必要な場合: 「ユーザー名:パスワード」を置いた SSM Parameter Store の SecureString のパラメーター名。
+      # パラメーターは担当者が作成し、ヘルスチェックのスタックが出力する管理ポリシーをリリース用インスタンスのロールに付ける。
+      # 認証が不要なら削除する
+      basic_auth_parameter_name: /myapp/staging/health-check/basic-auth
 
     # 待機時間。単位は項目名のとおり（_seconds は秒、_minutes は分）。
     # 待っている間は progress_log_interval_seconds ごとに進捗をログに出す

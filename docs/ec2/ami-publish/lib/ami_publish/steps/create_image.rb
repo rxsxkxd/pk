@@ -15,7 +15,7 @@ module AmiPublish
         return reuse(existing, context) if existing
 
         name = image_name(context.version)
-        tags = image_tags(context)
+        tags = image_tags(context, name)
         return plan_creation(name, tags) if context.dry_run
 
         context.image_id = create_image(name, tags, context.version)
@@ -64,8 +64,10 @@ module AmiPublish
         "#{configuration.application_name}-#{configuration.environment_name}-#{version}-#{timestamp}"
       end
 
-      def image_tags(context)
+      # Name タグは AMI 名と同じ値にする（コンソールの一覧の「Name」列は Name タグを表示するため）
+      def image_tags(context, name)
         [
+          { key: "Name", value: name },
           { key: "App", value: configuration.application_name },
           { key: "Environment", value: configuration.environment_name },
           { key: "AppVersion", value: context.version },

@@ -46,6 +46,9 @@ type LaunchTemplateSettings struct {
 // HealthCheckSettings は、再起動後のヘルスチェック（SSM ドキュメントとして登録する）のスタックの設定値。
 type HealthCheckSettings struct {
 	URL string `yaml:"url"`
+	// BasicAuthParameterName は、Basic 認証の「ユーザー名:パスワード」を置いた SSM Parameter Store の
+	// SecureString のパラメーター名（省略時は認証なし）
+	BasicAuthParameterName string `yaml:"basic_auth_parameter_name"`
 }
 
 // TimeoutSettings は待機時間。CodeBuildMinutes は CodeBuild プロジェクトのタイムアウト（生成に使う）。
@@ -70,6 +73,7 @@ var (
 	instanceIDPattern      = regexp.MustCompile(`^i-[0-9a-f]{8,17}$`)
 	securityGroupIDPattern = regexp.MustCompile(`^sg-[0-9a-f]{8,17}$`)
 	healthCheckURLPattern  = regexp.MustCompile(`^https?://[A-Za-z0-9._:/-]+$`)
+	parameterNamePattern   = regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
 	repositoryIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	arnPattern             = regexp.MustCompile(`^arn:aws[a-z-]*:[a-z0-9-]+:`)
 )
@@ -169,6 +173,12 @@ func (e Environment) problems() []string {
 	}
 
 	check("health_check.url", e.HealthCheck.URL, healthCheckURLPattern)
+	if e.HealthCheck.BasicAuthParameterName != "" {
+		check("health_check.basic_auth_parameter_name", e.HealthCheck.BasicAuthParameterName, parameterNamePattern)
+		if len(e.HealthCheck.BasicAuthParameterName) > 1011 {
+			problems = append(problems, "health_check.basic_auth_parameter_name は 1011 文字以下にする")
+		}
+	}
 
 	positive("timeouts.codebuild_minutes", e.Timeouts.CodeBuildMinutes)
 	positive("timeouts.image_available_seconds", e.Timeouts.ImageAvailableSeconds)

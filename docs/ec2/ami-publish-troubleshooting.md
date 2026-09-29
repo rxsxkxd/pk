@@ -135,6 +135,9 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 |---|---|
 | nginx（Passenger）の自動起動が無効（手作業で起動していた） | `sudo systemctl enable nginx`。リリース検証の手順に自動起動の確認を入れる |
 | アプリの起動時のエラー（設定・シークレットの不足、DB に接続できない） | エラーログを確認して直す |
+| `last HTTP status: 401`（`HTTP 401: the basic auth credentials were rejected or not sent`） | Basic 認証が必要なのに設定していない（`health_check.basic_auth_parameter_name` を設定する）、またはパラメーターの認証情報が誤っている（`ユーザー名:パスワード` の形式で置き直す） |
+| `cannot read the basic auth parameter ...` | リリース用インスタンスのロールに、ヘルスチェックのスタックの管理ポリシー（`BasicAuthParameterReadPolicyArn`）がアタッチされていない。パラメーターがない、名前が違う。カスタマー管理の KMS キーで暗号化している場合は `kms:Decrypt` も必要 |
+| `AWS CLI is not installed` | Basic 認証の情報を取り出すために、リリース用インスタンスに AWS CLI が必要。インストールする |
 | `/up` 以外のパスで確認すべき | `config/ami_publish.yml` の `health_check.url` を直し、ヘルスチェックのスタックを再生成・再デプロイする |
 
 ## 4. AMI の作成が終わらない・失敗する

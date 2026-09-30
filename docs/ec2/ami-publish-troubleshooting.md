@@ -228,7 +228,7 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 | `rbenv: version '3.4.10' not installed` | CodeBuild のイメージが更新され、3.4.10 がなくなった | イメージにある 3.4 系のバージョンを確認し、`internal/definitions/ami_publish_buildspec.go` の `codeBuildRubyVersion` を上げて再生成・反映する |
 | `bundle install` がプラットフォームの不一致で失敗する | `Gemfile.lock` の `PLATFORMS` から `x86_64-linux` が消えた（macOS だけで `bundle lock` し直した） | `bundle lock --add-platform x86_64-linux aarch64-linux` で戻す |
 | ネイティブ拡張のビルドに失敗する | ビルド環境に C コンパイラがない | CodeBuild 標準イメージでは起きない。独自のイメージを使っている場合はビルドツールを入れる |
-| buildspec や `Gemfile` が見つからない | パイプラインのソースのリポジトリのルートが `ami-publish/` になっていない | `ami-publish/` の中身をルートとするリポジトリをソースにする（[確認手順書の手順 0](./ami-publish-environment-verification.md#0-前提の決定-ソースにするリポジトリ)） |
+| buildspec や `Gemfile` が見つからない | パイプラインのソースのリポジトリ（GitHub または CodeCommit）のルートが `ami-publish/` になっていない | `ami-publish/` の中身をルートとするリポジトリをソースにする（[確認手順書の手順 0](./ami-publish-environment-verification.md#0-前提の決定-ソースにするリポジトリ)） |
 
 ## 8. 終了コード 2（使い方・設定値の誤り）
 

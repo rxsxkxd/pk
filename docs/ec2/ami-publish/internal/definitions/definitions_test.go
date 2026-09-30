@@ -437,15 +437,17 @@ func TestLoadConfigurationRejectsInvalidValues(t *testing.T) {
 	cases := map[string]struct {
 		replace, with, wantMessage string
 	}{
-		"未知のキー":              {"    aws_region:", "    unknown_key: x\n    aws_region:", "unknown_key"},
-		"インスタンス ID の形式":      {"i-0123456789abcdef0", "instance-1", "release_instance_id の形式が不正"},
-		"ヘルスチェックの待機時間":       {"health_check_seconds: 300", "health_check_seconds: 60", "timeouts.health_check_seconds"},
-		"URL に使えない文字":        {"http://localhost/up", "http://localhost/up;rm", "health_check.url の形式が不正"},
-		"Name タグの接頭辞に使えない文字": {"    health_check:\n", "    ami:\n      name_tag_prefix: \"my app\"\n    health_check:\n", "ami.name_tag_prefix の形式が不正"},
-		"パラメーター名が / で始まらない":  {"      url: http://localhost/up\n", "      url: http://localhost/up\n      basic_auth_parameter_name: myapp/basic-auth\n", "basic_auth_parameter_name の形式が不正"},
-		"アプリケーション名の大文字":      {"application_name: myapp", "application_name: MyApp", "application_name の形式が不正"},
-		"aws で始まる":           {"application_name: myapp", "application_name: awsapp", "aws / amazon で始めない"},
-		"名前として使わない旧項目":       {"      url: http://localhost/up", "      stack_name: x\n      url: http://localhost/up", "stack_name"},
+		"未知のキー":                 {"    aws_region:", "    unknown_key: x\n    aws_region:", "unknown_key"},
+		"インスタンス ID の形式":         {"i-0123456789abcdef0", "instance-1", "release_instance_id の形式が不正"},
+		"ヘルスチェックの待機時間":          {"health_check_seconds: 300", "health_check_seconds: 60", "timeouts.health_check_seconds"},
+		"URL に使えない文字":           {"http://localhost/up", "http://localhost/up;rm", "health_check.url の形式が不正"},
+		"Name タグの接頭辞に使えない文字":    {"    health_check:\n", "    ami:\n      name_tag_prefix: \"my app\"\n    health_check:\n", "ami.name_tag_prefix の形式が不正"},
+		"ソースの種類が不正":             {"      source_branch_name: main\n", "      source_type: s3\n      source_branch_name: main\n", "pipeline.source_type は github / codecommit"},
+		"CodeCommit でリポジトリ名がない": {"      source_branch_name: main\n", "      source_type: codecommit\n      source_branch_name: main\n", "pipeline.source_repository_name が空"},
+		"パラメーター名が / で始まらない":     {"      url: http://localhost/up\n", "      url: http://localhost/up\n      basic_auth_parameter_name: myapp/basic-auth\n", "basic_auth_parameter_name の形式が不正"},
+		"アプリケーション名の大文字":         {"application_name: myapp", "application_name: MyApp", "application_name の形式が不正"},
+		"aws で始まる":              {"application_name: myapp", "application_name: awsapp", "aws / amazon で始めない"},
+		"名前として使わない旧項目":          {"      url: http://localhost/up", "      stack_name: x\n      url: http://localhost/up", "stack_name"},
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -568,4 +570,50 @@ func TestStackExports(t *testing.T) {
 	if got := dig(t, healthCheck, "Outputs", "HealthCheckDocumentName", "Export", "Name"); got != "myapp-staging-health-check:DocumentName" {
 		t.Errorf("SSM ドキュメント名の Export = %v", got)
 	}
+}
+
+// ソースに CodeCommit を指定した場合は、CodeCommit のソースアクションと、そのリポジトリだけを取得する権限になる。
+func TestPipelineStackWithCodeCommitSource(t *testing.T) {
+	configuration := strings.Replace(testConfiguration,
+		"      source_connection_arn: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/abc\n      source_repository_id: example-org/ami-publish\n",
+		"      source_type: codecommit\n      source_repository_name: ami-publish\n", 1)
+	_, configPath := setUpRepository(t, configuration)
+	loaded, err := LoadConfiguration(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfiguration: %v", err)
+	}
+	document := map[string]any{}
+	content := ""
+	for _, file := range mustGenerate(t, loaded) {
+		if file.Path == "cloudformation/staging/ami-publish-pipeline-stack.yml" {
+			content = string(file.Content)
+			document = parse(t, file.Content)
+		}
+	}
+
+	source := dig(t, dig(t, document, "Resources", "Pipeline", "Properties", "Stages").([]any)[0], "Actions").([]any)[0]
+	if got := dig(t, source, "ActionTypeId", "Provider"); got != "CodeCommit" {
+		t.Errorf("Provider = %v, want CodeCommit", got)
+	}
+	if got := dig(t, source, "Configuration", "RepositoryName"); got != "ami-publish" {
+		t.Errorf("RepositoryName = %v", got)
+	}
+	if got := dig(t, source, "Configuration", "PollForSourceChanges"); got != false {
+		t.Errorf("PollForSourceChanges = %v, want false（自動起動しない）", got)
+	}
+	if !strings.Contains(content, "codecommit:GetBranch") || !strings.Contains(content, ":codecommit:${AWS::Region}:${AWS::AccountId}:ami-publish") {
+		t.Error("CodeCommit のリポジトリを取得する権限がない")
+	}
+	if strings.Contains(content, "UseConnection") {
+		t.Error("CodeCommit の場合は CodeConnections の権限を与えない")
+	}
+}
+
+func mustGenerate(t *testing.T, configuration Configuration) []File {
+	t.Helper()
+	files, err := GenerateAll(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
 }

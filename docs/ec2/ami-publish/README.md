@@ -39,7 +39,9 @@ spec/                                  AMI 公開ツールのテスト（RSpec�
 
 `config/ami_publish.yml` と `internal/definitions/` を編集する。事前に AWS 側で用意するもの:
 
-- CodeConnections の接続（このリポジトリへの接続。コンソールで承認まで済ませる）→ `pipeline.source_connection_arn`
+- このリポジトリの取得元（`pipeline.source_type`）:
+  - GitHub（既定）: CodeConnections の接続（コンソールで承認まで済ませる）→ `pipeline.source_connection_arn`、`pipeline.source_repository_id`
+  - CodeCommit: `pipeline.source_type: codecommit` とリポジトリ名（`pipeline.source_repository_name`）。接続は不要
 - リリース用インスタンス（SSM Agent が動き、インスタンスプロファイル（IAM ロール）に必要な許可があること。許可の一覧と設定方法は [リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md)）
 - ヘルスチェックに Basic 認証が必要な場合: 「ユーザー名:パスワード」を置いた SSM Parameter Store の SecureString（`health_check.basic_auth_parameter_name`）。CloudFormation では SecureString を作れないため、担当者が作成する:
 

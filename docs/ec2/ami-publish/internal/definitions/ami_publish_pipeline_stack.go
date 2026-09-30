@@ -278,12 +278,7 @@ func codePipelineServiceRole(environment Environment) Map {
 							"Action", []any{"s3:GetBucketVersioning", "s3:GetBucketLocation"},
 							"Resource", GetAtt("ArtifactBucket", "Arn"),
 						),
-						M(
-							"Sid", "UseSourceConnection",
-							"Effect", "Allow",
-							"Action", []any{"codeconnections:UseConnection", "codestar-connections:UseConnection"},
-							"Resource", environment.Pipeline.SourceConnectionARN,
-						),
+						sourceAccessStatement(environment.Pipeline),
 						M(
 							"Sid", "RunCodeBuild",
 							"Effect", "Allow",
@@ -341,23 +336,7 @@ func codePipeline(environment Environment) Map {
 			"Stages", []any{
 				M(
 					"Name", "Source",
-					"Actions", []any{M(
-						"Name", "Source",
-						"ActionTypeId", M(
-							"Category", "Source",
-							"Owner", "AWS",
-							"Provider", "CodeStarSourceConnection",
-							"Version", "1",
-						),
-						"Configuration", M(
-							"ConnectionArn", pipeline.SourceConnectionARN,
-							"FullRepositoryId", pipeline.SourceRepositoryID,
-							"BranchName", pipeline.SourceBranchName,
-							"DetectChanges", false,
-							"OutputArtifactFormat", "CODE_ZIP",
-						),
-						"OutputArtifacts", []any{M("Name", "SourceOutput")},
-					)},
+					"Actions", []any{sourceAction(pipeline)},
 				),
 				M(
 					"Name", "Publish",
@@ -390,5 +369,60 @@ func assumeRolePolicy(service string) Map {
 			"Principal", M("Service", service),
 			"Action", "sts:AssumeRole",
 		)},
+	)
+}
+
+// sourceAction は、このリポジトリを取得するソースアクション。GitHub（CodeConnections）と CodeCommit に対応する。
+// どちらも push による自動起動はしない（パイプラインは担当者が変数 VERSION を指定して起動する）。
+func sourceAction(pipeline PipelineSettings) Map {
+	if pipeline.SourceTypeOrDefault() == SourceTypeCodeCommit {
+		return M(
+			"Name", "Source",
+			"ActionTypeId", M("Category", "Source", "Owner", "AWS", "Provider", "CodeCommit", "Version", "1"),
+			"Configuration", M(
+				"RepositoryName", pipeline.SourceRepositoryName,
+				"BranchName", pipeline.SourceBranchName,
+				"PollForSourceChanges", false,
+				"OutputArtifactFormat", "CODE_ZIP",
+			),
+			"OutputArtifacts", []any{M("Name", "SourceOutput")},
+		)
+	}
+	return M(
+		"Name", "Source",
+		"ActionTypeId", M("Category", "Source", "Owner", "AWS", "Provider", "CodeStarSourceConnection", "Version", "1"),
+		"Configuration", M(
+			"ConnectionArn", pipeline.SourceConnectionARN,
+			"FullRepositoryId", pipeline.SourceRepositoryID,
+			"BranchName", pipeline.SourceBranchName,
+			"DetectChanges", false,
+			"OutputArtifactFormat", "CODE_ZIP",
+		),
+		"OutputArtifacts", []any{M("Name", "SourceOutput")},
+	)
+}
+
+// sourceAccessStatement は、CodePipeline のロールがソースのリポジトリを取得するための権限。
+func sourceAccessStatement(pipeline PipelineSettings) Map {
+	if pipeline.SourceTypeOrDefault() == SourceTypeCodeCommit {
+		return M(
+			"Sid", "ReadSourceRepository",
+			"Effect", "Allow",
+			"Action", []any{
+				"codecommit:GetBranch",
+				"codecommit:GetCommit",
+				"codecommit:GetRepository",
+				"codecommit:UploadArchive",
+				"codecommit:GetUploadArchiveStatus",
+				"codecommit:CancelUploadArchive",
+			},
+			"Resource", Sub("arn:${AWS::Partition}:codecommit:${AWS::Region}:${AWS::AccountId}:"+pipeline.SourceRepositoryName),
+		)
+	}
+	return M(
+		"Sid", "UseSourceConnection",
+		"Effect", "Allow",
+		"Action", []any{"codeconnections:UseConnection", "codestar-connections:UseConnection"},
+		"Resource", pipeline.SourceConnectionARN,
 	)
 }

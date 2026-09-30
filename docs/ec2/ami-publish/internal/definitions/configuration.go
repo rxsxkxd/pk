@@ -32,16 +32,35 @@ type Environment struct {
 
 // PipelineSettings は AMI 公開パイプラインのスタックの設定値。
 type PipelineSettings struct {
+	// SourceType はソースのリポジトリの種類（github: CodeConnections 経由の GitHub、codecommit: CodeCommit）。省略時は github
+	SourceType string `yaml:"source_type"`
+	// GitHub の場合: CodeConnections の接続と「オーナー/リポジトリ名」
 	SourceConnectionARN string `yaml:"source_connection_arn"`
 	SourceRepositoryID  string `yaml:"source_repository_id"`
-	SourceBranchName    string `yaml:"source_branch_name"`
-	LogRetentionDays    int    `yaml:"log_retention_days"`
+	// CodeCommit の場合: リポジトリ名
+	SourceRepositoryName string `yaml:"source_repository_name"`
+	SourceBranchName     string `yaml:"source_branch_name"`
+	LogRetentionDays     int    `yaml:"log_retention_days"`
 }
 
 // LaunchTemplateSettings は起動テンプレートのスタックの設定値。
 type LaunchTemplateSettings struct {
 	InstanceType     string   `yaml:"instance_type"`
 	SecurityGroupIDs []string `yaml:"security_group_ids"`
+}
+
+// ソースのリポジトリの種類。
+const (
+	SourceTypeGitHub     = "github"
+	SourceTypeCodeCommit = "codecommit"
+)
+
+// SourceTypeOrDefault は、省略時は github とみなしたソースの種類を返す。
+func (p PipelineSettings) SourceTypeOrDefault() string {
+	if p.SourceType == "" {
+		return SourceTypeGitHub
+	}
+	return p.SourceType
 }
 
 // AMISettings は、作成する AMI の設定値（Ruby の AMI 公開ツールが使う。ここでは形式だけを検証する）。
@@ -77,15 +96,16 @@ type TimeoutSettings struct {
 const maxNamePrefixLength = 60
 
 var (
-	environmentNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	applicationNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	instanceIDPattern      = regexp.MustCompile(`^i-[0-9a-f]{8,17}$`)
-	securityGroupIDPattern = regexp.MustCompile(`^sg-[0-9a-f]{8,17}$`)
-	healthCheckURLPattern  = regexp.MustCompile(`^https?://[A-Za-z0-9._:/-]+$`)
-	parameterNamePattern   = regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
-	nameTagPrefixPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
-	repositoryIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
-	arnPattern             = regexp.MustCompile(`^arn:aws[a-z-]*:[a-z0-9-]+:`)
+	environmentNamePattern          = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	applicationNamePattern          = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	instanceIDPattern               = regexp.MustCompile(`^i-[0-9a-f]{8,17}$`)
+	securityGroupIDPattern          = regexp.MustCompile(`^sg-[0-9a-f]{8,17}$`)
+	healthCheckURLPattern           = regexp.MustCompile(`^https?://[A-Za-z0-9._:/-]+$`)
+	parameterNamePattern            = regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
+	codeCommitRepositoryNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
+	nameTagPrefixPattern            = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+	repositoryIDPattern             = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+	arnPattern                      = regexp.MustCompile(`^arn:aws[a-z-]*:[a-z0-9-]+:`)
 )
 
 // LoadConfiguration は設定値ファイルを読み、値を検証する。
@@ -169,8 +189,16 @@ func (e Environment) problems() []string {
 	}
 	check("release_instance_id", e.ReleaseInstanceID, instanceIDPattern)
 
-	check("pipeline.source_connection_arn", e.Pipeline.SourceConnectionARN, arnPattern)
-	check("pipeline.source_repository_id", e.Pipeline.SourceRepositoryID, repositoryIDPattern)
+	switch e.Pipeline.SourceTypeOrDefault() {
+	case SourceTypeGitHub:
+		check("pipeline.source_connection_arn", e.Pipeline.SourceConnectionARN, arnPattern)
+		check("pipeline.source_repository_id", e.Pipeline.SourceRepositoryID, repositoryIDPattern)
+	case SourceTypeCodeCommit:
+		check("pipeline.source_repository_name", e.Pipeline.SourceRepositoryName, codeCommitRepositoryNamePattern)
+	default:
+		problems = append(problems, fmt.Sprintf("pipeline.source_type は %s / %s のどちらかにする: %q",
+			SourceTypeGitHub, SourceTypeCodeCommit, e.Pipeline.SourceType))
+	}
 	check("pipeline.source_branch_name", e.Pipeline.SourceBranchName, regexp.MustCompile(`^[A-Za-z0-9_./-]+$`))
 	positive("pipeline.log_retention_days", e.Pipeline.LogRetentionDays)
 

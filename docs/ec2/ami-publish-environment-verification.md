@@ -46,7 +46,7 @@ AMI 公開パイプラインは、CodeConnections でリポジトリを取得し
 | 〃 AWS CLI | Basic 認証を使う場合、ヘルスチェックが SSM Parameter Store から認証情報を取り出すのに使う | `command -v aws` |
 | Basic 認証のパラメーター（必要な場合） | 「ユーザー名:パスワード」を SSM Parameter Store の SecureString に置く（`aws ssm put-parameter --type SecureString ...`。`--key-id` は指定せず、既定の `aws/ssm` キーで暗号化する）。名前を `health_check.basic_auth_parameter_name` に書く | `aws ssm get-parameter --name <名前> --query Parameter.Type` → `SecureString` |
 | セキュリティグループ | 起動テンプレートで使うもの | `aws ec2 describe-security-groups --group-ids <ID>` |
-| CodeConnections の接続 | 手順 0 のリポジトリへの接続。**コンソールで承認し、状態が `AVAILABLE` になっていること** | `aws codeconnections get-connection --connection-arn <ARN> --query 'Connection.ConnectionStatus'` |
+| このリポジトリの取得元 | GitHub の場合: 手順 0 のリポジトリへの CodeConnections の接続。**コンソールで承認し、状態が `AVAILABLE` になっていること**。CodeCommit の場合: 手順 0 のリポジトリを CodeCommit に作り、ブランチを push しておく（接続は不要） | GitHub: `aws codeconnections get-connection --connection-arn <ARN> --query 'Connection.ConnectionStatus'`。CodeCommit: `aws codecommit get-branch --repository-name <名前> --branch-name main` |
 | デプロイする人の権限 | CloudFormation で IAM ロール・S3・CodePipeline・CodeBuild・SSM ドキュメント・起動テンプレートを作成できる | — |
 
 ## 2. 設定値の記入と再生成
@@ -57,8 +57,9 @@ AMI 公開パイプラインは、CodeConnections でリポジトリを取得し
 |---|---|---|
 | `aws_region` | `ap-northeast-1` | 使うリージョン |
 | `release_instance_id` | `i-0123456789abcdef0` | リリース用インスタンスの ID |
+| `pipeline.source_type` | `github` | 取得元の種類（`github` / `codecommit`） |
 | `pipeline.source_connection_arn` | `arn:aws:codeconnections:...:connection/0000...` | 手順 1 の接続の ARN |
-| `pipeline.source_repository_id` | `example-org/ami-publish` | 手順 0 のリポジトリ（`オーナー/リポジトリ名`） |
+| `pipeline.source_repository_id` | `example-org/ami-publish` | GitHub の場合: 手順 0 のリポジトリ（`オーナー/リポジトリ名`）。CodeCommit の場合はこの行と `source_connection_arn` の代わりに `source_repository_name`（リポジトリ名）を書く |
 | `pipeline.source_branch_name` | `main` | パイプラインが取得するブランチ |
 | `launch_template.security_group_ids` | `sg-0123456789abcdef0` | 手順 1 のセキュリティグループ |
 | `launch_template.instance_type` | `t3.small` | 本番で使うインスタンスタイプ |

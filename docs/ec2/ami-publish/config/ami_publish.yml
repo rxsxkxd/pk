@@ -16,9 +16,13 @@ environments:
     release_instance_id: i-0123456789abcdef0
 
     pipeline:
-      # このリポジトリ（ami-publish）を取得するための CodeConnections の接続
+      # このリポジトリ（ami-publish）の取得元。github（CodeConnections 経由。既定）または codecommit
+      source_type: github
+      # github の場合: CodeConnections の接続と「オーナー/リポジトリ名」
       source_connection_arn: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/00000000-0000-0000-0000-000000000000
       source_repository_id: example-org/ami-publish
+      # codecommit の場合: source_type を codecommit にし、上の 2 行の代わりにリポジトリ名を書く
+      # source_repository_name: ami-publish
       source_branch_name: main
       # CodeBuild のログと、ヘルスチェックの出力の保存期間（日）
       log_retention_days: 90

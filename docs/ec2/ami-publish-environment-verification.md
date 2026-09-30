@@ -80,20 +80,10 @@ cfn-lint generated/cloudformation/*/*.yml
 
 ## 3. 仕組みのデプロイ
 
-順番はヘルスチェック → 起動テンプレート → AMI 公開パイプライン。各スタックとも変更セットを作り、内容を確認してから実行する（コマンドの詳細は [README](./ami-publish/README.md#4-仕組みのデプロイaws-cli)）。
+仕組みの生成ツールが出力したデプロイ用シェルスクリプトを実行する（スタック名は命名規則どおりに入っている）。3 つのスタックとも変更セットを作るだけで反映はしないので、内容を確認してから、ヘルスチェック → 起動テンプレート → AMI 公開パイプラインの順に反映する（詳細は [README](./ami-publish/README.md#4-仕組みのデプロイaws-cli)）。
 
 ```bash
-ENV=staging
-aws cloudformation deploy --stack-name myapp-staging-health-check \
-  --template-file generated/cloudformation/$ENV/health-check-stack.yml --no-execute-changeset
-
-aws cloudformation deploy --stack-name myapp-staging-launch-template \
-  --template-file generated/cloudformation/$ENV/launch-template-stack.yml \
-  --capabilities CAPABILITY_IAM --no-execute-changeset   # AmiId / AppVersion は指定しない（初回は空）
-
-aws cloudformation deploy --stack-name myapp-staging-ami-publish-pipeline \
-  --template-file generated/cloudformation/$ENV/ami-publish-pipeline-stack.yml \
-  --capabilities CAPABILITY_IAM --no-execute-changeset
+bash generated/deploy/staging.sh up
 ```
 
 変更セットを確認する観点:
@@ -152,7 +142,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 | # | 確認 | コマンド | 期待結果 |
 |---|---|---|---|
 | 5-1 | パイプライン | `aws codepipeline get-pipeline-state --name myapp-staging-ami-publish --query 'stageStates[].latestExecution.status'` | `Succeeded` |
-| 5-2 | AMI | `aws ec2 describe-images --owners self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Images[].[ImageId,State,Tags]'` | `available`。タグ `Name`（AMI 名と同じ値）/ `App` / `Environment` / `AppVersion` / `Verified=manual` / `PipelineExecutionId` / `Status=published` / `HealthCheck=passed` |
+| 5-2 | AMI | `aws ec2 describe-images --owners self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Images[].[ImageId,State,Tags]'` | `available`。タグ `Name`（`<ami.name_tag_prefix>_<バージョン>_<日時>`。接頭辞の省略時は `<バージョン>_<日時>`）/ `App` / `Environment` / `AppVersion` / `Verified=manual` / `PipelineExecutionId` / `Status=published` / `HealthCheck=passed` |
 | 5-3 | スナップショットのタグ | `aws ec2 describe-snapshots --owner-ids self --filters Name=tag:AppVersion,Values=v1.0.0 --query 'Snapshots[].Tags'` | AMI と同じタグ（`Status` は `creating` のまま） |
 | 5-4 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].[VersionNumber,VersionDescription,LaunchTemplateData.ImageId]'` | 新しいバージョン、説明 `myapp v1.0.0`、5-2 の AMI |
 | 5-5 | スタックのパラメータ | `aws cloudformation describe-stacks --stack-name myapp-staging-launch-template --query 'Stacks[0].Parameters'` | `AmiId` が 5-2 の AMI、`AppVersion=v1.0.0` |
@@ -247,7 +237,7 @@ aws ec2 delete-snapshot --snapshot-id <上で表示されたスナップショ�
 
 ### 環境ごと撤去する場合
 
-パイプライン → 起動テンプレート → ヘルスチェックの順にスタックを削除する。パイプラインのスタックの S3 バケットは、中身を空にしてからでないと削除できない。
+デプロイ用シェルスクリプトの `down`（`bash generated/deploy/staging.sh down`）で、パイプライン → 起動テンプレート → ヘルスチェックの順にスタックを削除する（パイプラインのスタックの S3 バケットも、先に空にしてから削除する）。
 
 ### 記録
 

@@ -26,6 +26,7 @@ type Environment struct {
 	Pipeline          PipelineSettings       `yaml:"pipeline"`
 	LaunchTemplate    LaunchTemplateSettings `yaml:"launch_template"`
 	HealthCheck       HealthCheckSettings    `yaml:"health_check"`
+	AMI               AMISettings            `yaml:"ami"`
 	Timeouts          TimeoutSettings        `yaml:"timeouts"`
 }
 
@@ -41,6 +42,14 @@ type PipelineSettings struct {
 type LaunchTemplateSettings struct {
 	InstanceType     string   `yaml:"instance_type"`
 	SecurityGroupIDs []string `yaml:"security_group_ids"`
+}
+
+// AMISettings は、作成する AMI の設定値（Ruby の AMI 公開ツールが使う。ここでは形式だけを検証する）。
+type AMISettings struct {
+	// NameTagPrefix は AMI とスナップショットの Name タグの接頭辞（省略可）。
+	// Name タグは「<接頭辞>_<バージョン>_<日時>」、省略時は「<バージョン>_<日時>」になる（環境は含めない）。
+	// AMI 名・タグ App・リソースの名前には影響しない
+	NameTagPrefix string `yaml:"name_tag_prefix"`
 }
 
 // HealthCheckSettings は、再起動後のヘルスチェック（SSM ドキュメントとして登録する）のスタックの設定値。
@@ -74,6 +83,7 @@ var (
 	securityGroupIDPattern = regexp.MustCompile(`^sg-[0-9a-f]{8,17}$`)
 	healthCheckURLPattern  = regexp.MustCompile(`^https?://[A-Za-z0-9._:/-]+$`)
 	parameterNamePattern   = regexp.MustCompile(`^/[A-Za-z0-9_./-]+$`)
+	nameTagPrefixPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
 	repositoryIDPattern    = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 	arnPattern             = regexp.MustCompile(`^arn:aws[a-z-]*:[a-z0-9-]+:`)
 )
@@ -173,6 +183,9 @@ func (e Environment) problems() []string {
 	}
 
 	check("health_check.url", e.HealthCheck.URL, healthCheckURLPattern)
+	if e.AMI.NameTagPrefix != "" {
+		check("ami.name_tag_prefix", e.AMI.NameTagPrefix, nameTagPrefixPattern)
+	}
 	if e.HealthCheck.BasicAuthParameterName != "" {
 		check("health_check.basic_auth_parameter_name", e.HealthCheck.BasicAuthParameterName, parameterNamePattern)
 		if len(e.HealthCheck.BasicAuthParameterName) > 1011 {

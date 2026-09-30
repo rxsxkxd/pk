@@ -108,8 +108,8 @@ func TestGenerateAllProducesExpectedFiles(t *testing.T) {
 			t.Errorf("%s に生成物の注意書きがない", path)
 		}
 	}
-	if len(files) != 4 {
-		t.Errorf("生成ファイル数 = %d, want 4", len(files))
+	if len(files) != 5 {
+		t.Errorf("生成ファイル数 = %d, want 5（YAML 4 つとデプロイ用シェルスクリプト）", len(files))
 	}
 }
 
@@ -410,14 +410,15 @@ func TestLoadConfigurationRejectsInvalidValues(t *testing.T) {
 	cases := map[string]struct {
 		replace, with, wantMessage string
 	}{
-		"未知のキー":             {"    aws_region:", "    unknown_key: x\n    aws_region:", "unknown_key"},
-		"インスタンス ID の形式":     {"i-0123456789abcdef0", "instance-1", "release_instance_id の形式が不正"},
-		"ヘルスチェックの待機時間":      {"health_check_seconds: 300", "health_check_seconds: 60", "timeouts.health_check_seconds"},
-		"URL に使えない文字":       {"http://localhost/up", "http://localhost/up;rm", "health_check.url の形式が不正"},
-		"パラメーター名が / で始まらない": {"      url: http://localhost/up\n", "      url: http://localhost/up\n      basic_auth_parameter_name: myapp/basic-auth\n", "basic_auth_parameter_name の形式が不正"},
-		"アプリケーション名の大文字":     {"application_name: myapp", "application_name: MyApp", "application_name の形式が不正"},
-		"aws で始まる":          {"application_name: myapp", "application_name: awsapp", "aws / amazon で始めない"},
-		"名前として使わない旧項目":      {"      url: http://localhost/up", "      stack_name: x\n      url: http://localhost/up", "stack_name"},
+		"未知のキー":              {"    aws_region:", "    unknown_key: x\n    aws_region:", "unknown_key"},
+		"インスタンス ID の形式":      {"i-0123456789abcdef0", "instance-1", "release_instance_id の形式が不正"},
+		"ヘルスチェックの待機時間":       {"health_check_seconds: 300", "health_check_seconds: 60", "timeouts.health_check_seconds"},
+		"URL に使えない文字":        {"http://localhost/up", "http://localhost/up;rm", "health_check.url の形式が不正"},
+		"Name タグの接頭辞に使えない文字": {"    health_check:\n", "    ami:\n      name_tag_prefix: \"my app\"\n    health_check:\n", "ami.name_tag_prefix の形式が不正"},
+		"パラメーター名が / で始まらない":  {"      url: http://localhost/up\n", "      url: http://localhost/up\n      basic_auth_parameter_name: myapp/basic-auth\n", "basic_auth_parameter_name の形式が不正"},
+		"アプリケーション名の大文字":      {"application_name: myapp", "application_name: MyApp", "application_name の形式が不正"},
+		"aws で始まる":           {"application_name: myapp", "application_name: awsapp", "aws / amazon で始めない"},
+		"名前として使わない旧項目":       {"      url: http://localhost/up", "      stack_name: x\n      url: http://localhost/up", "stack_name"},
 	}
 	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -472,6 +473,50 @@ func TestDerivedNames(t *testing.T) {
 	for _, pair := range names {
 		if want[pair[0]] != pair[1] {
 			t.Errorf("%s = %q, want %q", pair[0], pair[1], want[pair[0]])
+		}
+	}
+}
+
+// デプロイ用シェルスクリプトは、up で依存関係の順にデプロイし、down で逆順に削除する。
+func TestDeployScript(t *testing.T) {
+	files, _ := generate(t)
+	script := string(files["deploy/staging.sh"])
+	upStart, downStart := strings.Index(script, "\nup() {"), strings.Index(script, "\ndown() {")
+	if upStart < 0 || downStart < upStart {
+		t.Fatalf("up() と down() がない:\n%s", script)
+	}
+	up, down := script[upStart:downStart], script[downStart:]
+
+	inOrder := func(section string, stacks []string) {
+		t.Helper()
+		previous := -1
+		for _, stack := range stacks {
+			position := strings.Index(section, "--stack-name "+stack)
+			if position < 0 || position < previous {
+				t.Fatalf("%q がない、または順番が違う:\n%s", stack, section)
+			}
+			previous = position
+		}
+	}
+	stacks := []string{"myapp-staging-health-check", "myapp-staging-launch-template", "myapp-staging-ami-publish-pipeline"}
+	inOrder(up, stacks)
+	inOrder(down, []string{stacks[2], stacks[1], stacks[0]})
+
+	for _, want := range []string{
+		"--region ap-northeast-1",
+		"--template-file generated/cloudformation/staging/launch-template-stack.yml",
+		"--no-execute-changeset --no-fail-on-empty-changeset",
+	} {
+		if !strings.Contains(up, want) {
+			t.Errorf("up に %q がない", want)
+		}
+	}
+	if strings.Contains(script, "--parameter-overrides") {
+		t.Error("パラメーター（AmiId / AppVersion）を上書きしない")
+	}
+	for _, want := range []string{"aws s3 rm", "delete-stack", "wait stack-delete-complete"} {
+		if !strings.Contains(down, want) {
+			t.Errorf("down に %q がない", want)
 		}
 	}
 }

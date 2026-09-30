@@ -28,6 +28,12 @@ environments:
       security_group_ids:
         - sg-0123456789abcdef0
 
+    ami:
+      # 作成する AMI とスナップショットの Name タグの接頭辞（省略可）。
+      # Name タグは「<接頭辞>_<バージョン>_<日時>」、省略時は「<バージョン>_<日時>」になる（環境は含めない）。
+      # AMI 名・タグ App・スタックなどの名前には影響しない
+      name_tag_prefix: myapp-web
+
     # AMI 作成時の再起動の後に、アプリが自動で起動して応答するかの確認。
     # AWS 上では SSM ドキュメントとして登録し、SSM Run Command でリリース用インスタンス上で実行する
     health_check:

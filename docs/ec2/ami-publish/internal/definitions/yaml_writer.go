@@ -23,7 +23,7 @@ type File struct {
 	Content []byte
 }
 
-// GenerateAll は全環境分の CloudFormation テンプレートと、共通の buildspec を生成する。
+// GenerateAll は全環境分の CloudFormation テンプレートとデプロイ用シェルスクリプト、共通の buildspec を生成する。
 func GenerateAll(configuration Configuration) ([]File, error) {
 	var files []File
 	add := func(path string, definition Map) error {
@@ -50,6 +50,7 @@ func GenerateAll(configuration Configuration) ([]File, error) {
 		if err := add(directory+"health-check-stack.yml", HealthCheckStack(environment)); err != nil {
 			return nil, err
 		}
+		files = append(files, File{Path: DeployScriptPath(name), Content: []byte(DeployScript(environment))})
 	}
 	return files, nil
 }
@@ -76,7 +77,11 @@ func WriteAll(outputDirectory string, files []File) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, file.Content, 0o644); err != nil {
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(file.Path, ".sh") {
+			mode = 0o755
+		}
+		if err := os.WriteFile(path, file.Content, mode); err != nil {
 			return err
 		}
 	}
@@ -129,7 +134,7 @@ func staleFiles(outputDirectory string, expected map[string]bool) ([]string, err
 		if err != nil {
 			return err
 		}
-		if entry.IsDir() || !strings.HasSuffix(path, ".yml") {
+		if entry.IsDir() || !(strings.HasSuffix(path, ".yml") || strings.HasSuffix(path, ".sh")) {
 			return nil
 		}
 		relative, err := filepath.Rel(outputDirectory, path)

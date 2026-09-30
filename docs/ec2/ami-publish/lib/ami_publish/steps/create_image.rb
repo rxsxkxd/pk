@@ -14,8 +14,9 @@ module AmiPublish
         existing = find_existing_image(context.pipeline_execution_id)
         return reuse(existing, context) if existing
 
-        name = image_name(context.version)
-        tags = image_tags(context, name)
+        timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
+        name = image_name(context.version, timestamp)
+        tags = image_tags(context, name_tag(context.version, timestamp))
         return plan_creation(name, tags) if context.dry_run
 
         context.image_id = create_image(name, tags, context.version)
@@ -59,15 +60,20 @@ module AmiPublish
                .max_by(&:creation_date)
       end
 
-      def image_name(version)
-        timestamp = Time.now.utc.strftime("%Y%m%d%H%M%S")
+      # AMI 名: <application_name>-<環境>-<バージョン>-<日時>
+      def image_name(version, timestamp)
         "#{configuration.application_name}-#{configuration.environment_name}-#{version}-#{timestamp}"
       end
 
-      # Name タグは AMI 名と同じ値にする（コンソールの一覧の「Name」列は Name タグを表示するため）
-      def image_tags(context, name)
+      # Name タグ: <ami.name_tag_prefix>_<バージョン>_<日時>。接頭辞を省略した場合は <バージョン>_<日時>（環境は含めない）
+      def name_tag(version, timestamp)
+        [configuration.ami_name_tag_prefix, version, timestamp].compact.join("_")
+      end
+
+      # Name タグはコンソールの一覧の「Name」列に表示される
+      def image_tags(context, name_tag)
         [
-          { key: "Name", value: name },
+          { key: "Name", value: name_tag },
           { key: "App", value: configuration.application_name },
           { key: "Environment", value: configuration.environment_name },
           { key: "AppVersion", value: context.version },

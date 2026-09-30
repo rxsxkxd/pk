@@ -21,6 +21,7 @@ generated/                             仕組みの生成ツールの出力（�
   cloudformation/<環境>/launch-template-stack.yml        起動テンプレートのスタック
   cloudformation/<環境>/ami-publish-pipeline-stack.yml   AMI 公開パイプライン（CodePipeline・CodeBuild・IAM）
   cloudformation/<環境>/health-check-stack.yml           再起動後のヘルスチェック（SSM ドキュメント）
+  deploy/<環境>.sh                                       3 つのスタックをデプロイ（up）・削除（down）する AWS CLI の呼び出しを並べたシェルスクリプト
 cmd/generate-definitions/              仕組みの生成ツールの実行コマンド（配線だけ）
 internal/definitions/                  生成する YAML の定義（Go）とテスト
 bin/ami_publish                        AMI 公開ツールの実行コマンド
@@ -80,33 +81,33 @@ cfn-lint generated/cloudformation/*/*.yml   # CloudFormation テンプレート�
 
 ### 4. 仕組みのデプロイ（AWS CLI）
 
-ヘルスチェック（SSM ドキュメント）→ 起動テンプレート → AMI 公開パイプラインの順にデプロイする。各スタックとも `--no-execute-changeset` で変更セットを作り、内容を確認してから実行する。
+仕組みの生成ツールが出力するデプロイ用シェルスクリプト `generated/deploy/<環境>.sh` を `up` で実行する。中身は、命名規則どおりのスタック名とテンプレートのパスを入れた AWS CLI の呼び出しを、依存関係の順（ヘルスチェック → 起動テンプレート → AMI 公開パイプライン）に並べただけのもの。スタック名を手で書かないので、AMI 公開ツールが探す名前とずれない。
 
 ```bash
-ENV=staging
+bash generated/deploy/staging.sh up
+```
 
-# ヘルスチェック（SSM ドキュメント）
-aws cloudformation deploy --stack-name myapp-staging-health-check \
-  --template-file generated/cloudformation/$ENV/health-check-stack.yml --no-execute-changeset
+各スタックとも変更セットを作るだけで、反映はしない（`--no-execute-changeset`）。表示された変更セットの内容を確認してから、依存関係の順に反映する。
 
-# 起動テンプレート（AmiId / AppVersion は指定しない。初回は空のまま作られ、最初のパイプラインの実行で AMI が入る。
-# 2 回目以降も指定しない＝現在の値を引き継ぐ）
-aws cloudformation deploy --stack-name myapp-staging-launch-template \
-  --template-file generated/cloudformation/$ENV/launch-template-stack.yml \
-  --capabilities CAPABILITY_IAM --no-execute-changeset
-
-# AMI 公開パイプライン
-aws cloudformation deploy --stack-name myapp-staging-ami-publish-pipeline \
-  --template-file generated/cloudformation/$ENV/ami-publish-pipeline-stack.yml \
-  --capabilities CAPABILITY_IAM --no-execute-changeset
-
-# 変更内容を確認して実行
+```bash
 aws cloudformation describe-change-set --stack-name <スタック名> --change-set-name <表示された変更セット名>
 aws cloudformation execute-change-set  --stack-name <スタック名> --change-set-name <変更セット名>
 ```
 
 - 起動テンプレートのスタックのパラメータ `AmiId` / `AppVersion` はパイプラインが更新する。手動のデプロイで指定しない（初回は空のまま作られ、起動テンプレートに AMI が入っていない状態になる。AMI が入るまでは、この起動テンプレートでインスタンスを起動するには AMI の指定が必要）。
 - パイプラインは作成直後に 1 回自動で実行されることがある。変数 `VERSION` が未指定のため AMI 公開ツールが使い方の誤り（終了コード 2）で止まり、AWS には何も変更しない。
+
+### 仕組みの撤去
+
+`down` で、依存関係の逆順（AMI 公開パイプライン → 起動テンプレート → ヘルスチェック）にスタックを削除する。パイプラインのアーティファクト用の S3 バケットは、削除の前に中身を空にする。
+
+```bash
+bash generated/deploy/staging.sh down
+```
+
+- 確認の問い合わせはない。実行するとすぐに削除が始まる
+- AMI とスナップショットはスタックのリソースではないため残る（必要なら [確認手順書の後片付け](../ami-publish-environment-verification.md#7-後片付けと記録) の手順で削除する）
+- 起動テンプレートのスタックを削除すると起動テンプレートも消える。起動テンプレートから起動済みのインスタンスには影響しない
 
 ## パイプラインの実行
 
@@ -142,7 +143,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 |---|---|---|
 | 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ）。あわせて SSM の管理対象かを確認（起動中なら SSM Agent が Online になるまで待つ。停止中なら登録されていること） | 失敗（AMI を作らず、何も変更しない） |
 | 0b | CheckReleaseInstancePermissions: リリース用インスタンスのロールに必要な許可（[一覧](../ami-publish-release-instance-iam.md)）があるかを、IAM のポリシーシミュレーターで判定する。停止中でも判定できる | A・C の不足は失敗（不足している許可を一覧にする。AMI を作らず、何も変更しない）。B（CloudWatch Logs への出力）の不足は警告を出して先に進む。Basic 認証のパラメーターが既定の `aws/ssm` キーの SecureString でなければ失敗 |
-| 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用 | 失敗 |
+| 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用。AMI 名は `<application_name>-<環境>-<バージョン>-<日時>`、Name タグは `<ami.name_tag_prefix>_<バージョン>_<日時>`（環境は含めない。接頭辞の省略時は `<バージョン>_<日時>`） | 失敗 |
 | 2 | WaitImageAvailable: available まで待つ | AMI とスナップショットを削除 |
 | 2a | StartInstanceIfStopped: **開始時に停止中だった場合だけ**、確認のためにインスタンスを起動する（停止には戻さない） | AMI とスナップショットを削除 |
 | 3 | WaitInstanceOnline: 再起動（または起動）後に SSM Agent が接続するまで待つ | AMI とスナップショットを削除 |

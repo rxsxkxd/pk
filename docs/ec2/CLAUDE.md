@@ -37,7 +37,7 @@ CheckInstanceState → CheckReleaseInstancePermissions（リリース用イン�
 
 - **命名規則は Go と Ruby の二重実装**: スタック名・パイプライン名・ロググループ・SSM ドキュメント名は設定値に書かず、`application_name` と環境名から決める。`internal/definitions/naming.go` と `lib/ami_publish/configuration.rb` の両方を直し、両方のテスト（`TestDerivedNames` と `spec/ami_publish/configuration_spec.rb`）で一致を確認する
 - **`config/ami_publish.yml` は Go が `KnownFields` で厳密に読む**: 未知の項目は生成時にエラー。項目を足すときは Go の構造体と検証も直す（Ruby は必要な項目だけ読む）。頻繁に変えない値（CodeBuild のイメージ `codeBuildImage`、CodeBuild で使う Ruby `codeBuildRubyVersion`）は設定値ではなく `internal/definitions/ami_publish_buildspec.go` の定数
-- **`generated/` は手で編集しない**: 定義か設定値を直して再生成し、`--check` で一致を確認する。YAML は順序付きマップ `definitions.M(...)` で書き、組み込み関数は完全形（`Ref:` / `Fn::Sub:`）で出力する（差分でレビューするため、出力順を固定している）
+- **`generated/` は手で編集しない**（CloudFormation テンプレート・buildspec に加え、`generated/deploy/<環境>.sh` も生成物。AWS CLI の呼び出しを並べるだけで、チェックなどの処理は入れない）: 定義か設定値を直して再生成し、`--check` で一致を確認する。YAML は順序付きマップ `definitions.M(...)` で書き、組み込み関数は完全形（`Ref:` / `Fn::Sub:`）で出力する（差分でレビューするため、出力順を固定している）
 - **起動テンプレートのスタックは、パイプラインがパラメータ `AmiId` / `AppVersion` だけを変える**: 変更セットに `AWS::EC2::LaunchTemplate` の Modify 以外が含まれたら中止する。スタックに Auto Scaling グループなど本番リソースを入れない。起動テンプレートに UserData・サブネットは入れない。`AmiId` は初回は空でよい
 - **失敗時の AMI**: ステップ 2〜4（と起動失敗）で失敗したら AMI とスナップショットを削除（D5）。ステップ 5 の失敗では残し、同じ実行の再試行で再利用する。古い AMI の整理はこのパイプラインでは行わない（D8）
 - **権限の方針**: CodeBuild のロールに `AWS-RunShellScript` や `ec2:StopInstances` を与えない（Go のテストで確認している）。AWS に書き込む箇所には `# [変更]` コメントを付けている
@@ -51,6 +51,8 @@ CheckInstanceState → CheckReleaseInstancePermissions（リリース用イン�
 ```bash
 # Go: 仕組みの生成と確認（オフラインで動く）
 go run ./cmd/generate-definitions            # generated/ に生成し、自動で決まる名前の一覧を表示
+bash generated/deploy/staging.sh up          # 仕組みのデプロイ（変更セットを作るだけ。確認後に担当者が反映する）
+bash generated/deploy/staging.sh down        # 仕組みの撤去（逆順にスタックを削除。確認の問い合わせはない）
 go run ./cmd/generate-definitions --check    # 定義・設定値と generated/ の一致確認（終了コード 1 = 差分あり）
 go test ./...
 go test ./internal/definitions -run TestPipelineStack   # 単一テスト

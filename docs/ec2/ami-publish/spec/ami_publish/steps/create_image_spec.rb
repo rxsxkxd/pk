@@ -20,10 +20,27 @@ RSpec.describe AmiPublish::Steps::CreateImage do
     expect(params[:no_reboot]).to be(false)
     expect(params[:tag_specifications].map { |spec| spec[:resource_type] }).to eq(%w[image snapshot])
     tags = params[:tag_specifications].first[:tags].to_h { |tag| [tag[:key], tag[:value]] }
-    expect(tags["Name"]).to eq(params[:name])
-    expect(params[:tag_specifications].last[:tags]).to include({ key: "Name", value: params[:name] })
+    # ami.name_tag_prefix を省略した場合、Name タグは <バージョン>_<日時>（AMI 名とは別の形）
+    expect(params[:name]).to match(/\Amyapp-staging-v1\.2\.3-\d{14}\z/)
+    expect(tags["Name"]).to eq("v1.2.3_#{params[:name][-14..]}")
+    expect(params[:tag_specifications].last[:tags]).to include({ key: "Name", value: tags["Name"] })
     expect(tags).to include("App" => "myapp", "Environment" => "staging", "AppVersion" => "v1.2.3",
                             "Verified" => "manual", "PipelineExecutionId" => "exec-1", "Status" => "creating")
+  end
+
+  it "ami.name_tag_prefix を指定すると、Name タグは <接頭辞>_<バージョン>_<日時>（AMI 名とタグ App は application_name のまま）" do
+    clients.ec2.stub_responses(:describe_images, images: [])
+    clients.ec2.stub_responses(:create_image, image_id: "ami-new")
+    settings = configuration("ami" => { "name_tag_prefix" => "web" })
+    step = described_class.new(**step_dependencies(clients, configuration: settings))
+
+    step.call(context)
+
+    params = requests(clients.ec2, :create_image).first[:params]
+    tags = params[:tag_specifications].first[:tags].to_h { |tag| [tag[:key], tag[:value]] }
+    expect(params[:name]).to match(/\Amyapp-staging-v1\.2\.3-\d{14}\z/)
+    expect(tags["Name"]).to eq("web_v1.2.3_#{params[:name][-14..]}")
+    expect(tags["App"]).to eq("myapp")
   end
 
   it "同じパイプライン実行で作成済みの AMI があれば、作らずに再利用する" do

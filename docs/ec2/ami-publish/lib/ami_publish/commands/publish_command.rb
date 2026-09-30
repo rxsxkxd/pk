@@ -6,7 +6,11 @@ module AmiPublish
     # 開始時にリリース用インスタンスが停止中なら、停止したまま AMI を作成し、確認のために起動する（起動したまま終わる）。
     class PublishCommand
       def initialize(configuration:, clients:, logger:, output_env_file: nil)
-        dependencies = { configuration: configuration, clients: clients, logger: logger }
+        # パイプラインのスタックの出力は、ステップ間で共有する（取得は 1 回）
+        pipeline_outputs = StackOutputs.new(cloudformation: clients.cloudformation,
+                                            stack_name: configuration.pipeline_stack_name)
+        dependencies = { configuration: configuration, clients: clients, logger: logger,
+                         pipeline_outputs: pipeline_outputs }
         @logger = logger
         @runner = StepRunner.new(logger: logger, steps: [
                                    Steps::CheckInstanceState.new(**dependencies),

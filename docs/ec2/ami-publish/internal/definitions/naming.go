@@ -44,6 +44,20 @@ func (e Environment) HealthCheckStackName() string { return e.namePrefix() + "-h
 // HealthCheckDocumentName はヘルスチェックの SSM ドキュメントの名前。
 func (e Environment) HealthCheckDocumentName() string { return e.namePrefix() + "-health-check" }
 
+// スタック間の参照に使う Export の名前（アカウント・リージョンの中で一意）。「<スタック名>:<項目>」とする。
+// Export している値は、参照されている間は変更・削除できないため、変わらない値だけを Export する
+// （起動テンプレートのバージョンは Export しない）。
+
+// LaunchTemplateStackExport は、起動テンプレートのスタックの Export の名前。
+func (e Environment) LaunchTemplateStackExport(item string) string {
+	return e.LaunchTemplateStackName() + ":" + item
+}
+
+// HealthCheckStackExport は、ヘルスチェックのスタックの Export の名前。
+func (e Environment) HealthCheckStackExport(item string) string {
+	return e.HealthCheckStackName() + ":" + item
+}
+
 // DerivedNames は自動で決めた名前の一覧（生成時に表示する）。
 func (e Environment) DerivedNames() [][2]string {
 	return [][2]string{

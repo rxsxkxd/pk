@@ -86,6 +86,8 @@ cfn-lint generated/cloudformation/*/*.yml
 bash generated/deploy/staging.sh up
 ```
 
+初回は、1 回目の `up` でパイプライン（3 つ目）の変更セットの作成がエラーで止まる（ヘルスチェックと起動テンプレートの Export がまだないため）。ヘルスチェックと起動テンプレートの変更セットを反映してから、もう一度 `up` を実行する。
+
 変更セットを確認する観点:
 
 - ヘルスチェック: `AWS::SSM::Document` 1 つだけ

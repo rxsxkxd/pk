@@ -33,11 +33,11 @@ module AmiPublish
       def send_health_check(context)
         response = clients.ssm.send_command(
           instance_ids: [configuration.release_instance_id],
-          document_name: configuration.health_check_document_name,
+          document_name: health_check_document_name,
           comment: "ami-publish health check #{context.version}",
           cloud_watch_output_config: {
             cloud_watch_output_enabled: true,
-            cloud_watch_log_group_name: configuration.log_group_name
+            cloud_watch_log_group_name: log_group_name
           }
         )
         response.command.command_id

@@ -4,17 +4,25 @@ module AmiPublish
   module Steps
     # 各ステップの共通部分。ステップは call(context) で処理し、結果を context に書き込む。
     class BaseStep
-      def initialize(configuration:, clients:, logger:, poller: nil, image_cleanup: nil)
+      def initialize(configuration:, clients:, logger:, poller: nil, image_cleanup: nil, pipeline_outputs: nil)
         @configuration = configuration
         @clients = clients
         @logger = logger
+        @pipeline_outputs = pipeline_outputs ||
+                            StackOutputs.new(cloudformation: clients.cloudformation,
+                                             stack_name: configuration.pipeline_stack_name)
         @poller = poller || Poller.new(interval_seconds: configuration.poll_interval_seconds)
         @image_cleanup = image_cleanup || ImageCleanup.new(ec2: clients.ec2, logger: logger)
       end
 
       private
 
-      attr_reader :configuration, :clients, :logger, :poller, :image_cleanup
+      attr_reader :configuration, :clients, :logger, :poller, :image_cleanup, :pipeline_outputs
+
+      # 他のスタックの名前などは、パイプラインのスタックの出力から引く（命名規則では決めない）
+      def launch_template_stack_name = pipeline_outputs.fetch("LaunchTemplateStackName")
+      def health_check_document_name = pipeline_outputs.fetch("HealthCheckDocumentName")
+      def log_group_name = pipeline_outputs.fetch("LogGroupName")
 
       # AWS SDK の待機処理（waiter）の設定。待機時間の上限を確認間隔で割った回数だけ確認する。
       # progress を渡すと、確認のたびに進捗を出す（ログの項目はブロックが直前のレスポンスから作る）。

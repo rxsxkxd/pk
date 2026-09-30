@@ -95,7 +95,7 @@ module AmiPublish
       def log_output_check(partition, region, account_id)
         Check.new(label: "B. ヘルスチェックの出力を CloudWatch Logs に送る", required: false,
                   actions: %w[logs:CreateLogStream logs:PutLogEvents logs:DescribeLogStreams],
-                  resource: "arn:#{partition}:logs:#{region}:#{account_id}:log-group:#{configuration.log_group_name}:*")
+                  resource: "arn:#{partition}:logs:#{region}:#{account_id}:log-group:#{log_group_name}:*")
       end
 
       # Basic 認証のパラメーターの前提を確かめる: 存在し、SecureString で、既定の aws/ssm キーで暗号化されていること。

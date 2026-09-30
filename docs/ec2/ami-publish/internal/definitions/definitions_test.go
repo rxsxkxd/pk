@@ -250,8 +250,23 @@ func TestPipelineStack(t *testing.T) {
 	if strings.Contains(content, "ec2:StopInstances") {
 		t.Error("パイプラインにインスタンスを停止する権限を与えない")
 	}
-	if !strings.Contains(content, "document/myapp-staging-health-check") {
-		t.Error("ヘルスチェックの SSM ドキュメントの実行が許可されていない")
+	// 他のスタックのリソースは、命名規則の文字列ではなく Export で参照する。
+	for _, want := range []string{
+		"document/${DocumentName}",
+		"Fn::ImportValue: myapp-staging-health-check:DocumentName",
+		"stack/${LaunchTemplateStackName}/*",
+		"Fn::ImportValue: myapp-staging-launch-template:StackName",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("パイプラインのスタックに %q がない", want)
+		}
+	}
+	if strings.Contains(content, "document/myapp-staging-health-check") || strings.Contains(content, "stack/myapp-staging-launch-template/") {
+		t.Error("他のスタックのリソースを命名規則の文字列で直接参照している")
+	}
+	// AMI 公開ツールが他のスタックの名前を引くための出力
+	for _, output := range []string{"LaunchTemplateStackName", "HealthCheckDocumentName", "LogGroupName", "LaunchTemplateStackServiceRoleArn"} {
+		dig(t, document, "Outputs", output)
 	}
 	dig(t, document, "Outputs", "LaunchTemplateStackServiceRoleArn")
 }
@@ -518,5 +533,27 @@ func TestDeployScript(t *testing.T) {
 		if !strings.Contains(down, want) {
 			t.Errorf("down に %q がない", want)
 		}
+	}
+}
+
+// 起動テンプレートのスタックとヘルスチェックのスタックは、参照される値を Export する（バージョンは Export しない）。
+func TestStackExports(t *testing.T) {
+	files, _ := generate(t)
+	launchTemplate := parse(t, files["cloudformation/staging/launch-template-stack.yml"])
+	for output, exportName := range map[string]string{
+		"StackName":        "myapp-staging-launch-template:StackName",
+		"LaunchTemplateId": "myapp-staging-launch-template:LaunchTemplateId",
+	} {
+		if got := dig(t, launchTemplate, "Outputs", output, "Export", "Name"); got != exportName {
+			t.Errorf("%s の Export = %v, want %s", output, got, exportName)
+		}
+	}
+	if _, ok := dig(t, launchTemplate, "Outputs", "LaunchTemplateVersion").(map[string]any)["Export"]; ok {
+		t.Error("起動テンプレートのバージョンは Export しない（参照されると更新できなくなる）")
+	}
+
+	healthCheck := parse(t, files["cloudformation/staging/health-check-stack.yml"])
+	if got := dig(t, healthCheck, "Outputs", "HealthCheckDocumentName", "Export", "Name"); got != "myapp-staging-health-check:DocumentName" {
+		t.Errorf("SSM ドキュメント名の Export = %v", got)
 	}
 }

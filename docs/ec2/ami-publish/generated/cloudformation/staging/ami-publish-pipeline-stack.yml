@@ -2,6 +2,11 @@
 # 変更するときは internal/definitions/ か config/ を直し、再生成して差分をレビューする。
 AWSTemplateFormatVersion: "2010-09-09"
 Description: myapp AMI publish pipeline (staging)
+Metadata:
+  cfn-lint:
+    config:
+      ignore_checks:
+        - W6001
 Resources:
   ArtifactBucket:
     Type: AWS::S3::Bucket
@@ -75,7 +80,10 @@ Resources:
                   - iam:UntagRole
                   - iam:PassRole
                 Resource:
-                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/myapp-staging-launch-template-*
+                  Fn::Sub:
+                    - arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${LaunchTemplateStackName}-*
+                    - LaunchTemplateStackName:
+                        Fn::ImportValue: myapp-staging-launch-template:StackName
               - Sid: ManageInstanceProfile
                 Effect: Allow
                 Action:
@@ -85,7 +93,10 @@ Resources:
                   - iam:AddRoleToInstanceProfile
                   - iam:RemoveRoleFromInstanceProfile
                 Resource:
-                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/myapp-staging-launch-template-*
+                  Fn::Sub:
+                    - arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${LaunchTemplateStackName}-*
+                    - LaunchTemplateStackName:
+                        Fn::ImportValue: myapp-staging-launch-template:StackName
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -174,7 +185,10 @@ Resources:
                 Action: ssm:SendCommand
                 Resource:
                   - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0123456789abcdef0
-                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/myapp-staging-health-check
+                  - Fn::Sub:
+                      - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${DocumentName}
+                      - DocumentName:
+                          Fn::ImportValue: myapp-staging-health-check:DocumentName
               - Sid: ReadCommandAndInstanceStatus
                 Effect: Allow
                 Action:
@@ -190,7 +204,10 @@ Resources:
                   - cloudformation:ExecuteChangeSet
                   - cloudformation:DeleteChangeSet
                 Resource:
-                  Fn::Sub: arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/myapp-staging-launch-template/*
+                  Fn::Sub:
+                    - arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LaunchTemplateStackName}/*
+                    - LaunchTemplateStackName:
+                        Fn::ImportValue: myapp-staging-launch-template:StackName
               - Sid: ReadOwnStackOutputs
                 Effect: Allow
                 Action: cloudformation:DescribeStacks
@@ -353,3 +370,12 @@ Outputs:
   ArtifactBucketName:
     Value:
       Ref: ArtifactBucket
+  LaunchTemplateStackName:
+    Value:
+      Fn::ImportValue: myapp-staging-launch-template:StackName
+  HealthCheckDocumentName:
+    Value:
+      Fn::ImportValue: myapp-staging-health-check:DocumentName
+  LogGroupName:
+    Value:
+      Ref: LogGroup

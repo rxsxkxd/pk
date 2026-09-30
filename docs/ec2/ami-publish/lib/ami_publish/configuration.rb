@@ -5,8 +5,9 @@ module AmiPublish
   # 同じファイルを Go の仕組み生成ツールも読む。値の形式の詳細な検証は仕組み生成ツールが行い、
   # ここでは AMI 公開ツールが使う値の有無と基本的な形式だけを確認する。
   #
-  # リソースの名前は application_name と環境名から自動で決める（下の「命名規則」）。
-  # Go の仕組み生成ツール（internal/definitions/naming.go）も同じ規則で名前を決めている。
+  # AMI 公開ツールが命名規則で決めるのは、AMI 公開パイプラインのスタック名だけ（下の「命名規則」）。
+  # ほかのスタックの名前などは、パイプラインのスタックの出力から引く（StackOutputs）。
+  # Go の仕組み生成ツール（internal/definitions/naming.go）も同じ規則でパイプラインのスタック名を決めている。
   # 規則を変えるときは両方を直し、両方のテストで同じ名前になることを確かめる。
   class Configuration
     VERSION_PATTERN = /\Av\d+\.\d+\.\d+\z/
@@ -49,17 +50,8 @@ module AmiPublish
 
     # 命名規則（Go の internal/definitions/naming.go と同じ）
 
-    # AMI 公開パイプラインのスタック（出力からスタック用サービスロールの ARN を取る）
+    # AMI 公開パイプラインのスタック（ほかの名前は、このスタックの出力から引く）
     def pipeline_stack_name = "#{name_prefix}-ami-publish-pipeline"
-
-    # CodeBuild のログと、ヘルスチェックの出力を保存する CloudWatch Logs のロググループ
-    def log_group_name = "/#{application_name}/#{environment_name}/ami-publish"
-
-    # 起動テンプレートのスタック
-    def launch_template_stack_name = "#{name_prefix}-launch-template"
-
-    # ヘルスチェックの SSM ドキュメント
-    def health_check_document_name = "#{name_prefix}-health-check"
 
     private
 

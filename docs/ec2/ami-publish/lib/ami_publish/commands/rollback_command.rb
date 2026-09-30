@@ -6,7 +6,11 @@ module AmiPublish
     # 起動テンプレートは直接変更せず、通常のリリースと同じく変更セットと差分の検証を通してスタックを更新する。
     class RollbackCommand
       def initialize(configuration:, clients:, logger:, output_env_file: nil)
-        dependencies = { configuration: configuration, clients: clients, logger: logger }
+        # パイプラインのスタックの出力は、ステップ間で共有する（取得は 1 回）
+        pipeline_outputs = StackOutputs.new(cloudformation: clients.cloudformation,
+                                            stack_name: configuration.pipeline_stack_name)
+        dependencies = { configuration: configuration, clients: clients, logger: logger,
+                         pipeline_outputs: pipeline_outputs }
         @logger = logger
         @runner = StepRunner.new(logger: logger, steps: [
                                    Steps::FindPublishedImage.new(**dependencies),

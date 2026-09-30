@@ -59,6 +59,12 @@ func Ref(logicalName string) Map { return M("Ref", logicalName) }
 // Sub は Fn::Sub を返す。
 func Sub(format string) Map { return M("Fn::Sub", format) }
 
+// SubWith は、変数を指定した Fn::Sub を返す（例: 他のスタックの Export を埋め込む）。
+func SubWith(format string, variables Map) Map { return M("Fn::Sub", []any{format, variables}) }
+
+// ImportValue は、他のスタックの Export を参照する Fn::ImportValue を返す。
+func ImportValue(exportName string) Map { return M("Fn::ImportValue", exportName) }
+
 // If は Fn::If を返す。
 func If(condition string, whenTrue, whenFalse any) Map {
 	return M("Fn::If", []any{condition, whenTrue, whenFalse})

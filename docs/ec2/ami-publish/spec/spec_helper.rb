@@ -46,9 +46,28 @@ module SpecHelpers
     AmiPublish::Poller.new(interval_seconds: 0, clock: -> { now += 1000 }, sleeper: ->(_) {})
   end
 
+  # パイプラインのスタックの出力（テストでは固定値を返す）
+  PIPELINE_OUTPUTS = {
+    "LaunchTemplateStackName" => "myapp-staging-launch-template",
+    "HealthCheckDocumentName" => "myapp-staging-health-check",
+    "LogGroupName" => "/myapp/staging/ami-publish",
+    "LaunchTemplateStackServiceRoleArn" => "arn:aws:iam::123456789012:role/service"
+  }.freeze
+  StaticOutputs = Struct.new(:outputs) do
+    def fetch(key) = outputs.fetch(key)
+  end
+
   def step_dependencies(clients, **overrides)
     { configuration: configuration, clients: clients, logger: logger,
-      poller: AmiPublish::Poller.new(interval_seconds: 0, sleeper: ->(_) {}) }.merge(overrides)
+      poller: AmiPublish::Poller.new(interval_seconds: 0, sleeper: ->(_) {}),
+      pipeline_outputs: StaticOutputs.new(PIPELINE_OUTPUTS) }.merge(overrides)
+  end
+
+  # パイプラインのスタックの出力を返す describe_stacks の応答
+  def pipeline_stack_response(outputs = PIPELINE_OUTPUTS)
+    { stacks: [{ stack_name: "myapp-staging-ami-publish-pipeline", creation_time: Time.now,
+                 stack_status: "UPDATE_COMPLETE",
+                 outputs: outputs.map { |key, value| { output_key: key, output_value: value } } }] }
   end
 
   def requests(client, operation)

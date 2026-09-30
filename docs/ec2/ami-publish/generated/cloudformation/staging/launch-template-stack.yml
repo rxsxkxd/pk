@@ -85,9 +85,16 @@ Resources:
                     - Ref: AppVersion
                     - none
 Outputs:
+  StackName:
+    Value:
+      Ref: AWS::StackName
+    Export:
+      Name: myapp-staging-launch-template:StackName
   LaunchTemplateId:
     Value:
       Ref: LaunchTemplate
+    Export:
+      Name: myapp-staging-launch-template:LaunchTemplateId
   LaunchTemplateVersion:
     Value:
       Fn::GetAtt:

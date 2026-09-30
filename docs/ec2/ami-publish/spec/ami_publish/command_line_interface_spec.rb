@@ -27,6 +27,7 @@ RSpec.describe AmiPublish::CommandLineInterface do
                                  iam_instance_profile: { arn: "arn:aws:iam::123456789012:instance-profile/release" }
                                }] }])
     stub_release_instance_role
+    stub_launch_template_stack
     ping_status = name == "running" ? "Online" : "ConnectionLost"
     clients.ssm.stub_responses(:describe_instance_information, instance_information_list: [{
                                  instance_id: "i-0123456789abcdef0", ping_status: ping_status
@@ -48,14 +49,21 @@ RSpec.describe AmiPublish::CommandLineInterface do
     })
   end
 
+  # パイプラインのスタック（出力で他のスタックの名前を返す）と、起動テンプレートのスタック
   def stub_launch_template_stack
-    clients.cloudformation.stub_responses(:describe_stacks, stacks: [{
-                                            stack_name: "myapp-staging-launch-template", creation_time: Time.now,
-                                            stack_status: "UPDATE_COMPLETE",
-                                            parameters: [{ parameter_key: "AmiId", parameter_value: "ami-old" },
-                                                         { parameter_key: "AppVersion", parameter_value: "v1.2.2" }],
-                                            outputs: [{ output_key: "LaunchTemplateVersion", output_value: "3" }]
-                                          }])
+    launch_template_stack = {
+      stack_name: "myapp-staging-launch-template", creation_time: Time.now, stack_status: "UPDATE_COMPLETE",
+      parameters: [{ parameter_key: "AmiId", parameter_value: "ami-old" },
+                   { parameter_key: "AppVersion", parameter_value: "v1.2.2" }],
+      outputs: [{ output_key: "LaunchTemplateVersion", output_value: "3" }]
+    }
+    clients.cloudformation.stub_responses(:describe_stacks, lambda { |request|
+      if request.params[:stack_name] == "myapp-staging-ami-publish-pipeline"
+        pipeline_stack_response
+      else
+        { stacks: [launch_template_stack] }
+      end
+    })
   end
 
   describe "使い方の誤り（終了コード 2）" do

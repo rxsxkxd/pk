@@ -8,7 +8,10 @@
 # up の後は、表示される変更セットを確認してから、依存関係の順に反映する:
 #   aws cloudformation describe-change-set --stack-name <スタック名> --change-set-name <変更セット名>
 #   aws cloudformation execute-change-set  --stack-name <スタック名> --change-set-name <変更セット名>
+# 初回は、1・2 を反映してから、もう一度 up を実行する（3 は 1・2 の Export を参照するため、
+# 1・2 が反映されるまで 3 の変更セットは作れず、エラーで止まる。反映済みの 1・2 は「変更なし」で通過する）。
 # down はスタックのリソースを削除する。AMI とスナップショットはスタックのリソースではないため残る。
+# 参照されている Export があるスタックは削除できないため、down は参照する側（3）から順に削除する。
 set -eu
 
 up() {

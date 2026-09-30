@@ -85,7 +85,17 @@ func LaunchTemplateStack(environment Environment) Map {
 			),
 		),
 		"Outputs", M(
-			"LaunchTemplateId", M("Value", Ref("LaunchTemplate")),
+			// スタック名: AMI 公開パイプラインのスタックが参照する（権限の対象）
+			"StackName", M(
+				"Value", Ref("AWS::StackName"),
+				"Export", M("Name", environment.LaunchTemplateStackExport("StackName")),
+			),
+			// 起動テンプレートの ID: フェーズ 2 のサーバーのスタックが参照する（作成後に変わらない）
+			"LaunchTemplateId", M(
+				"Value", Ref("LaunchTemplate"),
+				"Export", M("Name", environment.LaunchTemplateStackExport("LaunchTemplateId")),
+			),
+			// バージョンは AMI の公開のたびに変わるため Export しない（参照されると更新できなくなる）
 			"LaunchTemplateVersion", M("Value", GetAtt("LaunchTemplate", "LatestVersionNumber")),
 		),
 	)

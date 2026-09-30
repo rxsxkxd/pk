@@ -23,6 +23,9 @@ func AMIPublishPipelineStack(environment Environment) Map {
 	return M(
 		"AWSTemplateFormatVersion", "2010-09-09",
 		"Description", fmt.Sprintf("%s AMI publish pipeline (%s)", environment.ApplicationName, environment.Name),
+		// 出力の一部（LaunchTemplateStackName など）は他のスタックの Export をそのまま出している（W6001）。
+		// AMI 公開ツールが、パイプラインのスタックの出力だけを見れば他のスタックの名前がわかるようにするための意図した使い方
+		"Metadata", M("cfn-lint", M("config", M("ignore_checks", []any{"W6001"}))),
 		"Resources", M(
 			"ArtifactBucket", artifactBucket(),
 			"LogGroup", M(
@@ -43,6 +46,10 @@ func AMIPublishPipelineStack(environment Environment) Map {
 			"CodeBuildProjectName", M("Value", Ref("CodeBuildProject")),
 			"LaunchTemplateStackServiceRoleArn", M("Value", GetAtt("LaunchTemplateStackServiceRole", "Arn")),
 			"ArtifactBucketName", M("Value", Ref("ArtifactBucket")),
+			// AMI 公開ツール（Ruby）は、パイプラインのスタック名だけを命名規則で決め、以下の名前はこの出力から引く
+			"LaunchTemplateStackName", M("Value", ImportValue(environment.LaunchTemplateStackExport("StackName"))),
+			"HealthCheckDocumentName", M("Value", ImportValue(environment.HealthCheckStackExport("DocumentName"))),
+			"LogGroupName", M("Value", Ref("LogGroup")),
 		),
 	)
 }
@@ -73,10 +80,19 @@ func artifactBucket() Map {
 	)
 }
 
+// launchTemplateStackNameVariables は、起動テンプレートのスタック名を Export から取り、Fn::Sub に渡す変数。
+func launchTemplateStackNameVariables(environment Environment) Map {
+	return M("LaunchTemplateStackName", ImportValue(environment.LaunchTemplateStackExport("StackName")))
+}
+
 // launchTemplateStackServiceRole は、AMI 公開ツールが起動テンプレートのスタックを変更セットで更新するときに
 // CloudFormation に渡すサービスロール。CodeBuild 自身には起動テンプレートや IAM の変更権限を持たせない。
+//
+// CloudFormation は、一度サービスロールを渡したスタックでは以降の操作（担当者によるテンプレートの再デプロイを含む）
+// でもそのロールを使う。テンプレートの変更で IAM ロールが作り直されても動くよう、権限の対象は実際の ARN ではなく、
+// 起動テンプレートのスタック名（Export から取る）を接頭辞にした範囲とする。
 func launchTemplateStackServiceRole(environment Environment) Map {
-	stackName := environment.LaunchTemplateStackName()
+	stackNameVariables := launchTemplateStackNameVariables(environment)
 	return M(
 		"Type", "AWS::IAM::Role",
 		"Properties", M(
@@ -127,7 +143,7 @@ func launchTemplateStackServiceRole(environment Environment) Map {
 								"iam:UntagRole",
 								"iam:PassRole",
 							},
-							"Resource", Sub("arn:${AWS::Partition}:iam::${AWS::AccountId}:role/"+stackName+"-*"),
+							"Resource", SubWith("arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${LaunchTemplateStackName}-*", stackNameVariables),
 						),
 						M(
 							"Sid", "ManageInstanceProfile",
@@ -139,7 +155,7 @@ func launchTemplateStackServiceRole(environment Environment) Map {
 								"iam:AddRoleToInstanceProfile",
 								"iam:RemoveRoleFromInstanceProfile",
 							},
-							"Resource", Sub("arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/"+stackName+"-*"),
+							"Resource", SubWith("arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${LaunchTemplateStackName}-*", stackNameVariables),
 						),
 					},
 				),
@@ -154,8 +170,10 @@ func codeBuildServiceRole(environment Environment) Map {
 	instanceARN := "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/" + environment.ReleaseInstanceID
 	imageARN := "arn:${AWS::Partition}:ec2:${AWS::Region}::image/*"
 	snapshotARN := "arn:${AWS::Partition}:ec2:${AWS::Region}::snapshot/*"
-	launchTemplateStackARN := "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/" +
-		environment.LaunchTemplateStackName() + "/*"
+	launchTemplateStackARN := SubWith("arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LaunchTemplateStackName}/*",
+		launchTemplateStackNameVariables(environment))
+	healthCheckDocumentARN := SubWith("arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${DocumentName}",
+		M("DocumentName", ImportValue(environment.HealthCheckStackExport("DocumentName"))))
 	applicationTagCondition := M("StringEquals", M("ec2:ResourceTag/App", application))
 
 	return M(
@@ -237,8 +255,7 @@ func codeBuildServiceRole(environment Environment) Map {
 							"Action", "ssm:SendCommand",
 							"Resource", []any{
 								Sub(instanceARN),
-								Sub("arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/" +
-									environment.HealthCheckDocumentName()),
+								healthCheckDocumentARN,
 							},
 						),
 						M(
@@ -257,7 +274,7 @@ func codeBuildServiceRole(environment Environment) Map {
 								"cloudformation:ExecuteChangeSet",
 								"cloudformation:DeleteChangeSet",
 							},
-							"Resource", Sub(launchTemplateStackARN),
+							"Resource", launchTemplateStackARN,
 						),
 						M(
 							"Sid", "ReadOwnStackOutputs",

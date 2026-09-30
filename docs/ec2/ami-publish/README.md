@@ -89,6 +89,8 @@ bash generated/deploy/staging.sh up
 
 各スタックとも変更セットを作るだけで、反映はしない（`--no-execute-changeset`）。表示された変更セットの内容を確認してから、依存関係の順に反映する。
 
+**初回だけ `up` を 2 回実行する**: AMI 公開パイプラインのスタックは、ヘルスチェックと起動テンプレートのスタックの Export（スタック名、SSM ドキュメント名）を参照している。1 回目の `up` では、この 2 つが反映される前なので、パイプラインの変更セットの作成がエラーで止まる。2 つを反映してからもう一度 `up` を実行すると、反映済みの 2 つは「変更なし」で通過し、パイプラインの変更セットが作られる。
+
 ```bash
 aws cloudformation describe-change-set --stack-name <スタック名> --change-set-name <表示された変更セット名>
 aws cloudformation execute-change-set  --stack-name <スタック名> --change-set-name <変更セット名>

@@ -134,6 +134,8 @@ aws cloudformation deploy --stack-name myapp-staging-server-web-01 \
 
 ## フェーズ 1 側で必要になる変更
 
+**実装済み**: 起動テンプレートのスタックは、起動テンプレートの ID を Export している（Export の名前: `<起動テンプレートのスタック名>:LaunchTemplateId`。例: `myapp-staging-launch-template:LaunchTemplateId`）。
+
 | 変更 | 内容 |
 |---|---|
 | 起動テンプレートの ID の Export | 起動テンプレートのスタックの `Outputs` に `Export` を追加（例: `myapp-staging-launch-template-id`）。命名規則は Go と Ruby の両方に実装する |

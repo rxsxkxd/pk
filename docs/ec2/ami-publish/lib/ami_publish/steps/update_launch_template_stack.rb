@@ -46,7 +46,7 @@ module AmiPublish
       private
 
       def stack_name
-        configuration.launch_template_stack_name
+        @stack_name ||= launch_template_stack_name
       end
 
       def update_with_change_set(context, parameter_keys)
@@ -202,7 +202,7 @@ module AmiPublish
       end
 
       def service_role_arn
-        output_value(describe_stack(configuration.pipeline_stack_name), SERVICE_ROLE_OUTPUT)
+        pipeline_outputs.fetch(SERVICE_ROLE_OUTPUT)
       end
 
       def launch_template_version(stack)

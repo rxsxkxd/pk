@@ -47,6 +47,8 @@ Outputs:
   HealthCheckDocumentName:
     Value:
       Ref: HealthCheckDocument
+    Export:
+      Name: myapp-staging-health-check:DocumentName
   BasicAuthParameterReadPolicyArn:
     Description: Attach this managed policy to the IAM role of the release instance
     Value:

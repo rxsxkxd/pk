@@ -45,7 +45,11 @@ func HealthCheckStack(environment Environment) Map {
 		),
 	)
 	outputs := M(
-		"HealthCheckDocumentName", M("Value", Ref("HealthCheckDocument")),
+		// SSM ドキュメントの名前: AMI 公開パイプラインのスタックが参照する（実行の権限の対象）
+		"HealthCheckDocumentName", M(
+			"Value", Ref("HealthCheckDocument"),
+			"Export", M("Name", environment.HealthCheckStackExport("DocumentName")),
+		),
 	)
 
 	if settings.BasicAuthParameterName != "" {

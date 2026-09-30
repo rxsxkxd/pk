@@ -25,3 +25,7 @@ Metrics/ClassLength:
 Metrics/BlockLength:
   Exclude:
     - "spec/**/*"
+
+# ステップの依存（設定値、AWS のクライアント、ログ、待機処理など）はキーワード引数で注入するため、数に含めない
+Metrics/ParameterLists:
+  CountKeywordArgs: false

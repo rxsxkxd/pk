@@ -15,11 +15,7 @@ RSpec.describe AmiPublish::Steps::UpdateLaunchTemplateStack do
   end
   let(:changes) { [launch_template_change] }
   let(:state) { { executed: false } }
-  let(:pipeline_stack) do
-    stack("myapp-staging-ami-publish-pipeline", status: "UPDATE_COMPLETE",
-                                                outputs: { "LaunchTemplateStackServiceRoleArn" => service_role_arn })
-  end
-  let(:service_role_arn) { "arn:aws:iam::123456789012:role/service" }
+  let(:pipeline_stack) { stack("myapp-staging-ami-publish-pipeline", status: "UPDATE_COMPLETE") }
 
   def stack(name, status:, parameters: {}, outputs: {})
     { stack_name: name, creation_time: Time.now, stack_status: status,
@@ -58,7 +54,9 @@ RSpec.describe AmiPublish::Steps::UpdateLaunchTemplateStack do
 
     params = requests(cloudformation, :create_change_set).first[:params]
     expect(params).to include(stack_name: "myapp-staging-launch-template", change_set_type: "UPDATE",
-                              use_previous_template: true, role_arn: "arn:aws:iam::123456789012:role/service")
+                              use_previous_template: true)
+    # CloudFormation のサービスロールは渡さない（スタックにロールを覚えさせない）
+    expect(params).not_to have_key(:role_arn)
     expect(params[:parameters]).to contain_exactly(
       { parameter_key: "AmiId", parameter_value: "ami-new" },
       { parameter_key: "AppVersion", parameter_value: "v1.2.3" },

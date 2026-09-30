@@ -9,12 +9,14 @@ module AmiPublish
     # 実行せずに中止する（テンプレートが別経路で変更された場合の安全装置）。
     #
     # 失敗しても AMI は削除しない。AMI 自体は正常なので、同じパイプライン実行を再実行したときに再利用する。
+    #
+    # CloudFormation のサービスロールは渡さない（CodeBuild の権限で変更セットを実行する）。サービスロールを渡すと
+    # スタックがそのロールを覚え、担当者の再デプロイや削除までそのロールで実行されるようになるため。
     class UpdateLaunchTemplateStack < BaseStep
       MANAGED_PARAMETERS = %w[AmiId AppVersion].freeze
       STABLE_STATUSES = %w[CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE
                            IMPORT_COMPLETE IMPORT_ROLLBACK_COMPLETE].freeze
       NO_CHANGE_REASONS = ["didn't contain changes", "No updates are to be performed"].freeze
-      SERVICE_ROLE_OUTPUT = "LaunchTemplateStackServiceRoleArn"
 
       def initialize(change_set_prefix: "ami-publish", **dependencies)
         super(**dependencies)
@@ -79,7 +81,6 @@ module AmiPublish
           use_previous_template: true,
           parameters: build_parameters(parameter_keys, context),
           capabilities: %w[CAPABILITY_IAM CAPABILITY_NAMED_IAM],
-          role_arn: service_role_arn,
           description: "ami-publish: #{context.version} #{context.image_id}"
         )
         logger.info("change_set_created", stack_name: stack_name, change_set_name: change_set_name)
@@ -199,10 +200,6 @@ module AmiPublish
           else { parameter_key: key, use_previous_value: true }
           end
         end
-      end
-
-      def service_role_arn
-        pipeline_outputs.fetch(SERVICE_ROLE_OUTPUT)
       end
 
       def launch_template_version(stack)

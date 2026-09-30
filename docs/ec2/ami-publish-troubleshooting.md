@@ -196,8 +196,30 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 |---|---|---|
 | `起動テンプレート以外の変更が含まれているため中止した` | パラメータの変更で起動テンプレート以外のリソースも変わる状態になっている（テンプレート本体が想定外の形でデプロイされた） | 起動テンプレートのスタックのテンプレートを、`generated/` の正しいものでデプロイし直す。AMI は残っているので、その後に同じ実行を再試行する |
 | `更新できる状態ではない（状態: UPDATE_ROLLBACK_FAILED）` など | スタックが異常な状態 | CloudFormation のコンソールでイベントを確認し、`aws cloudformation continue-update-rollback --stack-name <スタック名>` などで復旧してから再実行する |
-| `スタックの更新が完了しなかった（状態: UPDATE_ROLLBACK_COMPLETE）` | 更新が失敗してロールバックされた | スタックのイベントで失敗したリソースと理由を確認する。サービスロールの権限不足のことが多い |
+| `スタックの更新が完了しなかった（状態: UPDATE_ROLLBACK_COMPLETE）` | 更新が失敗してロールバックされた | スタックのイベントで失敗したリソースと理由を確認する。CodeBuild のロールの権限不足のことが多い（下の「起動テンプレートの新しいバージョンを作れない」も参照） |
 | `パラメータ AmiId, AppVersion がない` | 起動テンプレートのスタックが古いテンプレートでデプロイされている | `generated/` のテンプレートでデプロイし直す |
+
+### 起動テンプレートの新しいバージョンを作れない（権限不足）
+
+起動テンプレートのスタックの更新は、CodeBuild のロールの権限で行う（CloudFormation のサービスロールは使わない）。CodeBuild のロールには、対象の起動テンプレートへの `ec2:CreateLaunchTemplateVersion` / `ec2:ModifyLaunchTemplate` を与えている。スタックのイベントに、これ以外の操作（例: 起動テンプレートが参照するインスタンスプロファイルのための `iam:PassRole`）の権限不足が出た場合は、パイプラインのスタックの定義（`internal/definitions/ami_publish_pipeline_stack.go` の `UpdateLaunchTemplate`）に、その操作を対象を絞って追加し、再デプロイする。
+
+### 以前の構成（サービスロールあり）からの移行
+
+以前は、起動テンプレートのスタックの更新に CloudFormation のサービスロール（パイプラインのスタックの `LaunchTemplateStackServiceRole`）を使っていた。CloudFormation は、一度サービスロールを渡したスタックでは、そのロールを覚えて以降のすべての操作に使う（外すことはできず、別のロールに差し替えることしかできない）。
+
+1. 起動テンプレートのスタックがロールを覚えているか確認する:
+
+   ```bash
+   aws cloudformation describe-stacks --stack-name myapp-staging-launch-template --query 'Stacks[0].RoleARN' --output text
+   ```
+
+2. `None` なら、移行は不要。`bash generated/deploy/staging.sh up` で新しい定義を反映する（起動テンプレート → パイプラインの順に変更セットを反映する）
+3. ロールの ARN が表示された場合は、そのロールが消えると、起動テンプレートのスタックを更新も削除もできなくなる。ARN を控えてから、起動テンプレートのスタックを作り直す:
+   1. `bash generated/deploy/staging.sh down` で削除する。パイプラインのスタックが先に削除され、ロールも消えるため、起動テンプレートのスタックの削除は失敗して止まる
+   2. 控えた ARN と**同じ名前**の IAM ロールを一時的に作る（信頼ポリシーは `cloudformation.amazonaws.com`、許可は起動テンプレートと、そのスタックの IAM ロール・インスタンスプロファイルの削除ができるもの）。同じ ARN になるので、CloudFormation がこのロールで削除を進められる
+   3. `bash generated/deploy/staging.sh down` をもう一度実行し、残りのスタックを削除する
+   4. 一時的に作った IAM ロールを削除する
+   5. `bash generated/deploy/staging.sh up`（初回なので 2 回）で作り直す。起動テンプレートのバージョンの履歴はなくなるが、AMI は残る。必要なら `rollback` で既存の AMI を起動テンプレートに入れ直せる
 
 ## 7. CodeBuild の install フェーズで失敗する
 

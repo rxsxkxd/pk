@@ -13,7 +13,6 @@ const BuildspecPath = "generated/codebuild/ami-publish-buildspec.yml"
 // 含めるもの:
 //   - CodePipeline（V2、実行モード QUEUED、パイプライン変数 VERSION / VERIFIED）
 //   - CodeBuild プロジェクト（同時実行数 1）と、そのサービスロール（AMI 作成・ヘルスチェック・スタック更新に必要な権限だけ）
-//   - 起動テンプレートのスタックの更新に使う CloudFormation のサービスロール
 //   - パイプラインのアーティファクト用 S3 バケット、ログ用の CloudWatch Logs ロググループ
 //
 // ソースはこのリポジトリで、push による自動起動は行わない（DetectChanges: false）。
@@ -35,7 +34,6 @@ func AMIPublishPipelineStack(environment Environment) Map {
 					"RetentionInDays", pipeline.LogRetentionDays,
 				),
 			),
-			"LaunchTemplateStackServiceRole", launchTemplateStackServiceRole(environment),
 			"CodeBuildServiceRole", codeBuildServiceRole(environment),
 			"CodeBuildProject", codeBuildProject(environment),
 			"CodePipelineServiceRole", codePipelineServiceRole(environment),
@@ -44,7 +42,6 @@ func AMIPublishPipelineStack(environment Environment) Map {
 		"Outputs", M(
 			"PipelineName", M("Value", Ref("Pipeline")),
 			"CodeBuildProjectName", M("Value", Ref("CodeBuildProject")),
-			"LaunchTemplateStackServiceRoleArn", M("Value", GetAtt("LaunchTemplateStackServiceRole", "Arn")),
 			"ArtifactBucketName", M("Value", Ref("ArtifactBucket")),
 			// AMI 公開ツール（Ruby）は、パイプラインのスタック名だけを命名規則で決め、以下の名前はこの出力から引く
 			"LaunchTemplateStackName", M("Value", ImportValue(environment.LaunchTemplateStackExport("StackName"))),
@@ -83,85 +80,6 @@ func artifactBucket() Map {
 // launchTemplateStackNameVariables は、起動テンプレートのスタック名を Export から取り、Fn::Sub に渡す変数。
 func launchTemplateStackNameVariables(environment Environment) Map {
 	return M("LaunchTemplateStackName", ImportValue(environment.LaunchTemplateStackExport("StackName")))
-}
-
-// launchTemplateStackServiceRole は、AMI 公開ツールが起動テンプレートのスタックを変更セットで更新するときに
-// CloudFormation に渡すサービスロール。CodeBuild 自身には起動テンプレートや IAM の変更権限を持たせない。
-//
-// CloudFormation は、一度サービスロールを渡したスタックでは以降の操作（担当者によるテンプレートの再デプロイを含む）
-// でもそのロールを使う。テンプレートの変更で IAM ロールが作り直されても動くよう、権限の対象は実際の ARN ではなく、
-// 起動テンプレートのスタック名（Export から取る）を接頭辞にした範囲とする。
-func launchTemplateStackServiceRole(environment Environment) Map {
-	stackNameVariables := launchTemplateStackNameVariables(environment)
-	return M(
-		"Type", "AWS::IAM::Role",
-		"Properties", M(
-			"AssumeRolePolicyDocument", assumeRolePolicy("cloudformation.amazonaws.com"),
-			"Policies", []any{M(
-				"PolicyName", "manage-launch-template-stack",
-				"PolicyDocument", M(
-					"Version", "2012-10-17",
-					"Statement", []any{
-						M(
-							"Sid", "ManageLaunchTemplate",
-							"Effect", "Allow",
-							"Action", []any{
-								"ec2:CreateLaunchTemplate",
-								"ec2:CreateLaunchTemplateVersion",
-								"ec2:ModifyLaunchTemplate",
-								"ec2:DeleteLaunchTemplate",
-								"ec2:DeleteLaunchTemplateVersions",
-								"ec2:CreateTags",
-							},
-							"Resource", Sub("arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*"),
-						),
-						M(
-							"Sid", "ReadEc2",
-							"Effect", "Allow",
-							"Action", []any{
-								"ec2:DescribeLaunchTemplates",
-								"ec2:DescribeLaunchTemplateVersions",
-								"ec2:DescribeImages",
-								"ec2:DescribeSecurityGroups",
-							},
-							"Resource", "*",
-						),
-						M(
-							"Sid", "ManageInstanceRole",
-							"Effect", "Allow",
-							"Action", []any{
-								"iam:GetRole",
-								"iam:CreateRole",
-								"iam:DeleteRole",
-								"iam:UpdateAssumeRolePolicy",
-								"iam:GetRolePolicy",
-								"iam:PutRolePolicy",
-								"iam:DeleteRolePolicy",
-								"iam:AttachRolePolicy",
-								"iam:DetachRolePolicy",
-								"iam:TagRole",
-								"iam:UntagRole",
-								"iam:PassRole",
-							},
-							"Resource", SubWith("arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${LaunchTemplateStackName}-*", stackNameVariables),
-						),
-						M(
-							"Sid", "ManageInstanceProfile",
-							"Effect", "Allow",
-							"Action", []any{
-								"iam:GetInstanceProfile",
-								"iam:CreateInstanceProfile",
-								"iam:DeleteInstanceProfile",
-								"iam:AddRoleToInstanceProfile",
-								"iam:RemoveRoleFromInstanceProfile",
-							},
-							"Resource", SubWith("arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${LaunchTemplateStackName}-*", stackNameVariables),
-						),
-					},
-				),
-			)},
-		),
-	)
 }
 
 // codeBuildServiceRole は AMI 公開ツール（Ruby）が CodeBuild 上で使う権限。
@@ -276,18 +194,27 @@ func codeBuildServiceRole(environment Environment) Map {
 							},
 							"Resource", launchTemplateStackARN,
 						),
+						// サービスロールを使わず、CloudFormation は CodeBuild の権限で変更セットを実行する。
+						// パイプラインが実行するのは起動テンプレートの変更だけ（差分の検証で限定）なので、
+						// 必要なのは対象の起動テンプレートの新しいバージョンの作成と、既定のバージョンの変更だけ
+						M(
+							"Sid", "UpdateLaunchTemplate",
+							"Effect", "Allow",
+							"Action", []any{"ec2:CreateLaunchTemplateVersion", "ec2:ModifyLaunchTemplate"},
+							"Resource", SubWith("arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${LaunchTemplateId}",
+								M("LaunchTemplateId", ImportValue(environment.LaunchTemplateStackExport("LaunchTemplateId")))),
+						),
+						M(
+							"Sid", "ReadLaunchTemplates",
+							"Effect", "Allow",
+							"Action", []any{"ec2:DescribeLaunchTemplates", "ec2:DescribeLaunchTemplateVersions"},
+							"Resource", "*",
+						),
 						M(
 							"Sid", "ReadOwnStackOutputs",
 							"Effect", "Allow",
 							"Action", "cloudformation:DescribeStacks",
 							"Resource", Ref("AWS::StackId"),
-						),
-						M(
-							"Sid", "PassLaunchTemplateStackServiceRole",
-							"Effect", "Allow",
-							"Action", "iam:PassRole",
-							"Resource", GetAtt("LaunchTemplateStackServiceRole", "Arn"),
-							"Condition", M("StringEquals", M("iam:PassedToService", "cloudformation.amazonaws.com")),
 						),
 					},
 				),

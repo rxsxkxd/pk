@@ -213,7 +213,7 @@ AWS_PROFILE=<プロファイル名> bundle exec ruby bin/ami_publish rollback --
 ```
 
 - 実行するユーザー（またはロール）には、CodeBuild のサービスロールと同等の権限が必要（AMI の作成・参照・削除、SSM でのヘルスチェックの実行、起動テンプレートのスタックの変更セット操作、スタック用サービスロールの `iam:PassRole` など。`generated/cloudformation/<環境>/ami-publish-pipeline-stack.yml` の `CodeBuildServiceRole` を参照）
-- 起動テンプレートのスタックと AMI 公開パイプラインのスタックがデプロイ済みである必要がある（スタック用サービスロールの ARN をパイプラインのスタックの出力から取得するため）
+- 起動テンプレートのスタックと AMI 公開パイプラインのスタックがデプロイ済みである必要がある（起動テンプレートのスタック名などを、パイプラインのスタックの出力から取得するため）
 
 ### buildspec の手順を Docker で再現する
 

@@ -108,7 +108,7 @@ aws iam attach-role-policy --role-name <リリース用インスタンスのロ�
 |---|---|---|---|
 | 4-1 | スタックの状態 | `aws cloudformation describe-stacks --stack-name <各スタック> --query 'Stacks[0].StackStatus'` | 3 つとも `CREATE_COMPLETE` |
 | 4-2 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].[VersionDescription,LaunchTemplateData.ImageId]'` | `myapp (AMI not set)` と `null`（初回はまだ AMI が入っていない） |
-| 4-3 | パイプラインの出力 | `aws cloudformation describe-stacks --stack-name myapp-staging-ami-publish-pipeline --query 'Stacks[0].Outputs'` | `LaunchTemplateStackServiceRoleArn` などがある |
+| 4-3 | パイプラインの出力 | `aws cloudformation describe-stacks --stack-name myapp-staging-ami-publish-pipeline --query 'Stacks[0].Outputs'` | `LaunchTemplateStackName`・`HealthCheckDocumentName`・`LogGroupName` などがある |
 | 4-4 | 作成直後の自動実行 | `aws codepipeline list-pipeline-executions --pipeline-name myapp-staging-ami-publish` | 作成直後に 1 回実行されていれば `Failed`（`VERSION` 未指定で終了コード 2）。CodeBuild のログに「--version を指定する」。AMI は作られていない |
 | 4-5 | CodeBuild の Ruby | 4-4 の CodeBuild のログ | `ruby --version` が 3.4.10、`bundle install` が成功している（`rbenv local 3.4.10` が失敗した場合は、イメージに 3.4.10 がない。`codeBuildRubyVersion` をイメージにあるバージョンに上げる） |
 | 4-6 | ヘルスチェックの単体実行 | 下記 | `Success` |

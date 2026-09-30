@@ -196,6 +196,7 @@ flowchart TD
 > - 出力順の固定は、構造体ではなく順序付きのマップ型（`internal/definitions/ordered_map.go`）で行う
 > - Ruby 側に共通部品を追加: `errors.rb`、`poller.rb`（待機処理）、`image_cleanup.rb`（失敗した AMI の削除）、`run_context.rb`、`steps/base_step.rb`、`steps/find_published_image.rb`（rollback 用）
 > - 起動テンプレートには UserData を指定しない
+> - 起動テンプレートのスタックの更新に CloudFormation のサービスロールは使わず、CodeBuild のロールに対象の起動テンプレートの操作権限を直接与える（サービスロールを渡すとスタックがそのロールを覚え、担当者の再デプロイや削除までそのロールで実行されるうえ、パイプラインのスタックを先に削除すると起動テンプレートのスタックを削除できなくなるため）
 > - スタック・パイプライン・ロググループ・SSM ドキュメントなどの名前は設定値に書かず、`application_name` と環境名から自動で決める（命名規則は `internal/definitions/naming.go` と `lib/ami_publish/configuration.rb` の両方に実装し、両方のテストで一致を確認する）
 
 
@@ -348,7 +349,7 @@ flowchart LR
 |---|---|
 | 定義 | `internal/definitions/launch_template_stack.go`（[テンプレート例](./ami-build-pipeline.md#テンプレート例)を Go の定義に移す） |
 | 生成・検証 | `go run ./cmd/generate-definitions`、`--check`、`go test`、`cfn-lint` |
-| サービスロール | スタック用の CloudFormation サービスロール（起動テンプレート・IAM の操作権限） |
+| 更新の権限 | 起動テンプレートのスタックの更新は CodeBuild の権限で行う（CloudFormation のサービスロールは使わない。M5 の CodeBuild のロールに、対象の起動テンプレートの操作権限を含める） |
 | 初回デプロイ | 開発アカウントで、AMI を指定せずに（`AmiId` は空）AWS CLI でスタックを作成（[仕組みのデプロイ](#仕組みのデプロイaws-cli)の手順） |
 
 **完了条件**: 開発アカウントに起動テンプレートのスタックがあり、手動で `AmiId` を変えて更新すると新しいバージョンができる。
@@ -388,7 +389,7 @@ flowchart LR
 | buildspec の定義 | `internal/definitions/ami_publish_buildspec.go`（Ruby はイメージにある 3.4 系を `rbenv local` で選ぶ） |
 | ビルド環境 | CodeBuild 標準イメージに入っている Ruby 3.4 系のバージョンを確認し、buildspec の `rbenv local` に指定する |
 | パイプラインのスタック | CodeBuild プロジェクト（同時実行数 1、タイムアウト）、AMI 公開パイプライン（V2、パイプライン変数 `VERSION`、実行モード `QUEUED`）の定義。ソースはインフラ用リポジトリの `main` ブランチで、push による自動起動は無効にする |
-| IAM | CodeBuild サービスロール（[権限一覧](./ami-build-pipeline.md#iam-権限)の AMI 作成側）、`iam:PassRole` の対象をスタックのサービスロールに限定 |
+| IAM | CodeBuild サービスロール（[権限一覧](./ami-build-pipeline.md#iam-権限)の AMI 作成側）。起動テンプレートの操作権限は、対象の起動テンプレート（Export の ID）だけに限定。IAM ロールの作成・変更の権限はパイプライン全体に持たせない |
 | ログ | CodeBuild のログを CloudWatch Logs に保存、SSM コマンドの出力も同じロググループへ |
 | 通知 | パイプラインの失敗を SNS 等に通知 |
 

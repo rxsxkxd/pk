@@ -30,73 +30,6 @@ Resources:
     Properties:
       LogGroupName: /myapp/staging/ami-publish
       RetentionInDays: 90
-  LaunchTemplateStackServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: cloudformation.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: manage-launch-template-stack
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Sid: ManageLaunchTemplate
-                Effect: Allow
-                Action:
-                  - ec2:CreateLaunchTemplate
-                  - ec2:CreateLaunchTemplateVersion
-                  - ec2:ModifyLaunchTemplate
-                  - ec2:DeleteLaunchTemplate
-                  - ec2:DeleteLaunchTemplateVersions
-                  - ec2:CreateTags
-                Resource:
-                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/*
-              - Sid: ReadEc2
-                Effect: Allow
-                Action:
-                  - ec2:DescribeLaunchTemplates
-                  - ec2:DescribeLaunchTemplateVersions
-                  - ec2:DescribeImages
-                  - ec2:DescribeSecurityGroups
-                Resource: '*'
-              - Sid: ManageInstanceRole
-                Effect: Allow
-                Action:
-                  - iam:GetRole
-                  - iam:CreateRole
-                  - iam:DeleteRole
-                  - iam:UpdateAssumeRolePolicy
-                  - iam:GetRolePolicy
-                  - iam:PutRolePolicy
-                  - iam:DeleteRolePolicy
-                  - iam:AttachRolePolicy
-                  - iam:DetachRolePolicy
-                  - iam:TagRole
-                  - iam:UntagRole
-                  - iam:PassRole
-                Resource:
-                  Fn::Sub:
-                    - arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${LaunchTemplateStackName}-*
-                    - LaunchTemplateStackName:
-                        Fn::ImportValue: myapp-staging-launch-template:StackName
-              - Sid: ManageInstanceProfile
-                Effect: Allow
-                Action:
-                  - iam:GetInstanceProfile
-                  - iam:CreateInstanceProfile
-                  - iam:DeleteInstanceProfile
-                  - iam:AddRoleToInstanceProfile
-                  - iam:RemoveRoleFromInstanceProfile
-                Resource:
-                  Fn::Sub:
-                    - arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${LaunchTemplateStackName}-*
-                    - LaunchTemplateStackName:
-                        Fn::ImportValue: myapp-staging-launch-template:StackName
   CodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -208,21 +141,27 @@ Resources:
                     - arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LaunchTemplateStackName}/*
                     - LaunchTemplateStackName:
                         Fn::ImportValue: myapp-staging-launch-template:StackName
+              - Sid: UpdateLaunchTemplate
+                Effect: Allow
+                Action:
+                  - ec2:CreateLaunchTemplateVersion
+                  - ec2:ModifyLaunchTemplate
+                Resource:
+                  Fn::Sub:
+                    - arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${LaunchTemplateId}
+                    - LaunchTemplateId:
+                        Fn::ImportValue: myapp-staging-launch-template:LaunchTemplateId
+              - Sid: ReadLaunchTemplates
+                Effect: Allow
+                Action:
+                  - ec2:DescribeLaunchTemplates
+                  - ec2:DescribeLaunchTemplateVersions
+                Resource: '*'
               - Sid: ReadOwnStackOutputs
                 Effect: Allow
                 Action: cloudformation:DescribeStacks
                 Resource:
                   Ref: AWS::StackId
-              - Sid: PassLaunchTemplateStackServiceRole
-                Effect: Allow
-                Action: iam:PassRole
-                Resource:
-                  Fn::GetAtt:
-                    - LaunchTemplateStackServiceRole
-                    - Arn
-                Condition:
-                  StringEquals:
-                    iam:PassedToService: cloudformation.amazonaws.com
   CodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
@@ -362,11 +301,6 @@ Outputs:
   CodeBuildProjectName:
     Value:
       Ref: CodeBuildProject
-  LaunchTemplateStackServiceRoleArn:
-    Value:
-      Fn::GetAtt:
-        - LaunchTemplateStackServiceRole
-        - Arn
   ArtifactBucketName:
     Value:
       Ref: ArtifactBucket

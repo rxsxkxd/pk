@@ -50,8 +50,7 @@ module SpecHelpers
   PIPELINE_OUTPUTS = {
     "LaunchTemplateStackName" => "myapp-staging-launch-template",
     "HealthCheckDocumentName" => "myapp-staging-health-check",
-    "LogGroupName" => "/myapp/staging/ami-publish",
-    "LaunchTemplateStackServiceRoleArn" => "arn:aws:iam::123456789012:role/service"
+    "LogGroupName" => "/myapp/staging/ami-publish"
   }.freeze
   StaticOutputs = Struct.new(:outputs) do
     def fetch(key) = outputs.fetch(key)

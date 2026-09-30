@@ -265,10 +265,22 @@ func TestPipelineStack(t *testing.T) {
 		t.Error("他のスタックのリソースを命名規則の文字列で直接参照している")
 	}
 	// AMI 公開ツールが他のスタックの名前を引くための出力
-	for _, output := range []string{"LaunchTemplateStackName", "HealthCheckDocumentName", "LogGroupName", "LaunchTemplateStackServiceRoleArn"} {
+	for _, output := range []string{"LaunchTemplateStackName", "HealthCheckDocumentName", "LogGroupName"} {
 		dig(t, document, "Outputs", output)
 	}
-	dig(t, document, "Outputs", "LaunchTemplateStackServiceRoleArn")
+	// 起動テンプレートのスタックの更新に CloudFormation のサービスロールは使わない（CodeBuild の権限で実行する）。
+	// パイプライン全体に IAM ロールを作成・変更する権限を持たせない。
+	for _, forbidden := range []string{"cloudformation.amazonaws.com", "iam:PassRole", "iam:CreateRole", "iam:PutRolePolicy"} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("パイプラインのスタックに %q がある", forbidden)
+		}
+	}
+	for _, want := range []string{"ec2:CreateLaunchTemplateVersion", "launch-template/${LaunchTemplateId}",
+		"Fn::ImportValue: myapp-staging-launch-template:LaunchTemplateId"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("CodeBuild のロールに起動テンプレートの操作権限（%q）がない", want)
+		}
+	}
 }
 
 // healthCheckScript は、ヘルスチェックのスタックの SSM ドキュメントのコマンドを 1 つの文字列にする。

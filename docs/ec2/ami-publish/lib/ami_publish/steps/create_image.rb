@@ -60,9 +60,11 @@ module AmiPublish
                .max_by(&:creation_date)
       end
 
-      # AMI 名: <application_name>-<環境>-<バージョン>-<日時>
+      # AMI 名: <application_name>_<バージョン>_<日時>（環境は含めない。Name タグと同じくアンダーバーでつなぐ）。
+      # AMI 名はアカウント・リージョンの中で一意で、作成後は変えられない。同じアカウントで環境ごとに分ける必要が
+      # あれば、application_name に環境を含める（例: myapp-staging）
       def image_name(version, timestamp)
-        "#{configuration.application_name}-#{configuration.environment_name}-#{version}-#{timestamp}"
+        [configuration.application_name, version, timestamp].join("_")
       end
 
       # Name タグ: <ami.name_tag_prefix>_<バージョン>_<日時>。接頭辞を省略した場合は <バージョン>_<日時>（環境は含めない）

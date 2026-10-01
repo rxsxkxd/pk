@@ -148,7 +148,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 |---|---|---|
 | 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ）。あわせて SSM の管理対象かを確認（起動中なら SSM Agent が Online になるまで待つ。停止中なら登録されていること） | 失敗（AMI を作らず、何も変更しない） |
 | 0b | CheckReleaseInstancePermissions: リリース用インスタンスのロールに必要な許可（[一覧](../ami-publish-release-instance-iam.md)）があるかを、IAM のポリシーシミュレーターで判定する。停止中でも判定できる | A・C の不足は失敗（不足している許可を一覧にする。AMI を作らず、何も変更しない）。B（CloudWatch Logs への出力）の不足は警告を出して先に進む。Basic 認証のパラメーターが既定の `aws/ssm` キーの SecureString でなければ失敗 |
-| 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用。AMI 名は `<application_name>-<環境>-<バージョン>-<日時>`、Name タグは `<ami.name_tag_prefix>_<バージョン>_<日時>`（環境は含めない。接頭辞の省略時は `<バージョン>_<日時>`） | 失敗 |
+| 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用。AMI 名は `<application_name>_<バージョン>_<日時>`、Name タグは `<ami.name_tag_prefix>_<バージョン>_<日時>`（どちらも環境は含めない。接頭辞の省略時は `<バージョン>_<日時>`。同じアカウントで環境ごとに AMI 名を分ける必要があれば、`application_name` に環境を含める） | 失敗 |
 | 2 | WaitImageAvailable: available まで待つ | AMI とスナップショットを削除 |
 | 2a | StartInstanceIfStopped: **開始時に停止中だった場合だけ**、確認のためにインスタンスを起動する（停止には戻さない） | AMI とスナップショットを削除 |
 | 3 | WaitInstanceOnline: 再起動（または起動）後に SSM Agent が接続するまで待つ | AMI とスナップショットを削除 |

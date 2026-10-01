@@ -21,7 +21,7 @@ RSpec.describe AmiPublish::Steps::CreateImage do
     expect(params[:tag_specifications].map { |spec| spec[:resource_type] }).to eq(%w[image snapshot])
     tags = params[:tag_specifications].first[:tags].to_h { |tag| [tag[:key], tag[:value]] }
     # ami.name_tag_prefix を省略した場合、Name タグは <バージョン>_<日時>（AMI 名とは別の形）
-    expect(params[:name]).to match(/\Amyapp-staging-v1\.2\.3-\d{14}\z/)
+    expect(params[:name]).to match(/\Amyapp_v1\.2\.3_\d{14}\z/)
     expect(tags["Name"]).to eq("v1.2.3_#{params[:name][-14..]}")
     expect(params[:tag_specifications].last[:tags]).to include({ key: "Name", value: tags["Name"] })
     expect(tags).to include("App" => "myapp", "Environment" => "staging", "AppVersion" => "v1.2.3",
@@ -38,7 +38,7 @@ RSpec.describe AmiPublish::Steps::CreateImage do
 
     params = requests(clients.ec2, :create_image).first[:params]
     tags = params[:tag_specifications].first[:tags].to_h { |tag| [tag[:key], tag[:value]] }
-    expect(params[:name]).to match(/\Amyapp-staging-v1\.2\.3-\d{14}\z/)
+    expect(params[:name]).to match(/\Amyapp_v1\.2\.3_\d{14}\z/)
     expect(tags["Name"]).to eq("web_v1.2.3_#{params[:name][-14..]}")
     expect(tags["App"]).to eq("myapp")
   end

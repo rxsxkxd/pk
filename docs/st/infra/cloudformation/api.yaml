@@ -1,0 +1,307 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Ticket QR API (Lambda x4 + API Gateway HTTP API). See docs/st/DEPLOY.md.
+
+Parameters:
+  Impl:
+    Type: String
+    AllowedValues: [go, node]
+    Default: go
+    Description: Implementation to deploy. One stack per implementation.
+  ArtifactBucket:
+    Type: String
+    Description: S3 bucket holding the Lambda zip files.
+  ArtifactPrefix:
+    Type: String
+    Description: Key prefix of the zips, e.g. ticketqr/go/<git-sha>. Change it on every deploy so Lambda picks up new code.
+  SigningSaltSecretArn:
+    Type: String
+    Description: ARN of the Secrets Manager secret {"current":"...","previous":"..."} (created outside this stack).
+  AnalyzerMode:
+    Type: String
+    Default: mock
+  TicketSuffixLength:
+    Type: Number
+    Default: 10
+    MinValue: 1
+    MaxValue: 32
+  PublicBaseUrl:
+    Type: String
+    Default: ""
+    Description: Public API URL (custom domain). Empty uses the execute-api default URL.
+  ThrottlingRateLimit:
+    Type: Number
+    Default: 50
+    Description: Steady-state requests per second for every route.
+  ThrottlingBurstLimit:
+    Type: Number
+    Default: 100
+  IssueReservedConcurrency:
+    Type: Number
+    Default: -1
+    Description: Reserved concurrency for the issuing functions (protects the analysis server). -1 = not set.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 180, 365]
+
+Mappings:
+  ImplMap:
+    go:
+      Runtime: provided.al2023
+      Handler: bootstrap
+    node:
+      Runtime: nodejs22.x
+      Handler: index.handler
+
+Conditions:
+  UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]
+  HasIssueReservedConcurrency: !Not [!Equals [!Ref IssueReservedConcurrency, -1]]
+
+Resources:
+  # ---------- IAM ----------
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: read-signing-salt
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref SigningSaltSecretArn
+
+  # ---------- HTTP API ----------
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ticketqr-${Impl}
+      ProtocolType: HTTP
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/apigateway/ticketqr-${Impl}
+      RetentionInDays: !Ref LogRetentionDays
+
+  DefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ThrottlingRateLimit
+        ThrottlingBurstLimit: !Ref ThrottlingBurstLimit
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","routeKey":"$context.routeKey","status":"$context.status","latency":"$context.responseLatency","integrationError":"$context.integrationErrorMessage"}'
+
+  # ---------- A: POST /v1/tickets/qr-inline ----------
+  IssueInlineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ticketqr-${Impl}-issue-inline
+      RetentionInDays: !Ref LogRetentionDays
+  IssueInlineFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: IssueInlineLogGroup
+    Properties:
+      FunctionName: !Sub ticketqr-${Impl}-issue-inline
+      Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
+      Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 15
+      Role: !GetAtt FunctionRole.Arn
+      ReservedConcurrentExecutions: !If [HasIssueReservedConcurrency, !Ref IssueReservedConcurrency, !Ref AWS::NoValue]
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Sub ${ArtifactPrefix}/issue-inline.zip
+      Environment:
+        Variables:
+          PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+          ANALYZER_MODE: !Ref AnalyzerMode
+          SIGNING_SALT_SECRET_ID: !Ref SigningSaltSecretArn
+          TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
+  IssueInlineIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt IssueInlineFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 20000
+  IssueInlineRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /v1/tickets/qr-inline
+      Target: !Sub integrations/${IssueInlineIntegration}
+  IssueInlinePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref IssueInlineFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+  # ---------- B-1: POST /v1/tickets ----------
+  IssueLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ticketqr-${Impl}-issue
+      RetentionInDays: !Ref LogRetentionDays
+  IssueFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: IssueLogGroup
+    Properties:
+      FunctionName: !Sub ticketqr-${Impl}-issue
+      Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
+      Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 15
+      Role: !GetAtt FunctionRole.Arn
+      ReservedConcurrentExecutions: !If [HasIssueReservedConcurrency, !Ref IssueReservedConcurrency, !Ref AWS::NoValue]
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Sub ${ArtifactPrefix}/issue.zip
+      Environment:
+        Variables:
+          PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+          ANALYZER_MODE: !Ref AnalyzerMode
+          SIGNING_SALT_SECRET_ID: !Ref SigningSaltSecretArn
+          TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
+  IssueIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt IssueFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 20000
+  IssueRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /v1/tickets
+      Target: !Sub integrations/${IssueIntegration}
+  IssuePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref IssueFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+  # ---------- B-3: GET /v1/tickets/{ticketCode}/view ----------
+  GetViewLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ticketqr-${Impl}-get-view
+      RetentionInDays: !Ref LogRetentionDays
+  GetViewFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GetViewLogGroup
+    Properties:
+      FunctionName: !Sub ticketqr-${Impl}-get-view
+      Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
+      Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 5
+      Role: !GetAtt FunctionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Sub ${ArtifactPrefix}/get-view.zip
+      Environment:
+        Variables:
+          PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+          ANALYZER_MODE: !Ref AnalyzerMode
+          SIGNING_SALT_SECRET_ID: !Ref SigningSaltSecretArn
+          TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
+  GetViewIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GetViewFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 10000
+  GetViewRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /v1/tickets/{ticketCode}/view
+      Target: !Sub integrations/${GetViewIntegration}
+  GetViewPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetViewFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+  # ---------- B-2: GET /v1/tickets/{ticketCode}/qr ----------
+  GetQRLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ticketqr-${Impl}-get-qr
+      RetentionInDays: !Ref LogRetentionDays
+  GetQRFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GetQRLogGroup
+    Properties:
+      FunctionName: !Sub ticketqr-${Impl}-get-qr
+      Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
+      Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
+      Architectures: [arm64]
+      MemorySize: 256
+      Timeout: 5
+      Role: !GetAtt FunctionRole.Arn
+      Code:
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Sub ${ArtifactPrefix}/get-qr.zip
+      Environment:
+        Variables:
+          PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+          ANALYZER_MODE: !Ref AnalyzerMode
+          SIGNING_SALT_SECRET_ID: !Ref SigningSaltSecretArn
+          TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
+  GetQRIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GetQRFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 10000
+  GetQRRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /v1/tickets/{ticketCode}/qr
+      Target: !Sub integrations/${GetQRIntegration}
+  GetQRPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetQRFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API (PUBLIC_BASE_URL when no custom domain is set).
+    Value: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+  ApiId:
+    Value: !Ref HttpApi

@@ -342,7 +342,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 | エンドポイント数（B） | 3（B-1, B-3, B-2） | 2（B-1, B-2） | 2（B-1, B-2） |
 | リロード時 | B-3 を再GET。同じHTMLが表示され、**再発行されない** | 元ページに戻り、チケット表示は消える。再発行はされないが**コードを失う** | 同じHTMLを再描画。再発行されない |
 | 戻る / URL共有 | ビューURLをブックマーク・共有でき、後から再表示可能 | 不可（クライアントで保持しない限り） | 不可（アプリが保持しない限り） |
-| 発行APIの認証 | ヘッダを付けられないため Cookie ベース等が必要（要確定） | ヘッダで API キー / JWT を付与可能 | ヘッダで API キー / JWT を付与可能 |
+| 発行APIの認証 | ヘッダを付けられないため認証なし（レート制限のみ。10章） | ヘッダで API キー / JWT を付与可能 | ヘッダで API キー / JWT を付与可能 |
 | 主な懸念 | エンドポイント増。ビューURL漏えいで第三者がQRを表示可能（期限なしの場合） | クライアント実装依存。リロードでチケットを見失う | アプリ前提。ブラウザ単体では使えない |
 
 ### 採用: 案1（PRG）
@@ -393,18 +393,24 @@ ImageAnalyzer はインターフェースとして抽象化し、テスト時は
 ```
 st/
 ├── DESIGN.md
-├── api/openapi.yaml           # 共通API契約
+├── go.mod                     # Go モジュールルート（templates/ を embed するため st/ 直下）
 ├── templates/                 # HTMLビュー / エラービュー（両実装共通）
-├── testdata/                  # 両実装共通のテストベクタ（採番・署名・HTML）
+├── testdata/                  # 両実装共通のテストベクタ（ticketcode.json, signature.json）
 ├── go/
-│   ├── cmd/{issue-inline,issue,get-view,get-qr}/main.go
+│   ├── Makefile               # run / test / build（Lambda zip）
+│   ├── cmd/{issue-inline,issue,get-view,get-qr}/main.go   # Lambda エントリポイント
+│   ├── cmd/local/main.go      # ローカル実行用 HTTP サーバー（net/http → Lambda イベント変換）
 │   └── internal/
-│       ├── handler/           # API Gateway イベント ⇔ ドメイン変換（JSON / multipart / HTML / PNG）
-│       ├── usecase/           # IssueTicket, RenderView, RenderQR
+│       ├── app/               # 依存関係の組み立て
+│       ├── handler/           # API Gateway イベント ⇔ ユースケース（JSON / multipart / HTML / PNG）
+│       ├── usecase/           # 発行フロー（検証 → 解析 → 採番）
 │       ├── ticketcode/        # 採番ルール（生成）
 │       ├── qr/                # QR生成
-│       ├── analyzer/          # 画像解析クライアント
+│       ├── analyzer/          # 画像解析クライアント（現状は常に valid のモックのみ）
+│       ├── imageinput/        # 画像サイズ・形式チェック
 │       ├── signer/            # 署名（salt + HMAC）
+│       ├── secret/            # salt 取得（Secrets Manager）
+│       ├── config/            # 環境変数
 │       └── view/              # HTMLレンダリング
 ├── node/
 │   └── src/
@@ -415,6 +421,8 @@ st/
     ├── contract/              # 両実装に同一ケースを流す
     └── load/                  # k6 シナリオ
 ```
+
+ローカル開発では、Lambda エミュレータを使わずに `go/cmd/local` を使う。ハンドラは Lambda と同じものを呼び出す。画像解析サーバーのプロトコルが決まるまでは、`ANALYZER_MODE=mock`（常に valid を返す）で動かす。
 
 | 項目 | Go | Node.js |
 |---|---|---|
@@ -432,7 +440,12 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 
 - **認証**:
   - A: API Gateway で API キー / JWT（Cognito等）/ IAM のいずれか（**要確定**）
-  - B-1: ブラウザのフォーム送信のためヘッダ認証は不可。Cookie ベースのセッション / JWT（Lambda オーソライザで検証）等が必要（**要確定**）。Cookie を使う場合は `SameSite=Lax` 以上 + `Origin` ヘッダ検証で CSRF 対策
+  - B-1: **認証なし（公開）**。ブラウザのフォーム送信ではヘッダ認証が使えないため、発行者の制限は行わず、レート制限で濫用を抑える
+    - API Gateway のスロットリング（ルート単位のレート / バースト上限）
+    - AWS WAF のレートベースルール（送信元IP単位）を HTTP API 前段の CloudFront 等に適用（WAF は HTTP API に直接関連付けできないため。採否は要確定）
+    - Lambda 予約同時実行数で画像解析サーバーへの同時リクエスト数に上限を設ける
+    - Cookie を使わないため CSRF 対策は不要
+    - 将来制限が必要になった場合の拡張候補: フォームトークン（有効期限付き HMAC を hidden フィールドに埋め込む）/ Cookie ログイン + Lambda オーソライザ
   - B-3, B-2: 認証なし・`sig` 検証のみ
 - **GET の負荷**: B-3/B-2 は呼ばれるたびにHTML/QRを生成する。署名照合を生成より前に行い、不正アクセスは生成処理に到達させない。加えてスロットリングで保護し、生成コストは評価項目で計測する
 - **salt の扱い**: salt が漏れると誰でも有効な `sig` を作れるため、ログ・環境変数への平文出力は禁止。Lambda の実行ロールのみ読み取り可とする
@@ -462,7 +475,7 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 4. QR のペイロード（チケットコードのみ / URL / 署名付きデータ）
 5. 画像解析サーバーのI/F（送信形式、レスポンス形式、認証、配置場所）
 6. 入力画像の対応形式とサイズ上限
-7. A の認証方式、B-1 の認証方式（Cookie / Lambda オーソライザ等）
+7. A の認証方式（B-1 は認証なしで決定）、B-1 のレート制限値・WAF 導入有無
 8. 同一画像の繰り返し送信を防ぐ必要があるか（6章 共通の残課題）
 9. ビューURLに有効期限が必要か
 10. IaC ツール（SAM / CDK / Terraform）

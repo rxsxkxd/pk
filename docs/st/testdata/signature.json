@@ -1,0 +1,25 @@
+{
+  "description": "sig = base64url(HMAC-SHA256(salt, ticketCode)) の先頭22文字（パディングなし）",
+  "cases": [
+    {
+      "salt": "test-salt-1",
+      "ticketCode": "20261001-7K3QX9MZ2P",
+      "sig": "5ccy3UglITkHG1Tvqcy530"
+    },
+    {
+      "salt": "test-salt-1",
+      "ticketCode": "20261001-0000000000",
+      "sig": "0LS5I3XT3gEpGgKLnT-a-Q"
+    },
+    {
+      "salt": "another-salt",
+      "ticketCode": "20261231-ZZZZZZZZZZ",
+      "sig": "3denbf0ULzFCGcty5yW6nc"
+    },
+    {
+      "salt": "日本語salt",
+      "ticketCode": "20260101-ABCDEFGHJK",
+      "sig": "R-qN6eKRaJBnQbVSdczxiS"
+    }
+  ]
+}

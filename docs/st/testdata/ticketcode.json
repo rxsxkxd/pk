@@ -1,0 +1,23 @@
+{
+  "description": "code = JSTの日付(YYYYMMDD) + '-' + 乱数バイトごとに Crockford Base32 alphabet[byte & 31]",
+  "cases": [
+    {
+      "now": "2026-09-30T15:00:00Z",
+      "random": "00010203040506070809",
+      "suffixLength": 10,
+      "expected": "20261001-0123456789"
+    },
+    {
+      "now": "2026-09-30T14:59:59Z",
+      "random": "1f20ff7f80e0a1b2c3d4",
+      "suffixLength": 10,
+      "expected": "20260930-Z0ZZ001J3M"
+    },
+    {
+      "now": "2026-12-31T23:30:00+09:00",
+      "random": "0a0b0c0d0e0f101112131415",
+      "suffixLength": 12,
+      "expected": "20261231-ABCDEFGHJKMN"
+    }
+  ]
+}

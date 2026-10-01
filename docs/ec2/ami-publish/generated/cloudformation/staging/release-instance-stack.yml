@@ -1,0 +1,61 @@
+# このファイルは cmd/generate-definitions が config/ami_publish.yml から生成した。手で編集しない。
+# 変更するときは internal/definitions/ か config/ を直し、再生成して差分をレビューする。
+AWSTemplateFormatVersion: "2010-09-09"
+Description: myapp release instance IAM role for the AMI publish pipeline (staging)
+Resources:
+  ReleaseInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: 'Role of the release instance (the source of the AMI): SSM and the health check'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: health-check
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteHealthCheckOutput
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/myapp/staging/ami-publish:*
+              - Sid: FindLogGroup
+                Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: '*'
+              - Sid: ReadBasicAuthParameter
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/myapp/staging/health-check/basic-auth
+      Tags:
+        - Key: App
+          Value: myapp
+  ReleaseInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: ReleaseInstanceRole
+Outputs:
+  InstanceProfileName:
+    Description: Associate this instance profile with the release instance
+    Value:
+      Ref: ReleaseInstanceProfile
+  InstanceProfileArn:
+    Value:
+      Fn::GetAtt:
+        - ReleaseInstanceProfile
+        - Arn
+  RoleName:
+    Value:
+      Ref: ReleaseInstanceRole

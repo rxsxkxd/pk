@@ -15,6 +15,7 @@ package definitions
 //	起動テンプレート                   myapp-staging
 //	ヘルスチェックのスタック           myapp-staging-health-check
 //	ヘルスチェックの SSM ドキュメント  myapp-staging-health-check
+//	リリース用インスタンスの IAM ロールのスタック  myapp-staging-release-instance
 
 func (e Environment) namePrefix() string { return e.ApplicationName + "-" + e.Name }
 
@@ -44,6 +45,10 @@ func (e Environment) HealthCheckStackName() string { return e.namePrefix() + "-h
 // HealthCheckDocumentName はヘルスチェックの SSM ドキュメントの名前。
 func (e Environment) HealthCheckDocumentName() string { return e.namePrefix() + "-health-check" }
 
+// ReleaseInstanceStackName は、リリース用インスタンスの IAM ロールのスタックの名前
+// （デプロイ用シェルスクリプトの up / down には含めない）。
+func (e Environment) ReleaseInstanceStackName() string { return e.namePrefix() + "-release-instance" }
+
 // スタック間の参照に使う Export の名前（アカウント・リージョンの中で一意）。「<スタック名>:<項目>」とする。
 // Export している値は、参照されている間は変更・削除できないため、変わらない値だけを Export する
 // （起動テンプレートのバージョンは Export しない）。
@@ -69,5 +74,6 @@ func (e Environment) DerivedNames() [][2]string {
 		{"起動テンプレート", e.LaunchTemplateName()},
 		{"ヘルスチェックのスタック", e.HealthCheckStackName()},
 		{"ヘルスチェックの SSM ドキュメント", e.HealthCheckDocumentName()},
+		{"リリース用インスタンスの IAM ロールのスタック", e.ReleaseInstanceStackName()},
 	}
 }

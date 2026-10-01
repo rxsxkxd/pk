@@ -22,11 +22,11 @@ EC2 の運用・自動化に関する**日本語の設計ドキュメント群**
 
 | 部分 | 言語 | いつ・誰が動かすか |
 |---|---|---|
-| 仕組みの生成ツール `cmd/generate-definitions` + `internal/definitions/` | Go | パイプラインの作成時に担当者が実行。`config/ami_publish.yml` から CloudFormation テンプレート 3 種と buildspec を `generated/` に生成。**AWS は呼ばない** |
+| 仕組みの生成ツール `cmd/generate-definitions` + `internal/definitions/` | Go | パイプラインの作成時に担当者が実行。`config/ami_publish.yml` から CloudFormation テンプレート 4 種（仕組みの 3 つと、リリース用インスタンスの IAM ロール）と buildspec を `generated/` に生成。**AWS は呼ばない** |
 | AMI 公開ツール `bin/ami_publish` + `lib/ami_publish/` | Ruby 3.4（AWS SDK for Ruby） | パイプラインの実行時に CodeBuild 上で動く（`run`）。`plan`（dry-run）と `rollback` は担当者が手元から実行 |
 | シェル | buildspec の数行のみ | Ruby の選択（`rbenv local`）、`bundle install`、ツールの起動、出力値の受け渡し |
 
-仕組み（3 つのスタック: ヘルスチェックの SSM ドキュメント → 起動テンプレート → AMI 公開パイプライン）のデプロイは、担当者が AWS CLI で行う（D9。CI による自動デプロイはしない）。パイプラインの起動は `aws codepipeline start-pipeline-execution --variables name=VERSION,value=vX.Y.Z`（D3）。
+仕組み（3 つのスタック: ヘルスチェックの SSM ドキュメント → 起動テンプレート → AMI 公開パイプライン）のデプロイは、担当者が AWS CLI で行う（D9。CI による自動デプロイはしない）。リリース用インスタンスの IAM ロールのスタック（`<app>-<env>-release-instance`）は `generated/deploy/<env>.sh` の `up` / `down` に含めず、個別にデプロイする（フェーズ 3 側に移す可能性があるため。既存インスタンスへの関連付けは AWS CLI）。パイプラインの起動は `aws codepipeline start-pipeline-execution --variables name=VERSION,value=vX.Y.Z`（D3）。
 
 AMI 公開ツールの流れは `lib/ami_publish/commands/publish_command.rb` のステップの並びがそのまま正本:
 CheckInstanceState → CheckReleaseInstancePermissions（リリース用インスタンスのロールの許可を IAM のポリシーシミュレーターで判定）→ CreateImage → WaitImageAvailable → StartInstanceIfStopped（開始時に停止中だった場合だけ起動。停止には戻さない）→ WaitInstanceOnline → HealthCheck → UpdateLaunchTemplateStack → PublishOutputs。
@@ -71,5 +71,5 @@ AWS_PROFILE=<profile> bundle exec ruby bin/ami_publish rollback --environment st
 
 - Ruby のツールは `ruby bin/ami_publish` の形で呼ぶ（CodePipeline のアーティファクトで実行ビットが落ちるため）
 - 終了コード: Go の生成ツールは 0 / 1（`--check` の差分）/ 2（使い方・設定値）/ 3（ファイル操作）。AMI 公開ツールは 0 / 1（ステップの失敗）/ 2（使い方・設定値）/ 3（AWS のエラー・認証情報なし・接続不可）
-- `.ruby-version` を変えたら、`vendor/bundle` のネイティブ拡張を `bundle pristine` で作り直す（`linked to incompatible libruby` になる）
+- 手元では gem をリポジトリ内（`vendor/bundle`）に置かない（`bundle config set path` を設定しない）。rbenv の Ruby（`.ruby-version`）の gem として入る。`.ruby-version` を変えたら `bundle install` し直す。CodeBuild は buildspec の deployment モードで、ビルド環境の中の `vendor/bundle` に入れる
 - パイプラインのソースは「`ami-publish/` の中身をルートとする別リポジトリ」を前提にしている（buildspec のパスがリポジトリのルート基準）。この `pk` リポジトリのままではパイプラインから動かない

@@ -98,6 +98,7 @@ func TestGenerateAllProducesExpectedFiles(t *testing.T) {
 		"cloudformation/staging/launch-template-stack.yml",
 		"cloudformation/staging/ami-publish-pipeline-stack.yml",
 		"cloudformation/staging/health-check-stack.yml",
+		"cloudformation/staging/release-instance-stack.yml",
 	} {
 		content, ok := files[path]
 		if !ok {
@@ -108,8 +109,8 @@ func TestGenerateAllProducesExpectedFiles(t *testing.T) {
 			t.Errorf("%s に生成物の注意書きがない", path)
 		}
 	}
-	if len(files) != 5 {
-		t.Errorf("生成ファイル数 = %d, want 5（YAML 4 つとデプロイ用シェルスクリプト）", len(files))
+	if len(files) != 6 {
+		t.Errorf("生成ファイル数 = %d, want 6（YAML 5 つとデプロイ用シェルスクリプト）", len(files))
 	}
 }
 
@@ -486,14 +487,15 @@ func TestDerivedNames(t *testing.T) {
 	}
 	environment := configuration.Environments["staging"]
 	want := map[string]string{
-		"AMI 公開パイプラインのスタック":       "myapp-staging-ami-publish-pipeline",
-		"CodePipeline のパイプライン":    "myapp-staging-ami-publish",
-		"CodeBuild プロジェクト":        "myapp-staging-ami-publish",
-		"CloudWatch Logs のロググループ": "/myapp/staging/ami-publish",
-		"起動テンプレートのスタック":           "myapp-staging-launch-template",
-		"起動テンプレート":                "myapp-staging",
-		"ヘルスチェックのスタック":            "myapp-staging-health-check",
-		"ヘルスチェックの SSM ドキュメント":     "myapp-staging-health-check",
+		"AMI 公開パイプラインのスタック":         "myapp-staging-ami-publish-pipeline",
+		"CodePipeline のパイプライン":      "myapp-staging-ami-publish",
+		"CodeBuild プロジェクト":          "myapp-staging-ami-publish",
+		"CloudWatch Logs のロググループ":   "/myapp/staging/ami-publish",
+		"起動テンプレートのスタック":             "myapp-staging-launch-template",
+		"起動テンプレート":                  "myapp-staging",
+		"ヘルスチェックのスタック":              "myapp-staging-health-check",
+		"ヘルスチェックの SSM ドキュメント":       "myapp-staging-health-check",
+		"リリース用インスタンスの IAM ロールのスタック": "myapp-staging-release-instance",
 	}
 	names := environment.DerivedNames()
 	if len(names) != len(want) {
@@ -616,4 +618,52 @@ func mustGenerate(t *testing.T, configuration Configuration) []File {
 		t.Fatal(err)
 	}
 	return files
+}
+
+// リリース用インスタンスの IAM ロールのスタックは、A〜C の許可を持つロールとインスタンスプロファイルを作る。
+// デプロイ用シェルスクリプト（up / down）には含めない。
+func TestReleaseInstanceStack(t *testing.T) {
+	files, _ := generate(t)
+	document := parse(t, files["cloudformation/staging/release-instance-stack.yml"])
+	role := dig(t, document, "Resources", "ReleaseInstanceRole", "Properties")
+	if got := dig(t, role, "AssumeRolePolicyDocument", "Statement").([]any)[0]; dig(t, got, "Principal", "Service") != "ec2.amazonaws.com" {
+		t.Errorf("EC2 が引き受けるロールではない: %v", got)
+	}
+	managed := dig(t, role, "ManagedPolicyArns").([]any)[0]
+	if !strings.HasSuffix(dig(t, managed, "Fn::Sub").(string), ":policy/AmazonSSMManagedInstanceCore") {
+		t.Errorf("A（AmazonSSMManagedInstanceCore）がない: %v", managed)
+	}
+	statements := dig(t, role, "Policies").([]any)[0].(map[string]any)["PolicyDocument"].(map[string]any)["Statement"].([]any)
+	if len(statements) != 2 {
+		t.Fatalf("Basic 認証なしの許可の数 = %d, want 2（B だけ）", len(statements))
+	}
+	if resource := dig(t, statements[0], "Resource", "Fn::Sub").(string); !strings.HasSuffix(resource, ":log-group:/myapp/staging/ami-publish:*") {
+		t.Errorf("B のロググループ = %v", resource)
+	}
+	if got := dig(t, document, "Resources", "ReleaseInstanceProfile", "Properties", "Roles").([]any)[0]; dig(t, got, "Ref") != "ReleaseInstanceRole" {
+		t.Errorf("インスタンスプロファイルのロール = %v", got)
+	}
+	if strings.Contains(string(files["deploy/staging.sh"]), "release-instance") {
+		t.Error("デプロイ用シェルスクリプトに、リリース用インスタンスのスタックを含めない")
+	}
+
+	withBasicAuth := strings.Replace(testConfiguration, "      url: http://localhost/up\n",
+		"      url: http://localhost/up\n      basic_auth_parameter_name: /myapp/staging/health-check/basic-auth\n", 1)
+	_, configPath := setUpRepository(t, withBasicAuth)
+	configuration, err := LoadConfiguration(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range mustGenerate(t, configuration) {
+		if file.Path != "cloudformation/staging/release-instance-stack.yml" {
+			continue
+		}
+		role := dig(t, parse(t, file.Content), "Resources", "ReleaseInstanceRole", "Properties")
+		statements := dig(t, role, "Policies").([]any)[0].(map[string]any)["PolicyDocument"].(map[string]any)["Statement"].([]any)
+		last := statements[len(statements)-1]
+		if dig(t, last, "Action") != "ssm:GetParameter" ||
+			!strings.HasSuffix(dig(t, last, "Resource", "Fn::Sub").(string), ":parameter/myapp/staging/health-check/basic-auth") {
+			t.Errorf("C（Basic 認証のパラメーターの読み取り）がない: %v", last)
+		}
+	}
 }

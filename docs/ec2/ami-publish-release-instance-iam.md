@@ -4,7 +4,7 @@
 >
 > スコープ外: CodeBuild のサービスロール（パイプラインのスタックが作る）、AMI から起動する本番インスタンスのロール（起動テンプレートのスタックが作る）、フェーズ 3（リリース検証の自動化）で必要になる許可
 >
-> 関連: [確認手順書](./ami-publish-environment-verification.md) / [トラブルシューティング](./ami-publish-troubleshooting.md)
+> 関連: [確認手順書](./ami-publish-environment-verification.md) / [トラブルシューティング](./ami-publish-troubleshooting.md) / 全ロールの一覧は [IAM ロールと許可ポリシーの現状](./ami-publish-iam-roles.md)
 
 ## 前提: どのロールの話か
 
@@ -12,7 +12,7 @@ AMI 公開パイプラインでは、IAM ロールが 3 種類登場する。こ
 
 | # | ロール | 誰が作るか | このドキュメント |
 |---|---|---|---|
-| 1 | **リリース用インスタンスのロール（インスタンスプロファイル）** | **このリポジトリの管理外。担当者が用意する** | **対象** |
+| 1 | **リリース用インスタンスのロール（インスタンスプロファイル）** | **担当者が用意する**。リリース用インスタンスの IAM ロールのスタック（`<application_name>-<環境>-release-instance`）で作れる。既存のロールに許可を付けてもよい | **対象** |
 | 2 | CodeBuild のサービスロール（AMI の作成、SSM の実行、起動テンプレートのスタックの更新） | パイプラインのスタック | 対象外 |
 | 3 | AMI から起動する本番インスタンスのロール | 起動テンプレートのスタック | 対象外 |
 
@@ -31,6 +31,8 @@ AMI にはロールは含まれない（ロールはインスタンスに付く�
 | A | AWS 管理ポリシー `AmazonSSMManagedInstanceCore` | SSM の管理対象になり、SSM Run Command（ヘルスチェックの SSM ドキュメント）を受け取るため。ステップ 0（AMI 作成前の SSM の確認）とステップ 3（再起動後の接続待ち）でも、これがないと「SSM に未登録」になる | **必須** | 管理ポリシーをロールにアタッチ |
 | B | CloudWatch Logs への書き込み（ロググループ `/<application_name>/<環境>/ami-publish`） | ヘルスチェックの出力を CloudWatch Logs に送るため（AMI 公開ツールが SSM Run Command に出力先としてこのロググループを指定している。書き込むのはインスタンス上の SSM Agent） | **推奨**（ない場合、ヘルスチェック自体は動くが出力がロググループに残らず、失敗時の調査がしにくくなる。パイプラインは警告を出して先に進む） | インラインポリシー（下記） |
 | C | SSM Parameter Store の Basic 認証のパラメーターの読み取り | ヘルスチェックが Basic 認証の情報を取り出すため | **Basic 認証を使う場合**（`health_check.basic_auth_parameter_name` を設定した場合） | ヘルスチェックのスタックが作る管理ポリシー（出力 `BasicAuthParameterReadPolicyArn`）をアタッチ |
+
+リリース用インスタンスの IAM ロールのスタック（[設定方法 2](#2-ロールとインスタンスプロファイルを作って付けるロールがない場合)）で作ったロールには、A〜C がすべて付いている（C は Basic 認証を設定した場合だけ）。この表の「設定方法」は、既存のロールに付ける場合のもの。
 
 ### A. AmazonSSMManagedInstanceCore
 
@@ -69,7 +71,7 @@ arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 ```
 
 - ロググループはパイプラインのスタックが事前に作るので、`logs:CreateLogGroup` は不要
-- 現時点では、この許可はどのスタックも作らない。担当者がインラインポリシーとして付ける（C と同じく、ヘルスチェックのスタックに管理ポリシーとして含める改善は可能。[今後の改善](#今後の改善)）
+- リリース用インスタンスの IAM ロールのスタックで作ったロールには、インラインポリシーとして含まれている。既存のロールを使う場合は、担当者がインラインポリシーとして付ける
 
 ### C. Basic 認証のパラメーターの読み取り
 
@@ -118,9 +120,55 @@ aws ec2 describe-instances --instance-ids <インスタンス ID> \
     --query 'InstanceProfile.Roles[0].RoleName' --output text
   ```
 
-- `None` → 手順 2 でロールとインスタンスプロファイルを作って付ける
+- `None` → 手順 2 でロールとインスタンスプロファイルを作って付ける（スタックで作れば、手順 3 は不要）
 
 ### 2. ロールとインスタンスプロファイルを作って付ける（ロールがない場合）
+
+#### 2-1. スタックで作る（推奨）
+
+仕組みの生成ツールが、リリース用インスタンスの IAM ロールのスタックのテンプレート `generated/cloudformation/<環境>/release-instance-stack.yml` を生成する（定義は `internal/definitions/release_instance_stack.go`）。中身は次のとおり。
+
+| リソース | 内容 |
+|---|---|
+| IAM ロール | EC2 が引き受けられるロール。A（AWS 管理ポリシー）、B と C（インラインポリシー `health-check`。C は `health_check.basic_auth_parameter_name` を設定した場合だけ）を持つ。名前は CloudFormation が自動で付ける |
+| インスタンスプロファイル | 上のロールを入れる |
+| 出力 | `InstanceProfileName`（関連付けに使う）、`InstanceProfileArn`、`RoleName` |
+
+このスタックは、パイプラインの仕組みではなくリリース用インスタンス側の設定のため、**デプロイ用シェルスクリプト（`generated/deploy/<環境>.sh` の `up` / `down`）には含めない**（フェーズ 3 でインスタンスの更新の仕組みに移す可能性がある）。他のスタックからは参照しない（Export しない）ので、他のスタックとのデプロイの順序はない。担当者が `ami-publish/` のルートで、次のとおりデプロイする。
+
+```bash
+STACK=myapp-staging-release-instance   # <application_name>-<環境>-release-instance
+
+# 変更セットを作る（反映はしない）。中身を確認してから反映する
+aws cloudformation deploy --region ap-northeast-1 --stack-name "$STACK" \
+  --template-file generated/cloudformation/staging/release-instance-stack.yml \
+  --capabilities CAPABILITY_IAM --no-execute-changeset
+aws cloudformation describe-change-set --stack-name "$STACK" --change-set-name <表示された変更セット名>
+aws cloudformation execute-change-set  --stack-name "$STACK" --change-set-name <表示された変更セット名>
+aws cloudformation wait stack-create-complete --stack-name "$STACK"   # 更新のときは stack-update-complete
+```
+
+変更セットを確認する観点: `AWS::IAM::Role` と `AWS::IAM::InstanceProfile` の 2 つだけ。
+
+既存のインスタンスへのインスタンスプロファイルの関連付けは、CloudFormation ではできない（CloudFormation が管理していないインスタンスのため）。スタックの作成後に、AWS CLI で 1 回だけ行う。
+
+```bash
+PROFILE=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+  --query "Stacks[0].Outputs[?OutputKey=='InstanceProfileName'].OutputValue" --output text)
+
+# リリース用インスタンスに付ける（起動中のままでよい）
+aws ec2 associate-iam-instance-profile --instance-id <インスタンス ID> --iam-instance-profile Name="$PROFILE"
+```
+
+注意:
+
+- **このスタックを削除すると、インスタンスに付いたままのロールが消え、SSM Agent とヘルスチェックが動かなくなる**。削除する前に、関連付けを外す（`aws ec2 disassociate-iam-instance-profile`）か、別のインスタンスプロファイルに入れ替える
+- 許可の変更（Basic 認証の追加など）は、設定値を直して再生成し、同じ手順でスタックを更新する。関連付けはそのまま（ロールの中身が変わるだけ）
+- ヘルスチェックのスタックの管理ポリシー（出力 `BasicAuthParameterReadPolicyArn`）は、既存のロールを使う場合のためのもの。このスタックのロールには C が含まれているので、アタッチしなくてよい
+
+#### 2-2. AWS CLI で作る
+
+スタックを使わない場合は、次のとおり作り、手順 3 で許可を付ける。
 
 ```bash
 ROLE=myapp-staging-release-instance
@@ -139,9 +187,9 @@ aws iam add-role-to-instance-profile --instance-profile-name "$ROLE" --role-name
 aws ec2 associate-iam-instance-profile --instance-id <インスタンス ID> --iam-instance-profile Name="$ROLE"
 ```
 
-既に別のインスタンスプロファイルが付いていて入れ替える場合は、`aws ec2 replace-iam-instance-profile-association` を使う（関連付け ID は `aws ec2 describe-iam-instance-profile-associations` で確認する）。
+既に別のインスタンスプロファイルが付いていて入れ替える場合は、`aws ec2 replace-iam-instance-profile-association` を使う（関連付け ID は `aws ec2 describe-iam-instance-profile-associations` で確認する）。既存のロールの許可（アプリが使う S3 の読み取りなど）がなくなるので、入れ替える前に確認する。
 
-### 3. 許可を付ける
+### 3. 許可を付ける（既存のロール、または 2-2 で作ったロールの場合）
 
 ```bash
 ROLE=<リリース用インスタンスのロール名>
@@ -191,5 +239,6 @@ AMI 公開パイプラインは、ヘルスチェックを行う実行（既定�
 
 | 改善 | 内容 |
 |---|---|
-| B を管理ポリシーとして生成する | C と同じく、ヘルスチェック（またはパイプライン）のスタックに B の管理ポリシーを含めて ARN を出力すれば、担当者は ARN をアタッチするだけになり、ロググループ名の手入力も不要になる |
+| B を管理ポリシーとして生成する | 既存のロールを使う場合向け。C と同じく、ヘルスチェック（またはパイプライン）のスタックに B の管理ポリシーを含めて ARN を出力すれば、担当者は ARN をアタッチするだけになり、ロググループ名の手入力も不要になる（リリース用インスタンスの IAM ロールのスタックのロールには B が含まれている） |
+| リリース用インスタンスの IAM ロールのスタックの置き場所 | フェーズ 3（リリース検証）で、インスタンスの更新の仕組み側に移す可能性がある。それまでは `up` / `down` に含めず、担当者が個別にデプロイする |
 | フェーズ 3 で必要になる許可 | リリース検証を自動化すると、デプロイキーの読み取り（Secrets Manager）や、検証用の設定の読み取り（Parameter Store）などが加わる見込み（[リリース検証の設計](./ami-build-pipeline.md)） |

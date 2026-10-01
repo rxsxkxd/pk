@@ -95,7 +95,7 @@ bash generated/deploy/staging.sh up
 - 起動テンプレート: `AWS::IAM::Role`、`AWS::IAM::InstanceProfile`、`AWS::EC2::LaunchTemplate` の 3 つだけ
 - パイプライン: S3 バケット、ロググループ、IAM ロール 3 つ、CodeBuild プロジェクト、CodePipeline
 
-Basic 認証を使う場合は、ヘルスチェックのスタックのデプロイ後に、出力 `BasicAuthParameterReadPolicyArn` の管理ポリシーを、リリース用インスタンスの IAM ロールにアタッチする。
+Basic 認証を使い、リリース用インスタンスに既存のロールを使っている場合は、ヘルスチェックのスタックのデプロイ後に、出力 `BasicAuthParameterReadPolicyArn` の管理ポリシーを、リリース用インスタンスの IAM ロールにアタッチする（リリース用インスタンスの IAM ロールのスタックで作ったロールには含まれているので不要。[リリース用インスタンスの IAM ロール 2-1](./ami-publish-release-instance-iam.md#2-1-スタックで作る推奨)）。
 
 ```bash
 aws cloudformation describe-stacks --stack-name myapp-staging-health-check \

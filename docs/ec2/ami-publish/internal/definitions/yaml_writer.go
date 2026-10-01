@@ -50,6 +50,10 @@ func GenerateAll(configuration Configuration) ([]File, error) {
 		if err := add(directory+"health-check-stack.yml", HealthCheckStack(environment)); err != nil {
 			return nil, err
 		}
+		// デプロイ用シェルスクリプトには含めない（担当者が個別にデプロイする）
+		if err := add(directory+"release-instance-stack.yml", ReleaseInstanceStack(environment)); err != nil {
+			return nil, err
+		}
 		files = append(files, File{Path: DeployScriptPath(name), Content: []byte(DeployScript(environment))})
 	}
 	return files, nil

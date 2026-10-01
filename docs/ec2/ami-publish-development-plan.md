@@ -213,7 +213,8 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │   ├── cloudformation/
 │   │   ├── launch-template-stack.yml                   # 起動テンプレートのスタックの CloudFormation テンプレート
 │   │   ├── ami-publish-pipeline-stack.yml              # AMI 公開パイプライン（CodePipeline・CodeBuild・IAM）の CloudFormation テンプレート
-│   │   └── health-check-stack.yml                      # 再起動後のヘルスチェック（SSM ドキュメント myapp-staging-health-check）の CloudFormation テンプレート
+│   │   ├── health-check-stack.yml                      # 再起動後のヘルスチェック（SSM ドキュメント myapp-staging-health-check）の CloudFormation テンプレート
+│   │   └── release-instance-stack.yml                  # リリース用インスタンスの IAM ロール・インスタンスプロファイルの CloudFormation テンプレート（デプロイ用シェルスクリプトには含めない）
 │   └── codebuild/
 │       └── ami-publish-buildspec.yml                   # CodeBuild プロジェクト ami-publish の buildspec
 │

@@ -21,6 +21,7 @@ generated/                             仕組みの生成ツールの出力（�
   cloudformation/<環境>/launch-template-stack.yml        起動テンプレートのスタック
   cloudformation/<環境>/ami-publish-pipeline-stack.yml   AMI 公開パイプライン（CodePipeline・CodeBuild・IAM）
   cloudformation/<環境>/health-check-stack.yml           再起動後のヘルスチェック（SSM ドキュメント）
+  cloudformation/<環境>/release-instance-stack.yml       リリース用インスタンスの IAM ロール・インスタンスプロファイル（deploy/<環境>.sh には含めない。個別にデプロイする）
   deploy/<環境>.sh                                       3 つのスタックをデプロイ（up）・削除（down）する AWS CLI の呼び出しを並べたシェルスクリプト
 cmd/generate-definitions/              仕組みの生成ツールの実行コマンド（配線だけ）
 internal/definitions/                  生成する YAML の定義（Go）とテスト
@@ -42,7 +43,7 @@ spec/                                  AMI 公開ツールのテスト（RSpec�
 - このリポジトリの取得元（`pipeline.source_type`）:
   - GitHub（既定）: CodeConnections の接続（コンソールで承認まで済ませる）→ `pipeline.source_connection_arn`、`pipeline.source_repository_id`
   - CodeCommit: `pipeline.source_type: codecommit` とリポジトリ名（`pipeline.source_repository_name`）。接続は不要
-- リリース用インスタンス（SSM Agent が動き、インスタンスプロファイル（IAM ロール）に必要な許可があること。許可の一覧と設定方法は [リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md)）
+- リリース用インスタンス（SSM Agent が動き、インスタンスプロファイル（IAM ロール）に必要な許可があること。許可の一覧と設定方法は [リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md)。ロールがなければ、生成されるリリース用インスタンスの IAM ロールのスタックで作れる）
 - ヘルスチェックに Basic 認証が必要な場合: 「ユーザー名:パスワード」を置いた SSM Parameter Store の SecureString（`health_check.basic_auth_parameter_name`）。CloudFormation では SecureString を作れないため、担当者が作成する:
 
   ```bash
@@ -253,7 +254,7 @@ LocalStack などで EC2 や SSM を模擬する方法もあるが、AMI の作�
 
 - `Gemfile.lock` には Linux のプラットフォーム（`x86_64-linux`・`aarch64-linux`）を含めている。macOS だけで `bundle lock` し直すと CodeBuild の `bundle install` が失敗するので、プラットフォームを消さない
 - ネイティブ拡張（`bigdecimal`）のビルドに C コンパイラが必要。CodeBuild の標準イメージには入っている
-- `.ruby-version` を変えたら、手元の `vendor/bundle` のネイティブ拡張を作り直す（`bundle pristine`）。古い Ruby に対してビルドされたままだと、読み込み時に `linked to incompatible libruby` で失敗する
+- 手元では gem をリポジトリ内（`vendor/bundle`）に置かない。rbenv で選ばれる Ruby（`.ruby-version`）の gem として入るので、`.ruby-version` を変えたら `bundle install` し直す
 
 ## 未実施（AWS 環境が必要）
 

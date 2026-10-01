@@ -75,12 +75,28 @@ Resources:
                 Resource: '*'
               - Sid: CheckReleaseInstanceRolePermissions
                 Effect: Allow
-                Action:
-                  - iam:GetInstanceProfile
-                  - iam:SimulatePrincipalPolicy
+                Action: iam:SimulatePrincipalPolicy
                 Resource:
-                  - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*
-                  - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+                  Fn::ImportValue: myapp-staging-release-instance:RoleArn
+              - Sid: AttachReleaseInstanceProfile
+                Effect: Allow
+                Action:
+                  - ec2:AssociateIamInstanceProfile
+                  - ec2:DisassociateIamInstanceProfile
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/i-0123456789abcdef0
+              - Sid: ReadInstanceProfileAssociations
+                Effect: Allow
+                Action: ec2:DescribeIamInstanceProfileAssociations
+                Resource: '*'
+              - Sid: PassReleaseInstanceRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  Fn::ImportValue: myapp-staging-release-instance:RoleArn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
               - Sid: FindBasicAuthParameterKey
                 Effect: Allow
                 Action: ssm:DescribeParameters
@@ -313,3 +329,9 @@ Outputs:
   LogGroupName:
     Value:
       Ref: LogGroup
+  ReleaseInstanceRoleArn:
+    Value:
+      Fn::ImportValue: myapp-staging-release-instance:RoleArn
+  ReleaseInstanceProfileArn:
+    Value:
+      Fn::ImportValue: myapp-staging-release-instance:InstanceProfileArn

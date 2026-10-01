@@ -47,15 +47,23 @@ Resources:
       Roles:
         - Ref: ReleaseInstanceRole
 Outputs:
-  InstanceProfileName:
-    Description: Associate this instance profile with the release instance
-    Value:
-      Ref: ReleaseInstanceProfile
   InstanceProfileArn:
     Value:
       Fn::GetAtt:
         - ReleaseInstanceProfile
         - Arn
+    Export:
+      Name: myapp-staging-release-instance:InstanceProfileArn
+  RoleArn:
+    Value:
+      Fn::GetAtt:
+        - ReleaseInstanceRole
+        - Arn
+    Export:
+      Name: myapp-staging-release-instance:RoleArn
+  InstanceProfileName:
+    Value:
+      Ref: ReleaseInstanceProfile
   RoleName:
     Value:
       Ref: ReleaseInstanceRole

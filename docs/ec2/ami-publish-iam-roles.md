@@ -20,7 +20,9 @@ IAM ロールは 4 つ。そのほかに、ロールではない IAM の管理�
 | 4 | 本番インスタンスのロール | EC2（起動テンプレートから起動するインスタンス） | 起動テンプレートのスタック `myapp-staging-launch-template` | 含める |
 | ― | Basic 認証のパラメーターの読み取り用の管理ポリシー（ロールではない） | ― | ヘルスチェックのスタック `myapp-staging-health-check` | 含める |
 
-CloudFormation のサービスロールは**使わない**。起動テンプレートのスタックは、CodeBuild のサービスロール（2）の権限で直接更新する（サービスロールを渡すとスタックがロールを覚え、削除や担当者の再デプロイまでそのロールで行われるため）。そのため、どのロールにも `iam:PassRole` はない。
+CloudFormation のサービスロールは**使わない**。起動テンプレートのスタックは、CodeBuild のサービスロール（2）の権限で直接更新する（サービスロールを渡すとスタックがロールを覚え、削除や担当者の再デプロイまでそのロールで行われるため）。
+
+`iam:PassRole` を持つのは、CodeBuild のサービスロール（2）の 1 か所だけ。リリース用インスタンスに、ヘルスチェックの区間だけインスタンスプロファイルを紐付けるために必要で、渡せるのはリリース用インスタンスのロール（1）だけ、渡す先は EC2 だけに限っている（[紐付けのフロー](./ami-publish-health-check-role-association-flow.md)）。
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "18px"}}}%%
@@ -34,7 +36,7 @@ flowchart TD
 
     Operator -->|start-pipeline-execution| Pipeline
     Pipeline -->|ソースの取得・CodeBuild の起動| Build
-    Build -->|AMI の作成・起動・<br/>ヘルスチェックの SSM ドキュメントの実行| Release
+    Build -->|ヘルスチェックの区間だけロール 1 を紐付け・解除<br/>AMI の作成・起動・<br/>ヘルスチェックの SSM ドキュメントの実行| Release
     Release -->|SSM Agent・ヘルスチェックが<br/>SSM・CloudWatch Logs を呼ぶ| Release
     Build -->|変更セットで AmiId / AppVersion を更新| Stack
     Stack -.->|起動テンプレートでインスタンスプロファイルを指定| Production
@@ -43,7 +45,8 @@ flowchart TD
 ## 1. リリース用インスタンスのロール
 
 - **定義**: `internal/definitions/release_instance_stack.go`。生成物は `generated/cloudformation/<環境>/release-instance-stack.yml` で、リソースは `ReleaseInstanceRole` と `ReleaseInstanceProfile`
-- **関連付け**: 既存のリリース用インスタンスへのインスタンスプロファイルの関連付けは CloudFormation ではできないので、AWS CLI（`aws ec2 associate-iam-instance-profile`）で行う。手順は [リリース用インスタンスの IAM ロール 2-1](./ami-publish-release-instance-iam.md#2-1-スタックで作る推奨)
+- **紐付け**: リリース用インスタンスには普段は付けない。AMI 公開ツール（CodeBuild のロール 2 の権限）が、AMI の作成の直前に紐付け、ヘルスチェックの後に解除する（失敗しても必ず解除する）。担当者が紐付ける作業はない
+- **Export**: `RoleArn` と `InstanceProfileArn` を Export し、パイプラインのスタックが参照する。そのため、このスタックは `up` より先にデプロイする
 - **使うのは誰か**: インスタンス上の SSM Agent と、ヘルスチェックの SSM ドキュメント（インスタンス上で動くシェル）が AWS を呼ぶときだけ。AMI の作成などは CodeBuild（2）が行うので、このロールには不要
 - **AMI との関係**: AMI にロールは含まれないので、このロールの許可が本番インスタンスに引き継がれることはない
 
@@ -75,7 +78,10 @@ flowchart TD
 | `DeleteFailedImage` | `ec2:DeregisterImage` / `ec2:DeleteSnapshot` | AMI、スナップショット。**タグ `App=myapp` が付いたものだけ** | 失敗時の AMI とスナップショットの削除（決定事項 D5） |
 | `RunHealthCheck` | `ssm:SendCommand` | リリース用インスタンスと、ヘルスチェックの SSM ドキュメント（Export で参照）だけ | ヘルスチェックの実行。**`AWS-RunShellScript` などの任意のコマンドは送れない** |
 | `ReadCommandAndInstanceStatus` | `ssm:GetCommandInvocation` / `ssm:DescribeInstanceInformation` | `*` | SSM の接続の確認と、ヘルスチェックの結果の取得 |
-| `CheckReleaseInstanceRolePermissions` | `iam:GetInstanceProfile` / `iam:SimulatePrincipalPolicy` | アカウント内のインスタンスプロファイルとロール | ロール 1 の許可の判定（ステップ 0b）。読み取りと判定だけで、IAM を変更する権限はない |
+| `CheckReleaseInstanceRolePermissions` | `iam:SimulatePrincipalPolicy` | ロール 1 だけ（Export で参照） | ロール 1 の許可の判定（ステップ 0b）。判定だけで、IAM を変更する権限はない |
+| `AttachReleaseInstanceProfile` | `ec2:AssociateIamInstanceProfile` / `ec2:DisassociateIamInstanceProfile` | リリース用インスタンスだけ | ヘルスチェックの区間だけ、ロール 1 のインスタンスプロファイルを紐付け・解除する |
+| `ReadInstanceProfileAssociations` | `ec2:DescribeIamInstanceProfileAssociations` | `*`（リソースで絞れない操作） | 紐付けの状態の確認（ステップ 0 と、紐付け・解除の完了待ち） |
+| `PassReleaseInstanceRole` | `iam:PassRole` | ロール 1 だけ（Export で参照）。条件 `iam:PassedToService = ec2.amazonaws.com` | 紐付けに必要。**このパイプラインで唯一の `iam:PassRole`** |
 | `FindBasicAuthParameterKey` | `ssm:DescribeParameters` | `*` | Basic 認証のパラメーターが既定のキーの SecureString であるかの確認（値は読まない） |
 | `UpdateLaunchTemplateStack` | `cloudformation:DescribeStacks` / `CreateChangeSet` / `DescribeChangeSet` / `ExecuteChangeSet` / `DeleteChangeSet` | 起動テンプレートのスタックだけ（Export で参照） | 変更セットで `AmiId` / `AppVersion` を更新 |
 | `UpdateLaunchTemplate` | `ec2:CreateLaunchTemplateVersion` / `ec2:ModifyLaunchTemplate` | 対象の起動テンプレートだけ（Export で参照） | 変更セットの実行時に CloudFormation がこのロールの権限で行う |
@@ -86,7 +92,8 @@ flowchart TD
 
 - `ec2:StopInstances`
 - `AWS-RunShellScript` の実行
-- IAM ロールの作成・変更、`iam:PassRole`
+- IAM ロールの作成・変更（`iam:CreateRole` / `iam:PutRolePolicy` / `iam:AttachRolePolicy`）
+- `PassReleaseInstanceRole` 以外の `iam:PassRole`
 
 ## 3. CodePipeline のサービスロール
 
@@ -110,13 +117,13 @@ flowchart TD
 
 - **定義**: `internal/definitions/health_check_stack.go`。リソースは `BasicAuthParameterReadPolicy`（`AWS::IAM::ManagedPolicy`）。`health_check.basic_auth_parameter_name` を設定したときだけ作る
 - **許可**: `ssm:GetParameter`（Basic 認証のパラメーターだけ）。ロール 1 の C と同じ
-- **使い方**: 出力 `BasicAuthParameterReadPolicyArn` を、**既存の**リリース用インスタンスのロールにアタッチする。リリース用インスタンスの IAM ロールのスタックでロールを作った場合は、ロール 1 に C が含まれているので使わない
+- **使い方**: 今は使わない。ロールを紐付ける方式に変える前に、既存のロールにアタッチするためのものだった。ロール 1 に C が含まれている
 
 ## 気になる点・今後の整理
 
 | 項目 | 内容 |
 |---|---|
-| C が 2 か所にある | ロール 1 のインラインポリシーと、ヘルスチェックのスタックの管理ポリシー（5）。リリース用インスタンスの IAM ロールのスタックを正式に使うと決まれば、5 は削除できる |
+| C が 2 か所にある | ロール 1 のインラインポリシーと、ヘルスチェックのスタックの管理ポリシー（5）。紐付けの方式ではロール 1 が必須になったので、5 は削除できる |
 | ロール 1 のスタックの置き場所 | フェーズ 3（リリース検証の自動化）で、インスタンスの更新の仕組み側に移す可能性がある。それまでは `up` / `down` に含めない |
 | ロール 4 の許可 | フェーズ 2 で、本番インスタンスに必要な許可（アプリが使う S3 など）を決める |
 | フェーズ 3 で増える許可 | リリース検証を自動化すると、ロール 1 にデプロイキーの読み取り（Secrets Manager）などが加わる見込み |

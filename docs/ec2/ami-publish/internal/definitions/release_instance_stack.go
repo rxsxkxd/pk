@@ -13,9 +13,12 @@ import "fmt"
 //
 // このスタックは、パイプラインの仕組みではなくリリース用インスタンス側の設定のため、デプロイ用シェルスクリプト
 // （up / down）には含めない。フェーズ 3（リリース検証）でインスタンスの更新の仕組みに移す可能性がある。
-// 既存のインスタンスへのインスタンスプロファイルの関連付けは CloudFormation ではできないため、
-// スタックの作成後に担当者が AWS CLI（aws ec2 associate-iam-instance-profile）で行う。
-// 他のスタックはこのスタックを参照しない（Export しない）。
+// インスタンスプロファイルとリリース用インスタンスの紐付けは、このスタックでは行わない。AMI 公開ツールが、
+// ヘルスチェックのための区間（AMI の作成の直前からヘルスチェックの完了まで）だけ紐付け、終わったら解除する
+// （docs/ec2/ami-publish-health-check-role-association-flow.md）。
+// ロールとインスタンスプロファイルの ARN は Export し、AMI 公開パイプラインのスタックが参照する
+// （CodeBuild のロールの iam:PassRole・許可の判定の対象と、AMI 公開ツールが使う値）。
+// そのため、このスタックは AMI 公開パイプラインのスタックより先にデプロイしておく。
 func ReleaseInstanceStack(environment Environment) Map {
 	statements := []any{
 		M(
@@ -77,12 +80,16 @@ func ReleaseInstanceStack(environment Environment) Map {
 			),
 		),
 		"Outputs", M(
-			// 関連付け（aws ec2 associate-iam-instance-profile --iam-instance-profile Name=...）に使う
-			"InstanceProfileName", M(
-				"Description", "Associate this instance profile with the release instance",
-				"Value", Ref("ReleaseInstanceProfile"),
+			// AMI 公開パイプラインのスタックが参照する（AMI 公開ツールがヘルスチェックの区間だけ紐付ける）
+			"InstanceProfileArn", M(
+				"Value", GetAtt("ReleaseInstanceProfile", "Arn"),
+				"Export", M("Name", environment.ReleaseInstanceStackExport("InstanceProfileArn")),
 			),
-			"InstanceProfileArn", M("Value", GetAtt("ReleaseInstanceProfile", "Arn")),
+			"RoleArn", M(
+				"Value", GetAtt("ReleaseInstanceRole", "Arn"),
+				"Export", M("Name", environment.ReleaseInstanceStackExport("RoleArn")),
+			),
+			"InstanceProfileName", M("Value", Ref("ReleaseInstanceProfile")),
 			"RoleName", M("Value", Ref("ReleaseInstanceRole")),
 		),
 	)

@@ -23,6 +23,9 @@ module AmiPublish
       def launch_template_stack_name = pipeline_outputs.fetch("LaunchTemplateStackName")
       def health_check_document_name = pipeline_outputs.fetch("HealthCheckDocumentName")
       def log_group_name = pipeline_outputs.fetch("LogGroupName")
+      # ヘルスチェックの区間だけリリース用インスタンスに紐付けるロールとインスタンスプロファイル
+      def release_instance_role_arn = pipeline_outputs.fetch("ReleaseInstanceRoleArn")
+      def release_instance_profile_arn = pipeline_outputs.fetch("ReleaseInstanceProfileArn")
 
       # AWS SDK の待機処理（waiter）の設定。待機時間の上限を確認間隔で割った回数だけ確認する。
       # progress を渡すと、確認のたびに進捗を出す（ログの項目はブロックが直前のレスポンスから作る）。
@@ -55,6 +58,15 @@ module AmiPublish
       def ssm_instance_information
         filters = [{ key: "InstanceIds", values: [configuration.release_instance_id] }]
         clients.ssm.describe_instance_information(filters: filters).instance_information_list.first
+      end
+
+      # リリース用インスタンスの、有効な（紐付け中・紐付け済みの）インスタンスプロファイルの紐付け。
+      # インスタンスに付けられるインスタンスプロファイルは 1 つだけなので、通常は 0 件か 1 件。
+      def active_profile_associations
+        filters = [{ name: "instance-id", values: [configuration.release_instance_id] }]
+        clients.ec2.describe_iam_instance_profile_associations(filters: filters)
+               .iam_instance_profile_associations
+               .select { |association| %w[associating associated].include?(association.state) }
       end
 
       def application_tag_filters

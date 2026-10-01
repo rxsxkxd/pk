@@ -22,7 +22,8 @@ module AmiPublish
         logger.info("instance_online", instance_id: configuration.release_instance_id)
       rescue Poller::TimeoutError => e
         image_cleanup.delete(context.image_id, reason: "再起動後に SSM Agent が接続しなかった")
-        raise StepFailedError, e.message
+        raise StepFailedError, "#{e.message}。インスタンスプロファイルは紐付け済み。SSM Agent のインストールと自動起動、" \
+                               "SSM への経路（NAT ゲートウェイまたは VPC エンドポイント）を確認する"
       end
 
       private

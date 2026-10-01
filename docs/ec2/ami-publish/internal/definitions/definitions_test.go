@@ -242,11 +242,28 @@ func TestPipelineStack(t *testing.T) {
 	if !strings.Contains(content, "ec2:StartInstances") {
 		t.Error("停止中のリリース用インスタンスを起動する権限がない")
 	}
-	// リリース用インスタンスのロールの許可を、ポリシーシミュレーターで確認する（ステップ 0 の後）。
-	for _, action := range []string{"iam:GetInstanceProfile", "iam:SimulatePrincipalPolicy"} {
-		if !strings.Contains(content, action) {
-			t.Errorf("リリース用インスタンスのロールの許可を確認する権限 %s がない", action)
-		}
+	// リリース用インスタンスのロールの許可を、ポリシーシミュレーターで確認する（対象はそのロールだけ）。
+	statements := dig(t, document, "Resources", "CodeBuildServiceRole", "Properties", "Policies").([]any)[0].(map[string]any)["PolicyDocument"].(map[string]any)["Statement"].([]any)
+	statementBySid := map[string]any{}
+	for _, statement := range statements {
+		statementBySid[dig(t, statement, "Sid").(string)] = statement
+	}
+	if got := dig(t, statementBySid["CheckReleaseInstanceRolePermissions"], "Resource", "Fn::ImportValue"); got != "myapp-staging-release-instance:RoleArn" {
+		t.Errorf("ポリシーシミュレーターの対象 = %v, want リリース用インスタンスのロールだけ", got)
+	}
+	// ヘルスチェックの区間だけ紐付けるため、紐付け・解除と iam:PassRole を持つ。
+	// iam:PassRole はリリース用インスタンスのロールだけ、渡す先は EC2 だけに限る。
+	if got := dig(t, statementBySid["AttachReleaseInstanceProfile"], "Resource", "Fn::Sub"); !strings.HasSuffix(got.(string), ":instance/i-0123456789abcdef0") {
+		t.Errorf("紐付け・解除の対象 = %v, want リリース用インスタンスだけ", got)
+	}
+	passRole := statementBySid["PassReleaseInstanceRole"]
+	if dig(t, passRole, "Action") != "iam:PassRole" ||
+		dig(t, passRole, "Resource", "Fn::ImportValue") != "myapp-staging-release-instance:RoleArn" ||
+		dig(t, passRole, "Condition", "StringEquals", "iam:PassedToService") != "ec2.amazonaws.com" {
+		t.Errorf("iam:PassRole の限定が不正: %v", passRole)
+	}
+	if strings.Count(content, "iam:PassRole") != 1 {
+		t.Error("iam:PassRole は PassReleaseInstanceRole の 1 か所だけにする")
 	}
 	if strings.Contains(content, "ec2:StopInstances") {
 		t.Error("パイプラインにインスタンスを停止する権限を与えない")
@@ -266,12 +283,13 @@ func TestPipelineStack(t *testing.T) {
 		t.Error("他のスタックのリソースを命名規則の文字列で直接参照している")
 	}
 	// AMI 公開ツールが他のスタックの名前を引くための出力
-	for _, output := range []string{"LaunchTemplateStackName", "HealthCheckDocumentName", "LogGroupName"} {
+	for _, output := range []string{"LaunchTemplateStackName", "HealthCheckDocumentName", "LogGroupName",
+		"ReleaseInstanceRoleArn", "ReleaseInstanceProfileArn"} {
 		dig(t, document, "Outputs", output)
 	}
 	// 起動テンプレートのスタックの更新に CloudFormation のサービスロールは使わない（CodeBuild の権限で実行する）。
-	// パイプライン全体に IAM ロールを作成・変更する権限を持たせない。
-	for _, forbidden := range []string{"cloudformation.amazonaws.com", "iam:PassRole", "iam:CreateRole", "iam:PutRolePolicy"} {
+	// パイプライン全体に IAM ロールを作成・変更する権限を持たせない（iam:PassRole は上で確認した 1 か所だけ）。
+	for _, forbidden := range []string{"cloudformation.amazonaws.com", "iam:CreateRole", "iam:PutRolePolicy", "iam:AttachRolePolicy"} {
 		if strings.Contains(content, forbidden) {
 			t.Errorf("パイプラインのスタックに %q がある", forbidden)
 		}
@@ -643,8 +661,16 @@ func TestReleaseInstanceStack(t *testing.T) {
 	if got := dig(t, document, "Resources", "ReleaseInstanceProfile", "Properties", "Roles").([]any)[0]; dig(t, got, "Ref") != "ReleaseInstanceRole" {
 		t.Errorf("インスタンスプロファイルのロール = %v", got)
 	}
-	if strings.Contains(string(files["deploy/staging.sh"]), "release-instance") {
+	if strings.Contains(string(files["deploy/staging.sh"]), "--stack-name myapp-staging-release-instance") {
 		t.Error("デプロイ用シェルスクリプトに、リリース用インスタンスのスタックを含めない")
+	}
+	for output, exportName := range map[string]string{
+		"InstanceProfileArn": "myapp-staging-release-instance:InstanceProfileArn",
+		"RoleArn":            "myapp-staging-release-instance:RoleArn",
+	} {
+		if got := dig(t, document, "Outputs", output, "Export", "Name"); got != exportName {
+			t.Errorf("%s の Export = %v, want %s", output, got, exportName)
+		}
 	}
 
 	withBasicAuth := strings.Replace(testConfiguration, "      url: http://localhost/up\n",

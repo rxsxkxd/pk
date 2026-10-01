@@ -2,7 +2,9 @@
 
 module AmiPublish
   module Steps
-    # 開始前の確認: リリース用インスタンスのロール（インスタンスプロファイル）に、必要な許可があるかを確かめる。
+    # 開始前の確認: リリース用インスタンスのロールに、必要な許可があるかを確かめる。
+    # 対象は、リリース用インスタンスの IAM ロールのスタックのロール（パイプラインのスタックの出力 ReleaseInstanceRoleArn）。
+    # インスタンスには、ヘルスチェックの区間だけ紐付けるので、開始時点ではインスタンスからロールを引かない。
     #
     # IAM のポリシーシミュレーター（SimulatePrincipalPolicy）で、ロールのポリシー上、必要な操作を
     # 実際の対象に対して実行できるかを判定する（AWS の操作は実行しない）。インスタンスが停止中でも確認できる。
@@ -53,22 +55,6 @@ module AmiPublish
 
         raise StepFailedError, "リリース用インスタンスのロール #{role_arn} に必要な許可が足りない。AMI は作成していない。" \
                                "不足: #{missing.join(' / ')}。設定方法は #{IAM_DOCUMENT} を参照"
-      end
-
-      def release_instance_role_arn
-        instance = clients.ec2.describe_instances(instance_ids: [configuration.release_instance_id])
-                          .reservations.flat_map(&:instances).first
-        profile_arn = instance&.iam_instance_profile&.arn
-        unless profile_arn
-          raise StepFailedError, "リリース用インスタンス #{configuration.release_instance_id} に" \
-                                 "インスタンスプロファイル（IAM ロール）が付いていない。設定方法は #{IAM_DOCUMENT} を参照"
-        end
-
-        profile_name = profile_arn.split("/").last
-        role = clients.iam.get_instance_profile(instance_profile_name: profile_name).instance_profile.roles.first
-        raise StepFailedError, "インスタンスプロファイル #{profile_name} にロールが入っていない" unless role
-
-        role.arn
       end
 
       def permission_checks(role_arn)

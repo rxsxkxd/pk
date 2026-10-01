@@ -23,10 +23,10 @@ RSpec.describe AmiPublish::CommandLineInterface do
 
   def stub_instance_state(name)
     clients.ec2.stub_responses(:describe_instances, reservations: [{ instances: [{
-                                 instance_id: "i-0123456789abcdef0", state: { name: name },
-                                 iam_instance_profile: { arn: "arn:aws:iam::123456789012:instance-profile/release" }
+                                 instance_id: "i-0123456789abcdef0", state: { name: name }
                                }] }])
     stub_release_instance_role
+    stub_profile_association_lifecycle(clients.ec2)
     stub_launch_template_stack
     ping_status = name == "running" ? "Online" : "ConnectionLost"
     clients.ssm.stub_responses(:describe_instance_information, instance_information_list: [{
@@ -34,14 +34,8 @@ RSpec.describe AmiPublish::CommandLineInterface do
                                }])
   end
 
-  # リリース用インスタンスのロールと、許可がすべてある判定結果
+  # リリース用インスタンスのロールに、許可がすべてある判定結果
   def stub_release_instance_role
-    clients.iam.stub_responses(:get_instance_profile, instance_profile: {
-                                 path: "/", instance_profile_name: "release", instance_profile_id: "id",
-                                 arn: "arn:aws:iam::123456789012:instance-profile/release", create_date: Time.now,
-                                 roles: [{ path: "/", role_name: "release", role_id: "id", create_date: Time.now,
-                                           arn: "arn:aws:iam::123456789012:role/release" }]
-                               })
     clients.iam.stub_responses(:simulate_principal_policy, lambda { |request|
       { is_truncated: false, evaluation_results: request.params[:action_names].map do |action|
         { eval_action_name: action, eval_decision: "allowed" }
@@ -108,6 +102,8 @@ RSpec.describe AmiPublish::CommandLineInterface do
     expect(requests(clients.ec2, :create_image)).to be_empty
     expect(requests(clients.cloudformation, :create_change_set)).to be_empty
     expect(requests(clients.ssm, :send_command)).to be_empty
+    expect(requests(clients.ec2, :associate_iam_instance_profile)).to be_empty
+    expect(stdout.string).to include('"event":"profile_association_planned"')
   end
 
   it "plan で停止中のインスタンスは、起動もしない" do
@@ -131,16 +127,20 @@ RSpec.describe AmiPublish::CommandLineInterface do
     expect(run_cli("run", "--environment", "staging", "--version", "v1.2.3")).to eq(1)
     expect(requests(clients.cloudformation, :create_change_set)).to be_empty
     expect(requests(clients.ec2, :deregister_image).size).to eq(1)
+    # AMI の作成の直前に紐付け、失敗したら解除する
+    expect(requests(clients.ec2, :associate_iam_instance_profile).size).to eq(1)
+    expect(requests(clients.ec2, :disassociate_iam_instance_profile).size).to eq(1)
   end
 
-  it "SSM の管理対象でないインスタンスは、AMI を作らずに終了コード 1 を返す" do
-    clients.ec2.stub_responses(:describe_instances, reservations: [{ instances: [{
-                                 instance_id: "i-0123456789abcdef0", state: { name: "stopped" }
-                               }] }])
-    clients.ssm.stub_responses(:describe_instance_information, instance_information_list: [])
+  it "別のインスタンスプロファイルが付いているインスタンスは、AMI を作らずに終了コード 1 を返す" do
+    stub_instance_state("running")
+    clients.ec2.stub_responses(:describe_iam_instance_profile_associations, iam_instance_profile_associations: [
+                                 profile_association(arn: "arn:aws:iam::123456789012:instance-profile/other")
+                               ])
 
     expect(run_cli("run", "--environment", "staging", "--version", "v1.2.3")).to eq(1)
     expect(requests(clients.ec2, :create_image)).to be_empty
+    expect(requests(clients.ec2, :associate_iam_instance_profile)).to be_empty
   end
 
   it "想定外の AWS エラーは終了コード 3 を返す" do

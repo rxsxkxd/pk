@@ -44,6 +44,8 @@ func DeployScript(environment Environment) string {
 	script.WriteString("#   aws cloudformation execute-change-set  --stack-name <スタック名> --change-set-name <変更セット名>\n")
 	script.WriteString("# 初回は、1・2 を反映してから、もう一度 up を実行する（3 は 1・2 の Export を参照するため、\n")
 	script.WriteString("# 1・2 が反映されるまで 3 の変更セットは作れず、エラーで止まる。反映済みの 1・2 は「変更なし」で通過する）。\n")
+	fmt.Fprintf(&script, "# 前提: リリース用インスタンスの IAM ロールのスタック（%s）を先にデプロイしておく\n", environment.ReleaseInstanceStackName())
+	script.WriteString("# （3 がその Export を参照する。このスクリプトでは作成も削除もしない）。\n")
 	script.WriteString("# down はスタックのリソースを削除する。AMI とスナップショットはスタックのリソースではないため残る。\n")
 	script.WriteString("# 参照されている Export があるスタックは削除できないため、down は参照する側（3）から順に削除する。\n")
 	script.WriteString("set -eu\n")

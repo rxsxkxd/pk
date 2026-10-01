@@ -63,6 +63,11 @@ func (e Environment) HealthCheckStackExport(item string) string {
 	return e.HealthCheckStackName() + ":" + item
 }
 
+// ReleaseInstanceStackExport は、リリース用インスタンスの IAM ロールのスタックの Export の名前。
+func (e Environment) ReleaseInstanceStackExport(item string) string {
+	return e.ReleaseInstanceStackName() + ":" + item
+}
+
 // DerivedNames は自動で決めた名前の一覧（生成時に表示する）。
 func (e Environment) DerivedNames() [][2]string {
 	return [][2]string{

@@ -50,7 +50,9 @@ module SpecHelpers
   PIPELINE_OUTPUTS = {
     "LaunchTemplateStackName" => "myapp-staging-launch-template",
     "HealthCheckDocumentName" => "myapp-staging-health-check",
-    "LogGroupName" => "/myapp/staging/ami-publish"
+    "LogGroupName" => "/myapp/staging/ami-publish",
+    "ReleaseInstanceRoleArn" => "arn:aws:iam::123456789012:role/release-instance",
+    "ReleaseInstanceProfileArn" => "arn:aws:iam::123456789012:instance-profile/release-instance"
   }.freeze
   StaticOutputs = Struct.new(:outputs) do
     def fetch(key) = outputs.fetch(key)
@@ -67,6 +69,27 @@ module SpecHelpers
     { stacks: [{ stack_name: "myapp-staging-ami-publish-pipeline", creation_time: Time.now,
                  stack_status: "UPDATE_COMPLETE",
                  outputs: outputs.map { |key, value| { output_key: key, output_value: value } } }] }
+  end
+
+  # インスタンスプロファイルの紐付け（describe_iam_instance_profile_associations の 1 件分）
+  def profile_association(arn: PIPELINE_OUTPUTS["ReleaseInstanceProfileArn"], state: "associated", id: "iip-assoc-1")
+    { association_id: id, instance_id: "i-0123456789abcdef0", state: state,
+      iam_instance_profile: { arn: arn, id: "id" } }
+  end
+
+  # 紐付け・解除の操作に応じて、紐付けの一覧が変わるスタブ
+  def stub_profile_association_lifecycle(client, associated: false)
+    client.stub_responses(:associate_iam_instance_profile, lambda { |_|
+      associated = true
+      { iam_instance_profile_association: profile_association(state: "associating") }
+    })
+    client.stub_responses(:disassociate_iam_instance_profile, lambda { |_|
+      associated = false
+      { iam_instance_profile_association: profile_association(state: "disassociating") }
+    })
+    client.stub_responses(:describe_iam_instance_profile_associations, lambda { |_|
+      { iam_instance_profile_associations: associated ? [profile_association] : [] }
+    })
   end
 
   def requests(client, operation)

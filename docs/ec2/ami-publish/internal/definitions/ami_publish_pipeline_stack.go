@@ -47,6 +47,9 @@ func AMIPublishPipelineStack(environment Environment) Map {
 			"LaunchTemplateStackName", M("Value", ImportValue(environment.LaunchTemplateStackExport("StackName"))),
 			"HealthCheckDocumentName", M("Value", ImportValue(environment.HealthCheckStackExport("DocumentName"))),
 			"LogGroupName", M("Value", Ref("LogGroup")),
+			// ヘルスチェックの区間だけリリース用インスタンスに紐付けるロールとインスタンスプロファイル
+			"ReleaseInstanceRoleArn", M("Value", ImportValue(environment.ReleaseInstanceStackExport("RoleArn"))),
+			"ReleaseInstanceProfileArn", M("Value", ImportValue(environment.ReleaseInstanceStackExport("InstanceProfileArn"))),
 		),
 	)
 }
@@ -93,6 +96,7 @@ func codeBuildServiceRole(environment Environment) Map {
 	healthCheckDocumentARN := SubWith("arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${DocumentName}",
 		M("DocumentName", ImportValue(environment.HealthCheckStackExport("DocumentName"))))
 	applicationTagCondition := M("StringEquals", M("ec2:ResourceTag/App", application))
+	releaseInstanceRoleARN := ImportValue(environment.ReleaseInstanceStackExport("RoleArn"))
 
 	return M(
 		"Type", "AWS::IAM::Role",
@@ -130,11 +134,30 @@ func codeBuildServiceRole(environment Environment) Map {
 						M(
 							"Sid", "CheckReleaseInstanceRolePermissions",
 							"Effect", "Allow",
-							"Action", []any{"iam:GetInstanceProfile", "iam:SimulatePrincipalPolicy"},
-							"Resource", []any{
-								Sub("arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/*"),
-								Sub("arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*"),
-							},
+							"Action", "iam:SimulatePrincipalPolicy",
+							"Resource", releaseInstanceRoleARN,
+						),
+						// ヘルスチェックの区間だけ、リリース用インスタンスにインスタンスプロファイルを紐付ける。
+						// 紐付けには渡すロールに対する iam:PassRole が要る。対象はリリース用インスタンスのロールだけ、
+						// 渡す先は EC2 だけに限る（ロールの作成・変更の権限は持たせない）
+						M(
+							"Sid", "AttachReleaseInstanceProfile",
+							"Effect", "Allow",
+							"Action", []any{"ec2:AssociateIamInstanceProfile", "ec2:DisassociateIamInstanceProfile"},
+							"Resource", Sub(instanceARN),
+						),
+						M(
+							"Sid", "ReadInstanceProfileAssociations",
+							"Effect", "Allow",
+							"Action", "ec2:DescribeIamInstanceProfileAssociations",
+							"Resource", "*",
+						),
+						M(
+							"Sid", "PassReleaseInstanceRole",
+							"Effect", "Allow",
+							"Action", "iam:PassRole",
+							"Resource", releaseInstanceRoleARN,
+							"Condition", M("StringEquals", M("iam:PassedToService", "ec2.amazonaws.com")),
 						),
 						M(
 							"Sid", "FindBasicAuthParameterKey",

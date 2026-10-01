@@ -12,18 +12,6 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
                                             configuration: configuration("health_check" => settings)))
   end
 
-  def stub_role(profile: "arn:aws:iam::123456789012:instance-profile/release-instance")
-    instance = { instance_id: "i-0123456789abcdef0", state: { name: "running" } }
-    instance[:iam_instance_profile] = { arn: profile } if profile
-    clients.ec2.stub_responses(:describe_instances, reservations: [{ instances: [instance] }])
-    clients.iam.stub_responses(:get_instance_profile, instance_profile: {
-                                 path: "/", instance_profile_name: "release-instance", instance_profile_id: "id",
-                                 arn: profile.to_s, create_date: Time.now,
-                                 roles: [{ path: "/", role_name: "release-instance", role_id: "id", arn: role_arn,
-                                           create_date: Time.now }]
-                               })
-  end
-
   # 指定した操作だけを拒否（implicitDeny）するシミュレーターのスタブ
   def stub_simulation(denied: [])
     clients.iam.stub_responses(:simulate_principal_policy, lambda { |request|
@@ -38,7 +26,6 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
   end
 
   it "必要な許可がすべてあれば成功する（A・B を、ロググループの ARN に対して判定する）" do
-    stub_role
     stub_simulation
 
     expect { step.call(context) }.not_to raise_error
@@ -50,7 +37,6 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
   end
 
   it "必須の許可（A）が足りなければ、不足している許可を一覧にして失敗する" do
-    stub_role
     stub_simulation(denied: %w[ssm:UpdateInstanceInformation])
 
     expect { step.call(context) }.to raise_error(AmiPublish::StepFailedError) { |error|
@@ -61,7 +47,6 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
   end
 
   it "B（CloudWatch Logs への出力）だけが足りない場合は、警告のログを出して先に進む" do
-    stub_role
     stub_simulation(denied: %w[logs:PutLogEvents])
 
     expect { step.call(context) }.not_to raise_error
@@ -72,7 +57,6 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
   end
 
   it "A と B が足りない場合は、A の不足で失敗し、B は警告に出す" do
-    stub_role
     stub_simulation(denied: %w[ssm:UpdateInstanceInformation logs:PutLogEvents])
 
     expect { step.call(context) }.to raise_error(AmiPublish::StepFailedError) { |error|
@@ -81,10 +65,14 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
     expect(log_events).to include("release_instance_permissions_warning")
   end
 
-  it "インスタンスプロファイルが付いていなければ失敗する" do
-    stub_role(profile: nil)
+  it "インスタンスではなく、パイプラインのスタックの出力のロールに対して判定する（紐付け前でも判定できる）" do
+    stub_simulation
 
-    expect { step.call(context) }.to raise_error(AmiPublish::StepFailedError, /インスタンスプロファイル/)
+    step.call(context)
+
+    expect(simulated(:policy_source_arn).uniq).to eq([role_arn])
+    expect(requests(clients.ec2, :describe_instances)).to be_empty
+    expect(requests(clients.iam, :get_instance_profile)).to be_empty
   end
 
   context "Basic 認証のパラメーターを設定している場合" do
@@ -96,7 +84,6 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
     end
 
     it "既定の aws/ssm キーの SecureString なら、C（パラメーターの読み取り）を判定する（KMS は判定しない）" do
-      stub_role
       stub_simulation
       stub_parameter
 
@@ -108,21 +95,18 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
     end
 
     it "カスタマー管理の KMS キーで暗号化されていたら、対応しないため失敗する" do
-      stub_role
       stub_parameter(key_id: "arn:aws:kms:ap-northeast-1:123456789012:key/abcd")
 
       expect { step(settings).call(context) }.to raise_error(AmiPublish::StepFailedError, %r{既定の aws/ssm キー})
     end
 
     it "SecureString でなければ失敗する" do
-      stub_role
       stub_parameter(type: "String", key_id: nil)
 
       expect { step(settings).call(context) }.to raise_error(AmiPublish::StepFailedError, /SecureString/)
     end
 
     it "パラメーターがなければ失敗する" do
-      stub_role
       clients.ssm.stub_responses(:describe_parameters, parameters: [])
 
       expect { step(settings).call(context) }.to raise_error(AmiPublish::StepFailedError, /パラメーター .* がない/)

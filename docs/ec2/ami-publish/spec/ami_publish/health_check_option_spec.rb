@@ -23,7 +23,7 @@ RSpec.describe "ヘルスチェックを省略する実行" do
     expect(log_events).to eq(%w[start_instance_skipped wait_instance_online_skipped health_check_skipped])
   end
 
-  it "開始時の SSM の管理対象の確認と、ロールの許可の確認も行わない" do
+  it "開始時のインスタンスプロファイルの紐付けの確認と、ロールの許可の確認も行わない" do
     clients.ec2.stub_responses(:describe_instances, reservations: [{ instances: [{
                                  instance_id: "i-0123456789abcdef0", state: { name: "running" }
                                }] }])
@@ -31,8 +31,16 @@ RSpec.describe "ヘルスチェックを省略する実行" do
     AmiPublish::Steps::CheckInstanceState.new(**step_dependencies(clients)).call(run_context)
     AmiPublish::Steps::CheckReleaseInstancePermissions.new(**step_dependencies(clients)).call(run_context)
 
-    expect(requests(clients.ssm, :describe_instance_information)).to be_empty
+    expect(requests(clients.ec2, :describe_iam_instance_profile_associations)).to be_empty
     expect(requests(clients.iam, :simulate_principal_policy)).to be_empty
-    expect(log_events).to include("ssm_check_skipped", "release_instance_permissions_check_skipped")
+    expect(log_events).to include("profile_association_check_skipped", "release_instance_permissions_check_skipped")
+  end
+
+  it "インスタンスプロファイルの紐付けも解除も行わない" do
+    section = AmiPublish::Steps::WithReleaseInstanceProfile.new(steps: [], **step_dependencies(clients))
+
+    section.call(run_context)
+
+    expect(clients.ec2.api_requests.map { |request| request[:operation_name] }).to be_empty
   end
 end

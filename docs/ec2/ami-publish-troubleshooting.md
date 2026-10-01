@@ -45,7 +45,8 @@ CodeBuild の `Command did not exit successfully bin/ami_publish run ... exit st
 | 症状 | 節 |
 |---|---|
 | `ping_status` が「SSM に未登録」のまま / 「SSM の管理対象になっていない」 | [1](#1-ssm-の管理対象になっていない) |
-| 「リリース用インスタンスのロール ... に必要な許可が足りない」/「インスタンスプロファイル（IAM ロール）が付いていない」 | [1a](#1a-リリース用インスタンスのロールの許可が足りない) |
+| 「別のインスタンスプロファイルが紐付いている」/「紐付けられなかった」/「紐付けを解除できなかった」/ ログに `profile_disassociate_failed` | [1b](#1b-インスタンスプロファイルの紐付けと解除の問題) |
+| 「リリース用インスタンスのロール ... に必要な許可が足りない」 | [1a](#1a-リリース用インスタンスのロールの許可が足りない) |
 | `ping_status` が `ConnectionLost` のまま / 「SSM Agent が接続していない」 | [2](#2-ssm-agent-が接続しない) |
 | ステップ 4 で `ヘルスチェックが失敗した` | [3](#3-ヘルスチェックが失敗する) |
 | ステップ 2 で長時間待つ / `available にならなかった` / 60 分で強制終了 | [4](#4-ami-の作成が終わらない失敗する) |
@@ -59,7 +60,9 @@ CodeBuild の `Command did not exit successfully bin/ami_publish run ... exit st
 
 ## 1. SSM の管理対象になっていない
 
-**症状**: ステップ 0（または 3）の進捗ログの `ping_status` が `（SSM に未登録）` のまま。ステップ 0 で「SSM の管理対象になっていない（Fleet Manager に表示されない）。AMI は作成していない」で失敗する。
+**症状**: ステップ 3（接続待ち）の進捗ログの `ping_status` が `（SSM に未登録）` のまま、「リリース用インスタンスの SSM Agent の接続が ... 秒以内に完了しなかった。インスタンスプロファイルは紐付け済み。...」で失敗する（AMI とスナップショットは削除され、紐付けは解除される）。
+
+リリース用インスタンスには、ヘルスチェックの区間（AMI の作成の直前から）だけインスタンスプロファイルを紐付けるため、開始時（ステップ 0）には SSM の管理対象かを確認しない。SSM Agent や経路の問題は、ここで初めて分かる。
 
 **意味**: SSM の管理対象の一覧に、リリース用インスタンスが存在しない。一度でも接続したことのあるインスタンスは、切断中でも `ConnectionLost` として一覧に残るため、「未登録」は**そもそも SSM の管理対象になっていない**ことを示す。CodeBuild の権限不足ではない（権限不足なら終了コード 3 になる）。
 
@@ -70,27 +73,28 @@ CodeBuild の `Command did not exit successfully bin/ami_publish run ... exit st
 aws ssm describe-instance-information --filters Key=InstanceIds,Values=<インスタンス ID> \
   --query 'InstanceInformationList[0].[PingStatus,LastPingDateTime]'
 
-# インスタンスプロファイルが付いているか
+# サブネットとメタデータ（IMDS）の設定
 aws ec2 describe-instances --instance-ids <インスタンス ID> \
-  --query 'Reservations[0].Instances[0].[IamInstanceProfile.Arn,SubnetId,MetadataOptions.HttpEndpoint]'
+  --query 'Reservations[0].Instances[0].[SubnetId,MetadataOptions.HttpEndpoint]'
 ```
 
 **原因と対処**（どれかが欠けている）:
 
 | 条件 | 確認・対処 |
 |---|---|
-| インスタンスプロファイル（IAM ロール）が付いていて、`AmazonSSMManagedInstanceCore` がある | ロールのポリシーを確認し、なければ付与する。**付与・変更した後は SSM Agent を再起動する**（すぐには反映されないことがある） |
+| リリース用インスタンスの IAM ロールのスタックのロールに `AmazonSSMManagedInstanceCore` がある | ステップ 0b で判定している。紐付けはパイプラインが行う |
+| 紐付けの後に SSM Agent が起動し直している | 起動中のインスタンスは AMI の作成で再起動し、停止中だったインスタンスはステップ 2a で起動するので、SSM Agent は起動時に認証情報を取る。SSM Agent の自動起動が無効だと、再起動後に起動しない |
 | SSM Agent が入っていて、起動している・自動起動が有効 | Amazon Linux: `sudo systemctl enable --now amazon-ssm-agent`。Ubuntu（snap 版）: `sudo snap start --enable amazon-ssm-agent`。ログは `/var/log/amazon/ssm/amazon-ssm-agent.log` |
 | SSM への経路がある | プライベートサブネットなら、NAT ゲートウェイ、または VPC エンドポイント（`com.amazonaws.<region>.ssm` / `ssmmessages` / `ec2messages`、プライベート DNS 有効、セキュリティグループで 443 を許可）が必要 |
 | インスタンスのメタデータ（IMDS）に到達できる | `HttpEndpoint` が `enabled` であること。コンテナ内から使う場合は `HttpPutResponseHopLimit` に注意 |
 
 SSM に接続できない状態では Session Manager でインスタンスに入れない。インスタンス上を調べるには、EC2 シリアルコンソール（事前に有効化が必要）か SSH を使う。
 
-**確認のしかた**: 対処後、上の `describe-instance-information` で `Online` になることを確認してから、パイプラインを再実行する（`plan` でも確認できる）。
+**確認のしかた**: インスタンスプロファイルは普段は紐付いていないので、パイプラインの外では `Online` にならない。調べる間だけ手で紐付ける場合は、終わったら必ず外す（[1b](#1b-インスタンスプロファイルの紐付けと解除の問題) のコマンド）。紐付けが残っていても、次の実行はそのまま使い、最後に解除する。
 
 ## 1a. リリース用インスタンスのロールの許可が足りない
 
-**症状**: ステップ 0b（CheckReleaseInstancePermissions）で「リリース用インスタンスのロール ... に必要な許可が足りない。AMI は作成していない。不足: ...」、または「インスタンスプロファイル（IAM ロール）が付いていない」で失敗する。
+**症状**: ステップ 0b（CheckReleaseInstancePermissions）で「リリース用インスタンスのロール ... に必要な許可が足りない。AMI は作成していない。不足: ...」で失敗する。判定の対象は、リリース用インスタンスの IAM ロールのスタックのロール（パイプラインのスタックの出力 `ReleaseInstanceRoleArn`）。
 
 **意味**: IAM のポリシーシミュレーターで判定した結果、ロールのポリシー上で許可されていない操作がある（A・C の不足で止まる。B の不足は止まらず、ログに `release_instance_permissions_warning` の警告が出る）。`不足:` の後に「区分: 操作（判定）」の形で並ぶ（例: `B. ヘルスチェックの出力を CloudWatch Logs に送る: logs:PutLogEvents（implicitDeny）`）。AMI は作っておらず、インスタンスも変更していない。
 
@@ -111,9 +115,33 @@ Basic 認証のパラメーターの前提を満たしていない場合も、�
 
 CodeBuild 側が判定の権限を持っていない場合は、`iam:SimulatePrincipalPolicy` などで終了コード 3（AccessDenied）になる。パイプラインのスタックが古い（判定の追加前）ので、仕組みを再デプロイする。
 
+## 1b. インスタンスプロファイルの紐付けと解除の問題
+
+AMI 公開ツールは、ヘルスチェックの区間（AMI の作成の直前からヘルスチェックの完了まで）だけ、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルをリリース用インスタンスに紐付ける（[設計](./ami-publish-health-check-role-association-flow.md)）。
+
+| 症状 | 意味 | 対処 |
+|---|---|---|
+| ステップ 0 で「別のインスタンスプロファイル ... が紐付いている。AMI は作成していない」 | リリース用インスタンスに、このスタック以外のインスタンスプロファイルが付いている。パイプラインは入れ替えない | 付いているプロファイルが不要なら外す（下のコマンド）。アプリのために必要なら、この方式は使えない（その許可をリリース用インスタンスの IAM ロールのスタックのロールに持たせる設計に変える） |
+| ステップ 1a で「インスタンスプロファイルを紐付けられなかった。AMI は作成していない」 | 紐付けが一定時間（300 秒）内に `associated` にならなかった | 下のコマンドで状態を確認し、途中の紐付けが残っていれば外してから再実行する |
+| ステップ 1a で終了コード 3（`UnauthorizedOperation` / `AccessDenied`） | CodeBuild のロールに `ec2:AssociateIamInstanceProfile` か `iam:PassRole` がない。パイプラインのスタックが古い | 仕組みを再デプロイする（`generated/deploy/<環境>.sh up`） |
+| `No export named ...-release-instance:RoleArn found`（`up` のとき） | リリース用インスタンスの IAM ロールのスタックがデプロイされていない | 先にそのスタックをデプロイする（[リリース用インスタンスの IAM ロール 2-1](./ami-publish-release-instance-iam.md#2-1-スタックで作る推奨)） |
+| 「ヘルスチェックは成功したが、インスタンスプロファイルの紐付けを解除できなかった。AMI は残している」 | ヘルスチェックの後の解除（4a）に失敗した。AMI は削除していない | 同じ実行を再試行する（AMI を再利用し、紐付け → ヘルスチェック → 解除をやり直す）か、下のコマンドで外してから再試行する |
+| ログに `profile_disassociate_failed`（失敗の後） | 1〜4 のどこかで失敗した後の解除（4x）にも失敗した。元の失敗はそのまま報告される | 下のコマンドで外す。外さなくても次の実行はそのまま使い、最後に解除する |
+| パイプラインの外で紐付けが残っている（`describe-iam-instance-profile-associations` で `associated`） | CodeBuild のタイムアウト・強制終了で、解除の処理が動かなかった | 下のコマンドで外す。外さなくても次の実行はそのまま使い、最後に解除する |
+
+```bash
+# 紐付けの確認（ID・状態・インスタンスプロファイル）
+aws ec2 describe-iam-instance-profile-associations \
+  --filters Name=instance-id,Values=<インスタンス ID> \
+  --query 'IamInstanceProfileAssociations[].[AssociationId,State,IamInstanceProfile.Arn]' --output text
+
+# 紐付けの解除
+aws ec2 disassociate-iam-instance-profile --association-id <紐付けの ID>
+```
+
 ## 2. SSM Agent が接続しない
 
-**症状**: `ping_status` が `ConnectionLost` のまま。ステップ 0 で「SSM Agent が接続していない（状態: ConnectionLost）」、またはステップ 3 で「リリース用インスタンスの SSM Agent の接続が 900 秒以内に完了しなかった」で失敗する。
+**症状**: `ping_status` が `ConnectionLost` のまま、ステップ 3 で「リリース用インスタンスの SSM Agent の接続が 600 秒以内に完了しなかった」で失敗する。
 
 **意味**: SSM の管理対象としては登録されているが、今は接続していない。ステップ 3 の場合は、AMI 作成時の再起動（または停止中からの起動）の後に戻ってこなかった。
 
@@ -174,8 +202,8 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 
 | 状況 | 対処 |
 |---|---|
-| 進捗は進んでいるが遅い | ディスクが大きい・変更量が多いと数十分かかる。異常ではない |
-| CodeBuild が 60 分（`timeouts.codebuild_minutes`）で強制終了された | ツールの後始末が動かないため、作成中の AMI が残ることがある。パイプラインの画面で失敗したアクションを**再試行**すると、同じ実行の AMI を再利用して続きから進む。毎回そうなるなら `codebuild_minutes` を延ばすか、`image_available_seconds` をそれより短くしてツールのタイムアウトを先に来させる |
+| 進捗は進んでいるが遅い | ディスクが大きい・変更量が多いと時間がかかる。待機時間の上限（`timeouts.image_available_seconds`、600 秒＝10 分）を超えると失敗する（AMI は削除され、紐付けは解除される）。実測に合わせて延ばす。延ばすときは、待機時間の合計が CodeBuild のタイムアウト（`codebuild_minutes`）に収まるようにする |
+| CodeBuild が 60 分（`timeouts.codebuild_minutes`）で強制終了された | ツールの後始末が動かないため、作成中の AMI と、インスタンスプロファイルの紐付けが残ることがある（紐付けは次の実行で解除される。[1b](#1b-インスタンスプロファイルの紐付けと解除の問題)）。パイプラインの画面で失敗したアクションを**再試行**すると、同じ実行の AMI を再利用して続きから進む。毎回そうなるなら `codebuild_minutes` を延ばすか、`image_available_seconds` をそれより短くしてツールのタイムアウトを先に来させる |
 | `failed` になった | AMI は削除済み。一時的な問題のことがあるので再実行する。繰り返すなら EBS ボリュームの状態を確認する |
 
 ## 5. 停止中のインスタンスを起動できない

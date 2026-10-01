@@ -43,7 +43,7 @@ spec/                                  AMI 公開ツールのテスト（RSpec�
 - このリポジトリの取得元（`pipeline.source_type`）:
   - GitHub（既定）: CodeConnections の接続（コンソールで承認まで済ませる）→ `pipeline.source_connection_arn`、`pipeline.source_repository_id`
   - CodeCommit: `pipeline.source_type: codecommit` とリポジトリ名（`pipeline.source_repository_name`）。接続は不要
-- リリース用インスタンス（SSM Agent が動き、インスタンスプロファイル（IAM ロール）に必要な許可があること。許可の一覧と設定方法は [リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md)。ロールがなければ、生成されるリリース用インスタンスの IAM ロールのスタックで作れる）
+- リリース用インスタンス（SSM Agent がインストール済みで自動起動が有効なこと。**インスタンスプロファイルは付けない**。パイプラインが、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルを、ヘルスチェックの区間だけ紐付ける。[リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md)）
 - ヘルスチェックに Basic 認証が必要な場合: 「ユーザー名:パスワード」を置いた SSM Parameter Store の SecureString（`health_check.basic_auth_parameter_name`）。CloudFormation では SecureString を作れないため、担当者が作成する:
 
   ```bash
@@ -86,6 +86,8 @@ cfn-lint generated/cloudformation/*/*.yml   # CloudFormation テンプレート�
 
 仕組みの生成ツールが出力するデプロイ用シェルスクリプト `generated/deploy/<環境>.sh` を `up` で実行する。中身は、命名規則どおりのスタック名とテンプレートのパスを入れた AWS CLI の呼び出しを、依存関係の順（ヘルスチェック → 起動テンプレート → AMI 公開パイプライン）に並べただけのもの。スタック名を手で書かないので、AMI 公開ツールが探す名前とずれない。
 
+**前提: リリース用インスタンスの IAM ロールのスタック（`<application_name>-<環境>-release-instance`）を先にデプロイしておく。** AMI 公開パイプラインのスタックがその Export（ロールとインスタンスプロファイルの ARN）を参照する。このスタックは `up` / `down` に含めない（手順は [リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md#2-リリース用インスタンスの-iam-ロールのスタックをデプロイする)）。
+
 ```bash
 bash generated/deploy/staging.sh up
 ```
@@ -113,6 +115,7 @@ bash generated/deploy/staging.sh down
 - 確認の問い合わせはない。実行するとすぐに削除が始まる
 - AMI とスナップショットはスタックのリソースではないため残る（必要なら [確認手順書の後片付け](../ami-publish-environment-verification.md#7-後片付けと記録) の手順で削除する）
 - 起動テンプレートのスタックを削除すると起動テンプレートも消える。起動テンプレートから起動済みのインスタンスには影響しない
+- リリース用インスタンスの IAM ロールのスタックは削除しない。不要なら `down` の後に、紐付けが残っていないことを確かめてから個別に削除する
 
 ## パイプラインの実行
 
@@ -134,8 +137,9 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 
 | 処理 | 既定（`HEALTH_CHECK=true`） | 省略（`HEALTH_CHECK=false`） |
 |---|---|---|
-| 0 SSM の管理対象の確認 | 行う | 行わない |
+| 0 インスタンスプロファイルの紐付けの確認 | 行う | 行わない |
 | 0b ロールの許可の確認 | 行う | 行わない |
+| 1a・4a インスタンスプロファイルの紐付けと解除 | 行う | 行わない |
 | 2a 停止中のインスタンスの起動 | 行う | 行わない（停止したまま AMI を作って終わる） |
 | 3 再起動後の SSM の接続待ち・4 ヘルスチェック | 行う | 行わない |
 | AMI のタグ `HealthCheck` | `passed` | `skipped` |
@@ -146,13 +150,15 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 
 | # | ステップ | 失敗時 |
 |---|---|---|
-| 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ）。あわせて SSM の管理対象かを確認（起動中なら SSM Agent が Online になるまで待つ。停止中なら登録されていること） | 失敗（AMI を作らず、何も変更しない） |
-| 0b | CheckReleaseInstancePermissions: リリース用インスタンスのロールに必要な許可（[一覧](../ami-publish-release-instance-iam.md)）があるかを、IAM のポリシーシミュレーターで判定する。停止中でも判定できる | A・C の不足は失敗（不足している許可を一覧にする。AMI を作らず、何も変更しない）。B（CloudWatch Logs への出力）の不足は警告を出して先に進む。Basic 認証のパラメーターが既定の `aws/ssm` キーの SecureString でなければ失敗 |
+| 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ）。あわせてインスタンスプロファイルの紐付けが「なし」か「リリース用インスタンスの IAM ロールのスタックのプロファイル」（前回の異常終了の残り）であることを確認する。SSM の管理対象かは、紐付け前は判定できないので確認しない | 別のプロファイルが付いていれば失敗（AMI を作らず、何も変更しない） |
+| 0b | CheckReleaseInstancePermissions: リリース用インスタンスの IAM ロールのスタックのロール（パイプラインのスタックの出力 `ReleaseInstanceRoleArn`）に必要な許可（[一覧](../ami-publish-release-instance-iam.md)）があるかを、IAM のポリシーシミュレーターで判定する。紐付け前・停止中でも判定できる | A・C の不足は失敗（不足している許可を一覧にする。AMI を作らず、何も変更しない）。B（CloudWatch Logs への出力）の不足は警告を出して先に進む。Basic 認証のパラメーターが既定の `aws/ssm` キーの SecureString でなければ失敗 |
+| 1a | WithReleaseInstanceProfile: **AMI の作成の直前に**、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルを紐付ける（すでに付いていればそのまま使う）。1〜4 はこの紐付けの区間の中で動く（[設計](../ami-publish-health-check-role-association-flow.md)） | 失敗（AMI を作らない。途中までの紐付けは解除する） |
 | 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用。AMI 名は `<application_name>_<バージョン>_<日時>`、Name タグは `<ami.name_tag_prefix>_<バージョン>_<日時>`（どちらも環境は含めない。接頭辞の省略時は `<バージョン>_<日時>`。同じアカウントで環境ごとに AMI 名を分ける必要があれば、`application_name` に環境を含める） | 失敗 |
 | 2 | WaitImageAvailable: available まで待つ | AMI とスナップショットを削除 |
 | 2a | StartInstanceIfStopped: **開始時に停止中だった場合だけ**、確認のためにインスタンスを起動する（停止には戻さない） | AMI とスナップショットを削除 |
 | 3 | WaitInstanceOnline: 再起動（または起動）後に SSM Agent が接続するまで待つ | AMI とスナップショットを削除 |
 | 4 | HealthCheck: SSM ドキュメントでアプリの応答を確認 | AMI とスナップショットを削除 |
+| 4a | WithReleaseInstanceProfile: 紐付けを解除する。**1〜4 のどこで失敗しても必ず解除する**（CodeBuild のタイムアウト・強制終了の場合だけは解除されず、次の実行で解除される） | 成功後の解除の失敗は、AMI を残して失敗（同じ実行の再試行で再利用）。失敗後の解除の失敗は、手で外すコマンドをログに出す |
 | 5 | UpdateLaunchTemplateStack: 変更セット → 差分の検証（起動テンプレートの変更以外があれば中止）→ 実行 | AMI は残す（同じ実行の再実行で再利用） |
 | 6 | PublishOutputs: AMI に `Status=published`、`AMI_ID` / `LAUNCH_TEMPLATE_VERSION` を出力 | — |
 
@@ -247,7 +253,7 @@ LocalStack などで EC2 や SSM を模擬する方法もあるが、AMI の作�
 | 項目 | 結果 |
 |---|---|
 | Go: `go vet` / `gofmt` / `go test` / `--check` | 通過 |
-| Ruby: `rspec`（41 件、AWS には接続しない）/ `rubocop` | 通過。テストが失敗を検出できることも、実装を一時的に壊して確認済み |
+| Ruby: `rspec`（87 件、AWS には接続しない）/ `rubocop` | 通過。テストが失敗を検出できることも、実装を一時的に壊して確認済み |
 | `cfn-lint`（生成した CloudFormation テンプレート） | 指摘なし |
 | buildspec の手順を Linux（`ruby:3.4`、x86_64）で実行 | install 成功。`VERSION` 未指定で終了コード 2、認証情報なしで終了コード 3、出力ファイルは作られない |
 | CodeBuild 標準イメージ | `aws/codebuild/standard:8.0`（Ubuntu 24.04。Ubuntu 系の最新）を使う。rbenv（`/usr/local/rbenv`）と Ruby 3.4.10 が入っている（[公式のイメージ定義](https://github.com/aws/aws-codebuild-docker-images/blob/master/ubuntu/standard/8.0/Dockerfile)）。buildspec は `runtime-versions` を使わず、`rbenv local 3.4.10` でイメージの Ruby を選ぶ（Ruby のビルドは行わない）。手元の `.ruby-version`（3.4.11）とはパッチバージョンが異なるが、deployment モードの `bundle install` が問題なく通ることを確認済み。イメージと Ruby のバージョンは頻繁に変えないため、設定値ファイルではなく `internal/definitions/ami_publish_buildspec.go` の定数 `codeBuildImage` / `codeBuildRubyVersion` で固定している。イメージの更新で 3.4.10 がなくなったら `codeBuildRubyVersion` を上げる |

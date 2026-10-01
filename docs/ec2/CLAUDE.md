@@ -29,9 +29,10 @@ EC2 の運用・自動化に関する**日本語の設計ドキュメント群**
 仕組み（3 つのスタック: ヘルスチェックの SSM ドキュメント → 起動テンプレート → AMI 公開パイプライン）のデプロイは、担当者が AWS CLI で行う（D9。CI による自動デプロイはしない）。リリース用インスタンスの IAM ロールのスタック（`<app>-<env>-release-instance`）は `generated/deploy/<env>.sh` の `up` / `down` に含めず、個別にデプロイする（フェーズ 3 側に移す可能性があるため。既存インスタンスへの関連付けは AWS CLI）。パイプラインの起動は `aws codepipeline start-pipeline-execution --variables name=VERSION,value=vX.Y.Z`（D3）。
 
 AMI 公開ツールの流れは `lib/ami_publish/commands/publish_command.rb` のステップの並びがそのまま正本:
-CheckInstanceState → CheckReleaseInstancePermissions（リリース用インスタンスのロールの許可を IAM のポリシーシミュレーターで判定）→ CreateImage → WaitImageAvailable → StartInstanceIfStopped（開始時に停止中だった場合だけ起動。停止には戻さない）→ WaitInstanceOnline → HealthCheck → UpdateLaunchTemplateStack → PublishOutputs。
+CheckInstanceState（状態と、インスタンスプロファイルの紐付けが「なし」か自分のものかの確認）→ CheckReleaseInstancePermissions（リリース用インスタンスのロールの許可を IAM のポリシーシミュレーターで判定）→ WithReleaseInstanceProfile［紐付け → CreateImage → WaitImageAvailable → StartInstanceIfStopped（開始時に停止中だった場合だけ起動。停止には戻さない）→ WaitInstanceOnline → HealthCheck → 解除（失敗しても必ず解除）］→ UpdateLaunchTemplateStack → PublishOutputs。
+リリース用インスタンスには、ヘルスチェックの区間だけインスタンスプロファイルを紐付ける（`docs/ec2/ami-publish-health-check-role-association-flow.md`）。そのため CodeBuild のロールは、リリース用インスタンスのロールだけを EC2 に渡す `iam:PassRole` を持つ（これ以外の `iam:PassRole` は持たせない。Go のテストで確認）。
 `rollback` は FindPublishedImage → UpdateLaunchTemplateStack → PublishOutputs。
-ヘルスチェックは既定で行い、パイプライン変数 `HEALTH_CHECK=false`（`--health-check false`）で省略できる。省略時は SSM に依存する処理（SSM の確認、ロールの許可の確認、停止中のインスタンスの起動、接続待ち、ヘルスチェック）をすべて行わず、AMI に `HealthCheck=skipped` を付ける（判定は `RunContext#health_check?` と `BaseStep#skipped_without_health_check?`）。
+ヘルスチェックは既定で行い、パイプライン変数 `HEALTH_CHECK=false`（`--health-check false`）で省略できる。省略時は SSM に依存する処理（紐付けの確認、ロールの許可の確認、紐付けと解除、停止中のインスタンスの起動、接続待ち、ヘルスチェック）をすべて行わず、AMI に `HealthCheck=skipped` を付ける（判定は `RunContext#health_check?` と `BaseStep#skipped_without_health_check?`）。
 
 ## 変更するときに守る前提
 

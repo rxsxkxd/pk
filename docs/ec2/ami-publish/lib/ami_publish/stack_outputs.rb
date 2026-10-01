@@ -7,7 +7,9 @@ module AmiPublish
   #   LaunchTemplateStackName            起動テンプレートのスタック名
   #   HealthCheckDocumentName            ヘルスチェックの SSM ドキュメント名
   #   LogGroupName                       CodeBuild のログとヘルスチェックの出力の保存先
-  # 前の 2 つは、パイプラインのスタックが他のスタックの Export から受け取って出力している。
+  #   ReleaseInstanceRoleArn             リリース用インスタンスのロール（許可の判定の対象）
+  #   ReleaseInstanceProfileArn          ヘルスチェックの区間だけリリース用インスタンスに紐付けるインスタンスプロファイル
+  # LogGroupName 以外は、パイプラインのスタックが他のスタックの Export から受け取って出力している。
   class StackOutputs
     def initialize(cloudformation:, stack_name:)
       @cloudformation = cloudformation

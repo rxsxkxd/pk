@@ -40,7 +40,7 @@ AMI 公開パイプラインは、CodeConnections でリポジトリを取得し
 
 | 準備するもの | 条件 | 確認コマンド |
 |---|---|---|
-| リリース用インスタンス | 起動中。インスタンスプロファイルに `AmazonSSMManagedInstanceCore`。SSM Agent が接続済み | `aws ssm describe-instance-information --filters Key=InstanceIds,Values=<ID> --query 'InstanceInformationList[0].PingStatus'` → `Online` |
+| リリース用インスタンス | 起動中。**インスタンスプロファイルが付いていない**（パイプラインがヘルスチェックの区間だけ紐付ける）。SSM Agent がインストール済みで、自動起動が有効。SSM への経路がある | `aws ec2 describe-iam-instance-profile-associations --filters Name=instance-id,Values=<ID> --query "IamInstanceProfileAssociations[?State=='associated']"` → `[]`（別のプロファイルが付いていたら、不要なら外す） |
 | 〃 アプリの状態 | リリースバージョンが配置・起動済みで、`curl http://localhost/up` が成功する。**再起動後に自動で起動する**（nginx などが `systemctl enable` 済み） | Session Manager で接続し、`curl -fsS http://localhost/up` と `systemctl is-enabled nginx` |
 | 〃 `curl` | ヘルスチェックの SSM ドキュメントが使う | `command -v curl` |
 | 〃 AWS CLI | Basic 認証を使う場合、ヘルスチェックが SSM Parameter Store から認証情報を取り出すのに使う | `command -v aws` |
@@ -81,7 +81,9 @@ cfn-lint generated/cloudformation/*/*.yml
 
 ## 3. 仕組みのデプロイ
 
-仕組みの生成ツールが出力したデプロイ用シェルスクリプトを実行する（スタック名は命名規則どおりに入っている）。3 つのスタックとも変更セットを作るだけで反映はしないので、内容を確認してから、ヘルスチェック → 起動テンプレート → AMI 公開パイプラインの順に反映する（詳細は [README](./ami-publish/README.md#4-仕組みのデプロイaws-cli)）。
+最初に、リリース用インスタンスの IAM ロールのスタック（`myapp-staging-release-instance`）をデプロイする。パイプラインのスタックがその Export を参照するため、`up` より先に必要。このスタックはデプロイ用シェルスクリプトに含めないので、[リリース用インスタンスの IAM ロール 手順 2](./ami-publish-release-instance-iam.md#2-リリース用インスタンスの-iam-ロールのスタックをデプロイする) のコマンドでデプロイする（インスタンスへの紐付けはしない）。
+
+続いて、仕組みの生成ツールが出力したデプロイ用シェルスクリプトを実行する（スタック名は命名規則どおりに入っている）。3 つのスタックとも変更セットを作るだけで反映はしないので、内容を確認してから、ヘルスチェック → 起動テンプレート → AMI 公開パイプラインの順に反映する（詳細は [README](./ami-publish/README.md#4-仕組みのデプロイaws-cli)）。
 
 ```bash
 bash generated/deploy/staging.sh up
@@ -93,35 +95,34 @@ bash generated/deploy/staging.sh up
 
 - ヘルスチェック: `AWS::SSM::Document` 1 つだけ
 - 起動テンプレート: `AWS::IAM::Role`、`AWS::IAM::InstanceProfile`、`AWS::EC2::LaunchTemplate` の 3 つだけ
-- パイプライン: S3 バケット、ロググループ、IAM ロール 3 つ、CodeBuild プロジェクト、CodePipeline
-
-Basic 認証を使い、リリース用インスタンスに既存のロールを使っている場合は、ヘルスチェックのスタックのデプロイ後に、出力 `BasicAuthParameterReadPolicyArn` の管理ポリシーを、リリース用インスタンスの IAM ロールにアタッチする（リリース用インスタンスの IAM ロールのスタックで作ったロールには含まれているので不要。[リリース用インスタンスの IAM ロール 2-1](./ami-publish-release-instance-iam.md#2-1-スタックで作る推奨)）。
-
-```bash
-aws cloudformation describe-stacks --stack-name myapp-staging-health-check \
-  --query "Stacks[0].Outputs[?OutputKey=='BasicAuthParameterReadPolicyArn'].OutputValue" --output text
-aws iam attach-role-policy --role-name <リリース用インスタンスのロール名> --policy-arn <上の ARN>
-```
+- パイプライン: S3 バケット、ロググループ、IAM ロール 2 つ（CodeBuild・CodePipeline）、CodeBuild プロジェクト、CodePipeline。CodeBuild のロールに `PassReleaseInstanceRole`（`iam:PassRole`。対象はリリース用インスタンスのロールだけ）と `AttachReleaseInstanceProfile` がある
 
 ## 4. デプロイ結果の確認
 
 | # | 確認 | コマンド | 期待結果 |
 |---|---|---|---|
-| 4-1 | スタックの状態 | `aws cloudformation describe-stacks --stack-name <各スタック> --query 'Stacks[0].StackStatus'` | 3 つとも `CREATE_COMPLETE` |
+| 4-1 | スタックの状態 | `aws cloudformation describe-stacks --stack-name <各スタック> --query 'Stacks[0].StackStatus'` | リリース用インスタンスの IAM ロールのスタックを含めて 4 つとも `CREATE_COMPLETE` |
 | 4-2 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].[VersionDescription,LaunchTemplateData.ImageId]'` | `myapp (AMI not set)` と `null`（初回はまだ AMI が入っていない） |
-| 4-3 | パイプラインの出力 | `aws cloudformation describe-stacks --stack-name myapp-staging-ami-publish-pipeline --query 'Stacks[0].Outputs'` | `LaunchTemplateStackName`・`HealthCheckDocumentName`・`LogGroupName` などがある |
+| 4-3 | パイプラインの出力 | `aws cloudformation describe-stacks --stack-name myapp-staging-ami-publish-pipeline --query 'Stacks[0].Outputs'` | `LaunchTemplateStackName`・`HealthCheckDocumentName`・`LogGroupName`・`ReleaseInstanceRoleArn`・`ReleaseInstanceProfileArn` などがある |
 | 4-4 | 作成直後の自動実行 | `aws codepipeline list-pipeline-executions --pipeline-name myapp-staging-ami-publish` | 作成直後に 1 回実行されていれば `Failed`（`VERSION` 未指定で終了コード 2）。CodeBuild のログに「--version を指定する」。AMI は作られていない |
 | 4-5 | CodeBuild の Ruby | 4-4 の CodeBuild のログ | `ruby --version` が 3.4.10、`bundle install` が成功している（`rbenv local 3.4.10` が失敗した場合は、イメージに 3.4.10 がない。`codeBuildRubyVersion` をイメージにあるバージョンに上げる） |
-| 4-6 | ヘルスチェックの単体実行 | 下記 | `Success` |
-| 4-7 | `plan` | 下記 | 終了コード 0。`ssm_managed`、`release_instance_permissions_checked`（`missing` が空）、`create_image_planned`、`launch_template_stack_update_planned` がログに出る。AWS に変更がない。リリース用インスタンスが SSM の管理対象でなければ、ここで終了コード 1（「SSM の管理対象になっていない」）になる |
+| 4-6 | ヘルスチェックの単体実行（任意） | 下記 | `Success`。終了後に紐付けが残っていない |
+| 4-7 | `plan` | 下記 | 終了コード 0。`profile_association_checked`、`release_instance_permissions_checked`（`missing` が空）、`profile_association_planned`、`create_image_planned`、`launch_template_stack_update_planned` がログに出る。AWS に変更がない。リリース用インスタンスに別のインスタンスプロファイルが付いていれば、ここで終了コード 1 になる |
 
-4-6 ヘルスチェックの単体実行（SSM ドキュメントがリリース用インスタンスで動くか）:
+4-6 ヘルスチェックの単体実行（SSM ドキュメントがリリース用インスタンスで動くか。任意）。リリース用インスタンスには普段ロールが付いていないので、確認の間だけ手で紐付け、**終わったら必ず外す**。紐付けた後は SSM Agent が認証情報に気づくまで時間がかかることがある（`Online` にならなければ、インスタンス上で SSM Agent を再起動する）:
 
 ```bash
+PROFILE_ARN=$(aws cloudformation describe-stacks --stack-name myapp-staging-release-instance \
+  --query "Stacks[0].Outputs[?OutputKey=='InstanceProfileArn'].OutputValue" --output text)
+ASSOCIATION_ID=$(aws ec2 associate-iam-instance-profile --instance-id <リリース用インスタンス ID> \
+  --iam-instance-profile Arn="$PROFILE_ARN" --query IamInstanceProfileAssociation.AssociationId --output text)
+# describe-instance-information の PingStatus が Online になってから実行する
 COMMAND_ID=$(aws ssm send-command --document-name myapp-staging-health-check \
   --instance-ids <リリース用インスタンス ID> --query Command.CommandId --output text)
 aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id <リリース用インスタンス ID> \
   --query '[Status,StandardOutputContent]'
+# 終わったら外す
+aws ec2 disassociate-iam-instance-profile --association-id "$ASSOCIATION_ID"
 ```
 
 4-7 `plan`（手元から。[手元での確認](./ami-publish/README.md#aws-を使う実行)の権限が必要）:
@@ -140,7 +141,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
   --variables name=VERSION,value=v1.0.0
 ```
 
-進行状況は、パイプラインの画面、または CodeBuild のログ（CloudWatch Logs `/myapp/staging/ami-publish`、ストリーム `codebuild/...`）で確認する。ログは JSON 形式で、`step_started` / `step_finished` がステップ 1〜6 の順に出る。待っている間は 60 秒ごとに進捗ログ（`"event":"waiting"`）が出る（[進捗ログ](./ami-publish/README.md#進捗ログ)）。進捗ログが出ているのに先へ進まない場合は、その項目（ステップ 3 なら `ping_status` など）で原因を切り分ける。
+進行状況は、パイプラインの画面、または CodeBuild のログ（CloudWatch Logs `/myapp/staging/ami-publish`、ストリーム `codebuild/...`）で確認する。ログは JSON 形式で、`step_started` / `step_finished` がステップの順に出る。インスタンスプロファイルの紐付け（`profile_associated`）は AMI の作成の直前、解除（`profile_disassociated`）はヘルスチェックの直後に出る。待っている間は 60 秒ごとに進捗ログ（`"event":"waiting"`）が出る（[進捗ログ](./ami-publish/README.md#進捗ログ)）。進捗ログが出ているのに先へ進まない場合は、その項目（ステップ 3 なら `ping_status` など）で原因を切り分ける。
 
 | # | 確認 | コマンド | 期待結果 |
 |---|---|---|---|
@@ -150,7 +151,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 | 5-4 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].[VersionNumber,VersionDescription,LaunchTemplateData.ImageId]'` | 新しいバージョン、説明 `myapp v1.0.0`、5-2 の AMI |
 | 5-5 | スタックのパラメータ | `aws cloudformation describe-stacks --stack-name myapp-staging-launch-template --query 'Stacks[0].Parameters'` | `AmiId` が 5-2 の AMI、`AppVersion=v1.0.0` |
 | 5-6 | 出力変数 | パイプラインの実行詳細で、アクション `PublishAmi` の出力変数 | `AMI_ID`、`LAUNCH_TEMPLATE_VERSION` |
-| 5-7 | リリース用インスタンス | `describe-instance-information` の `PingStatus` と `curl http://localhost/up` | 再起動後も `Online`、アプリが応答する |
+| 5-7 | リリース用インスタンス | `describe-iam-instance-profile-associations`（[1](#1-aws-側の事前準備) のコマンド）と、インスタンス上の `curl http://localhost/up` | 紐付けが残っていない（`[]`）、アプリが応答する。紐付けを解除したので、SSM は `ConnectionLost` になっていく（正常） |
 | 5-8 | ヘルスチェックの出力 | CloudWatch Logs `/myapp/staging/ami-publish` の SSM のストリーム | `health check passed` |
 | 5-9 | 所要時間 | CodeBuild のログの `duration_seconds` | 各ステップの時間を記録し、`config/ami_publish.yml` の `timeouts` とビルドのタイムアウト（`timeouts.codebuild_minutes`、60 分）に余裕があるか確認する |
 
@@ -172,7 +173,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 
 1. パイプラインを実行し、ログに `image_creation_started` が出た後（ステップ 2 の待機中）に、CodeBuild のビルドを停止する。
 2. パイプラインの画面で、失敗したアクション `PublishAmi` を**再試行（Retry）**する（同じ実行 ID のまま再実行される）。
-3. 期待結果: ログに `image_reused` が出て、新しい AMI を作らずに続きから完走する。
+3. 期待結果: ログに `profile_association_reused`（停止で紐付けが残っているため）と `image_reused` が出て、新しい AMI を作らずに続きから完走する。最後に `profile_disassociated` が出て、紐付けが残らない。
 
 ### 6-3. 同時実行
 
@@ -241,6 +242,8 @@ aws ec2 delete-snapshot --snapshot-id <上で表示されたスナップショ�
 ### 環境ごと撤去する場合
 
 デプロイ用シェルスクリプトの `down`（`bash generated/deploy/staging.sh down`）で、パイプライン → 起動テンプレート → ヘルスチェックの順にスタックを削除する（パイプラインのスタックの S3 バケットも、先に空にしてから削除する）。
+
+リリース用インスタンスの IAM ロールのスタックは `down` では削除しない。不要なら、`down` の後に、紐付けが残っていないこと（[1](#1-aws-側の事前準備) のコマンド）を確かめてから `aws cloudformation delete-stack --stack-name myapp-staging-release-instance` で削除する。
 
 ### 記録
 

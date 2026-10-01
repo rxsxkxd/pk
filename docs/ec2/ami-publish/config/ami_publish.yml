@@ -53,8 +53,8 @@ environments:
       # CodeBuild のビルド全体のタイムアウト（CodeBuild の指定が分単位のため分）。
       # 下の各待機時間は上限で、通常はその合計よりずっと短く終わる。実測の所要時間に余裕を持たせた値にする
       codebuild_minutes: 60
-      image_available_seconds: 3600
-      instance_online_seconds: 900
+      image_available_seconds: 600
+      instance_online_seconds: 600
       health_check_seconds: 300
       stack_update_seconds: 1800
       poll_interval_seconds: 15

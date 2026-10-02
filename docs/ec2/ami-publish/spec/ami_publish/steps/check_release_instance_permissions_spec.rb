@@ -8,8 +8,8 @@ RSpec.describe AmiPublish::Steps::CheckReleaseInstancePermissions do
   let(:parameter_name) { "/myapp/staging/health-check/basic-auth" }
 
   def step(settings = {})
-    described_class.new(**step_dependencies(clients,
-                                            configuration: configuration("health_check" => settings)))
+    step_with(described_class, **step_dependencies(clients,
+                                                   configuration: configuration("health_check" => settings)))
   end
 
   # 指定した操作だけを拒否（implicitDeny）するシミュレーターのスタブ

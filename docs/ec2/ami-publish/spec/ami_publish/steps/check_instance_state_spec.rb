@@ -13,7 +13,7 @@ RSpec.describe AmiPublish::Steps::CheckInstanceState do
     clients.ec2.stub_responses(:describe_instances, instance_state("running"))
     run_context = context
 
-    described_class.new(**step_dependencies(clients)).call(run_context)
+    step_with(described_class, **step_dependencies(clients)).call(run_context)
 
     expect(run_context.instance_state_at_start).to eq("running")
   end
@@ -22,7 +22,7 @@ RSpec.describe AmiPublish::Steps::CheckInstanceState do
     clients.ec2.stub_responses(:describe_instances, [instance_state("stopping"), instance_state("stopped")])
     run_context = context
 
-    described_class.new(**step_dependencies(clients)).call(run_context)
+    step_with(described_class, **step_dependencies(clients)).call(run_context)
 
     expect(run_context.instance_state_at_start).to eq("stopped")
     expect(waiting_logs.first).to include("state" => "stopping")
@@ -31,13 +31,13 @@ RSpec.describe AmiPublish::Steps::CheckInstanceState do
   it "終了済みなどの状態では、AWS を何も変更せずに失敗にする" do
     clients.ec2.stub_responses(:describe_instances, instance_state("terminated"))
 
-    expect { described_class.new(**step_dependencies(clients)).call(context) }
+    expect { step_with(described_class, **step_dependencies(clients)).call(context) }
       .to raise_error(AmiPublish::StepFailedError, /terminated/)
   end
 
   it "状態が落ち着かないまま待機時間を過ぎたら失敗にする" do
     clients.ec2.stub_responses(:describe_instances, instance_state("pending"))
-    step = described_class.new(**step_dependencies(clients, poller: expiring_poller))
+    step = step_with(described_class, **step_dependencies(clients, poller: expiring_poller))
 
     expect { step.call(context) }.to raise_error(AmiPublish::StepFailedError, /pending/)
   end
@@ -46,7 +46,7 @@ RSpec.describe AmiPublish::Steps::CheckInstanceState do
     before { clients.ec2.stub_responses(:describe_instances, instance_state("running")) }
 
     it "紐付けがなければ先に進む（SSM の管理対象かは確かめない）" do
-      described_class.new(**step_dependencies(clients)).call(context)
+      step_with(described_class, **step_dependencies(clients)).call(context)
 
       expect(log_events).to include("profile_association_checked")
       expect(requests(clients.ssm, :describe_instance_information)).to be_empty
@@ -56,7 +56,7 @@ RSpec.describe AmiPublish::Steps::CheckInstanceState do
       clients.ec2.stub_responses(:describe_iam_instance_profile_associations,
                                  iam_instance_profile_associations: [profile_association])
 
-      described_class.new(**step_dependencies(clients)).call(context)
+      step_with(described_class, **step_dependencies(clients)).call(context)
 
       expect(log_events).to include("profile_association_left")
     end
@@ -66,7 +66,7 @@ RSpec.describe AmiPublish::Steps::CheckInstanceState do
                                    profile_association(arn: "arn:aws:iam::123456789012:instance-profile/other")
                                  ])
 
-      expect { described_class.new(**step_dependencies(clients)).call(context) }
+      expect { step_with(described_class, **step_dependencies(clients)).call(context) }
         .to raise_error(AmiPublish::StepFailedError, %r{instance-profile/other.*AMI は作成していない})
     end
 
@@ -76,7 +76,7 @@ RSpec.describe AmiPublish::Steps::CheckInstanceState do
                                                        state: "disassociated")
                                  ])
 
-      expect { described_class.new(**step_dependencies(clients)).call(context) }.not_to raise_error
+      expect { step_with(described_class, **step_dependencies(clients)).call(context) }.not_to raise_error
     end
   end
 end

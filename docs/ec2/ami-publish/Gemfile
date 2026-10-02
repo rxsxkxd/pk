@@ -8,6 +8,8 @@ gem "aws-sdk-cloudformation", "~> 1.0"
 gem "aws-sdk-ec2", "~> 1.0"
 gem "aws-sdk-iam", "~> 1.0"
 gem "aws-sdk-ssm", "~> 1.0"
+# ステップの組み立て（Organizer で順に実行し、失敗したら実行済みのステップの rollback を逆順に呼ぶ）
+gem "interactor", "~> 3.2"
 
 group :development, :test do
   gem "rspec", "~> 3.13"

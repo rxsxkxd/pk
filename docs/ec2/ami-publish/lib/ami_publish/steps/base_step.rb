@@ -2,22 +2,52 @@
 
 module AmiPublish
   module Steps
-    # 各ステップの共通部分。ステップは call(context) で処理し、結果を context に書き込む。
+    # 各ステップの共通部分。ステップは interactor（gem）の Interactor で、call で処理し、結果を context に書き込む。
+    #
+    # context（Interactor::Context）には、実行の値（version、dry_run、image_id など）と、ステップが使う部品
+    # （configuration、clients、logger。テストでは poller・image_cleanup・pipeline_outputs も差し替えられる）を入れる。
+    # ステップの並びは Commands の Organizer が決める。後のステップが失敗すると、interactor が実行済みのステップの
+    # rollback を逆順に呼ぶ。
     class BaseStep
-      def initialize(configuration:, clients:, logger:, poller: nil, image_cleanup: nil, pipeline_outputs: nil)
-        @configuration = configuration
-        @clients = clients
-        @logger = logger
-        @pipeline_outputs = pipeline_outputs ||
-                            StackOutputs.new(cloudformation: clients.cloudformation,
-                                             stack_name: configuration.pipeline_stack_name)
-        @poller = poller || Poller.new(interval_seconds: configuration.poll_interval_seconds)
-        @image_cleanup = image_cleanup || ImageCleanup.new(ec2: clients.ec2, logger: logger)
+      include Interactor
+
+      # ステップごとに開始・終了・失敗と所要時間をログに出す。
+      # interactor の around フックはクラスごとに持つ（子クラスに引き継がれない）ので、子クラスの定義時に付ける。
+      def self.inherited(subclass)
+        super
+        subclass.around(:log_step)
       end
 
       private
 
-      attr_reader :configuration, :clients, :logger, :poller, :image_cleanup, :pipeline_outputs
+      def configuration = context.configuration
+      def clients = context.clients
+      def logger = context.logger
+
+      def pipeline_outputs
+        context.pipeline_outputs ||= StackOutputs.new(cloudformation: clients.cloudformation,
+                                                      stack_name: configuration.pipeline_stack_name)
+      end
+
+      def poller = context.poller ||= Poller.new(interval_seconds: configuration.poll_interval_seconds)
+      def image_cleanup = context.image_cleanup ||= ImageCleanup.new(ec2: clients.ec2, logger: logger)
+
+      # 既定ではヘルスチェックを行う（明示的に false を指定したときだけ省略する）
+      def health_check? = context.health_check != false
+
+      def log_step(step)
+        name = self.class.name.split("::").last
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        logger.info("step_started", step: name, dry_run: context.dry_run)
+        step.call
+        logger.info("step_finished", step: name, duration_seconds: elapsed_since(started))
+      rescue StandardError => e
+        logger.error("step_failed", step: name, error_class: e.class.name, message: e.message,
+                                    duration_seconds: elapsed_since(started))
+        raise
+      end
+
+      def elapsed_since(started) = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(1)
 
       # 他のスタックの名前などは、パイプラインのスタックの出力から引く（命名規則では決めない）
       def launch_template_stack_name = pipeline_outputs.fetch("LaunchTemplateStackName")
@@ -47,8 +77,8 @@ module AmiPublish
       end
 
       # ヘルスチェックを省略する実行なら、理由をログに出して true を返す（ステップの先頭で使う）
-      def skipped_without_health_check?(context, event)
-        return false if context.health_check?
+      def skipped_without_health_check?(event)
+        return false if health_check?
 
         logger.info(event, reason: "ヘルスチェックを省略する実行のため（--health-check false）")
         true

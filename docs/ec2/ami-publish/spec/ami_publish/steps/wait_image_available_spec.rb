@@ -3,7 +3,7 @@
 require_relative "../../spec_helper"
 
 RSpec.describe AmiPublish::Steps::WaitImageAvailable do
-  subject(:step) { described_class.new(**step_dependencies(clients)) }
+  subject(:step) { step_with(described_class, **step_dependencies(clients)) }
 
   let(:clients) { stub_clients }
 

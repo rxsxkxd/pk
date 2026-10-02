@@ -16,7 +16,7 @@ RSpec.describe AmiPublish::Steps::HealthCheck do
                                  { status: "InProgress" },
                                  { status: "Success" }
                                ])
-    step = described_class.new(**step_dependencies(clients))
+    step = step_with(described_class, **step_dependencies(clients))
 
     expect { step.call(context(image_id: "ami-1")) }.not_to raise_error
 
@@ -32,7 +32,7 @@ RSpec.describe AmiPublish::Steps::HealthCheck do
   it "ヘルスチェックが失敗したら、AMI を削除して失敗にする" do
     clients.ssm.stub_responses(:get_command_invocation,
                                status: "Failed", standard_error_content: "health check failed: http://localhost/up")
-    step = described_class.new(**step_dependencies(clients))
+    step = step_with(described_class, **step_dependencies(clients))
 
     expect { step.call(context(image_id: "ami-1")) }
       .to raise_error(AmiPublish::StepFailedError, %r{Failed.*http://localhost/up})
@@ -41,14 +41,14 @@ RSpec.describe AmiPublish::Steps::HealthCheck do
 
   it "待機時間内に終わらなければ、AMI を削除して失敗にする" do
     clients.ssm.stub_responses(:get_command_invocation, status: "InProgress")
-    step = described_class.new(**step_dependencies(clients, poller: expiring_poller))
+    step = step_with(described_class, **step_dependencies(clients, poller: expiring_poller))
 
     expect { step.call(context(image_id: "ami-1")) }.to raise_error(AmiPublish::StepFailedError, /ヘルスチェック/)
     expect(requests(clients.ec2, :deregister_image).size).to eq(1)
   end
 
   it "AMI を作成していない（dry-run）場合は実行しない" do
-    described_class.new(**step_dependencies(clients)).call(context(image_id: nil))
+    step_with(described_class, **step_dependencies(clients)).call(context(image_id: nil))
 
     expect(requests(clients.ssm, :send_command)).to be_empty
   end

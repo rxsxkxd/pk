@@ -26,8 +26,8 @@ module AmiPublish
       # required: false の区分は、不足していても警告にとどめる
       Check = Struct.new(:label, :actions, :resource, :required, keyword_init: true)
 
-      def call(context)
-        return if skipped_without_health_check?(context, "release_instance_permissions_check_skipped")
+      def call
+        return if skipped_without_health_check?("release_instance_permissions_check_skipped")
 
         role_arn = release_instance_role_arn
         checks = permission_checks(role_arn)

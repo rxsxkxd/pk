@@ -18,12 +18,7 @@ module AmiPublish
                            IMPORT_COMPLETE IMPORT_ROLLBACK_COMPLETE].freeze
       NO_CHANGE_REASONS = ["didn't contain changes", "No updates are to be performed"].freeze
 
-      def initialize(change_set_prefix: "ami-publish", **dependencies)
-        super(**dependencies)
-        @change_set_prefix = change_set_prefix
-      end
-
-      def call(context)
+      def call
         stack = describe_stack(stack_name)
         verify_stack(stack)
 
@@ -35,24 +30,26 @@ module AmiPublish
         end
 
         current = parameter_values(stack)
-        if current["AmiId"] == context.image_id && current["AppVersion"] == context.version
-          context.launch_template_version = launch_template_version(stack)
-          logger.info("launch_template_stack_already_applied", stack_name: stack_name, image_id: context.image_id,
-                                                               launch_template_version: context.launch_template_version)
-          return
-        end
+        return record_already_applied(stack) if current["AmiId"] == context.image_id &&
+                                                current["AppVersion"] == context.version
 
         update_with_change_set(context, current.keys)
       end
 
       private
 
+      def record_already_applied(stack)
+        context.launch_template_version = launch_template_version(stack)
+        logger.info("launch_template_stack_already_applied", stack_name: stack_name, image_id: context.image_id,
+                                                             launch_template_version: context.launch_template_version)
+      end
+
       def stack_name
         @stack_name ||= launch_template_stack_name
       end
 
       def update_with_change_set(context, parameter_keys)
-        change_set_name = "#{@change_set_prefix}-#{Time.now.utc.strftime('%Y%m%d%H%M%S')}"
+        change_set_name = "#{context.change_set_prefix || 'ami-publish'}-#{Time.now.utc.strftime('%Y%m%d%H%M%S')}"
         create_change_set(change_set_name, context, parameter_keys)
         changes = wait_for_change_set(change_set_name)
         if changes.nil?

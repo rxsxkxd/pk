@@ -10,8 +10,8 @@ module AmiPublish
       TERMINAL_STATUSES = %w[Success Cancelled TimedOut Failed].freeze
       OUTPUT_EXCERPT_LENGTH = 1000
 
-      def call(context)
-        return if skipped_without_health_check?(context, "health_check_skipped")
+      def call
+        return if skipped_without_health_check?("health_check_skipped")
 
         if context.image_id.nil?
           logger.info("health_check_skipped", reason: "dry-run のため AMI を作成していない")

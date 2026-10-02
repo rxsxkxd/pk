@@ -16,7 +16,7 @@ RSpec.describe AmiPublish::Steps::PublishOutputs do
   attr_reader :output_path
 
   it "AMI に Status=published と HealthCheck=passed を付け、出力値をファイルに書き出す" do
-    step = described_class.new(output_env_file: output_path, **step_dependencies(clients))
+    step = step_with(described_class, output_env_file: output_path, **step_dependencies(clients))
 
     step.call(context(image_id: "ami-new", launch_template_version: "4"))
 
@@ -27,7 +27,7 @@ RSpec.describe AmiPublish::Steps::PublishOutputs do
   end
 
   it "ヘルスチェックを省略した実行では HealthCheck=skipped を付ける" do
-    step = described_class.new(**step_dependencies(clients))
+    step = step_with(described_class, **step_dependencies(clients))
 
     step.call(context(image_id: "ami-new", launch_template_version: "4", health_check: false))
 
@@ -36,7 +36,7 @@ RSpec.describe AmiPublish::Steps::PublishOutputs do
   end
 
   it "tag_image: false（rollback）ではタグを変えない" do
-    step = described_class.new(output_env_file: output_path, tag_image: false, **step_dependencies(clients))
+    step = step_with(described_class, output_env_file: output_path, tag_image: false, **step_dependencies(clients))
 
     step.call(context(image_id: "ami-old", launch_template_version: "5"))
 
@@ -45,7 +45,7 @@ RSpec.describe AmiPublish::Steps::PublishOutputs do
   end
 
   it "シェルで読み込めない値は書き出さずに失敗にする" do
-    step = described_class.new(output_env_file: output_path, tag_image: false, **step_dependencies(clients))
+    step = step_with(described_class, output_env_file: output_path, tag_image: false, **step_dependencies(clients))
 
     expect { step.call(context(image_id: "ami-1; rm -rf /", launch_template_version: "4")) }
       .to raise_error(AmiPublish::StepFailedError)
@@ -53,7 +53,7 @@ RSpec.describe AmiPublish::Steps::PublishOutputs do
   end
 
   it "dry-run では何も変更しない" do
-    step = described_class.new(output_env_file: output_path, **step_dependencies(clients))
+    step = step_with(described_class, output_env_file: output_path, **step_dependencies(clients))
 
     step.call(context(image_id: nil, dry_run: true))
 

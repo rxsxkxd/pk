@@ -6,7 +6,7 @@ module AmiPublish
     # failed になった、または待機時間を過ぎた場合は、AMI とスナップショットを削除して失敗にする。
     # 待っている間は、AMI の状態とスナップショットの進み具合（%）を進捗として出す。
     class WaitImageAvailable < BaseStep
-      def call(context)
+      def call
         if context.image_id.nil?
           logger.info("wait_image_available_skipped", reason: "dry-run のため AMI を作成していない")
           return

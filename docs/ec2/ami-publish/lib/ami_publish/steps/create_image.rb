@@ -10,7 +10,7 @@ module AmiPublish
     class CreateImage < BaseStep
       UNUSABLE_STATES = %w[failed deregistered error invalid].freeze
 
-      def call(context)
+      def call
         existing = find_existing_image(context.pipeline_execution_id)
         return reuse(existing, context) if existing
 

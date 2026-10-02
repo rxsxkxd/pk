@@ -1,6 +1,6 @@
 # ヘルスチェックの区間だけリリース用インスタンスにロールを紐付けるフロー
 
-> 状態: **実装済み**（`ami-publish/lib/ami_publish/steps/with_release_instance_profile.rb`。区間の中のステップの並びは `lib/ami_publish/commands/publish_command.rb`）。実機での確認はまだ行っていない
+> 状態: **実装済み**（紐付けは `ami-publish/lib/ami_publish/steps/attach_release_instance_profile.rb`、解除は `detach_release_instance_profile.rb`。失敗時の解除は、interactor（gem）が紐付けのステップの `rollback` を呼んで行う。ステップの並びは `lib/ami_publish/commands/publish_command.rb`）。実機での確認はまだ行っていない
 >
 > スコープ: AMI 公開パイプライン（[`ami-publish/`](./ami-publish/README.md)、フェーズ 1）で、リリース用インスタンスへのインスタンスプロファイルの紐付けと解除を、パイプラインの CodeBuild のビルドの中で行うフロー。成功時・失敗時・異常終了時の扱いを含む
 >
@@ -85,7 +85,7 @@ flowchart TD
     Update --> Done
 ```
 
-図の「紐付けありの区間」は、AMI 公開ツールの中で「最後に必ず解除する」ブロック（Ruby の `ensure`）で囲む。区間の中で何が失敗しても（例外を含めて）解除が動く。
+図の「紐付けありの区間」の解除は、2 か所で行う。成功時は解除のステップ（`DetachReleaseInstanceProfile`）が行う。区間の中で失敗したときは、ステップの並び（interactor の Organizer）が、実行済みのステップの `rollback` を逆順に呼ぶので、紐付けのステップ（`AttachReleaseInstanceProfile`）の `rollback` が解除する。区間の中で何が失敗しても（例外を含めて）解除が動く。
 
 ## ステップごとの説明
 

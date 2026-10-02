@@ -21,9 +21,9 @@ module AmiPublish
       STABLE_STATES = %w[running stopped].freeze
       TRANSITIONAL_STATES = %w[pending stopping].freeze
 
-      def call(context)
+      def call
         state = wait_for_stable_state
-        verify_profile_association unless skipped_without_health_check?(context, "profile_association_check_skipped")
+        verify_profile_association unless skipped_without_health_check?("profile_association_check_skipped")
         context.instance_state_at_start = state
         logger.info("instance_state_checked", instance_id: instance_id, state: state, flow: flow_description(state))
       end

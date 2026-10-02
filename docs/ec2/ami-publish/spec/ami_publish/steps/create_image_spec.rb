@@ -3,7 +3,7 @@
 require_relative "../../spec_helper"
 
 RSpec.describe AmiPublish::Steps::CreateImage do
-  subject(:step) { described_class.new(**step_dependencies(clients)) }
+  subject(:step) { step_with(described_class, **step_dependencies(clients)) }
 
   let(:clients) { stub_clients }
 
@@ -32,7 +32,7 @@ RSpec.describe AmiPublish::Steps::CreateImage do
     clients.ec2.stub_responses(:describe_images, images: [])
     clients.ec2.stub_responses(:create_image, image_id: "ami-new")
     settings = configuration("ami" => { "name_tag_prefix" => "web" })
-    step = described_class.new(**step_dependencies(clients, configuration: settings))
+    step = step_with(described_class, **step_dependencies(clients, configuration: settings))
 
     step.call(context)
 

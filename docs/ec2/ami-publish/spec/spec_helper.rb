@@ -58,10 +58,24 @@ module SpecHelpers
     def fetch(key) = outputs.fetch(key)
   end
 
+  # ステップが使う部品（context に入れる）
   def step_dependencies(clients, **overrides)
     { configuration: configuration, clients: clients, logger: logger,
       poller: AmiPublish::Poller.new(interval_seconds: 0, sleeper: ->(_) {}),
       pipeline_outputs: StaticOutputs.new(PIPELINE_OUTPUTS) }.merge(overrides)
+  end
+
+  # ステップ（Interactor）を、部品などの値を context に足してから実行する。
+  #   step_with(described_class, **step_dependencies(clients)).call(context(image_id: "ami-1"))
+  PreparedStep = Struct.new(:step_class, :step_values) do
+    def call(run_context)
+      step_values.each { |key, value| run_context[key] = value }
+      step_class.call!(run_context)
+    end
+  end
+
+  def step_with(step_class, **values)
+    PreparedStep.new(step_class, values)
   end
 
   # パイプラインのスタックの出力を返す describe_stacks の応答
@@ -97,8 +111,8 @@ module SpecHelpers
   end
 
   def context(**values)
-    AmiPublish::RunContext.new(version: "v1.2.3", verified: "manual", pipeline_execution_id: "exec-1",
-                               dry_run: false, **values)
+    Interactor::Context.build(version: "v1.2.3", verified: "manual", pipeline_execution_id: "exec-1",
+                              dry_run: false, **values)
   end
 end
 

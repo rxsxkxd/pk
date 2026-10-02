@@ -5,7 +5,7 @@ module AmiPublish
     # rollback 用: 戻し先のバージョンの、公開済み（Status=published）の AMI を探す。
     # 見つからない、または複数ある場合は、何も変更せずに失敗にする。
     class FindPublishedImage < BaseStep
-      def call(context)
+      def call
         images = published_images(context.version)
         case images.size
         when 0

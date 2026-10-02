@@ -235,7 +235,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │       └── *_test.go                                   # 生成された YAML ファイルの構造テスト（go test。必須のリソースや設定値が含まれているか）
 │
 │  ── AMI 公開ツール（Ruby。AMI 公開パイプラインの CodeBuild 上で動く）──
-├── Gemfile                                   # 使用する gem の定義（aws-sdk-ec2 / aws-sdk-ssm / aws-sdk-cloudformation / rspec / rubocop）
+├── Gemfile                                   # 使用する gem の定義（aws-sdk-ec2 / aws-sdk-ssm / aws-sdk-cloudformation / aws-sdk-iam / interactor / rspec / rubocop）
 ├── Gemfile.lock                              # gem のバージョン固定
 ├── .ruby-version                             # 手元で使う Ruby のバージョン（3.4 系の最新）。CodeBuild はイメージにある 3.4 系を rbenv local で使う
 ├── .rubocop.yml                              # Ruby のコード規約チェック（RuboCop）の設定
@@ -245,10 +245,9 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │   └── ami_publish/                          # AMI 公開ツール本体
 │       ├── command_line_interface.rb         # コマンドライン引数の解釈と終了コードの決定
 │       ├── configuration.rb                  # config/ami_publish.yml と環境変数の読み込み・値の検証
-│       ├── step_runner.rb                    # ステップを順番に実行する処理。dry-run の切り替えとログ出力を担当
 │       ├── structured_logger.rb              # JSON 形式のログ出力（ステップ名、所要時間、対象リソース ID）
 │       ├── aws_client_factory.rb             # AWS SDK for Ruby のクライアント生成（テストではスタブに差し替える）
-│       ├── commands/                         # サブコマンドごとのステップの組み合わせ
+│       ├── commands/                         # サブコマンドごとのステップの並び（interactor の Organizer）。ステップの実行と、失敗時の rollback の呼び出しは interactor（gem）が行う
 │       │   ├── publish_command.rb                      # run / plan: ステップ 1〜6 を順に実行
 │       │   └── rollback_command.rb                     # rollback: 戻し先の AMI を探し、ステップ 5 でスタックを更新
 │       └── steps/                            # 各ステップの実装（1 ファイル 1 ステップ）
@@ -262,7 +261,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 └── spec/                                     # AMI 公開ツールの RSpec のテスト
     └── ami_publish/
         ├── steps/                            # 各ステップの単体テスト（AWS SDK の stub_responses で AWS に接続せずに実行）
-        └── step_runner_spec.rb               # ステップの実行順・dry-run・失敗時の停止のテスト
+        └── steps/release_instance_profile_spec.rb # 紐付け・解除と、失敗時の rollback・ステップのログのテスト
 ```
 
 ### YAML ファイルの生成方式（Go の仕組み生成ツール）

@@ -55,19 +55,17 @@ module AmiPublish
 
     private
 
+    # ステップが使う部品と実行の値を context に入れ、コマンド（interactor の Organizer）を実行する
     def execute(subcommand, options, configuration, clients)
-      dependencies = { configuration: configuration, clients: clients, logger: @logger,
-                       output_env_file: options[:output_env_file] }
+      parts = { configuration: configuration, clients: clients, logger: @logger,
+                output_env_file: options[:output_env_file] }
       if subcommand == "rollback"
-        Commands::RollbackCommand.new(**dependencies).run(
-          RunContext.new(version: options[:to_version], dry_run: options[:dry_run])
-        )
+        Commands::RollbackCommand.call!(**parts, version: options[:to_version], dry_run: options[:dry_run])
       else
-        Commands::PublishCommand.new(**dependencies).run(
-          RunContext.new(version: options[:version], verified: options[:verified],
-                         pipeline_execution_id: options[:pipeline_execution_id], dry_run: subcommand == "plan",
-                         health_check: options[:health_check] == "true")
-        )
+        Commands::PublishCommand.call!(**parts, version: options[:version], verified: options[:verified],
+                                                pipeline_execution_id: options[:pipeline_execution_id],
+                                                dry_run: subcommand == "plan",
+                                                health_check: options[:health_check] == "true")
       end
     end
 

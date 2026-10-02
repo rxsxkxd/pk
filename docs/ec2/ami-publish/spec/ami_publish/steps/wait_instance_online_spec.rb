@@ -13,7 +13,7 @@ RSpec.describe AmiPublish::Steps::WaitInstanceOnline do
                                  { instance_information_list: [{ instance_id: "i-0123456789abcdef0",
                                                                  ping_status: "Online" }] }
                                ])
-    step = described_class.new(**step_dependencies(clients))
+    step = step_with(described_class, **step_dependencies(clients))
 
     expect { step.call(context(image_id: "ami-1")) }.not_to raise_error
     expect(requests(clients.ssm, :describe_instance_information).size).to eq(3)
@@ -25,7 +25,7 @@ RSpec.describe AmiPublish::Steps::WaitInstanceOnline do
                                instance_information_list: [{ instance_id: "i-0123456789abcdef0",
                                                              ping_status: "ConnectionLost" }])
     clients.ec2.stub_responses(:describe_images, images: [])
-    step = described_class.new(**step_dependencies(clients, poller: expiring_poller))
+    step = step_with(described_class, **step_dependencies(clients, poller: expiring_poller))
 
     expect { step.call(context(image_id: "ami-1")) }.to raise_error(AmiPublish::StepFailedError, /SSM Agent/)
     expect(requests(clients.ec2, :deregister_image).first[:params]).to eq(image_id: "ami-1")

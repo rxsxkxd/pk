@@ -227,6 +227,16 @@ func codeBuildServiceRole(environment Environment) Map {
 							"Resource", SubWith("arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${LaunchTemplateId}",
 								M("LaunchTemplateId", ImportValue(environment.LaunchTemplateStackExport("LaunchTemplateId")))),
 						),
+						// 起動テンプレートの新しいバージョンを作るとき、起動テンプレートが指すインスタンスプロファイル
+						// （起動テンプレートのスタックの InstanceProfile。本番インスタンス用）を確かめるために必要。
+						// 名前は CloudFormation が「<スタック名>-InstanceProfile-<ランダム>」で付けるので、スタック名で絞る
+						M(
+							"Sid", "ReadLaunchTemplateInstanceProfile",
+							"Effect", "Allow",
+							"Action", "iam:GetInstanceProfile",
+							"Resource", SubWith("arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${LaunchTemplateStackName}-*",
+								launchTemplateStackNameVariables(environment)),
+						),
 						M(
 							"Sid", "ReadLaunchTemplates",
 							"Effect", "Allow",

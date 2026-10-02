@@ -229,7 +229,14 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 
 ### 起動テンプレートの新しいバージョンを作れない（権限不足）
 
-起動テンプレートのスタックの更新は、CodeBuild のロールの権限で行う（CloudFormation のサービスロールは使わない）。CodeBuild のロールには、対象の起動テンプレートへの `ec2:CreateLaunchTemplateVersion` / `ec2:ModifyLaunchTemplate` を与えている。スタックのイベントに、これ以外の操作（例: 起動テンプレートが参照するインスタンスプロファイルのための `iam:PassRole`）の権限不足が出た場合は、パイプラインのスタックの定義（`internal/definitions/ami_publish_pipeline_stack.go` の `UpdateLaunchTemplate`）に、その操作を対象を絞って追加し、再デプロイする。
+起動テンプレートのスタックの更新は、CodeBuild のロールの権限で行う（CloudFormation のサービスロールは使わない）。リリース用インスタンスのロールは関係しない。CodeBuild のロールには、対象の起動テンプレートへの `ec2:CreateLaunchTemplateVersion` / `ec2:ModifyLaunchTemplate` と、起動テンプレートが指すインスタンスプロファイル（起動テンプレートのスタックの `InstanceProfile`）への `iam:GetInstanceProfile` を与えている。
+
+| スタックのイベントの理由 | 原因 | 対処 |
+|---|---|---|
+| `... assumed-role/<CodeBuild のロール>/... is not authorized to perform: iam:GetInstanceProfile` | パイプラインのスタックが古い（`ReadLaunchTemplateInstanceProfile` の追加前）。または、起動テンプレートのスタック名が長く、CloudFormation が付けたインスタンスプロファイルの名前が `<スタック名>-` で始まっていない | パイプラインのスタックを更新する（`up` → 反映）。名前を確認する: `aws cloudformation describe-stack-resource --stack-name myapp-staging-launch-template --logical-resource-id InstanceProfile --query StackResourceDetail.PhysicalResourceId` |
+| それ以外の操作の権限不足 | CloudFormation が、想定していない操作を呼んでいる | パイプラインのスタックの定義（`internal/definitions/ami_publish_pipeline_stack.go` の CodeBuild のロール）に、その操作を対象を絞って追加し、再デプロイする |
+
+更新が失敗しても、AMI は残っている（ヘルスチェックは通過済み）。権限を直した後は、**同じ実行の再試行ではなく、新しい実行**でやり直す。再試行では作成済みの AMI を再利用するためインスタンスが再起動せず、紐付けた後に SSM Agent が認証情報に気づかず接続待ちで止まることがある。残った AMI は不要なら削除する。
 
 ### 以前の構成（サービスロールあり）からの移行
 

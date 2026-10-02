@@ -85,6 +85,7 @@ flowchart TD
 | `FindBasicAuthParameterKey` | `ssm:DescribeParameters` | `*` | Basic 認証のパラメーターが既定のキーの SecureString であるかの確認（値は読まない） |
 | `UpdateLaunchTemplateStack` | `cloudformation:DescribeStacks` / `CreateChangeSet` / `DescribeChangeSet` / `ExecuteChangeSet` / `DeleteChangeSet` | 起動テンプレートのスタックだけ（Export で参照） | 変更セットで `AmiId` / `AppVersion` を更新 |
 | `UpdateLaunchTemplate` | `ec2:CreateLaunchTemplateVersion` / `ec2:ModifyLaunchTemplate` | 対象の起動テンプレートだけ（Export で参照） | 変更セットの実行時に CloudFormation がこのロールの権限で行う |
+| `ReadLaunchTemplateInstanceProfile` | `iam:GetInstanceProfile` | 起動テンプレートのスタックのインスタンスプロファイルだけ（`instance-profile/<起動テンプレートのスタック名>-*`。スタック名は Export で参照） | 起動テンプレートの新しいバージョンを作るとき、起動テンプレートが指すインスタンスプロファイル（本番インスタンス用）を確かめるために必要。これがないとスタックの更新が失敗する |
 | `ReadLaunchTemplates` | `ec2:DescribeLaunchTemplates` / `ec2:DescribeLaunchTemplateVersions` | `*` | 同上・結果の確認 |
 | `ReadOwnStackOutputs` | `cloudformation:DescribeStacks` | パイプラインのスタック自身 | 他のスタックの名前やロググループ名を、パイプラインのスタックの出力から引く |
 

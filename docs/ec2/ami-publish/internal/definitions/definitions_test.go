@@ -256,6 +256,17 @@ func TestPipelineStack(t *testing.T) {
 	if got := dig(t, statementBySid["AttachReleaseInstanceProfile"], "Resource", "Fn::Sub"); !strings.HasSuffix(got.(string), ":instance/i-0123456789abcdef0") {
 		t.Errorf("紐付け・解除の対象 = %v, want リリース用インスタンスだけ", got)
 	}
+	// 起動テンプレートの更新（CloudFormation が CodeBuild の権限で実行する）で、起動テンプレートが指す
+	// インスタンスプロファイルを読む。対象は起動テンプレートのスタックが作るものだけ。
+	readProfile := statementBySid["ReadLaunchTemplateInstanceProfile"]
+	if readProfile == nil || dig(t, readProfile, "Action") != "iam:GetInstanceProfile" {
+		t.Fatal("起動テンプレートのインスタンスプロファイルを読む権限（iam:GetInstanceProfile）がない")
+	}
+	readProfileResource := dig(t, readProfile, "Resource", "Fn::Sub").([]any)
+	if !strings.HasSuffix(readProfileResource[0].(string), ":instance-profile/${LaunchTemplateStackName}-*") ||
+		dig(t, readProfileResource[1], "LaunchTemplateStackName", "Fn::ImportValue") != "myapp-staging-launch-template:StackName" {
+		t.Errorf("iam:GetInstanceProfile の対象 = %v, want 起動テンプレートのスタックのインスタンスプロファイルだけ", readProfileResource)
+	}
 	passRole := statementBySid["PassReleaseInstanceRole"]
 	if dig(t, passRole, "Action") != "iam:PassRole" ||
 		dig(t, passRole, "Resource", "Fn::ImportValue") != "myapp-staging-release-instance:RoleArn" ||

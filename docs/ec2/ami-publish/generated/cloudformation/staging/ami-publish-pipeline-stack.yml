@@ -167,6 +167,14 @@ Resources:
                     - arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:launch-template/${LaunchTemplateId}
                     - LaunchTemplateId:
                         Fn::ImportValue: myapp-staging-launch-template:LaunchTemplateId
+              - Sid: ReadLaunchTemplateInstanceProfile
+                Effect: Allow
+                Action: iam:GetInstanceProfile
+                Resource:
+                  Fn::Sub:
+                    - arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${LaunchTemplateStackName}-*
+                    - LaunchTemplateStackName:
+                        Fn::ImportValue: myapp-staging-launch-template:StackName
               - Sid: ReadLaunchTemplates
                 Effect: Allow
                 Action:

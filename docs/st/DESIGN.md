@@ -26,6 +26,9 @@
 | B-1 | `POST /v1/tickets` | `multipart/form-data`（画像ファイル） | `303 See Other` → B-3 |
 | B-3 | `GET /v1/tickets/{ticketCode}/view?sig=...` | - | `200` HTML（`<img src=B-2>`） |
 | B-2 | `GET /v1/tickets/{ticketCode}/qr?sig=...` | - | `200` `image/png` |
+| EX | `GET /v1/example/qr` | - | `200` `image/png`（`https://example.com` の QR。固定） |
+
+EX はチケット機能とは独立した、固定の QR を返すだけのエンドポイント。デプロイパッケージ（`exampleqr.zip`）も実行ロールも、チケット系とは分ける。設定・シークレット・署名・画像解析は使わない。
 
 ## 2. 全体構成
 
@@ -163,14 +166,16 @@ sequenceDiagram
 ### フォーマット（案）
 
 ```
-{YYYYMMDD}-{suffix}
-例: 20261001-7K3QX9MZ2P
+{YYYYMMDDHHmmss}-{suffix}
+例: 20261001194300-7K3QX9MZ（2026-10-01 19:43:00 JST に発行）
 ```
 
 | 要素 | 内容 |
 |---|---|
-| 日付 | 発行日。**タイムゾーンは JST 固定**（Lambda は UTC のため明示変換） |
+| 日時 | 発行日時（14桁、秒まで）。**タイムゾーンは JST 固定**（Lambda は UTC のため明示変換）。レスポンスの `issuedAt` と同じ時刻 |
 | suffix | ルールに従いステートレスに生成（下記） |
+
+全体で 23 文字（suffix 8文字）。
 
 ### ステートレス採番の方針
 
@@ -178,23 +183,34 @@ sequenceDiagram
 
 - suffix は暗号論的乱数（Go: `crypto/rand`、Node: `crypto.randomBytes`）から生成
 - 表記は Crockford Base32（`0-9A-Z` から `I L O U` を除く。読み間違いに強い）を想定
-- 衝突は日付単位でしか起こらない（日付が異なれば別コード）
+- 衝突は**同じ秒に発行されたコード同士でしか起こらない**（日時が1秒でも違えば別コード）
 
-1日あたりの発行数 n、suffix のビット数 b のとき、その日に1件以上衝突する確率 ≈ n² / 2^(b+1)
+1秒あたりの発行数 r、suffix のビット数 b のとき、ある1秒の中で衝突する確率 ≈ r² / 2^(b+1)。
+#### 想定する発行量
 
-| suffix 長 (Base32) | ビット数 | n=10万/日 | n=100万/日 |
-|---|---|---|---|
-| 8文字 | 40 | 約 0.45% | 約 37% |
-| 10文字 | 50 | 約 4.4×10⁻⁶ | 約 4.4×10⁻⁴ |
-| 12文字 | 60 | 約 4.3×10⁻⁹ | 約 4.3×10⁻⁷ |
+| 項目 | 値 |
+|---|---|
+| ピーク | 1秒あたり 2件 |
+| 1日あたり | 多くても数千件（計算では 5,000件/日） |
 
-→ 想定発行数を確認の上、許容衝突確率から桁数を決める（暫定: 10〜12文字）。
+最悪ケースとして、1日 5,000件がすべて「同じ秒に2件ずつ」発行されたとする（同じ秒の組が 2,500組できる）。このとき、その日に1件以上衝突する確率 ≈ 2,500 / 2^b。
+あわせて、API Gateway のスロットリング上限（`ThrottlingRateLimit` = 50件/秒）いっぱいの発行が1日中続いた場合（濫用時の上限）も示す。
+
+| suffix 長 (Base32) | ビット数 | 想定（1日あたり） | 想定（1年あたり） | スロットリング上限が1日続いた場合 |
+|---|---|---|---|---|
+| 6文字 | 30 | 約 2.3×10⁻⁶ | 約 8.5×10⁻⁴ | 約 9.9% |
+| 7文字 | 35 | 約 7.3×10⁻⁸ | 約 2.7×10⁻⁵ | 約 0.31% |
+| **8文字（採用）** | 40 | 約 2.3×10⁻⁹ | 約 8.3×10⁻⁷ | 約 9.6×10⁻⁵ |
+| 10文字 | 50 | 約 2.2×10⁻¹² | 約 8.1×10⁻¹⁰ | 約 9.4×10⁻⁸ |
+
+→ **suffix は 8文字を採用**（環境変数 `TICKET_SUFFIX_LENGTH` の既定値）。想定の発行量では、1年間で衝突する確率がおよそ100万分の1。スロットリング上限いっぱいの濫用が丸1日続いても、約1万分の1に収まる。
+発行量の想定が大きく変わる場合は、この表で桁数を見直す。
 
 ### ルールとの関係
 
 - 生成ルールはチケット利用側と共有された仕様であり、APIはそれに**厳密に準拠したコードのみ**を生成する
 - 採番ロジックは `TicketCodeGenerator` として分離し、ルール変更の影響をここに閉じ込める（コードの形式チェックはAPIでは行わない）
-- 乱数源はインターフェース化し、テスト時は固定値を注入する。Go/Node の両実装に**同一のテストベクタ**（入力: 日付・乱数バイト → 期待コード）を流す
+- 時刻と乱数源はインターフェース化し、テスト時は固定値を注入する。Go/Node の両実装に**同一のテストベクタ**（`testdata/ticketcode.json`。入力: 時刻・乱数バイト → 期待コード。UTC→JST の日付またぎも含む）を流す
 
 > suffix の具体的なルールは **要確定**。ルールが連番など状態を必要とするものだった場合、本前提（外部ストアなし）と両立しないため再検討が必要。
 
@@ -226,7 +242,7 @@ const res = await fetch(`${apiBaseUrl}/v1/tickets/qr-inline`, { method: "POST", 
 Response `201 Created`, `Content-Type: application/json`
 ```json
 {
-  "ticketCode": "20261001-7K3QX9MZ2P",
+  "ticketCode": "20261001194300-7K3QX9MZ",
   "issuedAt": "2026-10-01T19:43:00+09:00",
   "qr": {
     "mimeType": "image/png",
@@ -248,7 +264,7 @@ Request `Content-Type: multipart/form-data`
 Response（成功）
 ```
 HTTP/1.1 303 See Other
-Location: https://api.example.com/v1/tickets/20261001-7K3QX9MZ2P/view?sig=Xq3v9bJk2mPz8RtY1cWnHA
+Location: https://api.example.com/v1/tickets/20261001194300-7K3QX9MZ/view?sig=Xq3v9bJk2mPz8RtY1cWnHA
 Cache-Control: no-store
 ```
 
@@ -266,14 +282,14 @@ Response `200 OK`, `Content-Type: text/html; charset=utf-8`
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>チケット 20261001-7K3QX9MZ2P</title>
+  <title>チケット 20261001194300-7K3QX9MZ</title>
 </head>
 <body>
-  <main data-ticket-code="20261001-7K3QX9MZ2P">
+  <main data-ticket-code="20261001194300-7K3QX9MZ">
     <h1>チケット</h1>
-    <img src="https://api.example.com/v1/tickets/20261001-7K3QX9MZ2P/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
+    <img src="https://api.example.com/v1/tickets/20261001194300-7K3QX9MZ/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
          alt="チケットQRコード" width="256" height="256">
-    <p>20261001-7K3QX9MZ2P</p>
+    <p>20261001194300-7K3QX9MZ</p>
   </main>
 </body>
 </html>
@@ -284,7 +300,7 @@ Response `200 OK`, `Content-Type: text/html; charset=utf-8`
 | 項目 | 方針 |
 |---|---|
 | テンプレート | 両実装で**同一のテンプレートファイル**（`templates/ticket.html`, `templates/error.html`）を共有し、ビルド時に同梱 |
-| 埋め込みデータ | `ticketCode`, `qrUrl` のみ。発行日時は保存していないため表示しない（日付はコードに含まれる） |
+| 埋め込みデータ | `ticketCode`, `qrUrl` のみ。発行日時は保存していないため別途は表示しない（日時はコードの先頭14桁に含まれる） |
 | `qrUrl` | **絶対URL**。`PUBLIC_BASE_URL` から組み立てる |
 | エスケープ | 自動エスケープ必須（Go: `html/template`、Node: エスケープ付きテンプレート関数 or 軽量ライブラリ）。属性値・本文とも |
 | 機械可読性 | `data-*` 属性にコード等を載せ、HTMLをパースする利用側でも値を取り出せるようにする |
@@ -414,12 +430,15 @@ st/
 ├── templates/                 # HTMLビュー / エラービュー（両実装共通）
 ├── testdata/                  # 両実装共通のテストベクタ（ticketcode.json, signature.json）
 ├── go/
-│   ├── Makefile               # run / test / build（Lambda zip は ticketqr.zip の1つだけ）
+│   ├── Makefile               # run / run-example / test / build（ticketqr.zip と exampleqr.zip）
 │   ├── cmd/ticketqr/          # 唯一のエントリポイント。Lambda 上ならハンドラとして、それ以外ならローカル HTTP サーバーとして起動
 │   │   ├── main.go            # AWS_LAMBDA_RUNTIME_API の有無で起動方法を切り替える
-│   │   └── local.go           # net/http → Lambda イベント変換（routeKey を付与）
+│   │   └── local.go           # ローカルモードの起動（アップロードフォーム付き）
+│   ├── cmd/exampleqr/main.go  # example.com の QR エンドポイント（別パッケージ。Lambda / ローカル両対応）
 │   └── internal/
-│       ├── app/               # 依存関係の組み立て
+│       ├── app/               # 依存関係の組み立て（ticketqr 用）
+│       ├── exampleqr/         # example.com の QR を返すハンドラ
+│       ├── localhttp/         # ローカル実行用 net/http → Lambda イベント変換（routeKey を付与。両パッケージで共有）
 │       ├── handler/           # API Gateway イベント ⇔ ユースケース（JSON / multipart / HTML / PNG）、routeKey による振り分け
 │       ├── usecase/           # 発行フロー（検証 → 解析 → 採番）
 │       ├── ticketcode/        # 採番ルール（生成）
@@ -488,8 +507,8 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 ## 12. 要確定事項
 
 1. suffix の具体的なルール（ステートレスに生成可能であること、桁数・文字種）
-2. 1日あたりの想定発行数と許容衝突確率
-3. 日付のタイムゾーン（JST 前提で良いか）、日付は発行日か利用日か
+2. ピーク時の発行レート（件/秒）と許容衝突確率
+3. 日時のタイムゾーン（JST 前提で良いか）と精度（秒で良いか。ミリ秒まで入れれば衝突はさらに減るがコードが3桁長くなる）
 4. QR のペイロード（チケットコードのみ / URL / 署名付きデータ）
 5. 画像解析サーバーのI/F（送信先URL、レスポンス形式、認証、配置場所。送信形式は `application/octet-stream` で確定）
 6. 入力画像の対応形式とサイズ上限

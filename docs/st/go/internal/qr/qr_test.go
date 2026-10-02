@@ -14,8 +14,8 @@ import (
 
 func TestPNGDecodesToContent(t *testing.T) {
 	for _, content := range []string{
-		"20261001-7K3QX9MZ2P",
-		"20261231-ABCDEFGHJKMN",
+		"20261001194300-7K3QX9MZ2P",
+		"20261231235959-ABCDEFGHJKMN",
 		strings.Repeat("x", 120), // larger version, smaller modules
 	} {
 		t.Run(content, func(t *testing.T) {

@@ -3,23 +3,23 @@
   "cases": [
     {
       "salt": "test-salt-1",
-      "ticketCode": "20261001-7K3QX9MZ2P",
-      "sig": "5ccy3UglITkHG1Tvqcy530"
+      "ticketCode": "20261001194300-7K3QX9MZ2P",
+      "sig": "Imqkn3lIKI0aAHG-O6XAmt"
     },
     {
       "salt": "test-salt-1",
-      "ticketCode": "20261001-0000000000",
-      "sig": "0LS5I3XT3gEpGgKLnT-a-Q"
+      "ticketCode": "20261001000000-0000000000",
+      "sig": "HZLz0BayBhi-y01k7qhZa7"
     },
     {
       "salt": "another-salt",
-      "ticketCode": "20261231-ZZZZZZZZZZ",
-      "sig": "3denbf0ULzFCGcty5yW6nc"
+      "ticketCode": "20261231235959-ZZZZZZZZZZ",
+      "sig": "6_ur4H8c7E8ppsAC_zst7i"
     },
     {
       "salt": "日本語salt",
-      "ticketCode": "20260101-ABCDEFGHJK",
-      "sig": "R-qN6eKRaJBnQbVSdczxiS"
+      "ticketCode": "20260101000000-ABCDEFGHJK",
+      "sig": "9Y1vilnJBQBS0XaRbqWLin"
     }
   ]
 }

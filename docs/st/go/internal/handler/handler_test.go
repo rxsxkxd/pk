@@ -25,7 +25,7 @@ import (
 var (
 	jpeg     = []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
 	png      = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0}
-	codeRe   = regexp.MustCompile(`^\d{8}-[0-9A-HJKMNP-TV-Z]{10}$`)
+	codeRe   = regexp.MustCompile(`^\d{14}-[0-9A-HJKMNP-TV-Z]{10}$`)
 	pngMagic = png[:8]
 )
 
@@ -250,8 +250,8 @@ func TestIssueErrorsAreHTML(t *testing.T) {
 
 func TestSignatureRequired(t *testing.T) {
 	h := newHandlers(t, analyzer.AlwaysValid{})
-	code := "20261001-7K3QX9MZ2P"
-	other := "20261001-0000000000"
+	code := "20261001194300-7K3QX9MZ2P"
+	other := "20261001000000-0000000000"
 	cases := map[string]Request{
 		"missing sig":        signedGet(h, code, ""),
 		"sig for other code": signedGet(h, code, h.Signer.Sign(other)),

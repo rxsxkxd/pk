@@ -14,9 +14,12 @@ API Gateway HTTP API（$default ステージ、自動デプロイ、スロット
  ├─ POST /v1/tickets/qr-inline        → Lambda ticketqr-{impl}-issue-inline
  ├─ POST /v1/tickets                  → Lambda ticketqr-{impl}-issue
  ├─ GET  /v1/tickets/{ticketCode}/view → Lambda ticketqr-{impl}-get-view
- └─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr
-Lambda 共通: provided.al2023 / arm64 / 256MB、実行ロールは Secrets Manager の salt だけを読める
-           4関数とも同じパッケージ ticketqr.zip を使う（どのハンドラを呼ぶかは、イベントの routeKey で決まる）
+ ├─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr
+ └─ GET  /v1/example/qr                → Lambda ticketqr-{impl}-example-qr
+チケット系（上の4つ）: provided.al2023 / arm64 / 256MB、パッケージ ticketqr.zip を共有（どのハンドラを呼ぶかは routeKey で決まる）
+                      実行ロールは Secrets Manager の salt だけを読める
+example-qr:           provided.al2023 / arm64 / 128MB、別パッケージ exampleqr.zip、設定もシークレットも不要
+                      実行ロールはログ出力だけ（チケット系とは別のロール）
 Secrets Manager: ticketqr/{impl}/signing-salt（スタックの外で管理する）
 ```
 
@@ -46,7 +49,7 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ```sh
 make -C go test
 make -C go build
-ls go/bin/ticketqr.zip   # 全エンドポイント共通のパッケージ（bootstrap が1つ）
+ls go/bin/*.zip   # ticketqr.zip（チケット系4エンドポイント）、exampleqr.zip（example.com の QR）
 ```
 
 ### 2.2 署名用 salt の作成（初回だけ）
@@ -120,7 +123,7 @@ for f in issue-inline issue get-view get-qr; do
     --runtime provided.al2023 --architectures arm64 --handler bootstrap \
     --role $ROLE_ARN --memory-size 256 --timeout $TIMEOUT \
     --zip-file fileb://go/bin/ticketqr.zip \
-    --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_SECRET_ID=$SECRET_ARN,TICKET_SUFFIX_LENGTH=10}" \
+    --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_SECRET_ID=$SECRET_ARN,TICKET_SUFFIX_LENGTH=8}" \
     --query FunctionArn --output text
 done
 ```
@@ -165,7 +168,44 @@ aws apigatewayv2 create-stage --api-id $API_ID --stage-name '$default' --auto-de
 
 この時点で API が公開される。動作確認は [5章](#5-動作確認)。
 
-### 3.6 コードの更新
+### 3.6 example.com の QR エンドポイント（別パッケージ）
+
+salt を読まないので、ログ出力の権限だけを持つ実行ロールを別に作る。
+
+```sh
+EXAMPLE_ROLE_NAME=ticketqr-$IMPL-example-lambda
+aws iam create-role --role-name $EXAMPLE_ROLE_NAME \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+aws iam attach-role-policy --role-name $EXAMPLE_ROLE_NAME \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+EXAMPLE_ROLE_ARN=$(aws iam get-role --role-name $EXAMPLE_ROLE_NAME --query Role.Arn --output text)
+sleep 10
+
+aws logs create-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr
+aws logs put-retention-policy --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr --retention-in-days 30
+
+FN_ARN=$(aws lambda create-function \
+  --function-name ticketqr-$IMPL-example-qr \
+  --runtime provided.al2023 --architectures arm64 --handler bootstrap \
+  --role $EXAMPLE_ROLE_ARN --memory-size 128 --timeout 5 \
+  --zip-file fileb://go/bin/exampleqr.zip \
+  --query FunctionArn --output text)
+
+INTEGRATION_ID=$(aws apigatewayv2 create-integration --api-id $API_ID \
+  --integration-type AWS_PROXY --integration-uri $FN_ARN \
+  --payload-format-version 2.0 --timeout-in-millis 10000 \
+  --query IntegrationId --output text)
+aws apigatewayv2 create-route --api-id $API_ID \
+  --route-key 'GET /v1/example/qr' --target integrations/$INTEGRATION_ID >/dev/null
+aws lambda add-permission --function-name ticketqr-$IMPL-example-qr \
+  --statement-id apigateway-invoke --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCOUNT_ID:$API_ID/*/*" >/dev/null
+```
+
+ステージは自動デプロイなので、ルートを追加するとすぐに公開される。
+
+### 3.7 コードの更新
 
 ```sh
 make -C go build
@@ -173,11 +213,13 @@ for f in issue-inline issue get-view get-qr; do
   aws lambda update-function-code --function-name ticketqr-$IMPL-$f \
     --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
 done
+aws lambda update-function-code --function-name ticketqr-$IMPL-example-qr \
+  --zip-file fileb://go/bin/exampleqr.zip --query LastUpdateStatus --output text
 ```
 
 環境変数を変えるときは `aws lambda update-function-configuration --environment ...` を使う。指定した変数で全体が置き換わるので、既存の変数もすべて指定し直す。
 
-### 3.7 削除
+### 3.8 削除
 
 ```sh
 aws apigatewayv2 delete-api --api-id $API_ID
@@ -188,6 +230,10 @@ done
 aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-signing-salt
 aws iam detach-role-policy --role-name ticketqr-$IMPL-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 aws iam delete-role --role-name ticketqr-$IMPL-lambda
+aws lambda delete-function --function-name ticketqr-$IMPL-example-qr
+aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr
+aws iam detach-role-policy --role-name ticketqr-$IMPL-example-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
 # salt は、必要がなくなったときだけ削除する（2.2 を参照）
 ```
 
@@ -204,7 +250,7 @@ aws iam delete-role --role-name ticketqr-$IMPL-lambda
 | `ArtifactPrefix` | - | zip のキーの接頭辞。**デプロイのたびに変える**（例: `ticketqr/go/<git sha>`） |
 | `SigningSaltSecretArn` | - | 2.2 で作ったシークレットの ARN |
 | `AnalyzerMode` | `mock` | 画像解析クライアントの種類 |
-| `TicketSuffixLength` | `10` | suffix の桁数 |
+| `TicketSuffixLength` | `8` | suffix の桁数 |
 | `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。空なら execute-api の URL を自動で使う |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `50` / `100` | 全ルートに共通のスロットリング |
 | `IssueReservedConcurrency` | `-1`（設定しない） | 発行系の関数に予約する同時実行数 |
@@ -226,7 +272,9 @@ aws s3api put-bucket-versioning --bucket $ARTIFACT_BUCKET --versioning-configura
 ```sh
 make -C go build
 export ARTIFACT_PREFIX=ticketqr/$IMPL/$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty-$(date +%s))
-aws s3 cp go/bin/ticketqr.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip
+for p in ticketqr exampleqr; do
+  aws s3 cp go/bin/$p.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$p.zip
+done
 ```
 
 CloudFormation は、`S3Key` が変わらない限り Lambda のコードを更新しない。そのため、デプロイのたびに接頭辞を変える。コミットしていない変更がある場合は、接頭辞に `-dirty-<時刻>` を付ける。
@@ -285,6 +333,9 @@ curl -s -o /tmp/qr.png -w '%{http_code} %{content_type}\n' "$QR"
 
 # 署名を改ざん → 403
 curl -s -o /dev/null -w '%{http_code}\n' "${LOC%sig=*}sig=AAAAAAAAAAAAAAAAAAAAAA"
+
+# example.com の QR → 200 image/png
+curl -s -o /tmp/example.png -w '%{http_code} %{content_type}\n' $API_URL/v1/example/qr
 ```
 
 ブラウザで `$LOC` を開くと、QR の画面が表示される。

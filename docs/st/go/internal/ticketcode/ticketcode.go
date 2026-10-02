@@ -1,4 +1,4 @@
-// Package ticketcode generates ticket codes ({YYYYMMDD}-{suffix}) without shared state.
+// Package ticketcode generates ticket codes ({YYYYMMDDHHmmss}-{suffix}) without shared state.
 package ticketcode
 
 import (
@@ -40,5 +40,5 @@ func (g *Generator) Generate() (Ticket, error) {
 		suffix[i] = alphabet[b&31]
 	}
 	now := g.Now().In(jst)
-	return Ticket{Code: now.Format("20060102") + "-" + string(suffix), IssuedAt: now}, nil
+	return Ticket{Code: now.Format("20060102150405") + "-" + string(suffix), IssuedAt: now}, nil
 }

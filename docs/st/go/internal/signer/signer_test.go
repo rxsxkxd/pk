@@ -42,7 +42,7 @@ func TestVerify(t *testing.T) {
 	old, _ := New("old-salt", "")
 	cur, _ := New("new-salt", "")
 	rotating, _ := New("new-salt", "old-salt")
-	code := "20261001-7K3QX9MZ2P"
+	code := "20261001194300-7K3QX9MZ2P"
 	oldSig := old.Sign(code)
 
 	tests := []struct {
@@ -55,7 +55,7 @@ func TestVerify(t *testing.T) {
 		{"current salt", rotating, code, cur.Sign(code), true},
 		{"previous salt during rotation", rotating, code, oldSig, true},
 		{"previous salt after rotation", cur, code, oldSig, false},
-		{"other code", cur, "20261001-0000000000", cur.Sign(code), false},
+		{"other code", cur, "20261001000000-0000000000", cur.Sign(code), false},
 		{"empty", cur, code, "", false},
 		{"truncated", cur, code, cur.Sign(code)[:21], false},
 		{"tampered", cur, code, "A" + cur.Sign(code)[1:], cur.Sign(code)[0] == 'A'},

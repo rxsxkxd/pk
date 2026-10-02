@@ -54,7 +54,7 @@ func TestGenerateVectors(t *testing.T) {
 }
 
 func TestGenerateRandomShape(t *testing.T) {
-	re := regexp.MustCompile(`^\d{8}-[0-9A-HJKMNP-TV-Z]{10}$`)
+	re := regexp.MustCompile(`^\d{14}-[0-9A-HJKMNP-TV-Z]{10}$`)
 	g := NewGenerator(10)
 	seen := map[string]bool{}
 	for range 1000 {

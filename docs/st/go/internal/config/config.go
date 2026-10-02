@@ -16,7 +16,7 @@ type Config struct {
 	AnalyzerMode  string
 }
 
-const defaultSuffixLength = 10
+const defaultSuffixLength = 8
 
 func Load() (Config, error) {
 	base := strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/")

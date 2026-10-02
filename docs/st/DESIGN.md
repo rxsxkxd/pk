@@ -449,10 +449,7 @@ st/
 │       ├── secret/            # salt 取得（Secrets Manager）
 │       ├── config/            # 環境変数
 │       └── view/              # HTMLレンダリング
-├── node/
-│   └── src/
-│       ├── handlers/{issueInline,issue,getView,getQr}.ts
-│       ├── usecase/ ticketcode/ qr/ analyzer/ signer/ view/
+├── node/                      # 詳細は NODE.md（ソース4ファイル: lib.ts / ticketqr.ts / exampleqr.ts / local.ts）
 ├── infra/                     # IaC（impl=go|node でパラメータ化）
 └── tests/
     ├── contract/              # 両実装に同一ケースを流す
@@ -463,11 +460,11 @@ st/
 
 | 項目 | Go | Node.js |
 |---|---|---|
-| ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs22.x`（arm64） |
+| ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs24.x`（使えない場合は `nodejs22.x`、arm64、`index.handler`） |
 | Lambda アダプタ | `aws-lambda-go` | 標準ハンドラ |
 | AWS SDK | aws-sdk-go-v2（Secrets Manager のみ） | AWS SDK for JavaScript v3（同左） |
-| QR ライブラリ | `github.com/skip2/go-qrcode` | `qrcode`（候補） |
-| multipart 解析 | 標準 `mime/multipart` | `busboy`（候補） |
+| QR ライブラリ | `github.com/skip2/go-qrcode` | `lean-qr`（NODE.md 3章） |
+| multipart 解析 | 標準 `mime/multipart` | 標準 `Request.formData()`（NODE.md 2.2） |
 | HTMLテンプレート | `html/template` + `embed` | テンプレートをバンドルに同梱、エスケープ付きで描画 |
 | ビルド | `GOOS=linux GOARCH=arm64 go build` | esbuild でバンドル（tree-shaking） |
 

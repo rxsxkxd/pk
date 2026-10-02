@@ -16,6 +16,7 @@ API Gateway HTTP API（$default ステージ、自動デプロイ、スロット
  ├─ GET  /v1/tickets/{ticketCode}/view → Lambda ticketqr-{impl}-get-view
  └─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr
 Lambda 共通: provided.al2023 / arm64 / 256MB、実行ロールは Secrets Manager の salt だけを読める
+           4関数とも同じパッケージ ticketqr.zip を使う（どのハンドラを呼ぶかは、イベントの routeKey で決まる）
 Secrets Manager: ticketqr/{impl}/signing-salt（スタックの外で管理する）
 ```
 
@@ -45,7 +46,7 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ```sh
 make -C go test
 make -C go build
-ls go/bin/*.zip   # issue-inline.zip issue.zip get-view.zip get-qr.zip
+ls go/bin/ticketqr.zip   # 全エンドポイント共通のパッケージ（bootstrap が1つ）
 ```
 
 ### 2.2 署名用 salt の作成（初回だけ）
@@ -118,13 +119,15 @@ for f in issue-inline issue get-view get-qr; do
     --function-name ticketqr-$IMPL-$f \
     --runtime provided.al2023 --architectures arm64 --handler bootstrap \
     --role $ROLE_ARN --memory-size 256 --timeout $TIMEOUT \
-    --zip-file fileb://go/bin/$f.zip \
+    --zip-file fileb://go/bin/ticketqr.zip \
     --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_SECRET_ID=$SECRET_ARN,TICKET_SUFFIX_LENGTH=10}" \
     --query FunctionArn --output text
 done
 ```
 
+- 4関数とも同じ zip を使う。関数を分けているのは、タイムアウトと同時実行数をエンドポイントごとに設定するためだけ
 - 発行系の関数（`issue-inline`、`issue`）は、画像解析の待ち時間（最大5秒程度）を見込んで 15秒にしている
+- 関数を1つにまとめることもできる。コードの変更は不要で、全ルートの統合先を同じ関数にすればよい。ただし、発行系だけの同時実行数の制限はできなくなる
 - 画像解析サーバーを守るために同時実行数に上限をかける場合は、次のコマンドを使う: `aws lambda put-function-concurrency --function-name ticketqr-$IMPL-issue --reserved-concurrent-executions 10`
 
 ### 3.4 ルート・統合・呼び出し権限
@@ -168,7 +171,7 @@ aws apigatewayv2 create-stage --api-id $API_ID --stage-name '$default' --auto-de
 make -C go build
 for f in issue-inline issue get-view get-qr; do
   aws lambda update-function-code --function-name ticketqr-$IMPL-$f \
-    --zip-file fileb://go/bin/$f.zip --query LastUpdateStatus --output text
+    --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
 done
 ```
 
@@ -223,7 +226,7 @@ aws s3api put-bucket-versioning --bucket $ARTIFACT_BUCKET --versioning-configura
 ```sh
 make -C go build
 export ARTIFACT_PREFIX=ticketqr/$IMPL/$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty-$(date +%s))
-aws s3 cp go/bin/ s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ --recursive --exclude '*' --include '*.zip'
+aws s3 cp go/bin/ticketqr.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip
 ```
 
 CloudFormation は、`S3Key` が変わらない限り Lambda のコードを更新しない。そのため、デプロイのたびに接頭辞を変える。コミットしていない変更がある場合は、接頭辞に `-dirty-<時刻>` を付ける。
@@ -270,9 +273,7 @@ aws cloudformation wait stack-delete-complete --stack-name ticketqr-$IMPL
 printf '\xff\xd8\xff\xe0test' > /tmp/sample.jpg
 
 # パターンA → 201 JSON
-curl -s -X POST $API_URL/v1/tickets/qr-inline \
-  -H 'content-type: application/json' \
-  -d "{\"image\":\"$(base64 < /tmp/sample.jpg)\"}" | head -c 200; echo
+curl -s -F image=@/tmp/sample.jpg $API_URL/v1/tickets/qr-inline | head -c 200; echo
 
 # パターンB-1 → 303 とビューの URL
 LOC=$(curl -s -o /dev/null -w '%{redirect_url}' -F image=@/tmp/sample.jpg $API_URL/v1/tickets); echo $LOC

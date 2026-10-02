@@ -42,6 +42,10 @@ func AnalysisTimeout() *Error {
 	return &Error{http.StatusGatewayTimeout, "ANALYSIS_TIMEOUT", "image analysis timed out"}
 }
 
+func NotFound() *Error {
+	return &Error{http.StatusNotFound, "NOT_FOUND", "route not found"}
+}
+
 func Internal() *Error {
 	return &Error{http.StatusInternalServerError, "INTERNAL_ERROR", "internal error"}
 }

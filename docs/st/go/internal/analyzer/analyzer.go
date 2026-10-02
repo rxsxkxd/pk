@@ -1,6 +1,8 @@
 // Package analyzer is the client for the external image analysis server.
 //
-// The server protocol is not decided yet, so only a mock that always returns valid exists.
+// Request format is fixed: POST with Content-Type application/octet-stream and the raw image
+// bytes (Image.Data) as the body. Endpoint, auth and response format are not decided yet, so
+// only a mock that always returns valid exists.
 package analyzer
 
 import (
@@ -10,8 +12,8 @@ import (
 )
 
 type Image struct {
-	Data     []byte
-	MimeType string
+	Data     []byte // sent as-is as the application/octet-stream body
+	MimeType string // detected from magic bytes; not part of the request until the protocol says so
 }
 
 type Result struct {

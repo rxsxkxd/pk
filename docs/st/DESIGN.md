@@ -22,7 +22,7 @@
 
 | ID | メソッド / パス | リクエスト | 成功時レスポンス |
 |---|---|---|---|
-| A | `POST /v1/tickets/qr-inline` | JSON（画像 base64） | `201` JSON（QR base64） |
+| A | `POST /v1/tickets/qr-inline` | `multipart/form-data`（画像ファイル） | `201` JSON（QR base64） |
 | B-1 | `POST /v1/tickets` | `multipart/form-data`（画像ファイル） | `303 See Other` → B-3 |
 | B-3 | `GET /v1/tickets/{ticketCode}/view?sig=...` | - | `200` HTML（`<img src=B-2>`） |
 | B-2 | `GET /v1/tickets/{ticketCode}/qr?sig=...` | - | `200` `image/png` |
@@ -43,7 +43,7 @@ flowchart LR
 | リソース | 用途 |
 |---|---|
 | API Gateway (HTTP API) | ルーティング、認証、スロットリング |
-| Lambda × 4 | エンドポイントごとに1関数（言語ごとに計8関数） |
+| Lambda × 4 | エンドポイントごとに1関数（言語ごとに計8関数）。コードは**1つのパッケージを共有**し、イベントの `routeKey` で振り分ける。関数を分けるのは、タイムアウトと同時実行数を個別に設定するため |
 | Secrets Manager / SSM | 画像解析サーバーのAPIキー、署名用salt（発行側と検証側で共有） |
 | CloudWatch Logs | 発行ログ（唯一の記録） |
 
@@ -58,12 +58,18 @@ flowchart LR
 
 ### 共通処理（A / B-1）
 
-1. **入力検証**: Content-Type、デコード可否、サイズ上限、マジックバイトで画像形式判定（JPEG/PNG 等）
-2. **画像解析連携**: タイムアウト付きHTTP呼び出し。5xx/タイムアウトのみ限定リトライ（例: 最大1回）
+画像データの受け渡し:
+
+```
+ブラウザ ──multipart/form-data（フィールド image）──▶ API ──application/octet-stream（画像バイト列そのまま）──▶ 画像解析サーバー
+```
+
+1. **入力検証**: Content-Type が `multipart/form-data` か、`image` フィールドがあるか、サイズ上限、マジックバイトで画像形式判定（JPEG/PNG 等）
+2. **画像解析連携**: 検証済みの画像バイト列を `application/octet-stream` でそのまま送る（7章）。タイムアウト付きHTTP呼び出し。5xx/タイムアウトのみ限定リトライ（例: 最大1回）
 3. **採番**: valid 時のみ実施。外部ストアを参照せずに生成する（4章）
 4. 発行の記録は構造化ログにのみ残す
 
-### パターンA: `POST /v1/tickets/qr-inline`（JSON）
+### パターンA: `POST /v1/tickets/qr-inline`（JSON で返す）
 
 ```mermaid
 sequenceDiagram
@@ -71,9 +77,9 @@ sequenceDiagram
   participant L as Lambda (issue-inline)
   participant IA as 画像解析サーバー
 
-  C->>L: POST /v1/tickets/qr-inline（JSON: 画像 base64）
+  C->>L: POST /v1/tickets/qr-inline（fetch: multipart/form-data）
   L->>L: 入力検証
-  L->>IA: 画像送信
+  L->>IA: POST application/octet-stream（画像バイト列）
   IA-->>L: valid / invalid
   alt invalid
     L-->>C: 422 JSON { error }
@@ -96,7 +102,7 @@ sequenceDiagram
 
   B->>L: POST /v1/tickets（form送信: multipart/form-data）
   L->>L: 入力検証
-  L->>IA: 画像送信
+  L->>IA: POST application/octet-stream（画像バイト列）
   IA-->>L: valid / invalid
   alt invalid / エラー
     L-->>B: 4xx/5xx HTML（エラービュー）
@@ -196,17 +202,25 @@ sequenceDiagram
 
 共通事項:
 - ベースパス: `/v1`
-- 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため。A の JSON base64 も同様）
+- 画像の受け取り: A・B-1 とも `multipart/form-data` の `image` フィールド（ブラウザの `<input type="file">` / `FormData` で送る形式に統一）
+- 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため）
+- 画像の形式判定はマジックバイトで行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）
 - `Cache-Control: no-store`（全エンドポイント）
 
 ### 5.1 パターンA: `POST /v1/tickets/qr-inline`
 
-Request `Content-Type: application/json`
-```json
-{
-  "image": "<base64>",
-  "imageMimeType": "image/jpeg"
-}
+ブラウザの `fetch` から呼ばれる想定。
+
+Request `Content-Type: multipart/form-data`
+
+| フィールド | 内容 |
+|---|---|
+| `image` | 画像ファイル（JPEG / PNG） |
+
+```js
+const body = new FormData();
+body.append("image", fileInput.files[0]);
+const res = await fetch(`${apiBaseUrl}/v1/tickets/qr-inline`, { method: "POST", body }); // Content-Type はブラウザが boundary 付きで設定する
 ```
 
 Response `201 Created`, `Content-Type: application/json`
@@ -320,10 +334,10 @@ sig = base64url( HMAC-SHA256(salt, ticketCode) ) の先頭 22 文字（128bit）
 
 | HTTP | code | 条件 |
 |---|---|---|
-| 400 | `BAD_REQUEST` | リクエスト不正、必須項目欠落、デコード失敗 |
+| 400 | `BAD_REQUEST` | multipart の形式不正、`image` フィールドなし |
 | 403 | `FORBIDDEN` | `sig` 欠落・不一致（B-3, B-2） |
 | 413 | `PAYLOAD_TOO_LARGE` | 画像サイズ上限超過 |
-| 415 | `UNSUPPORTED_MEDIA_TYPE` | 非対応の画像形式 |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` | Content-Type が `multipart/form-data` でない、非対応の画像形式 |
 | 422 | `IMAGE_INVALID` | 画像解析サーバーが invalid と判定 |
 | 502 | `ANALYSIS_UPSTREAM_ERROR` | 解析サーバーが 5xx / 想定外レスポンス |
 | 504 | `ANALYSIS_TIMEOUT` | 解析サーバーのタイムアウト |
@@ -337,7 +351,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 | | 案1: PRG（採用） | 案2: fetch + DOM差し込み | 案3: WebView に HTML 直接ロード |
 |---|---|---|---|
 | クライアント | ブラウザのフォーム送信 | ページ内JSで `fetch` し、返ったHTMLをDOMに挿入 | ネイティブアプリが POST し、HTML文字列を WebView に `loadHTMLString` 等で表示 |
-| B-1 のリクエスト | `multipart/form-data` | JSON（画像 base64） | JSON（画像 base64） |
+| B-1 のリクエスト | `multipart/form-data` | `multipart/form-data`（`FormData`） | `multipart/form-data` |
 | B-1 のレスポンス | `303` → B-3 | `201` HTML | `201` HTML |
 | エンドポイント数（B） | 3（B-1, B-3, B-2） | 2（B-1, B-2） | 2（B-1, B-2） |
 | リロード時 | B-3 を再GET。同じHTMLが表示され、**再発行されない** | 元ページに戻り、チケット表示は消える。再発行はされないが**コードを失う** | 同じHTMLを再描画。再発行されない |
@@ -349,7 +363,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 
 - ブラウザ単体で完結し、リロード・戻る操作でも二重発行が起きない
 - ビュー / QR いずれも `sig` で保護され、ステートレスのまま再表示できる
-- 5章の仕様は案1を前提に記載している。案2・案3に切り替える場合は B-1 を JSON 受付 + `201` HTML 返却に戻し、B-3 を廃止する
+- 5章の仕様は案1を前提に記載している。案2・案3に切り替える場合は B-1 を `201` HTML 返却に変え、B-3 を廃止する（リクエスト形式は変わらない）
 
 ### 共通の残課題: 同一画像の繰り返し送信
 
@@ -363,7 +377,8 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 
 | 項目 | 方針 |
 |---|---|
-| 送信形式 | 要確認（JSON + base64 / multipart / バイナリ） |
+| 送信形式 | **確定**: `POST`、`Content-Type: application/octet-stream`、ボディは画像バイト列そのもの（multipart から取り出した `image` パートの中身。再エンコードしない） |
+| 送信先URL / メソッド以外のヘッダ | 要確認（画像形式を `X-Image-Type` 等で伝えるか、ファイル名などのメタデータを送るか） |
 | レスポンス | 要確認。想定: `{ "valid": true/false, "reason": "..." }` |
 | 認証 | APIキー等を Secrets Manager から取得し、コールド起動時にキャッシュ（メモリ内のみ） |
 | タイムアウト | 接続 1s / 全体 5s 程度（解析時間の実測で調整）。API Gateway の 29s 上限内に収める |
@@ -371,6 +386,8 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 | ネットワーク | 解析サーバーがVPC内ならLambdaをVPC配置（NAT/エンドポイント設計が必要） |
 
 ImageAnalyzer はインターフェースとして抽象化し、テスト時はスタブに差し替える。
+
+> 実装状況: 送信形式は確定したが、送信先・認証・レスポンス形式が未確定のため、HTTP クライアントの実装は保留。現在は常に valid を返すモック（`ANALYZER_MODE=mock`）のみ。インターフェースが受け取るのは検証済みの画像バイト列で、HTTP クライアントはそれをそのまま `application/octet-stream` で送る。
 
 ## 8. 状態・データ
 
@@ -397,12 +414,13 @@ st/
 ├── templates/                 # HTMLビュー / エラービュー（両実装共通）
 ├── testdata/                  # 両実装共通のテストベクタ（ticketcode.json, signature.json）
 ├── go/
-│   ├── Makefile               # run / test / build（Lambda zip）
-│   ├── cmd/{issue-inline,issue,get-view,get-qr}/main.go   # Lambda エントリポイント
-│   ├── cmd/local/main.go      # ローカル実行用 HTTP サーバー（net/http → Lambda イベント変換）
+│   ├── Makefile               # run / test / build（Lambda zip は ticketqr.zip の1つだけ）
+│   ├── cmd/ticketqr/          # 唯一のエントリポイント。Lambda 上ならハンドラとして、それ以外ならローカル HTTP サーバーとして起動
+│   │   ├── main.go            # AWS_LAMBDA_RUNTIME_API の有無で起動方法を切り替える
+│   │   └── local.go           # net/http → Lambda イベント変換（routeKey を付与）
 │   └── internal/
 │       ├── app/               # 依存関係の組み立て
-│       ├── handler/           # API Gateway イベント ⇔ ユースケース（JSON / multipart / HTML / PNG）
+│       ├── handler/           # API Gateway イベント ⇔ ユースケース（JSON / multipart / HTML / PNG）、routeKey による振り分け
 │       ├── usecase/           # 発行フロー（検証 → 解析 → 採番）
 │       ├── ticketcode/        # 採番ルール（生成）
 │       ├── qr/                # QR生成
@@ -422,14 +440,14 @@ st/
     └── load/                  # k6 シナリオ
 ```
 
-ローカル開発では、Lambda エミュレータを使わずに `go/cmd/local` を使う。ハンドラは Lambda と同じものを呼び出す。画像解析サーバーのプロトコルが決まるまでは、`ANALYZER_MODE=mock`（常に valid を返す）で動かす。
+ローカル開発では、Lambda エミュレータを使わずに `go/cmd/ticketqr` をそのまま起動する（ローカル HTTP サーバーとして動く）。ハンドラは Lambda と同じものを呼び出す。画像解析サーバーのプロトコルが決まるまでは、`ANALYZER_MODE=mock`（常に valid を返す）で動かす。
 
 | 項目 | Go | Node.js |
 |---|---|---|
 | ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs22.x`（arm64） |
 | Lambda アダプタ | `aws-lambda-go` | 標準ハンドラ |
 | AWS SDK | aws-sdk-go-v2（Secrets Manager のみ） | AWS SDK for JavaScript v3（同左） |
-| QR ライブラリ | `github.com/skip2/go-qrcode`（候補） | `qrcode`（候補） |
+| QR ライブラリ | `github.com/skip2/go-qrcode` | `qrcode`（候補） |
 | multipart 解析 | 標準 `mime/multipart` | `busboy`（候補） |
 | HTMLテンプレート | `html/template` + `embed` | テンプレートをバンドルに同梱、エスケープ付きで描画 |
 | ビルド | `GOOS=linux GOARCH=arm64 go build` | esbuild でバンドル（tree-shaking） |
@@ -473,7 +491,7 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 2. 1日あたりの想定発行数と許容衝突確率
 3. 日付のタイムゾーン（JST 前提で良いか）、日付は発行日か利用日か
 4. QR のペイロード（チケットコードのみ / URL / 署名付きデータ）
-5. 画像解析サーバーのI/F（送信形式、レスポンス形式、認証、配置場所）
+5. 画像解析サーバーのI/F（送信先URL、レスポンス形式、認証、配置場所。送信形式は `application/octet-stream` で確定）
 6. 入力画像の対応形式とサイズ上限
 7. A の認証方式（B-1 は認証なしで決定）、B-1 のレート制限値・WAF 導入有無
 8. 同一画像の繰り返し送信を防ぐ必要があるか（6章 共通の残課題）

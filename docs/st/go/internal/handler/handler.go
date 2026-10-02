@@ -40,32 +40,14 @@ type Handlers struct {
 	Logger        *slog.Logger
 }
 
-// IssueInline is pattern A: POST /v1/tickets/qr-inline (JSON in, JSON with base64 QR out).
+// IssueInline is pattern A: POST /v1/tickets/qr-inline (multipart image in, JSON with base64 QR out).
 func (h *Handlers) IssueInline(ctx context.Context, req Request) (Response, error) {
 	return h.run(ctx, req, "issue-inline", h.jsonError, func() (Response, error) {
-		if !hasMediaType(req, "application/json") {
-			return Response{}, apperr.UnsupportedMediaType("Content-Type must be application/json")
-		}
-		body, err := requestBody(req)
+		image, err := readFormImage(req)
 		if err != nil {
 			return Response{}, err
 		}
-		var in struct {
-			Image         string `json:"image"`
-			ImageMimeType string `json:"imageMimeType"`
-		}
-		if err := json.Unmarshal(body, &in); err != nil {
-			return Response{}, apperr.BadRequest("request body must be JSON")
-		}
-		if in.Image == "" {
-			return Response{}, apperr.BadRequest("image is required")
-		}
-		image, err := base64.StdEncoding.DecodeString(in.Image)
-		if err != nil {
-			return Response{}, apperr.BadRequest("image must be base64")
-		}
-
-		t, err := h.Issuer.Issue(ctx, image, in.ImageMimeType)
+		t, err := h.Issuer.Issue(ctx, image)
 		if err != nil {
 			return Response{}, err
 		}
@@ -90,14 +72,14 @@ func (h *Handlers) IssueInline(ctx context.Context, req Request) (Response, erro
 	})
 }
 
-// Issue is pattern B-1: POST /v1/tickets (browser form) → 303 to the view.
+// Issue is pattern B-1: POST /v1/tickets (multipart image from a browser form) → 303 to the view.
 func (h *Handlers) Issue(ctx context.Context, req Request) (Response, error) {
 	return h.run(ctx, req, "issue", h.htmlError, func() (Response, error) {
 		image, err := readFormImage(req)
 		if err != nil {
 			return Response{}, err
 		}
-		t, err := h.Issuer.Issue(ctx, image, "")
+		t, err := h.Issuer.Issue(ctx, image)
 		if err != nil {
 			return Response{}, err
 		}
@@ -242,11 +224,8 @@ func header(req Request, name string) string {
 	return ""
 }
 
-func hasMediaType(req Request, want string) bool {
-	mt, _, err := mime.ParseMediaType(header(req, "Content-Type"))
-	return err == nil && mt == want
-}
-
+// readFormImage returns the raw bytes of the multipart "image" field. The part's own
+// Content-Type is ignored; the format is detected from magic bytes later.
 func readFormImage(req Request) ([]byte, error) {
 	mt, params, err := mime.ParseMediaType(header(req, "Content-Type"))
 	if err != nil || mt != "multipart/form-data" || params["boundary"] == "" {

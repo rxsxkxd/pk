@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Ticket QR API (Lambda x4 + API Gateway HTTP API). See docs/st/DEPLOY.md.
+Description: Ticket QR API (Lambda x4 sharing one package + API Gateway HTTP API). See docs/st/DEPLOY.md.
 
 Parameters:
   Impl:
@@ -12,7 +12,7 @@ Parameters:
     Description: S3 bucket holding the Lambda zip files.
   ArtifactPrefix:
     Type: String
-    Description: Key prefix of the zips, e.g. ticketqr/go/<git-sha>. Change it on every deploy so Lambda picks up new code.
+    Description: Key prefix of ticketqr.zip, e.g. ticketqr/go/<git-sha>. Change it on every deploy so Lambda picks up new code.
   SigningSaltSecretArn:
     Type: String
     Description: ARN of the Secrets Manager secret {"current":"...","previous":"..."} (created outside this stack).
@@ -125,7 +125,7 @@ Resources:
       ReservedConcurrentExecutions: !If [HasIssueReservedConcurrency, !Ref IssueReservedConcurrency, !Ref AWS::NoValue]
       Code:
         S3Bucket: !Ref ArtifactBucket
-        S3Key: !Sub ${ArtifactPrefix}/issue-inline.zip
+        S3Key: !Sub ${ArtifactPrefix}/ticketqr.zip
       Environment:
         Variables:
           PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
@@ -174,7 +174,7 @@ Resources:
       ReservedConcurrentExecutions: !If [HasIssueReservedConcurrency, !Ref IssueReservedConcurrency, !Ref AWS::NoValue]
       Code:
         S3Bucket: !Ref ArtifactBucket
-        S3Key: !Sub ${ArtifactPrefix}/issue.zip
+        S3Key: !Sub ${ArtifactPrefix}/ticketqr.zip
       Environment:
         Variables:
           PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
@@ -222,7 +222,7 @@ Resources:
       Role: !GetAtt FunctionRole.Arn
       Code:
         S3Bucket: !Ref ArtifactBucket
-        S3Key: !Sub ${ArtifactPrefix}/get-view.zip
+        S3Key: !Sub ${ArtifactPrefix}/ticketqr.zip
       Environment:
         Variables:
           PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
@@ -270,7 +270,7 @@ Resources:
       Role: !GetAtt FunctionRole.Arn
       Code:
         S3Bucket: !Ref ArtifactBucket
-        S3Key: !Sub ${ArtifactPrefix}/get-qr.zip
+        S3Key: !Sub ${ArtifactPrefix}/ticketqr.zip
       Environment:
         Variables:
           PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]

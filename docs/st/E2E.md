@@ -24,7 +24,7 @@ flowchart LR
   subgraph compose["docker compose（ネットワーク: e2e）"]
     E2E["e2e<br/>Playwright + Chromium"]
     WEB["web<br/>nginx（静的ファイルのみ）<br/>http://web:8080<br/>別名 http://evil:8080"]
-    API["api<br/>Go: go/cmd/local<br/>http://api:8080"]
+    API["api<br/>Go: go/cmd/ticketqr（ローカルモード）<br/>http://api:8080"]
   end
   E2E -->|ブラウザで開く| WEB
   E2E -->|フォーム POST / fetch| API
@@ -60,7 +60,7 @@ flowchart LR
 | パターン | 操作 | 動き |
 |---|---|---|
 | B（PRG） | `<form method="post" action="{apiBaseUrl}/v1/tickets" enctype="multipart/form-data">` でファイルを選んで送信 | ブラウザが API へ画面遷移する。303 を受けて B-3（API が返すビュー）へ移り、`<img>` が B-2 から読み込まれる |
-| A（inline） | ファイルを選んでボタンを押す。JS が base64 に変換し、`fetch` で `POST /v1/tickets/qr-inline` を呼ぶ | 返ってきた JSON の `qr.data` を `<img src="data:image/png;base64,...">` で表示する |
+| A（inline） | ファイルを選んでボタンを押す。JS が `FormData` に入れて、`fetch` で `POST /v1/tickets/qr-inline`（`multipart/form-data`）を呼ぶ | 返ってきた JSON の `qr.data` を `<img src="data:image/png;base64,...">` で表示する |
 
 - JS は `app.js` 1本で、フレームワークは使わない（S3 に置くだけで動かすため）
 - `action` 属性は、ページを読み込んだときに `config.js` の `apiBaseUrl` を使って JS で書き換える
@@ -110,10 +110,11 @@ img-src 'self' data:;
 
 ### 4.3 パターン A（fetch）の CORS
 
-- `application/json` で送る `fetch` はプリフライトが発生する。そのため API 側の CORS 設定が必要になる
-- 本番: API Gateway HTTP API の CORS 設定（`AllowOrigins = ALLOWED_ORIGINS`、`AllowMethods = POST`、`AllowHeaders = content-type`）
-- ローカル / E2E: プリフライトは API Gateway が Lambda の手前で処理するため、ハンドラには CORS を実装しない。**`go/cmd/local` のアダプタが、API Gateway の CORS 設定と同じ動きをする**ようにする（同じ `ALLOWED_ORIGINS` を読む）
-- A にも Origin 照合を入れるかは、A の認証方式とあわせて決める（DESIGN.md 12章 7）
+- A も `FormData`（`multipart/form-data`）で送るので、**`fetch` でも単純リクエストになり、プリフライトは発生しない**。リクエストは他のオリジンからでも API に届き、CORS が止めるのはレスポンスを JS から読むことだけ
+- したがって、**A にも B-1 と同じ Origin 照合が必要**（照合しないと、他のサイトの JS からチケットを発行させられる。レスポンスは読めないが、画像解析と採番は実行される）
+- CORS の設定は、許可したオリジンの JS がレスポンス（JSON）を読めるようにするために必要
+- 本番: API Gateway HTTP API の CORS 設定（`AllowOrigins = ALLOWED_ORIGINS`、`AllowMethods = POST`。単純リクエストなので `AllowHeaders` は不要）
+- ローカル / E2E: プリフライトは API Gateway が Lambda の手前で処理するため、ハンドラには CORS を実装しない。**`go/cmd/ticketqr` のローカルモード（`local.go`）が、API Gateway の CORS 設定と同じ動きをする**ようにする（同じ `ALLOWED_ORIGINS` を読む）
 
 ### 4.4 検討して採用しなかった案
 
@@ -126,8 +127,8 @@ img-src 'self' data:;
 ### 4.5 API 側で必要な変更
 
 - 環境変数 `ALLOWED_ORIGINS` を追加する（カンマ区切り。完全一致で照合し、ワイルドカードは使わない）
-- B-1（`Issue`）で Origin を照合する。テストを追加する
-- `go/cmd/local` に CORS 処理を追加する（プリフライトの `OPTIONS` と、`Access-Control-Allow-Origin` の付与）
+- A（`IssueInline`）と B-1（`Issue`）で Origin を照合する。テストを追加する
+- `go/cmd/ticketqr/local.go` に CORS 処理を追加する（プリフライトの `OPTIONS` と、`Access-Control-Allow-Origin` の付与）
 - DESIGN.md の 5.2、5.6、10章、12章に反映する
 
 ## 5. E2E テスト
@@ -149,7 +150,7 @@ img-src 'self' data:;
 | 2 | B: ビューをリロード | ケース1のあとにリロードする。→ チケットコードが変わらない（再発行されない） |
 | 3 | A: fetch で発行 | `web` で画像を選んでボタンを押す。→ コードが表示され、`data:image/png` の `<img>` が `naturalWidth > 0` |
 | 4 | CSRF: 他のオリジンからのフォーム送信 | `http://evil:8080/` の同じフォームから送信する。→ `403` のエラービューが出て、`Location` で転送されない |
-| 5 | CSRF: 他のオリジンからの fetch | `http://evil:8080/` で A を実行する。→ CORS エラーになり、画面にコードが表示されない |
+| 5 | CSRF: 他のオリジンからの fetch | `http://evil:8080/` で A を実行する。→ API が `403` を返し（Origin 照合）、さらに CORS でレスポンスも読めないため、画面にコードが表示されない |
 | 6 | 署名の改ざん | ビューの URL の `sig` を書き換えて開く。→ `403` |
 | 7 | 画像でないファイル | テキストファイルを送信する。→ `415` のエラービュー |
 
@@ -189,7 +190,7 @@ services:
       SIGNING_SALT: e2e-salt
       PUBLIC_BASE_URL: http://api:8080
       ALLOWED_ORIGINS: http://web:8080
-    healthcheck: { test: ["CMD", "/local", "-healthcheck"], interval: 2s, retries: 15 }
+    healthcheck: { test: ["CMD", "/ticketqr", "-healthcheck"], interval: 2s, retries: 15 }
   web:
     image: nginx:alpine
     volumes: [ "./web:/usr/share/nginx/html:ro", "./docker/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro", ... ]
@@ -208,7 +209,7 @@ services:
 docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
 ```
 
-- `api` のイメージは distroless か scratch で、シェルや curl が無い。そのため、ヘルスチェック用のフラグ `-healthcheck` を `go/cmd/local` に追加する
+- `api` のイメージは distroless か scratch で、シェルや curl が無い。そのため、ヘルスチェック用のフラグ `-healthcheck` を `go/cmd/ticketqr` のローカルモードに追加する
 - 開発中にテストを書くときは、`api` と `web` だけを起動し、ホスト側の `npx playwright test --ui` で操作することもできる（ホストの `/etc/hosts` か、ポートフォワードの設定が必要）
 
 ## 6. GitHub Actions
@@ -270,7 +271,7 @@ jobs:
 
 ## 8. この構成で確認できないこと
 
-`api` コンテナは `go/cmd/local` のアダプタを使っており、API Gateway と Lambda の実行環境そのものではない。次の点は、この E2E では確認できない。
+`api` コンテナは `go/cmd/ticketqr` のローカルモード（HTTP → Lambda イベントへの変換）を使っており、API Gateway と Lambda の実行環境そのものではない。次の点は、この E2E では確認できない。
 
 - API Gateway の CORS 設定、ルーティング、スロットリング
 - ペイロードの上限（6MB）、base64 への変換、バイナリレスポンスの扱い

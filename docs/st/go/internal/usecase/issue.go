@@ -20,8 +20,8 @@ type Issuer struct {
 }
 
 // Issue validates the image, asks the analyzer, and generates a ticket code only when it is valid.
-func (i *Issuer) Issue(ctx context.Context, image []byte, declaredMime string) (ticketcode.Ticket, error) {
-	mime, err := imageinput.Validate(image, declaredMime)
+func (i *Issuer) Issue(ctx context.Context, image []byte) (ticketcode.Ticket, error) {
+	mime, err := imageinput.Validate(image)
 	if err != nil {
 		return ticketcode.Ticket{}, err
 	}

@@ -32,9 +32,13 @@ var (
 type stubAnalyzer struct {
 	res analyzer.Result
 	err error
+	got *analyzer.Image // when set, records what the analyzer was given
 }
 
-func (s stubAnalyzer) Analyze(context.Context, analyzer.Image) (analyzer.Result, error) {
+func (s stubAnalyzer) Analyze(_ context.Context, img analyzer.Image) (analyzer.Result, error) {
+	if s.got != nil {
+		*s.got = img
+	}
 	return s.res, s.err
 }
 
@@ -57,15 +61,6 @@ func newHandlers(t *testing.T, an analyzer.Analyzer) *Handlers {
 		View:          vw,
 		Logger:        logger,
 	}
-}
-
-func jsonRequest(t *testing.T, v any) Request {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return Request{Headers: map[string]string{"content-type": "application/json"}, Body: string(b)}
 }
 
 func formRequest(t *testing.T, field string, data []byte) Request {
@@ -114,15 +109,17 @@ func assertCommonHeaders(t *testing.T, res Response) {
 }
 
 func TestIssueInline(t *testing.T) {
-	h := newHandlers(t, analyzer.AlwaysValid{})
-	res, _ := h.IssueInline(context.Background(), jsonRequest(t, map[string]string{
-		"image": base64.StdEncoding.EncodeToString(jpeg), "imageMimeType": "image/jpeg",
-	}))
+	var sent analyzer.Image
+	h := newHandlers(t, stubAnalyzer{res: analyzer.Result{Valid: true}, got: &sent})
+	res, _ := h.IssueInline(context.Background(), formRequest(t, "image", jpeg))
 
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", res.StatusCode, res.Body)
 	}
 	assertCommonHeaders(t, res)
+	if !bytes.Equal(sent.Data, jpeg) {
+		t.Errorf("analyzer received %x, want the uploaded bytes unchanged %x", sent.Data, jpeg)
+	}
 	var body struct {
 		TicketCode string `json:"ticketCode"`
 		IssuedAt   string `json:"issuedAt"`
@@ -155,16 +152,16 @@ func TestIssueInlineErrors(t *testing.T) {
 		status   int
 		code     string
 	}{
-		{"wrong content type", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "text/plain"}, Body: "x"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"broken json", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "application/json"}, Body: "{"}, 400, "BAD_REQUEST"},
-		{"missing image", analyzer.AlwaysValid{}, jsonRequest(t, map[string]string{}), 400, "BAD_REQUEST"},
-		{"not base64", analyzer.AlwaysValid{}, jsonRequest(t, map[string]string{"image": "!!!"}), 400, "BAD_REQUEST"},
-		{"not an image", analyzer.AlwaysValid{}, jsonRequest(t, map[string]string{"image": base64.StdEncoding.EncodeToString([]byte("hello"))}), 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"mime mismatch", analyzer.AlwaysValid{}, jsonRequest(t, map[string]string{"image": base64.StdEncoding.EncodeToString(png), "imageMimeType": "image/jpeg"}), 400, "BAD_REQUEST"},
-		{"too large", analyzer.AlwaysValid{}, jsonRequest(t, map[string]string{"image": base64.StdEncoding.EncodeToString(big)}), 413, "PAYLOAD_TOO_LARGE"},
-		{"rejected", stubAnalyzer{res: analyzer.Result{Valid: false, Reason: "blurry"}}, jsonRequest(t, map[string]string{"image": base64.StdEncoding.EncodeToString(jpeg)}), 422, "IMAGE_INVALID"},
-		{"upstream error", stubAnalyzer{err: analyzer.ErrUpstream}, jsonRequest(t, map[string]string{"image": base64.StdEncoding.EncodeToString(jpeg)}), 502, "ANALYSIS_UPSTREAM_ERROR"},
-		{"timeout", stubAnalyzer{err: analyzer.ErrTimeout}, jsonRequest(t, map[string]string{"image": base64.StdEncoding.EncodeToString(jpeg)}), 504, "ANALYSIS_TIMEOUT"},
+		{"json instead of form", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "application/json"}, Body: "{}"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"no boundary", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "multipart/form-data"}, Body: "x"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"broken multipart", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "multipart/form-data; boundary=xyz"}, Body: "garbage"}, 400, "BAD_REQUEST"},
+		{"missing image field", analyzer.AlwaysValid{}, formRequest(t, "file", jpeg), 400, "BAD_REQUEST"},
+		{"empty image", analyzer.AlwaysValid{}, formRequest(t, "image", nil), 400, "BAD_REQUEST"},
+		{"not an image", analyzer.AlwaysValid{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"too large", analyzer.AlwaysValid{}, formRequest(t, "image", big), 413, "PAYLOAD_TOO_LARGE"},
+		{"rejected", stubAnalyzer{res: analyzer.Result{Valid: false, Reason: "blurry"}}, formRequest(t, "image", jpeg), 422, "IMAGE_INVALID"},
+		{"upstream error", stubAnalyzer{err: analyzer.ErrUpstream}, formRequest(t, "image", jpeg), 502, "ANALYSIS_UPSTREAM_ERROR"},
+		{"timeout", stubAnalyzer{err: analyzer.ErrTimeout}, formRequest(t, "image", jpeg), 504, "ANALYSIS_TIMEOUT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -229,7 +226,7 @@ func TestIssueErrorsAreHTML(t *testing.T) {
 		status   int
 		code     string
 	}{
-		{"json instead of form", analyzer.AlwaysValid{}, jsonRequest(t, map[string]string{}), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"json instead of form", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "application/json"}, Body: "{}"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
 		{"missing image field", analyzer.AlwaysValid{}, formRequest(t, "file", jpeg), 400, "BAD_REQUEST"},
 		{"not an image", analyzer.AlwaysValid{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
 		{"too large", analyzer.AlwaysValid{}, formRequest(t, "image", append(append([]byte{}, jpeg...), make([]byte, imageinput.MaxBytes)...)), 413, "PAYLOAD_TOO_LARGE"},

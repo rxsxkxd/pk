@@ -8,14 +8,12 @@
 make run            # http://localhost:8080/
 ```
 
-`go/cmd/local` は、HTTP リクエストを API Gateway HTTP API（payload v2）のイベントに変換して、Lambda と同じハンドラを呼び出す。
+エントリポイントは `go/cmd/ticketqr` の1つだけ。Lambda 上（`AWS_LAMBDA_RUNTIME_API` が設定されている環境）ではハンドラとして起動する。それ以外ではローカル HTTP サーバーとして起動し、HTTP リクエストを API Gateway HTTP API（payload v2）のイベントに変換したうえで、`routeKey` を付けて同じハンドラを呼び出す。
 ブラウザで `http://localhost:8080/` を開くと、パターン B-1 を試すためのアップロードフォームが表示される（このフォームはローカル専用）。
 
 ```sh
 # パターンA
-curl -s -X POST localhost:8080/v1/tickets/qr-inline \
-  -H 'content-type: application/json' \
-  -d "{\"image\":\"$(base64 < sample.jpg)\"}"
+curl -s -F image=@sample.jpg localhost:8080/v1/tickets/qr-inline
 
 # パターンB（303 → view → qr）
 curl -sL -F image=@sample.jpg localhost:8080/v1/tickets
@@ -25,7 +23,7 @@ curl -sL -F image=@sample.jpg localhost:8080/v1/tickets
 
 ```sh
 make test           # go vet + go test（共通テストベクタ ../testdata を使用）
-make build          # bin/<func>.zip（provided.al2023 / arm64 用の bootstrap を含む）
+make build          # bin/ticketqr.zip（provided.al2023 / arm64 用の bootstrap。全エンドポイント共通）
 ```
 
 ## 環境変数
@@ -40,9 +38,11 @@ make build          # bin/<func>.zip（provided.al2023 / arm64 用の bootstrap 
 
 `make run` は、ローカル用の値（`APP_ENV=local`、`ANALYZER_MODE=mock` など）を自動で設定する。
 
-## Lambda ハンドラ対応
+## ルーティング
 
-| 関数 | ルート |
+パッケージは1つで、`handler.Route` がイベントの `routeKey` を見てハンドラを選ぶ。API Gateway の統合先は、1つの関数にまとめても、ルートごとに関数を分けてもよい（どちらでもコードの変更は不要）。CloudFormation では、タイムアウトと同時実行数を個別に設定するために、同じ zip を使う関数を4つ作っている。
+
+| 関数（CloudFormation） | ルート |
 |---|---|
 | `issue-inline` | `POST /v1/tickets/qr-inline` |
 | `issue` | `POST /v1/tickets` |

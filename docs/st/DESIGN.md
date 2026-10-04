@@ -35,18 +35,16 @@ EX はチケット機能とは独立した、固定の QR を返すだけのエ�
 ```mermaid
 flowchart LR
   C[Client] -->|HTTPS| APIGW[API Gateway<br/>HTTP API]
-  APIGW --> L1[Lambda<br/>issue-inline]
-  APIGW --> L2[Lambda<br/>issue]
-  APIGW --> L4[Lambda<br/>get-view]
+  APIGW -->|A / B-1 / B-3| L1[Lambda<br/>tickets]
   APIGW --> L3[Lambda<br/>get-qr]
-  L1 & L2 -->|画像検証| IA[画像解析サーバー]
-  L1 & L2 & L3 & L4 -.-> SM[Secrets Manager<br/>解析サーバー認証情報 / 署名salt]
+  L1 -->|画像検証| IA[画像解析サーバー]
+  L1 & L3 -.-> SM[Secrets Manager<br/>解析サーバー認証情報 / 署名salt]
 ```
 
 | リソース | 用途 |
 |---|---|
 | API Gateway (HTTP API) | ルーティング、認証、スロットリング |
-| Lambda × 4 | エンドポイントごとに1関数（言語ごとに計8関数）。コードは**1つのパッケージを共有**し、イベントの `routeKey` で振り分ける。関数を分けるのは、タイムアウトと同時実行数を個別に設定するため |
+| Lambda × 2（チケット系） | `tickets`（A / B-1 / B-3: 画像解析・採番・ビュー）と `get-qr`（B-2: QR 画像の生成）。コードは**1つのパッケージを共有**し、イベントの `routeKey` で振り分ける（関数の分け方はインフラ設定だけで変えられる）。`get-qr` を分けるのは、`<img>` から呼ばれる QR 生成を、画像解析の同時実行数の上限から切り離すため |
 | Secrets Manager / SSM | 画像解析サーバーのAPIキー、署名用salt（発行側と検証側で共有） |
 | CloudWatch Logs | 発行ログ（唯一の記録） |
 
@@ -67,6 +65,8 @@ flowchart LR
 ブラウザ ──multipart/form-data（フィールド image）──▶ API ──application/octet-stream（画像バイト列そのまま）──▶ 画像解析サーバー
 ```
 
+API が変えるのは**送り方（multipart → octet-stream）だけ**。画像の中身はパススルーで、圧縮・リサイズ・形式変換・メタデータ（EXIF など）の除去は行わない。
+
 1. **入力検証**: Content-Type が `multipart/form-data` か、`image` フィールドがあるか、サイズ上限、マジックバイトで画像形式判定（JPEG/PNG 等）
 2. **画像解析連携**: 検証済みの画像バイト列を `application/octet-stream` でそのまま送る（7章）。タイムアウト付きHTTP呼び出し。5xx/タイムアウトのみ限定リトライ（例: 最大1回）
 3. **採番**: valid 時のみ実施。外部ストアを参照せずに生成する（4章）
@@ -77,7 +77,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
   participant C as Client
-  participant L as Lambda (issue-inline)
+  participant L as Lambda (tickets)
   participant IA as 画像解析サーバー
 
   C->>L: POST /v1/tickets/qr-inline（fetch: multipart/form-data）
@@ -100,7 +100,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   participant B as ブラウザ
-  participant L as Lambda (issue)
+  participant L as Lambda (tickets)
   participant IA as 画像解析サーバー
 
   B->>L: POST /v1/tickets（form送信: multipart/form-data）
@@ -123,7 +123,7 @@ POSTの結果はHTMLで直接返さず、ビューURLへリダイレクトする
 ```mermaid
 sequenceDiagram
   participant B as ブラウザ
-  participant L as Lambda (get-view)
+  participant L as Lambda (tickets)
 
   Note over B: 303 を受けて自動で GET（リロード時もここから）
   B->>L: GET /v1/tickets/{code}/view?sig=...
@@ -393,7 +393,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 
 | 項目 | 方針 |
 |---|---|
-| 送信形式 | **確定**: `POST`、`Content-Type: application/octet-stream`、ボディは画像バイト列そのもの（multipart から取り出した `image` パートの中身。再エンコードしない） |
+| 送信形式 | **確定**: `POST`、`Content-Type: application/octet-stream`、ボディは画像バイト列そのもの（multipart から取り出した `image` パートの中身。圧縮・リサイズ・形式変換・再エンコードはしないパススルー） |
 | 送信先URL / メソッド以外のヘッダ | 要確認（画像形式を `X-Image-Type` 等で伝えるか、ファイル名などのメタデータを送るか） |
 | レスポンス | 要確認。想定: `{ "valid": true/false, "reason": "..." }` |
 | 認証 | APIキー等を Secrets Manager から取得し、コールド起動時にキャッシュ（メモリ内のみ） |
@@ -460,7 +460,7 @@ st/
 
 | 項目 | Go | Node.js |
 |---|---|---|
-| ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs24.x`（使えない場合は `nodejs22.x`、arm64、`index.handler`） |
+| ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs24.x`（arm64、`index.handler`） |
 | Lambda アダプタ | `aws-lambda-go` | 標準ハンドラ |
 | AWS SDK | aws-sdk-go-v2（Secrets Manager のみ） | AWS SDK for JavaScript v3（同左） |
 | QR ライブラリ | `github.com/skip2/go-qrcode` | `lean-qr`（NODE.md 3章） |

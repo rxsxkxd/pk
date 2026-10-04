@@ -48,13 +48,11 @@ make build          # bin/ticketqr.zip（チケット系4エンドポイント�
 
 ## ルーティング
 
-パッケージは1つで、`handler.Route` がイベントの `routeKey` を見てハンドラを選ぶ。API Gateway の統合先は、1つの関数にまとめても、ルートごとに関数を分けてもよい（どちらでもコードの変更は不要）。CloudFormation では、タイムアウトと同時実行数を個別に設定するために、同じ zip を使う関数を4つ作っている。
+パッケージは1つで、`handler.Route` がイベントの `routeKey` を見てハンドラを選ぶ。API Gateway の統合先は、1つの関数にまとめても、ルートごとに関数を分けてもよい（どちらでもコードの変更は不要）。CloudFormation では、同じ zip を使う関数を2つ作っている。`tickets`（A / B-1 / B-3: 画像解析・採番・ビュー）と、`get-qr`（B-2: QR 生成）。QR 生成を、画像解析の同時実行数の上限から切り離すため。
 
 | 関数（CloudFormation） | ルート |
 |---|---|
-| `issue-inline` | `POST /v1/tickets/qr-inline` |
-| `issue` | `POST /v1/tickets` |
-| `get-view` | `GET /v1/tickets/{ticketCode}/view` |
+| `tickets` | `POST /v1/tickets/qr-inline`、`POST /v1/tickets`、`GET /v1/tickets/{ticketCode}/view` |
 | `get-qr` | `GET /v1/tickets/{ticketCode}/qr` |
 | `example-qr`（exampleqr.zip） | `GET /v1/example/qr` |
 

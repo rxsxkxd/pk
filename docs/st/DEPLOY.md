@@ -11,19 +11,19 @@ API の設計は [DESIGN.md](DESIGN.md) を参照。デプロイの方法は2つ
 
 ```
 API Gateway HTTP API（$default ステージ、自動デプロイ、スロットリング）
- ├─ POST /v1/tickets/qr-inline        → Lambda ticketqr-{impl}-issue-inline
- ├─ POST /v1/tickets                  → Lambda ticketqr-{impl}-issue
- ├─ GET  /v1/tickets/{ticketCode}/view → Lambda ticketqr-{impl}-get-view
- ├─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr
+ ├─ POST /v1/tickets/qr-inline        ┐
+ ├─ POST /v1/tickets                  ├→ Lambda ticketqr-{impl}-tickets（画像解析・採番・ビュー）
+ ├─ GET  /v1/tickets/{ticketCode}/view ┘
+ ├─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr（QR 画像の生成）
  └─ GET  /v1/example/qr                → Lambda ticketqr-{impl}-example-qr
-チケット系（上の4つ）: provided.al2023 / arm64 / 256MB、パッケージ ticketqr.zip を共有（どのハンドラを呼ぶかは routeKey で決まる）
+チケット系（上の2関数）: provided.al2023 / arm64 / 256MB、パッケージ ticketqr.zip を共有（どのハンドラを呼ぶかは routeKey で決まる）
                       実行ロールは Secrets Manager の salt だけを読める
 example-qr:           provided.al2023 / arm64 / 128MB、別パッケージ exampleqr.zip、設定もシークレットも不要
                       実行ロールはログ出力だけ（チケット系とは別のロール）
 Secrets Manager: ticketqr/{impl}/signing-salt（スタックの外で管理する）
 ```
 
-> 現在の実装の状態: 画像解析は `ANALYZER_MODE=mock`（常に valid を返す）。`ALLOWED_ORIGINS`（Origin の照合と CORS）は未実装（E2E.md 4章）。静的サイトはまだ無いため、この手順の対象は API だけ。
+> 現在の実装の状態: Go 版・Node 版とも実装済み（同じ手順でデプロイできる。2.1.1）。画像解析は `ANALYZER_MODE=mock`（常に valid を返す）。`ALLOWED_ORIGINS`（Origin の照合と CORS）は未実装（E2E.md 4章）。静的サイトはまだ無いため、この手順の対象は API だけ。
 
 ## 1. 前提
 
@@ -51,6 +51,26 @@ make -C go test
 make -C go build
 ls go/bin/*.zip   # ticketqr.zip（チケット系4エンドポイント）、exampleqr.zip（example.com の QR）
 ```
+
+### 2.1.1 Node 版の場合
+
+Node 版も zip の名前と構成は同じ。以降の手順は、次の表の項目だけを読み替える。
+
+```sh
+npm --prefix node ci
+npm --prefix node test && npm --prefix node run typecheck
+npm --prefix node run build
+ls node/dist/*.zip   # ticketqr.zip、exampleqr.zip
+```
+
+| 項目 | Go 版 | Node 版 |
+|---|---|---|
+| `IMPL` | `go` | `node` |
+| zip の場所 | `go/bin/*.zip` | `node/dist/*.zip` |
+| 手動デプロイ（3.3、3.6）の `--runtime` / `--handler` | `provided.al2023` / `bootstrap` | `nodejs24.x` / `index.handler` |
+| CloudFormation（4.4） | `Impl=go` | `Impl=node`（Runtime と Handler はテンプレートの `ImplMap` が切り替える） |
+
+salt のシークレット（2.2）は実装ごとに作る（`ticketqr/node/signing-salt`）。
 
 ### 2.2 署名用 salt の作成（初回だけ）
 
@@ -109,11 +129,16 @@ export API_ID API_URL
 echo $API_URL   # https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com
 ```
 
-### 3.3 Lambda 関数（4つ）
+### 3.3 Lambda 関数（チケット系は2つ）
+
+| 関数 | 担当ルート | タイムアウト |
+|---|---|---|
+| `ticketqr-$IMPL-tickets` | A `POST /v1/tickets/qr-inline`、B-1 `POST /v1/tickets`、B-3 `GET .../view`（画像解析・採番・ビュー） | 15秒 |
+| `ticketqr-$IMPL-get-qr` | B-2 `GET .../qr`（QR 画像の生成） | 5秒 |
 
 ```sh
-for f in issue-inline issue get-view get-qr; do
-  case $f in issue*) TIMEOUT=15 ;; *) TIMEOUT=5 ;; esac
+for f in tickets get-qr; do
+  case $f in tickets) TIMEOUT=15 ;; *) TIMEOUT=5 ;; esac
 
   aws logs create-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-$f
   aws logs put-retention-policy --log-group-name /aws/lambda/ticketqr-$IMPL-$f --retention-in-days 30
@@ -128,35 +153,34 @@ for f in issue-inline issue get-view get-qr; do
 done
 ```
 
-- 4関数とも同じ zip を使う。関数を分けているのは、タイムアウトと同時実行数をエンドポイントごとに設定するためだけ
-- 発行系の関数（`issue-inline`、`issue`）は、画像解析の待ち時間（最大5秒程度）を見込んで 15秒にしている
-- 関数を1つにまとめることもできる。コードの変更は不要で、全ルートの統合先を同じ関数にすればよい。ただし、発行系だけの同時実行数の制限はできなくなる
-- 画像解析サーバーを守るために同時実行数に上限をかける場合は、次のコマンドを使う: `aws lambda put-function-concurrency --function-name ticketqr-$IMPL-issue --reserved-concurrent-executions 10`
+- 2関数とも同じ zip（`ticketqr.zip`）を使う。どのハンドラーを呼ぶかは、イベントの `routeKey` で決まる（コードは関数の分け方に依存しない）
+- `tickets` は、画像解析の待ち時間（最大5秒程度）を見込んで 15秒にしている。B-3（ビュー）も同じ関数なので 15秒になるが、実際の処理は数ミリ秒で終わる
+- `get-qr` を分けているのは、ブラウザの `<img>` から呼ばれる QR 生成を、画像解析の同時実行数の上限から切り離すため
+- 画像解析サーバーを守るために同時実行数に上限をかける場合は、次のコマンドを使う: `aws lambda put-function-concurrency --function-name ticketqr-$IMPL-tickets --reserved-concurrent-executions 10`（B-3 のビュー表示もこの上限の対象に入る）
 
 ### 3.4 ルート・統合・呼び出し権限
 
-```sh
-while read f route; do
-  FN_ARN=$(aws lambda get-function --function-name ticketqr-$IMPL-$f --query Configuration.FunctionArn --output text)
+1つの統合（integration）を複数のルートから使う。
 
+```sh
+for f in tickets get-qr; do
+  FN_ARN=$(aws lambda get-function --function-name ticketqr-$IMPL-$f --query Configuration.FunctionArn --output text)
   INTEGRATION_ID=$(aws apigatewayv2 create-integration --api-id $API_ID \
     --integration-type AWS_PROXY --integration-uri $FN_ARN \
     --payload-format-version 2.0 --timeout-in-millis 20000 \
     --query IntegrationId --output text)
-
-  aws apigatewayv2 create-route --api-id $API_ID \
-    --route-key "$route" --target integrations/$INTEGRATION_ID >/dev/null
+  eval "INTEGRATION_${f//-/_}=$INTEGRATION_ID"
 
   aws lambda add-permission --function-name ticketqr-$IMPL-$f \
     --statement-id apigateway-invoke --action lambda:InvokeFunction \
     --principal apigateway.amazonaws.com \
     --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCOUNT_ID:$API_ID/*/*" >/dev/null
-done <<'EOF'
-issue-inline POST /v1/tickets/qr-inline
-issue POST /v1/tickets
-get-view GET /v1/tickets/{ticketCode}/view
-get-qr GET /v1/tickets/{ticketCode}/qr
-EOF
+done
+
+for route in 'POST /v1/tickets/qr-inline' 'POST /v1/tickets' 'GET /v1/tickets/{ticketCode}/view'; do
+  aws apigatewayv2 create-route --api-id $API_ID --route-key "$route" --target integrations/$INTEGRATION_tickets >/dev/null
+done
+aws apigatewayv2 create-route --api-id $API_ID --route-key 'GET /v1/tickets/{ticketCode}/qr' --target integrations/$INTEGRATION_get_qr >/dev/null
 ```
 
 ### 3.5 ステージ（スロットリングを含む）
@@ -209,7 +233,7 @@ aws lambda add-permission --function-name ticketqr-$IMPL-example-qr \
 
 ```sh
 make -C go build
-for f in issue-inline issue get-view get-qr; do
+for f in tickets get-qr; do
   aws lambda update-function-code --function-name ticketqr-$IMPL-$f \
     --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
 done
@@ -223,7 +247,7 @@ aws lambda update-function-code --function-name ticketqr-$IMPL-example-qr \
 
 ```sh
 aws apigatewayv2 delete-api --api-id $API_ID
-for f in issue-inline issue get-view get-qr; do
+for f in tickets get-qr; do
   aws lambda delete-function --function-name ticketqr-$IMPL-$f
   aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-$f
 done
@@ -253,7 +277,7 @@ aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
 | `TicketSuffixLength` | `8` | suffix の桁数 |
 | `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。空なら execute-api の URL を自動で使う |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `50` / `100` | 全ルートに共通のスロットリング |
-| `IssueReservedConcurrency` | `-1`（設定しない） | 発行系の関数に予約する同時実行数 |
+| `IssueReservedConcurrency` | `-1`（設定しない） | `tickets` 関数に予約する同時実行数（画像解析サーバーの保護用） |
 | `LogRetentionDays` | `30` | Lambda と API のアクセスログの保持日数 |
 
 ### 4.2 成果物バケットの作成（初回だけ）
@@ -272,8 +296,9 @@ aws s3api put-bucket-versioning --bucket $ARTIFACT_BUCKET --versioning-configura
 ```sh
 make -C go build
 export ARTIFACT_PREFIX=ticketqr/$IMPL/$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty-$(date +%s))
+BIN_DIR=$([ $IMPL = node ] && echo node/dist || echo go/bin)
 for p in ticketqr exampleqr; do
-  aws s3 cp go/bin/$p.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$p.zip
+  aws s3 cp $BIN_DIR/$p.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$p.zip
 done
 ```
 
@@ -343,7 +368,7 @@ curl -s -o /tmp/example.png -w '%{http_code} %{content_type}\n' $API_URL/v1/exam
 ログを見る:
 
 ```sh
-aws logs tail /aws/lambda/ticketqr-$IMPL-issue --follow
+aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --follow
 aws logs tail /aws/apigateway/ticketqr-$IMPL --since 10m   # CloudFormation の場合だけ（アクセスログ）
 ```
 

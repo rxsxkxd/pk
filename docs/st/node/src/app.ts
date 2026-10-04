@@ -57,7 +57,7 @@ const ROUTES: ReadonlyArray<readonly ['GET' | 'POST', string, string, 'json' | '
 // 設定と salt を読み込み依存部品を組み立てる（Lambda 実行環境ごとに初期化時に1回だけ呼ぶ）。
 export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<Deps> {
   const config = loadConfig(env);
-  const analyzer = newAnalyzer(config.analyzerMode);
+  const analyzer = await newAnalyzer(env);
   const salts = await loadSalts(env);
   const signer = newSigner(salts.current, salts.previous);
   return { config, analyzer, signer, newTicket: () => generateTicket(config.suffixLength), log: consoleLog };

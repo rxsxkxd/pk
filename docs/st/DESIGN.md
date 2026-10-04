@@ -403,7 +403,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 
 ImageAnalyzer はインターフェースとして抽象化し、テスト時はスタブに差し替える。
 
-> 実装状況: 送信形式は確定したが、送信先・認証・レスポンス形式が未確定のため、HTTP クライアントの実装は保留。現在は常に valid を返すモック（`ANALYZER_MODE=mock`）のみ。インターフェースが受け取るのは検証済みの画像バイト列で、HTTP クライアントはそれをそのまま `application/octet-stream` で送る。
+> 実装状況: Node 版は HTTP クライアント（`ANALYZER_MODE=http`）を、仮のプロトコル（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`、レスポンス `{valid, reason}`）で実装済み。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。Go 版は常に valid を返すモック（`ANALYZER_MODE=mock`）のみ。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 4.7。
 
 ## 8. 状態・データ
 

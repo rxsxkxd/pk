@@ -19,6 +19,16 @@ Parameters:
   AnalyzerMode:
     Type: String
     Default: mock
+    AllowedValues: [mock, http]
+    Description: mock = in-process, always valid. http = POST to AnalyzerUrl (Node version only for now).
+  AnalyzerUrl:
+    Type: String
+    Default: ""
+    Description: Image analysis endpoint for AnalyzerMode=http, e.g. the analyzer-stub stack's AnalyzeUrl output.
+  AnalyzerApiKeySecretArn:
+    Type: String
+    Default: ""
+    Description: Secret holding the analysis server's x-api-key (AnalyzerMode=http), e.g. the analyzer-stub stack's ApiKeySecretArn output.
   TicketSuffixLength:
     Type: Number
     Default: 8
@@ -56,6 +66,7 @@ Mappings:
 Conditions:
   UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]
   HasIssueReservedConcurrency: !Not [!Equals [!Ref IssueReservedConcurrency, -1]]
+  HasAnalyzerApiKey: !Not [!Equals [!Ref AnalyzerApiKeySecretArn, ""]]
 
 Resources:
   # ---------- IAM ----------
@@ -78,6 +89,16 @@ Resources:
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource: !Ref SigningSaltSecretArn
+        - !If
+          - HasAnalyzerApiKey
+          - PolicyName: read-analyzer-api-key
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource: !Ref AnalyzerApiKeySecretArn
+          - !Ref AWS::NoValue
 
   # exampleqr reads no secrets, so it gets a role with logging only.
   ExampleFunctionRole:
@@ -144,6 +165,8 @@ Resources:
         Variables:
           PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
           ANALYZER_MODE: !Ref AnalyzerMode
+          ANALYZER_URL: !Ref AnalyzerUrl
+          ANALYZER_API_KEY_SECRET_ID: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeySecretArn, !Ref AWS::NoValue]
           SIGNING_SALT_SECRET_ID: !Ref SigningSaltSecretArn
           TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
   TicketsIntegration:
@@ -204,6 +227,8 @@ Resources:
         Variables:
           PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
           ANALYZER_MODE: !Ref AnalyzerMode
+          ANALYZER_URL: !Ref AnalyzerUrl
+          ANALYZER_API_KEY_SECRET_ID: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeySecretArn, !Ref AWS::NoValue]
           SIGNING_SALT_SECRET_ID: !Ref SigningSaltSecretArn
           TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
   GetQRIntegration:

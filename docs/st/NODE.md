@@ -126,7 +126,7 @@ app.ts ──▶ domain.ts ◀── infra.ts
 | ファイル | 層 | 主な関数・型 | 対応する Go |
 |---|---|---|---|
 | `domain.ts` | ビジネスロジック | `issueTicket`（画像チェック → 解析 → 採番）、`generateTicket`、`newSigner`、`validateImage`、外部とのインターフェース（`Analyzer`、`Log`、`AnalyzerError`）、`AppError` と各エラー | `usecase`、`ticketcode`、`signer`、`imageinput`、`analyzer`（型）、`apperr` |
-| `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Secrets Manager）、`newAnalyzer` / `alwaysValid`（解析クライアント。今はモック）、`qrPng`（lean-qr）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、`qr`、slog |
+| `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Secrets Manager）、`newAnalyzer` / `alwaysValid` / `httpAnalyzer`（画像解析クライアント。モックと HTTP）、`qrPng`（lean-qr）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、`qr`、slog |
 | `app.ts` | HTTP 層と組み立て | `ROUTES`、`createApp`（ミドルウェア・`onError`・`notFound`）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`issueInline` / `issue` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readFormImage`、`createExampleApp`、`ticketView` / `errorView`、`loadDeps` | `app`、`handler`、`view`、`exampleqr` |
 
 - `domain.ts` は外部と直接やり取りしない。画像解析とログは、`issueTicket` が受け取る `IssuePorts`（`analyzer`、`newTicket`、`log`）を通して使う。テストでは、ここに差し替え用の実装（スタブ）を渡す
@@ -264,7 +264,7 @@ if (!(image instanceof File)) throw badRequest('image file is required');       
 cd docs/st/node
 npm ci
 npm run dev          # http://localhost:8080/（フォーム）、http://localhost:8081/v1/example/qr
-npm test             # 43件。共通テストデータ（../testdata）と Go と同じハンドラーのケース
+npm test             # 53件。共通テストデータ（../testdata）と Go と同じハンドラーのケース
 npm run typecheck
 npm run format:check
 npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
@@ -272,7 +272,10 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 
 | 環境変数 | 内容 |
 |---|---|
-| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_SECRET_ID`、`TICKET_SUFFIX_LENGTH`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`） |
+| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_SECRET_ID`、`TICKET_SUFFIX_LENGTH`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。ただし `ANALYZER_MODE` は `mock` に加えて `http` も使える（Node 版のみ） |
+| `ANALYZER_URL` | `ANALYZER_MODE=http` のときの POST 先（例: `http://localhost:8090/v1/analyze`） |
+| `ANALYZER_API_KEY_SECRET_ID` | `ANALYZER_MODE=http` のときの API キーのシークレット。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
+| `ANALYZER_TIMEOUT_MS` | 1回の呼び出しのタイムアウト（既定 5000） |
 | `PORT` / `EXAMPLE_PORT` | `npm run dev` の待ち受けポート（既定値 8080 / 8081） |
 
 デプロイは `DEPLOY.md` を参照（`Impl=node` を指定し、`node/dist/*.zip` をアップロードする）。
@@ -301,3 +304,18 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 | 壊れた multipart、`image` がない | 400 `BAD_REQUEST` / `image is required` など | 400 `BAD_REQUEST` / `image file is required` |
 | `image` がファイルではなく文字列で送られた | その文字列を画像として扱い、形式判定で 415 | 400 `BAD_REQUEST` |
 | パスのチケットコードが空（`/v1/tickets//view`） | ハンドラーを直接呼ぶと 403 | ルートに一致しないので 404。API Gateway 経由では Go も同じ（ルートに一致しない） |
+
+## 11. 画像解析サーバーとの接続（HTTP クライアント）
+
+`ANALYZER_MODE=http` のとき、`infra.ts` の `httpAnalyzer` が画像を解析サーバーに POST する（仕様は analyzer-stub/DESIGN.md 3・8章）。
+
+```sh
+# ローカルでスタブと組み合わせて動かす
+(cd ../analyzer-stub/node && npm run dev)     # :8090、API キー local-stub-key
+ANALYZER_MODE=http ANALYZER_URL=http://localhost:8090/v1/analyze ANALYZER_API_KEY=local-stub-key npm run dev
+```
+
+- 依存は増やさない（標準の `fetch` と `AbortSignal.timeout` を使う）
+- 1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライする。失敗は `AnalyzerError`（`timeout` / `upstream`）として `domain.ts` に返し、API のエラー（504 / 502）になる。`valid: false` は 422
+- AWS へのデプロイは DEPLOY.md 4.7（`AnalyzerMode=http`、`AnalyzerUrl`、`AnalyzerApiKeySecretArn`）
+

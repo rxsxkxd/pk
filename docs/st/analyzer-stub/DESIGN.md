@@ -2,7 +2,7 @@
 
 API の設計は [../DESIGN.md](../DESIGN.md)（7章 画像解析サーバー連携）を参照。
 
-> **実装状況**: Node 版は実装済み（`node/`）。Rust 版は未着手（`rust/`、6章）。
+> **実装状況**: Node 版のスタブは実装済み（`node/`）。Rust 版は未着手（`rust/`、6章）。API 側の HTTP クライアントは Node 版のみ実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 4.7。
 
 ## 1. 目的
 
@@ -175,7 +175,7 @@ aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL
 - 予約同時実行数は 5（パラメータ `ReservedConcurrency`）。URL が漏れても、使える量を抑えるため
 - Function URL を `AuthType: NONE` で公開するには、`lambda:InvokeFunctionUrl` と `lambda:InvokeFunction`（`InvokedViaFunctionUrl: true`）の両方の権限が必要。テンプレートに両方を入れている
 
-## 8. API 側で必要になる変更（別作業）
+## 8. API 側の変更（Node 版は実装済み、Go 版は未着手）
 
 | 対象 | 内容 |
 |---|---|
@@ -187,8 +187,19 @@ aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL
 
 レスポンスの形式（3.2）は仮のものなので、クライアント側では解釈部分を1か所にまとめ、本物の仕様が決まったらそこだけを差し替える。
 
+Node 版の実装（`node/src/infra.ts`）:
+
+| 項目 | 内容 |
+|---|---|
+| `newAnalyzer(env)` | `ANALYZER_MODE=mock` → プロセス内のモック、`http` → `httpAnalyzer`。`http` のときは `ANALYZER_URL`（必須）、`ANALYZER_API_KEY_SECRET_ID`（Lambda 上。ローカルは `APP_ENV=local` + `ANALYZER_API_KEY`）、`ANALYZER_TIMEOUT_MS`（既定 5000）を読む |
+| `httpAnalyzer` | 標準の `fetch` で POST する（依存なし）。1回ごとに `AbortSignal.timeout` で打ち切る。5xx・タイムアウト・通信エラーのときだけ1回リトライし、4xx と形式の崩れたレスポンスはリトライしない |
+| `parseAnalyzerResponse` | 仮の形式 `{valid: boolean, reason?: string}` の解釈。本物の仕様が決まったら、ここだけを差し替える |
+| テスト | `node/test/app.test.ts` の `http analyzer client`。ローカルの HTTP サーバーを立てて、送ったバイト列とヘッダー、リトライの回数、タイムアウト、API のエラー（422 / 502 / 504）への変換を確認する |
+
+ローカルでの通し確認（スタブの `npm run dev` + API の `ANALYZER_MODE=http`）: 発行（201 / 303）が通り、スタブのログの SHA-256 が送った画像と一致した。スタブを止めたとき・API キーが違うときは 502 になった。
+
 ## 9. 決めておきたいこと
 
 1. 仮のレスポンス形式（3.2）と認証（3.3）を、この内容で進めてよいか
-2. API 側の HTTP クライアント（8章）を、Go 版と Node 版のどちらから先に実装するか
+2. Go 版の HTTP クライアントに着手する時期（Node 版は実装済み）
 3. Rust 版のスタブ（6章）に着手する時期

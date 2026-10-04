@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { describe, test } from 'node:test';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { after, describe, test } from 'node:test';
 import { handle } from '@hono/aws-lambda';
 import type { APIGatewayProxyEventV2 as Event, APIGatewayProxyStructuredResultV2 as Result } from 'aws-lambda';
 import { correction, generate } from 'lean-qr';
 import { createApp, createExampleApp, type Deps } from '../src/app.ts';
 import { AnalyzerError, generateTicket, MAX_IMAGE_BYTES, newSigner, type Analyzer } from '../src/domain.ts';
-import { alwaysValid, loadConfig, qrPng } from '../src/infra.ts';
+import { alwaysValid, httpAnalyzer, loadConfig, newAnalyzer, qrPng } from '../src/infra.ts';
 
 const root = new URL('../../', import.meta.url);
 const vectors = (name: string) => JSON.parse(readFileSync(new URL(`testdata/${name}`, root), 'utf8'));
@@ -27,7 +29,7 @@ type LambdaHandler = (event: Event) => Promise<Result>;
 
 function newRoute(analyzer: Analyzer = alwaysValid) {
   const deps: Deps = {
-    config: { publicBaseUrl: BASE, publicOrigin: BASE, suffixLength: 8, analyzerMode: 'mock' },
+    config: { publicBaseUrl: BASE, publicOrigin: BASE, suffixLength: 8 },
     analyzer,
     signer: newSigner('test-salt'),
     newTicket: () => generateTicket(8),
@@ -154,12 +156,11 @@ describe('signer', () => {
 
 describe('config', () => {
   test('defaults and origin', () => {
-    const c = loadConfig({ PUBLIC_BASE_URL: 'https://api.example.com:8443/', ANALYZER_MODE: 'mock' });
+    const c = loadConfig({ PUBLIC_BASE_URL: 'https://api.example.com:8443/' });
     assert.deepEqual(c, {
       publicBaseUrl: 'https://api.example.com:8443',
       publicOrigin: 'https://api.example.com:8443',
       suffixLength: 8,
-      analyzerMode: 'mock',
     });
   });
   test('invalid values', () => {
@@ -394,4 +395,101 @@ test('example.com QR', async () => {
   assert.equal(header(res, 'Cache-Control'), 'no-store');
   assert.equal(res.isBase64Encoded, true);
   assert.deepEqual(Buffer.from(res.body!, 'base64').subarray(0, 8), Buffer.from(PNG_MAGIC));
+});
+
+// ---------------------------------------------------------------- HTTP analyzer client (analyzer-stub/DESIGN.md 3)
+
+describe('http analyzer client', () => {
+  // A local server whose behavior is scripted per test; it records every request it receives.
+  type Reply = (req: IncomingMessage, res: ServerResponse) => void;
+  let replies: Reply[] = [];
+  const received: Array<{ headers: IncomingMessage['headers']; body: Buffer }> = [];
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    received.push({ headers: req.headers, body: Buffer.concat(chunks) });
+    (replies.shift() ?? ((_, r) => r.writeHead(599).end()))(req, res);
+  });
+  const listening = new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  after(() => server.close());
+
+  const json =
+    (status: number, body: unknown): Reply =>
+    (_, res) =>
+      res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
+  const hang: Reply = () => {}; // never answers
+
+  async function client(...script: Reply[]) {
+    await listening;
+    replies = script;
+    received.length = 0;
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/analyze`;
+    return httpAnalyzer({ url, apiKey: 'k', timeoutMs: 200 });
+  }
+  const analyze = (a: Awaited<ReturnType<typeof client>>) => a({ data: JPEG, mimeType: 'image/jpeg' });
+
+  test('posts the image bytes unchanged as octet-stream with the API key', async () => {
+    const a = await client(json(200, { valid: true, reason: 'ok' }));
+    assert.deepEqual(await analyze(a), { valid: true, reason: 'ok' });
+    assert.equal(received.length, 1);
+    assert.equal(received[0].headers['content-type'], 'application/octet-stream');
+    assert.equal(received[0].headers['x-api-key'], 'k');
+    assert.deepEqual(new Uint8Array(received[0].body), JPEG);
+  });
+
+  test('valid: false is a result, not an error', async () => {
+    assert.deepEqual(await analyze(await client(json(200, { valid: false }))), { valid: false, reason: '' });
+  });
+
+  // [name, server replies in order, expected request count, expected outcome]
+  const retries: Array<[string, Reply[], number, 'valid' | 'upstream' | 'timeout']> = [
+    ['5xx is retried once and succeeds', [json(500, {}), json(200, { valid: true })], 2, 'valid'],
+    ['no answer is retried once and succeeds', [hang, json(200, { valid: true })], 2, 'valid'],
+    ['5xx twice is an upstream error', [json(500, {}), json(502, {})], 2, 'upstream'],
+    ['no answer twice is a timeout', [hang, hang], 2, 'timeout'],
+    ['4xx is not retried', [json(401, {})], 1, 'upstream'],
+    ['malformed body is not retried', [json(200, { valid: 'yes' })], 1, 'upstream'],
+  ];
+  for (const [name, script, calls, outcome] of retries) {
+    test(name, async () => {
+      const a = await client(...script);
+      if (outcome === 'valid') {
+        assert.equal((await analyze(a)).valid, true);
+      } else {
+        await assert.rejects(analyze(a), (err: unknown) => err instanceof AnalyzerError && err.kind === outcome);
+      }
+      assert.equal(received.length, calls);
+    });
+  }
+
+  test('the API maps analyzer failures to 502 / 504 and invalid to 422', async () => {
+    const cases: Array<[Reply[], number, string]> = [
+      [[json(200, { valid: false })], 422, 'IMAGE_INVALID'],
+      [[json(500, {}), json(500, {})], 502, 'ANALYSIS_UPSTREAM_ERROR'],
+      [[hang, hang], 504, 'ANALYSIS_TIMEOUT'],
+    ];
+    for (const [script, status, code] of cases) {
+      const { handle } = newRoute(await client(...script));
+      const res = await handle(await formEvent(ISSUE_INLINE, 'image', JPEG));
+      assert.equal(res.statusCode, status);
+      assert.equal(errorCode(res), code);
+    }
+  });
+
+  test('newAnalyzer validates http settings', async () => {
+    await assert.rejects(newAnalyzer({ ANALYZER_MODE: 'http' }), /ANALYZER_URL/);
+    await assert.rejects(
+      newAnalyzer({ ANALYZER_MODE: 'http', ANALYZER_URL: 'http://x/v1/analyze' }),
+      /ANALYZER_API_KEY_SECRET_ID/,
+    );
+    await assert.rejects(newAnalyzer({ ANALYZER_MODE: 'nope' }), /unsupported/);
+    assert.equal(await newAnalyzer({ ANALYZER_MODE: 'mock' }), alwaysValid);
+    const a = await newAnalyzer({
+      ANALYZER_MODE: 'http',
+      ANALYZER_URL: 'http://x/v1/analyze',
+      APP_ENV: 'local',
+      ANALYZER_API_KEY: 'k',
+    });
+    assert.equal(typeof a, 'function');
+  });
 });

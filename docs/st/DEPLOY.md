@@ -23,7 +23,7 @@ example-qr:           provided.al2023 / arm64 / 128MB、別パッケージ examp
 Secrets Manager: ticketqr/{impl}/signing-salt（スタックの外で管理する）
 ```
 
-> 現在の実装の状態: Go 版・Node 版とも実装済み（同じ手順でデプロイできる。2.1.1）。画像解析は `ANALYZER_MODE=mock`（常に valid を返す）。`ALLOWED_ORIGINS`（Origin の照合と CORS）は未実装（E2E.md 4章）。静的サイトはまだ無いため、この手順の対象は API だけ。
+> 現在の実装の状態: Go 版・Node 版とも実装済み（同じ手順でデプロイできる。2.1.1）。画像解析は `ANALYZER_MODE=mock`（プロセス内で常に valid）と `ANALYZER_MODE=http`（画像解析サーバーに POST。Node 版のみ）から選ぶ（[4.7](#47-画像解析サーバーの切り替えanalyzer_mode)）。`ALLOWED_ORIGINS`（Origin の照合と CORS）は未実装（E2E.md 4章）。静的サイトはまだ無いため、この手順の対象は API だけ。
 
 ## 1. 前提
 
@@ -273,7 +273,9 @@ aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
 | `ArtifactBucket` | - | Lambda の zip を置く S3 バケット |
 | `ArtifactPrefix` | - | zip のキーの接頭辞。**デプロイのたびに変える**（例: `ticketqr/go/<git sha>`） |
 | `SigningSaltSecretArn` | - | 2.2 で作ったシークレットの ARN |
-| `AnalyzerMode` | `mock` | 画像解析クライアントの種類 |
+| `AnalyzerMode` | `mock` | 画像解析クライアントの種類。`mock`（プロセス内で常に valid）/ `http`（`AnalyzerUrl` に POST。**Node 版のみ対応**）。4.7 |
+| `AnalyzerUrl` | 空 | `AnalyzerMode=http` のときの POST 先（例: スタブのスタックの出力 `AnalyzeUrl`） |
+| `AnalyzerApiKeySecretArn` | 空 | `AnalyzerMode=http` のときの API キーのシークレット（例: スタブのスタックの出力 `ApiKeySecretArn`）。指定すると、Lambda の実行ロールに読み取り権限が付く |
 | `TicketSuffixLength` | `8` | suffix の桁数 |
 | `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。空なら execute-api の URL を自動で使う |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `50` / `100` | 全ルートに共通のスロットリング |
@@ -338,6 +340,101 @@ aws cloudformation wait stack-delete-complete --stack-name ticketqr-$IMPL
 
 スタックの外にある salt のシークレットと成果物バケットは残る。
 
+### 4.7 画像解析サーバーの切り替え（ANALYZER_MODE）
+
+| モード | 動き | 必要なパラメータ | 対応する実装 |
+|---|---|---|---|
+| `mock`（既定） | API の中で、通信せずに常に valid を返す | なし | Go 版・Node 版 |
+| `http` | `AnalyzerUrl` に画像をそのまま POST する（`application/octet-stream`、`x-api-key` 付き。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） | `AnalyzerUrl`、`AnalyzerApiKeySecretArn` | **Node 版のみ**（Go 版で `http` を指定すると、Lambda の初期化でエラーになる） |
+
+本物の画像解析サーバーができるまでは、`http` の接続先に画像解析サーバーのスタブ（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md)。解析はせず常に valid を返す）を使う。
+
+#### 手順1: スタブをデプロイする（初回、またはスタブを更新するとき）
+
+```sh
+cd docs/st
+npm --prefix analyzer-stub/node run build
+export STUB_IMPL=node
+export STUB_PREFIX=analyzer-stub/$STUB_IMPL/$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty-$(date +%s))
+aws s3 cp analyzer-stub/node/dist/analyzer-stub.zip s3://$ARTIFACT_BUCKET/$STUB_PREFIX/analyzer-stub.zip
+
+aws cloudformation deploy --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
+  --template-file analyzer-stub/template.yaml --capabilities CAPABILITY_IAM \
+  --parameter-overrides Impl=$STUB_IMPL ArtifactBucket=$ARTIFACT_BUCKET ArtifactPrefix=$STUB_PREFIX
+
+stub_output() {
+  aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+}
+export ANALYZER_URL=$(stub_output AnalyzeUrl)
+export ANALYZER_KEY_ARN=$(stub_output ApiKeySecretArn)
+echo $ANALYZER_URL
+```
+
+API キーはスタブのスタックが自動生成する。値を知る必要があるのは、スタブを直接 curl で叩くときだけ（`aws secretsmanager get-secret-value --secret-id $ANALYZER_KEY_ARN --query SecretString --output text`）。
+
+#### 手順2: API を `http` モードでデプロイする（Node 版）
+
+4.3 で Node 版の zip（`node/dist/*.zip`）をアップロードしたうえで、4.4 のコマンドにパラメータを3つ足す。
+
+```sh
+export IMPL=node
+aws cloudformation deploy \
+  --stack-name ticketqr-$IMPL \
+  --template-file infra/cloudformation/api.yaml \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    Impl=$IMPL \
+    ArtifactBucket=$ARTIFACT_BUCKET \
+    ArtifactPrefix=$ARTIFACT_PREFIX \
+    SigningSaltSecretArn=$SECRET_ARN \
+    AnalyzerMode=http \
+    AnalyzerUrl=$ANALYZER_URL \
+    AnalyzerApiKeySecretArn=$ANALYZER_KEY_ARN
+```
+
+- `tickets` と `get-qr` の両方の Lambda に `ANALYZER_MODE`、`ANALYZER_URL`、`ANALYZER_API_KEY_SECRET_ID` が入り、実行ロールに API キーの読み取り権限が付く（2つの関数は同じ初期化処理を通るため、`get-qr` にも必要）
+- `aws cloudformation deploy` は、指定しなかったパラメータを既定値に戻す。`http` のまま別の変更をデプロイするときも、3つのパラメータを毎回指定する
+
+#### 手順3: 動作確認
+
+```sh
+printf '\xff\xd8\xff\xe0test' > /tmp/sample.jpg
+curl -s -F image=@/tmp/sample.jpg $API_URL/v1/tickets/qr-inline | head -c 120; echo   # 201（スタブ経由で valid）
+
+# スタブが受け取った画像のハッシュが、送ったファイルと一致することを確認する（画像が加工されずに届いている）
+shasum -a 256 /tmp/sample.jpg
+aws logs tail /aws/lambda/ticketqr-analyzer-stub-$STUB_IMPL --since 5m | grep '"msg":"analyzed"'
+
+# スタブにつながらない・API キーが合わないときは、API が 502 ANALYSIS_UPSTREAM_ERROR を返し、ログに原因が出る
+aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 5m | grep 'image analysis failed'
+```
+
+#### 手動デプロイ（3章）の場合
+
+3.3 の環境変数に `ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_SECRET_ID=$ANALYZER_KEY_ARN` を加え、3.1 の実行ロールに読み取り権限を足す。
+
+```sh
+aws iam put-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-analyzer-api-key \
+  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"$ANALYZER_KEY_ARN\"}]}"
+
+for f in tickets get-qr; do
+  aws lambda update-function-configuration --function-name ticketqr-$IMPL-$f \
+    --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_SECRET_ID=$ANALYZER_KEY_ARN,SIGNING_SALT_SECRET_ID=$SECRET_ARN,TICKET_SUFFIX_LENGTH=8}" \
+    --query LastUpdateStatus --output text
+done
+```
+
+#### `mock` に戻す・スタブを削除する
+
+```sh
+# mock に戻す: 4.4 のコマンドを AnalyzerMode などを付けずに実行する（既定値の mock に戻る）
+# スタブを削除する（API を mock に戻してから）
+aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL
+```
+
+API を `http` のままスタブを削除すると、画像の発行（A / B-1）がすべて 502 になる。
+
 ## 5. 動作確認
 
 モックの画像解析は、JPEG / PNG のマジックバイトさえあれば通る。
@@ -389,6 +486,6 @@ aws logs tail /aws/apigateway/ticketqr-$IMPL --since 10m   # CloudFormation の�
 | `ALLOWED_ORIGINS`（Origin の照合）と、HTTP API の CORS 設定 | 未実装（E2E.md 4章）。実装したら、テンプレートの `CorsConfiguration` と環境変数を追加する |
 | 静的サイト（S3 + CloudFront） | 未作成（E2E.md 3章） |
 | 独自ドメイン | `PublicBaseUrl` パラメータだけ用意してある。ACM 証明書と `AWS::ApiGatewayV2::DomainName`、`ApiMapping` は別途追加する |
-| 本物の画像解析クライアント | プロトコルが決まり次第追加する。認証情報のシークレットと VPC の設定が必要になる可能性がある |
+| 本物の画像解析サーバーへの接続 | Node 版の HTTP クライアント（4.7）は仮のプロトコル（analyzer-stub/DESIGN.md 3）で実装済み。本物の仕様が決まったらレスポンスの解釈部分を差し替える。VPC の設定が必要になる可能性がある。Go 版の HTTP クライアントは未実装 |
 | WAF | HTTP API に直接は付けられない。手前に CloudFront を置く場合に検討する |
 | GitHub Actions からのデプロイ | OIDC で IAM ロールを引き受けて、4.3〜4.4 を実行する形を想定 |

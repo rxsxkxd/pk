@@ -449,7 +449,7 @@ st/
 │       ├── secret/            # salt 取得（Secrets Manager）
 │       ├── config/            # 環境変数
 │       └── view/              # HTMLレンダリング
-├── node/                      # 詳細は NODE.md（ソース4ファイル: lib.ts / ticketqr.ts / exampleqr.ts / local.ts）
+├── node/                      # 詳細は NODE.md（domain.ts / infra.ts / app.ts + 入口の ticketqr.ts / exampleqr.ts / local.ts）
 ├── infra/                     # IaC（impl=go|node でパラメータ化）
 └── tests/
     ├── contract/              # 両実装に同一ケースを流す
@@ -464,7 +464,7 @@ st/
 | Lambda アダプタ | `aws-lambda-go` | Hono + `@hono/aws-lambda`（NODE.md 5.1） |
 | AWS SDK | aws-sdk-go-v2（Secrets Manager のみ） | AWS SDK for JavaScript v3（同左） |
 | QR ライブラリ | `github.com/skip2/go-qrcode` | `lean-qr`（NODE.md 3章） |
-| multipart 解析 | 標準 `mime/multipart` | Hono の `c.req.formData()` + `content-type`（NODE.md 5.2） |
+| multipart 解析 | 標準 `mime/multipart` | Hono の `c.req.formData()`（NODE.md 5.2） |
 | HTMLテンプレート | `html/template` + `embed` | テンプレートをバンドルに同梱、エスケープ付きで描画 |
 | ビルド | `GOOS=linux GOARCH=arm64 go build` | esbuild でバンドル（tree-shaking） |
 

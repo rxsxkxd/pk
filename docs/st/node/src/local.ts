@@ -3,7 +3,7 @@
 
 import { serve } from '@hono/node-server';
 import { fileURLToPath } from 'node:url';
-import { createApp, createExampleApp, loadDeps } from './lib.ts';
+import { createApp, createExampleApp, loadDeps } from './app.ts';
 
 const port = Number(process.env.PORT ?? 8080);
 const examplePort = Number(process.env.EXAMPLE_PORT ?? 8081);

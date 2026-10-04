@@ -7,21 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { handle } from '@hono/aws-lambda';
 import type { APIGatewayProxyEventV2 as Event, APIGatewayProxyStructuredResultV2 as Result } from 'aws-lambda';
 import { correction, generate } from 'lean-qr';
-import {
-  alwaysValid,
-  AnalyzerError,
-  createApp,
-  createExampleApp,
-  generateTicket,
-  loadConfig,
-  loadViews,
-  MAX_IMAGE_BYTES,
-  newSigner,
-  qrPng,
-  ROUTE_KEYS,
-  type Analyzer,
-  type Deps,
-} from '../src/lib.ts';
+import { createApp, createExampleApp, ROUTE_KEYS, type Deps } from '../src/app.ts';
+import { AnalyzerError, generateTicket, MAX_IMAGE_BYTES, newSigner, type Analyzer } from '../src/domain.ts';
+import { alwaysValid, loadConfig, loadViews, qrPng } from '../src/infra.ts';
 
 const root = new URL('../../', import.meta.url);
 const vectors = (name: string) => JSON.parse(readFileSync(new URL(`testdata/${name}`, root), 'utf8'));
@@ -240,11 +228,25 @@ describe('A: POST /v1/tickets/qr-inline', () => {
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
-      'no boundary',
+      'urlencoded instead of multipart',
       alwaysValid,
-      async () => rawEvent(ISSUE_INLINE, 'multipart/form-data', 'x'),
+      async () => rawEvent(ISSUE_INLINE, 'application/x-www-form-urlencoded', 'image=x'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
+    ],
+    // Malformed multipart is a single 400 (Go returns 415 for a missing boundary; NODE.md 10).
+    ['no boundary', alwaysValid, async () => rawEvent(ISSUE_INLINE, 'multipart/form-data', 'x'), 400, 'BAD_REQUEST'],
+    [
+      'image sent as a text field',
+      alwaysValid,
+      async () =>
+        rawEvent(
+          ISSUE_INLINE,
+          'multipart/form-data; boundary=xyz',
+          '--xyz\r\nContent-Disposition: form-data; name="image"\r\n\r\nhello\r\n--xyz--\r\n',
+        ),
+      400,
+      'BAD_REQUEST',
     ],
     [
       'broken multipart',

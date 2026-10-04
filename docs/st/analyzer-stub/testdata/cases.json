@@ -1,0 +1,15 @@
+{
+  "description": "Shared by the Node and Rust stubs. Each case is a request to the stub (API key 'test-key') and the expected status. Accepted images are always valid (no analysis).",
+  "cases": [
+    { "name": "jpeg is valid", "bodyHex": "ffd8ffe000104a464946", "status": 200, "valid": true },
+    { "name": "png is valid", "bodyHex": "89504e470d0a1a0a0000", "status": 200, "valid": true },
+    { "name": "any bytes are valid (no analysis)", "bodyHex": "68656c6c6f", "status": 200, "valid": true },
+    { "name": "content type with parameters", "bodyHex": "ffd8ff", "contentType": "application/octet-stream; charset=binary", "status": 200, "valid": true },
+    { "name": "missing api key", "bodyHex": "ffd8ff", "apiKey": null, "status": 401 },
+    { "name": "wrong api key", "bodyHex": "ffd8ff", "apiKey": "nope", "status": 401 },
+    { "name": "wrong content type", "bodyHex": "ffd8ff", "contentType": "image/jpeg", "status": 400 },
+    { "name": "empty body", "bodyHex": "", "status": 400 },
+    { "name": "wrong path", "bodyHex": "ffd8ff", "path": "/v1/other", "status": 404 },
+    { "name": "wrong method", "bodyHex": "", "method": "GET", "status": 404 }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "ticketqr-analyzer-stub-node",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "dev": "node local.mjs",
+    "test": "node --test 'test/*.test.mjs'",
+    "build": "rm -rf dist && mkdir -p dist && zip -q dist/analyzer-stub.zip index.mjs"
+  }
+}

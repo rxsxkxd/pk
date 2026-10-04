@@ -1,8 +1,7 @@
-// Implementations that talk to the outside world: environment variables, Secrets Manager, template
-// files, the QR library, the image analysis server (mock for now) and log output. The business
+// Implementations that talk to the outside world: environment variables, Secrets Manager, the QR
+// library, the image analysis server (mock for now) and log output. The business
 // logic in domain.ts only sees the Analyzer / Log ports.
 
-import { readFileSync } from 'node:fs';
 import { correction, generate } from 'lean-qr';
 import { toPngBuffer } from 'lean-qr/extras/node_export';
 import type { Analyzer, Log } from './domain.ts';
@@ -87,36 +86,6 @@ export function qrPng(text: string): Buffer {
   const scale = Math.max(1, Math.floor(QR_MAX_PX / (code.size + 2 * QUIET_ZONE)));
   const png = toPngBuffer(code, { on: [0, 0, 0], off: [255, 255, 255], pad: QUIET_ZONE, scale });
   return Buffer.from(png.buffer, png.byteOffset, png.byteLength);
-}
-
-// =================================================================================================
-// Views: shared ../templates  (↔ go/internal/view)
-// =================================================================================================
-
-// HTML の特殊文字（& < > " '）を数値文字参照にエスケープする。
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-
-export type Views = {
-  ticket(ticketCode: string, qrUrl: string): string;
-  error(code: string, message: string): string;
-};
-
-// 共通テンプレートを読み込み、{{.Field}} 以外の構文があれば読み込み時にエラーにする。
-export function loadViews(dir: string): Views {
-  const load = (name: string, fields: string[]) => {
-    const tpl = readFileSync(`${dir.replace(/\/+$/, '')}/${name}`, 'utf8');
-    for (const m of tpl.matchAll(/\{\{(.*?)\}\}/g)) {
-      const field = /^\.(\w+)$/.exec(m[1])?.[1];
-      if (!field || !fields.includes(field)) throw new Error(`${name}: unsupported template action ${m[0]}`);
-    }
-    return (data: Record<string, string>) => tpl.replace(/\{\{\.(\w+)\}\}/g, (_, k: string) => escapeHtml(data[k]));
-  };
-  const ticket = load('ticket.html', ['TicketCode', 'QRURL']);
-  const error = load('error.html', ['Code', 'Message']);
-  return {
-    ticket: (ticketCode, qrUrl) => ticket({ TicketCode: ticketCode, QRURL: qrUrl }),
-    error: (code, message) => error({ Code: code, Message: message }),
-  };
 }
 
 // =================================================================================================

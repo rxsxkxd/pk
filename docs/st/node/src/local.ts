@@ -2,7 +2,6 @@
 // example.com QR app on :8081 with @hono/node-server — the same Hono apps the Lambda functions run.
 
 import { serve } from '@hono/node-server';
-import { fileURLToPath } from 'node:url';
 import { createApp, createExampleApp, loadDeps } from './app.ts';
 
 const port = Number(process.env.PORT ?? 8080);
@@ -13,7 +12,6 @@ const defaults: Record<string, string> = {
   PUBLIC_BASE_URL: `http://localhost:${port}`,
   SIGNING_SALT: 'local-dev-salt',
   ANALYZER_MODE: 'mock',
-  TEMPLATES_DIR: fileURLToPath(new URL('../../templates/', import.meta.url)),
 };
 for (const [k, v] of Object.entries(defaults)) process.env[k] ??= v;
 

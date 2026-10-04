@@ -12,7 +12,7 @@
     "format": "prettier --write src test",
     "format:check": "prettier --check src test",
     "build": "rm -rf dist && npm run build:ticketqr && npm run build:exampleqr",
-    "build:ticketqr": "esbuild src/ticketqr.ts --bundle --platform=node --target=node24 --format=esm --minify '--external:@aws-sdk/*' --outfile=dist/ticketqr/index.mjs && mkdir -p dist/ticketqr/templates && cp ../templates/*.html dist/ticketqr/templates/ && cd dist/ticketqr && zip -qr ../ticketqr.zip .",
+    "build:ticketqr": "esbuild src/ticketqr.ts --bundle --platform=node --target=node24 --format=esm --minify '--external:@aws-sdk/*' --outfile=dist/ticketqr/index.mjs && cd dist/ticketqr && zip -qr ../ticketqr.zip .",
     "build:exampleqr": "esbuild src/exampleqr.ts --bundle --platform=node --target=node24 --format=esm --minify --outfile=dist/exampleqr/index.mjs && cd dist/exampleqr && zip -qr ../exampleqr.zip ."
   },
   "dependencies": {

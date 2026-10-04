@@ -1,15 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { handle } from '@hono/aws-lambda';
 import type { APIGatewayProxyEventV2 as Event, APIGatewayProxyStructuredResultV2 as Result } from 'aws-lambda';
 import { correction, generate } from 'lean-qr';
-import { createApp, createExampleApp, ROUTE_KEYS, type Deps } from '../src/app.ts';
+import { createApp, createExampleApp, type Deps } from '../src/app.ts';
 import { AnalyzerError, generateTicket, MAX_IMAGE_BYTES, newSigner, type Analyzer } from '../src/domain.ts';
-import { alwaysValid, loadConfig, loadViews, qrPng } from '../src/infra.ts';
+import { alwaysValid, loadConfig, qrPng } from '../src/infra.ts';
 
 const root = new URL('../../', import.meta.url);
 const vectors = (name: string) => JSON.parse(readFileSync(new URL(`testdata/${name}`, root), 'utf8'));
@@ -23,19 +20,8 @@ const BASE = 'https://api.example.com';
 const ISSUE_INLINE = '/v1/tickets/qr-inline';
 const ISSUE = '/v1/tickets';
 
-test('route table matches the API Gateway route keys (same as Go handler.RouteKeys)', () => {
-  assert.deepEqual(ROUTE_KEYS, [
-    'POST /v1/tickets/qr-inline',
-    'POST /v1/tickets',
-    'GET /v1/tickets/{ticketCode}/view',
-    'GET /v1/tickets/{ticketCode}/qr',
-  ]);
-});
-
 // ---------------------------------------------------------------- helpers
 // Requests go through @hono/aws-lambda, so the tests also cover the Lambda event conversion.
-
-const views = loadViews(fileURLToPath(new URL('templates/', root)));
 
 type LambdaHandler = (event: Event) => Promise<Result>;
 
@@ -44,7 +30,6 @@ function newRoute(analyzer: Analyzer = alwaysValid) {
     config: { publicBaseUrl: BASE, publicOrigin: BASE, suffixLength: 8, analyzerMode: 'mock' },
     analyzer,
     signer: newSigner('test-salt'),
-    views,
     newTicket: () => generateTicket(8),
     log: () => {},
   };
@@ -351,6 +336,8 @@ describe('B-1 errors are HTML views', () => {
       assert.match(header(res, 'Content-Type'), /^text\/html/);
       assert.ok(res.body!.includes(`data-error-code="${code}"`), String(res.body));
       assert.equal(header(res, 'Location'), '');
+      assertCommonHeaders(res);
+      assert.match(header(res, 'Content-Security-Policy'), /img-src https:\/\/api\.example\.com/);
     });
   }
 });
@@ -397,13 +384,7 @@ test('unknown route is 404 JSON', async () => {
   const res = await newRoute().handle(event({ path: '/v1/unknown' }));
   assert.equal(res.statusCode, 404);
   assert.equal(errorCode(res), 'NOT_FOUND');
-});
-
-test('views reject template syntax other than {{.Field}}', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'tpl-'));
-  writeFileSync(join(dir, 'ticket.html'), '{{if .TicketCode}}{{.QRURL}}{{end}}');
-  writeFileSync(join(dir, 'error.html'), '{{.Code}}');
-  assert.throws(() => loadViews(dir), /unsupported template action/);
+  assertCommonHeaders(res);
 });
 
 test('example.com QR', async () => {

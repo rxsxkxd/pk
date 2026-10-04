@@ -299,14 +299,14 @@ Response `200 OK`, `Content-Type: text/html; charset=utf-8`
 
 | 項目 | 方針 |
 |---|---|
-| テンプレート | 両実装で**同一のテンプレートファイル**（`templates/ticket.html`, `templates/error.html`）を共有し、ビルド時に同梱 |
+| テンプレート | Go は `templates/ticket.html` / `templates/error.html` を `embed` で同梱。Node は `hono/html` で同じ内容の HTML を作る（ファイルは共有しない。NODE.md 5.3） |
 | 埋め込みデータ | `ticketCode`, `qrUrl` のみ。発行日時は保存していないため別途は表示しない（日時はコードの先頭14桁に含まれる） |
 | `qrUrl` | **絶対URL**。`PUBLIC_BASE_URL` から組み立てる |
-| エスケープ | 自動エスケープ必須（Go: `html/template`、Node: エスケープ付きテンプレート関数 or 軽量ライブラリ）。属性値・本文とも |
+| エスケープ | 自動エスケープ必須（Go: `html/template`、Node: `hono/html`）。属性値・本文とも |
 | 機械可読性 | `data-*` 属性にコード等を載せ、HTMLをパースする利用側でも値を取り出せるようにする |
 | 外部リソース | 使わない（CSS はインライン、JS なし） |
 | セキュリティヘッダ | `Content-Security-Policy: default-src 'none'; img-src {PUBLIC_BASE_URL}; style-src 'unsafe-inline'`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` |
-| 出力一致性 | Go/Node で同一入力に対し同一HTMLを出すことを契約テストで確認（空白差は正規化して比較） |
+| 出力の同等性 | Go/Node で同一入力に対し、`data-*` 属性・`<img src>`・文言が同じであることを契約テストで確認（HTML のバイト単位の一致は求めない） |
 
 > デザイン（文言・スタイル）は **要確定**。上記は最小構成の例。
 
@@ -427,7 +427,7 @@ ImageAnalyzer はインターフェースとして抽象化し、テスト時は
 st/
 ├── DESIGN.md
 ├── go.mod                     # Go モジュールルート（templates/ を embed するため st/ 直下）
-├── templates/                 # HTMLビュー / エラービュー（両実装共通）
+├── templates/                 # HTMLビュー / エラービュー（Go 版が使う。Node は hono/html で同じ内容を持つ）
 ├── testdata/                  # 両実装共通のテストベクタ（ticketcode.json, signature.json）
 ├── go/
 │   ├── Makefile               # run / run-example / test / build（ticketqr.zip と exampleqr.zip）
@@ -465,7 +465,7 @@ st/
 | AWS SDK | aws-sdk-go-v2（Secrets Manager のみ） | AWS SDK for JavaScript v3（同左） |
 | QR ライブラリ | `github.com/skip2/go-qrcode` | `lean-qr`（NODE.md 3章） |
 | multipart 解析 | 標準 `mime/multipart` | Hono の `c.req.formData()`（NODE.md 5.2） |
-| HTMLテンプレート | `html/template` + `embed` | テンプレートをバンドルに同梱、エスケープ付きで描画 |
+| HTMLテンプレート | `html/template` + `embed` | `hono/html` のタグ付きテンプレート（コード内） |
 | ビルド | `GOOS=linux GOARCH=arm64 go build` | esbuild でバンドル（tree-shaking） |
 
 QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256px、余白4モジュール、PNG。

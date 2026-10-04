@@ -2,7 +2,7 @@
 
 > **実装状況: 実装済み**（`node/`）。使い方は [9章](#9-使い方)、Go 版との突き合わせ結果は [10章](#10-go-版との突き合わせ結果)。
 
-API の仕様は [DESIGN.md](DESIGN.md) を参照。Go 版（`go/`）と**同じ API 仕様・同じ共通テストデータ・同じテンプレート**で実装し、後で比較評価する。
+API の仕様は [DESIGN.md](DESIGN.md) を参照。Go 版（`go/`）と**同じ API 仕様・同じ共通テストデータ**で実装し、後で比較評価する。HTML は Go と同じ内容を Node 側で独自に持つ（テンプレートファイルは共有しない）。
 
 ## 1. 方針
 
@@ -50,7 +50,7 @@ API の仕様は [DESIGN.md](DESIGN.md) を参照。Go 版（`go/`）と**同じ
 | 乱数（suffix の生成） | `crypto.randomBytes` | `nanoid` など |
 | リクエスト ID（ローカル実行時） | `crypto.randomUUID` | `uuid` |
 | JST の日時の整形 | `Date` を +9時間ずらして `getUTC*` で取り出す | `dayjs`、`date-fns`（tzdata にも依存しない） |
-| HTML の生成とエスケープ | 共通テンプレートの `{{.Name}}` を、`& < > " '` を数値文字参照（`&#NN;`）にした値で置き換える小さな関数 | `handlebars`、`ejs`、`escape-html` / `hono/html`（`"` を `&quot;` にするので Go 版と HTML が一致しない） |
+| HTML の生成とエスケープ | **`hono/html`** の `html` タグ付きテンプレート（埋め込む値を自動でエスケープ。hono に含まれるので依存は増えない） | `handlebars`、`ejs`、`escape-html`、Go の `templates/*.html` の共有（ファイル読み込み・構文検査・テンプレートの zip 同梱が必要になるためやめた） |
 | ルーティング | **Hono**（ルート表から `app.on()` で登録） | `middy`（複数パッケージ、エラー形式は結局自作） |
 | ローカル HTTP サーバー | **@hono/node-server**（Lambda と同じ Hono アプリを起動） | `express` |
 | 設定値の検証 | 手書き（約20行） | `valibot`（画像解析の本物のクライアントでレスポンス検証が必要になった時点で、設定・salt とあわせて再検討する） |
@@ -97,7 +97,6 @@ const png = toPngBuffer(code, { on: [0, 0, 0], off: [255, 255, 255], pad: 4, sca
 
 ```
 st/
-├── templates/                 # Go と共有（ticket.html / error.html）
 ├── testdata/                  # Go と共有（ticketcode.json / signature.json）
 └── node/
     ├── package.json           # scripts: dev / test / typecheck / format / build
@@ -105,8 +104,8 @@ st/
     ├── .prettierrc.json
     ├── src/
     │   ├── domain.ts          # ビジネスロジック（外部入出力なし。node:crypto だけ使う）
-    │   ├── infra.ts           # 外部とのやり取りの実装（環境変数・Secrets Manager・テンプレート・lean-qr・解析クライアント・ログ）
-    │   ├── app.ts             # HTTP 層（Hono）: ルート表・エンドポイント・リクエスト / レスポンス、依存の組み立て
+    │   ├── infra.ts           # 外部とのやり取りの実装（環境変数・Secrets Manager・lean-qr・解析クライアント・ログ）
+    │   ├── app.ts             # HTTP 層（Hono）: ルート表・エンドポイント・リクエスト / レスポンス・HTML ビュー、依存の組み立て
     │   ├── ticketqr.ts        # Lambda エントリ: handler = handle(createApp(await loadDeps()))
     │   ├── exampleqr.ts       # Lambda エントリ: handler = handle(createExampleApp())
     │   └── local.ts           # ローカルサーバー（@hono/node-server で同じアプリを起動。開発専用でバンドルしない）
@@ -127,19 +126,19 @@ app.ts ──▶ domain.ts ◀── infra.ts
 | ファイル | 層 | 主な関数・型 | 対応する Go |
 |---|---|---|---|
 | `domain.ts` | ビジネスロジック | `issueTicket`（画像チェック → 解析 → 採番）、`generateTicket`、`newSigner`、`validateImage`、外部とのインターフェース（`Analyzer`、`Log`、`AnalyzerError`）、`AppError` と各エラー | `usecase`、`ticketcode`、`signer`、`imageinput`、`analyzer`（型）、`apperr` |
-| `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Secrets Manager）、`newAnalyzer` / `alwaysValid`（解析クライアント。今はモック）、`qrPng`（lean-qr）、`loadViews`（テンプレート）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、`qr`、`view`、slog |
-| `app.ts` | HTTP 層と組み立て | `ROUTES`、`createApp`、`run`、各エンドポイント（`issueInline` / `issue` / `getView` / `getQr`）、`verified`、`ticketUrl`、`createExampleApp`、`readFormImage`、レスポンスの生成、`loadDeps` | `app`、`handler`、`exampleqr` |
+| `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Secrets Manager）、`newAnalyzer` / `alwaysValid`（解析クライアント。今はモック）、`qrPng`（lean-qr）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、`qr`、slog |
+| `app.ts` | HTTP 層と組み立て | `ROUTES`、`createApp`（ミドルウェア・`onError`・`notFound`）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`issueInline` / `issue` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readFormImage`、`createExampleApp`、`ticketView` / `errorView`、`loadDeps` | `app`、`handler`、`view`、`exampleqr` |
 
 - `domain.ts` は外部と直接やり取りしない。画像解析とログは、`issueTicket` が受け取る `IssuePorts`（`analyzer`、`newTicket`、`log`）を通して使う。テストでは、ここに差し替え用の実装（スタブ）を渡す
 - 関数はすべてモジュール直下に置き、依存部品は引数（`deps` と Hono の `c`）で受け取る
-- ルートは `app.ts` の `ROUTES` 表だけで定義し、`createApp` が表から Hono に登録する。`ROUTE_KEYS`（API Gateway の表記）は表から作り、Go の `RouteKeys` との一致をテストで確認する。`ROUTE_KEYS` は `/* @__PURE__ */` を付けて、使わないバンドル（exampleqr）で表ごと削除されるようにする
+- ルートは `app.ts` の `ROUTES` 表だけで定義し、`createApp` が表から Hono に登録する
 - Go は `routeKey` で振り分けるが、Node（Hono）はパスで振り分ける。API Gateway で一致したルートのパスがそのまま届くので、結果は同じ
-- エントリポイントのファイル（`ticketqr.ts`、`exampleqr.ts`）は10行程度にする。初期化（設定と salt の取得、テンプレートの読み込み）は、`ticketqr.ts` のトップレベル `await` で、Lambda の初期化フェーズ中に1回だけ行う
+- エントリポイントのファイル（`ticketqr.ts`、`exampleqr.ts`）は10行程度にする。初期化（設定と salt の取得）は、`ticketqr.ts` のトップレベル `await` で、Lambda の初期化フェーズ中に1回だけ行う
 - `exampleqr.ts` は `app.ts` の `createExampleApp` と `infra.ts` の `qrPng` だけを使う。esbuild の tree shaking で、チケット系のコードはバンドルに含まれない
 
 ## 5. 実装方針の詳細
 
-### 5.1 ルーティング（Hono）
+### 5.1 ルーティングとエラー処理（Hono）
 
 ```ts
 // prettier-ignore
@@ -152,16 +151,26 @@ const ROUTES = [
 ];
 
 export function createApp(deps) {
-  const app = new Hono();
-  for (const [method, path, name, errors, endpoint] of ROUTES) app.on(method, path, (c) => run(c, deps, name, errors, () => endpoint(c, deps)));
-  app.notFound((c) => run(c, deps, 'unknown', 'json', async () => { throw notFound(); }));
+  const app = new Hono().use(requestLog(deps.log), commonHeaders(csp));
+  for (const [method, path, name, errors, endpoint] of ROUTES) app.on(method, path, setRoute({ name, errors }), (c) => endpoint(c, deps));
+  app.notFound((c) => c.json(errorBody(notFound()), 404));
+  app.onError((err, c) => /* AppError → c.get('route').errors に応じて HTML か JSON */);
   return app;
 }
 ```
 
-- `run` は Go と同じ役割（ログ出力と、`AppError` を各エンドポイントの形式のエラーに変換）。例外を Hono や Lambda に投げ返さない
-- レスポンスは `c.json()` / `c.html()` ではなく `c.body(…, status, headers)` でヘッダーを明示する。`c.html()` は `charset=UTF-8`（大文字）を付けるなど、Go 版とヘッダーが一致しなくなるため
+| 仕組み | 役割 |
+|---|---|
+| `setRoute`（ルートごとのミドルウェア） | ルート表のログ名とエラー形式を `c.set('route', …)` で記録する |
+| `requestLog`（全体のミドルウェア） | 完了ログ（`requestId`、`endpoint`、`status`、`durationMs`）を出す。ログ名は Go と同じ（`issue-inline` など） |
+| `commonHeaders`（全体のミドルウェア） | すべてのレスポンス（エラー・404 を含む）に `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、CSP を付ける。example アプリは CSP なし |
+| `app.onError` | `AppError` をルートのエラー形式（HTML / JSON）のレスポンスにする。それ以外の例外は 500 にしてログを出す |
+| `app.notFound` | 404 JSON |
+
+- エンドポイントは Hono 標準の `c.json()` / `c.html()` / `c.redirect()` / `c.body()` で返す。ヘッダーはミドルウェアで付けるので、各エンドポイントでは指定しない
+- Hono のミドルウェアは、`onError` が返したレスポンスにも外側からヘッダーを付けられる（`compose` が層ごとにエラーを処理するため）。エラーと 404 に共通ヘッダーが付くことはテストで確認する
 - PNG は `Content-Type: image/png` で返すだけで、`@hono/aws-lambda` が base64 にして `isBase64Encoded: true` を付ける
+- example アプリ（`createExampleApp`）は try/catch を持たず、失敗したときは Hono 既定の 500 に任せる
 
 ### 5.2 multipart の読み取り
 
@@ -175,14 +184,12 @@ if (!(image instanceof File)) throw badRequest('image file is required');       
 - サイズ（4MB 超 → 413）と形式（マジックバイト）は `validateImage` で判定する（Go と同じ順番）
 - パートの `Content-Type` は見ない
 
-### 5.3 テンプレート
+### 5.3 HTML ビュー
 
-- Go の `html/template` と同じテンプレートファイルを使う。テンプレート中の構文は `{{.TicketCode}}` などの単純な埋め込みだけなので、`/\{\{\.(\w+)\}\}/g` で置き換える
-- エスケープは `& < > " '` を数値文字参照（`&#38;` など）にする1行の関数。XSS を防ぐという要件だけを満たす
-- Go の `html/template` とは書き方が違う（Go は `&amp;`、`&#34;` など。`+` と NUL も置き換える）。違いが出るのは記号を含む値（不正なチケットコードなど）を表示するときだけで、通常のチケットコード・URL・エラーメッセージの HTML は Go と一致する
-- テンプレート読み込み時に `{{.Field}}` 以外の構文があればエラーにする（Go と共有できないテンプレートを早期に検出する）
-- テンプレートの場所: `TEMPLATES_DIR`（既定値はバンドルと同じ階層の `templates/`）から、初期化時に `fs.readFileSync` で読む。ビルド時に `../templates/*.html` を zip にコピーする。ローカル実行（`local.ts`）は既定値として `../templates` を設定し、テストはファイルのパスを直接渡す
-- テンプレートに `{{if}}` などの制御構文を使い始めたら、この方式は見直す（Go と Node で同じテンプレートを共有する前提が崩れるため）
+- `app.ts` の `ticketView` / `errorView` が、`hono/html` の `html` タグ付きテンプレートで HTML を作る。埋め込む値は自動でエスケープされる（`&amp;`、`&lt;`、`&gt;`、`&quot;`、`&#39;`）。不正なチケットコードもエスケープされることはテストで確認する
+- Go 版の `templates/*.html` とは共有しない。内容（文言・`data-*` 属性・`<img>`・スタイル）は同じにそろえるが、空白や `<meta ... />` の書き方などは一致させない。文言やデザインを変えるときは両方を直す
+- 共通のスタイルは文字列定数 `STYLE` にして `raw()` で埋め込む。モジュール直下で `html` を呼ぶと esbuild が削除できず、HTML を出さない exampleqr のバンドルに残るため
+- レスポンスは `c.html(body, status, headers)`。CSP などのヘッダーは明示的に付ける（`Content-Type` は Hono が付ける `text/html; charset=UTF-8`）
 
 ### 5.4 salt の取得
 
@@ -201,8 +208,8 @@ if (!(image instanceof File)) throw badRequest('image file is required');       
 | `npm run dev` | `node src/local.ts`。`@hono/node-server` で `:8080`（チケット系 + アップロードフォーム）と `:8081`（example）を起動する。`APP_ENV=local` などのローカル用の値は `local.ts` が既定値として設定する（Go の `make run` / `make run-example` と同じ URL 構成） |
 | `npm test` | `node --test 'test/*.test.ts'` |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run format` / `format:check` | prettier で `src` と `test` を整形する / 整形済みか確認する（CI では `format:check`）。縦にそろえた表（`ROUTES`、`HTML_ESCAPES`）は `// prettier-ignore` で整形の対象から外す |
-| `npm run build` | esbuild で `dist/ticketqr/index.mjs`（`@aws-sdk/*` は外部扱い）と `dist/exampleqr/index.mjs` を作り、`dist/ticketqr.zip`（`index.mjs` + `templates/*.html`）と `dist/exampleqr.zip` にまとめる |
+| `npm run format` / `format:check` | prettier で `src` と `test` を整形する / 整形済みか確認する（CI では `format:check`）。縦にそろえた表（`ROUTES`）は `// prettier-ignore` で整形の対象から外す |
+| `npm run build` | esbuild で `dist/ticketqr/index.mjs`（`@aws-sdk/*` は外部扱い）と `dist/exampleqr/index.mjs` を作り、それぞれ `index.mjs` だけを含む `dist/ticketqr.zip` と `dist/exampleqr.zip` にまとめる |
 
 ```jsonc
 // tsconfig.json（概要）
@@ -227,7 +234,7 @@ if (!(image instanceof File)) throw badRequest('image file is required');       
 | ハンドラー | Go の `handler_test.go` と同じケース（正常系、各エラー、PRG の流れ、署名の必須チェック、HTML のエスケープ、ルーティング）。API Gateway v2 のイベントを `@hono/aws-lambda` の `handle()` に渡して確認するので、Lambda イベントとの変換もテストの対象になる |
 | QR | Node の単体テストでは、PNG のシグネチャと、IHDR のサイズが「256px 以内に収まる最大の整数倍」になっていることを確認する |
 | QR の読み取り（両実装） | 契約テスト（`tests/contract`）で、Go と Node の両方のサーバーに同じリクエストを送り、返ってきた PNG を Go の gozxing で読み取って比べる。Node 側に QR デコーダーの dev 依存は追加しない |
-| HTML の一致 | 契約テストで、同じ `ticketCode` と `sig` を指定したときの B-3 の HTML を比べる |
+| HTML の同等性 | 契約テストで、同じ `ticketCode` と `sig` を指定したときの B-3 の HTML から、`data-ticket-code`、`<img src>`、`<title>`、`data-error-code`、メッセージ、ヘッダーを取り出して比べる（バイト単位の一致は求めない） |
 
 ## 7. 後で JS に切り替える場合
 
@@ -257,7 +264,7 @@ if (!(image instanceof File)) throw badRequest('image file is required');       
 cd docs/st/node
 npm ci
 npm run dev          # http://localhost:8080/（フォーム）、http://localhost:8081/v1/example/qr
-npm test             # 45件。共通テストデータ（../testdata）と Go と同じハンドラーのケース
+npm test             # 43件。共通テストデータ（../testdata）と Go と同じハンドラーのケース
 npm run typecheck
 npm run format:check
 npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
@@ -266,7 +273,6 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 | 環境変数 | 内容 |
 |---|---|
 | `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_SECRET_ID`、`TICKET_SUFFIX_LENGTH`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`） |
-| `TEMPLATES_DIR` | テンプレートの場所。既定値はバンドルと同じ階層の `templates/` |
 | `PORT` / `EXAMPLE_PORT` | `npm run dev` の待ち受けポート（既定値 8080 / 8081） |
 
 デプロイは `DEPLOY.md` を参照（`Impl=node` を指定し、`node/dist/*.zip` をアップロードする）。
@@ -277,13 +283,15 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 
 | 対象 | 結果 |
 |---|---|
-| B-3 のビュー HTML（同じ `ticketCode` と `sig`） | バイト単位で一致 |
-| 403 エラー（B-3 の HTML、B-2 の JSON）、415 エラー（A の JSON、B-1 の HTML、urlencoded） | バイト単位で一致 |
-| レスポンスヘッダー（B-3、B-3 の 403、B-2 の 403、B-2 の PNG） | 一致（ヘッダー名の大文字小文字と、サーバーが付ける `Date`・`Content-Length` などを除く） |
+| B-3 のビュー HTML（同じ `ticketCode` と `sig`） | 内容が一致（`data-ticket-code`、`<img src>` の署名付き URL、`<title>`）。HTML はテンプレートを共有しなくなったので、バイト単位では比べない |
+| B-3 の 403 エラー HTML | 内容が一致（ステータス、`data-error-code`、メッセージ） |
+| JSON のエラー（B-2 の 403、A の 415、urlencoded の 415） | バイト単位で一致 |
+| レスポンスヘッダー | HTML（B-3、B-3 の 403）は一致。JSON・PNG・303 には、Node では CSP と Referrer-Policy も付く（共通ミドルウェアで全レスポンスに付けるため。害はない）。JSON の `Content-Type` は Node では `application/json`（charset なし） |
 | B-1 の 303 | `Location` の形が一致（`{PUBLIC_BASE_URL}/v1/tickets/{code}/view?sig=…`） |
 | B-2 の QR PNG | Go は 256×256、Node は 232×232（許容済み）。どちらも Go の gozxing で読み取ると同じチケットコードになる |
 | Lambda での動作 | `public.ecr.aws/lambda/nodejs:24`（Lambda のエミュレーター入り）で `dist/*.zip` に API Gateway v2 のイベントを送り、A（201）、B-1（303）、B-3（200 HTML）、B-2（200 PNG、base64）、署名不一致（403）、未定義のルート（404 JSON）、example（200 PNG）を確認 |
 | zip サイズ | ticketqr 17KB / exampleqr 14KB（Go: 4.9MB / 2.9MB） |
+| HTML の差 | 空白・インデント、`<meta ... />` の書き方、エスケープの書き方（Go は `&#34;`、Node は `&quot;` など）。いずれも表示と意味は同じ |
 
 既知の差（いずれも要件外の細部。Node はビジネス要件だけを満たす簡略な実装にしているため）:
 
@@ -292,5 +300,4 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 | `multipart/form-data` だが boundary がない | 415 `UNSUPPORTED_MEDIA_TYPE` | 400 `BAD_REQUEST` |
 | 壊れた multipart、`image` がない | 400 `BAD_REQUEST` / `image is required` など | 400 `BAD_REQUEST` / `image file is required` |
 | `image` がファイルではなく文字列で送られた | その文字列を画像として扱い、形式判定で 415 | 400 `BAD_REQUEST` |
-| 記号（`& < > " '` など）を含む値の HTML エスケープ | `&amp;`、`&#34;` など（`+`、NUL も置き換える） | `&#38;`、`&#34;` などの数値文字参照 |
 | パスのチケットコードが空（`/v1/tickets//view`） | ハンドラーを直接呼ぶと 403 | ルートに一致しないので 404。API Gateway 経由では Go も同じ（ルートに一致しない） |

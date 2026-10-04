@@ -1,25 +1,27 @@
 // Ticket QR API — Node.js implementation. Same API, templates and test vectors as the Go version
 // (spec: ../../DESIGN.md, Node-specific decisions: ../../NODE.md). Importing this module has no side
-// effects.
+// effects. HTTP routing and the Lambda event conversion are done by Hono (@hono/aws-lambda).
 //
 // Reading order (each section names the Go file it mirrors):
-//   1. Entry points and route table   — what the Lambda functions expose
+//   1. Apps and route table           — what the Lambda functions expose
 //   2. Endpoints                      — A / B-1 / B-3 / B-2 and example.com
 //   3. Issue flow                     — validate → analyze → generate code
 //   4. Domain rules                   — ticket code, signer, image check, analyzer, QR
 //   5. I/O                            — config and salts, templates, multipart, responses
 //   6. Errors and logging
 
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { parse as parseContentType } from 'content-type';
+import { Hono, type Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { correction, generate } from 'lean-qr';
 import { toPngBuffer } from 'lean-qr/extras/node_export';
-import type { APIGatewayProxyEventV2, APIGatewayProxyStructuredResultV2 } from 'aws-lambda';
 
-export type Event = APIGatewayProxyEventV2;
-export type Result = APIGatewayProxyStructuredResultV2;
-export type Handler = (event: Event) => Promise<Result>;
+// Lambda passes the API Gateway request context as a Hono binding; the local server passes none.
+type Env = { Bindings: { requestContext?: { requestId?: string } } };
+type Ctx = Context<Env>;
 
 export type Deps = {
   config: Config;
@@ -31,27 +33,23 @@ export type Deps = {
 };
 
 // =================================================================================================
-// 1. Entry points and route table  (↔ go/internal/app/app.go, go/internal/handler/route.go)
+// 1. Apps and route table  (↔ go/internal/app/app.go, go/internal/handler/route.go)
 // =================================================================================================
 
-type Endpoint = {
-  name: string; // the "endpoint" field in logs
-  errors: 'json' | 'html'; // error response format (DESIGN.md 5.6)
-  handle: (deps: Deps, event: Event) => Promise<Result>;
-};
+type Endpoint = (c: Ctx, deps: Deps) => Promise<Response>;
 
-// Keys are the route keys exactly as configured on API Gateway HTTP API (the local server registers
-// the same strings). Literal keys keep the table tree-shakable for bundles that don't use it.
+// Same routes as API Gateway HTTP API ({ticketCode} is written :ticketCode in Hono).
 // prettier-ignore
-const ROUTES: Record<string, Endpoint> = {
-  'POST /v1/tickets/qr-inline':        { name: 'issue-inline', errors: 'json', handle: issueInline },
-  'POST /v1/tickets':                  { name: 'issue',        errors: 'html', handle: issue },
-  'GET /v1/tickets/{ticketCode}/view': { name: 'get-view',     errors: 'html', handle: getView },
-  'GET /v1/tickets/{ticketCode}/qr':   { name: 'get-qr',       errors: 'json', handle: getQr },
-};
+const ROUTES: ReadonlyArray<readonly ['GET' | 'POST', string, string, 'json' | 'html', Endpoint]> = [
+  // method  path                            log name        errors  handler
+  ['POST',   '/v1/tickets/qr-inline',        'issue-inline', 'json', issueInline],
+  ['POST',   '/v1/tickets',                  'issue',        'html', issue],
+  ['GET',    '/v1/tickets/:ticketCode/view', 'get-view',     'html', getView],
+  ['GET',    '/v1/tickets/:ticketCode/qr',   'get-qr',       'json', getQr],
+];
 
-// Marked pure so bundles that never use the table (exampleqr) drop it and the ticket handlers.
-export const ROUTE_KEYS = /* @__PURE__ */ Object.keys(ROUTES);
+// ルート表を API Gateway のルートキー表記（"GET /v1/tickets/{ticketCode}/qr"）で返す（Go 版との一致確認用）。
+export const ROUTE_KEYS = /* @__PURE__ */ ROUTES.map(([m, path]) => `${m} ${path.replace(/:(\w+)/g, '{$1}')}`);
 
 // 設定・salt・テンプレートを読み込み依存部品を組み立てる（Lambda 実行環境ごとに初期化時に1回だけ呼ぶ）。
 export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<Deps> {
@@ -63,41 +61,35 @@ export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<De
   return { config, analyzer, signer, views, newTicket: () => generateTicket(config.suffixLength), log: consoleLog };
 }
 
-// routeKey でルート表を引いて各エンドポイントに振り分ける Lambda ハンドラーを返す。
-export function route(deps: Deps): Handler {
-  return (event) => {
-    const ep = Object.hasOwn(ROUTES, event.routeKey) ? ROUTES[event.routeKey] : undefined;
-    if (!ep) {
-      return run(deps, event, 'unknown', jsonError, async () => {
-        throw notFound();
-      });
-    }
-    const onError = ep.errors === 'html' ? (e: AppError) => htmlError(deps, e) : jsonError;
-    return run(deps, event, ep.name, onError, () => ep.handle(deps, event));
-  };
+// ルート表からチケット系エンドポイントの Hono アプリを組み立てる（未定義のルートは 404 JSON）。
+export function createApp(deps: Deps): Hono<Env> {
+  const app = new Hono<Env>();
+  for (const [method, path, name, errors, endpoint] of ROUTES) {
+    app.on(method, path, (c) => run(c, deps, name, errors, () => endpoint(c, deps)));
+  }
+  app.notFound((c) =>
+    run(c, deps, 'unknown', 'json', async () => {
+      throw notFound();
+    }),
+  );
+  return app;
 }
 
 // 処理を実行してリクエストログを出し、例外はエンドポイントの形式のエラーレスポンスに変換する（例外を外に投げない）。
-async function run(
-  deps: Deps,
-  event: Event,
-  endpoint: string,
-  onError: (e: AppError) => Result,
-  fn: () => Promise<Result>,
-) {
+async function run(c: Ctx, deps: Deps, endpoint: string, errors: 'json' | 'html', fn: () => Promise<Response>) {
   const start = performance.now();
-  const ctx = { requestId: event.requestContext?.requestId, endpoint };
-  let res: Result;
+  const ctx = { requestId: c.env?.requestContext?.requestId ?? randomUUID(), endpoint };
+  let res: Response;
   try {
     res = await fn();
   } catch (err) {
     const e = err instanceof AppError ? err : internal();
     if (e.status >= 500) deps.log('ERROR', 'request failed', { ...ctx, error: String(err) });
-    res = onError(e);
+    res = errors === 'html' ? htmlError(c, deps, e) : jsonError(c, e);
   }
   deps.log('INFO', 'request completed', {
     ...ctx,
-    status: res.statusCode,
+    status: res.status,
     durationMs: Math.round(performance.now() - start),
   });
   return res;
@@ -108,10 +100,10 @@ async function run(
 // =================================================================================================
 
 // A: 画像を受け取って発行し、QR を base64 で埋め込んだ JSON を返す（DESIGN.md 5.1）。
-async function issueInline(deps: Deps, event: Event): Promise<Result> {
-  const t = await issueTicket(deps, await readFormImage(event));
+async function issueInline(c: Ctx, deps: Deps): Promise<Response> {
+  const t = await issueTicket(deps, await readFormImage(c));
   const png = qrPng(t.code);
-  return jsonResponse(201, {
+  return jsonResponse(c, 201, {
     ticketCode: t.code,
     issuedAt: t.issuedAt,
     qr: { mimeType: 'image/png', data: png.toString('base64') },
@@ -119,26 +111,26 @@ async function issueInline(deps: Deps, event: Event): Promise<Result> {
 }
 
 // B-1: フォーム送信された画像で発行し、署名付きビュー URL へ 303 で転送する（DESIGN.md 5.2）。
-async function issue(deps: Deps, event: Event): Promise<Result> {
-  const t = await issueTicket(deps, await readFormImage(event));
-  return { statusCode: 303, headers: { Location: ticketUrl(deps, t.code, 'view'), ...COMMON_HEADERS } };
+async function issue(c: Ctx, deps: Deps): Promise<Response> {
+  const t = await issueTicket(deps, await readFormImage(c));
+  return c.body(null, 303, { Location: ticketUrl(deps, t.code, 'view'), ...COMMON_HEADERS });
 }
 
 // B-3: sig を検証し、署名付き QR URL を埋め込んだ HTML を返す（DESIGN.md 5.3）。
-async function getView(deps: Deps, event: Event): Promise<Result> {
-  const code = verified(deps, event);
-  return htmlResponse(deps, 200, deps.views.ticket(code, ticketUrl(deps, code, 'qr')));
+async function getView(c: Ctx, deps: Deps): Promise<Response> {
+  const code = verified(c, deps);
+  return htmlResponse(c, deps, 200, deps.views.ticket(code, ticketUrl(deps, code, 'qr')));
 }
 
 // B-2: sig を検証し、チケットコードの QR PNG をその場で生成して返す（DESIGN.md 5.4）。
-async function getQr(deps: Deps, event: Event): Promise<Result> {
-  return pngResponse(qrPng(verified(deps, event)));
+async function getQr(c: Ctx, deps: Deps): Promise<Response> {
+  return pngResponse(c, qrPng(verified(c, deps)));
 }
 
 // パスのチケットコードを sig と照合して返す。不一致なら 403（コード自体の形式は検査しない）。
-function verified(deps: Deps, event: Event): string {
-  const code = event.pathParameters?.ticketCode ?? '';
-  if (!code || !deps.signer.verify(code, event.queryStringParameters?.sig ?? '')) throw forbidden();
+function verified(c: Ctx, deps: Deps): string {
+  const code = c.req.param('ticketCode') ?? '';
+  if (!code || !deps.signer.verify(code, c.req.query('sig') ?? '')) throw forbidden();
   return code;
 }
 
@@ -149,18 +141,19 @@ function ticketUrl(deps: Deps, code: string, resource: 'view' | 'qr'): string {
 }
 
 // GET /v1/example/qr — fixed QR for https://example.com, deployed as its own package (exampleqr.zip).
-export const EXAMPLE_ROUTE_KEY = 'GET /v1/example/qr';
 export const EXAMPLE_CONTENT = 'https://example.com'; // with scheme so readers open it as a link
 
-// example.com の固定 QR を PNG で返す Lambda ハンドラー（別パッケージ exampleqr.zip 用）。
-export const exampleQr: Handler = async (event) => {
-  try {
-    return pngResponse(qrPng(EXAMPLE_CONTENT));
-  } catch (err) {
-    consoleLog('ERROR', 'render qr failed', { requestId: event.requestContext?.requestId, error: String(err) });
-    return jsonError(internal());
-  }
-};
+// example.com の固定 QR を PNG で返す Hono アプリを作る（別パッケージ exampleqr.zip 用。設定不要）。
+export function createExampleApp(): Hono<Env> {
+  return new Hono<Env>().get('/v1/example/qr', (c) => {
+    try {
+      return pngResponse(c, qrPng(EXAMPLE_CONTENT));
+    } catch (err) {
+      consoleLog('ERROR', 'render qr failed', { requestId: c.env?.requestContext?.requestId, error: String(err) });
+      return jsonError(c, internal());
+    }
+  });
+}
 
 // =================================================================================================
 // 3. Issue flow  (↔ go/internal/usecase/issue.go)
@@ -391,28 +384,25 @@ export function loadViews(dir: string): Views {
   };
 }
 
-// ---- request parsing  (↔ readFormImage / requestBody / header in go/internal/handler/handler.go)
+// ---- request parsing  (↔ readFormImage in go/internal/handler/handler.go)
 
 // multipart/form-data の image フィールドのバイト列をそのまま取り出す（パートの Content-Type は見ない）。
-async function readFormImage(event: Event): Promise<Uint8Array> {
-  const contentType = header(event, 'content-type');
-  const [mediaType, ...params] = contentType.split(';').map((s) => s.trim());
-  const boundary = params
-    .find((p) => p.toLowerCase().startsWith('boundary='))
-    ?.slice(9)
-    .replace(/^"|"$/g, '');
-  if (mediaType.toLowerCase() !== 'multipart/form-data' || !boundary) {
+async function readFormImage(c: Ctx): Promise<Uint8Array> {
+  // Checked before formData(): it would also accept urlencoded bodies, and a missing boundary must be 415.
+  let type = '';
+  let boundary: string | undefined;
+  try {
+    ({
+      type,
+      parameters: { boundary },
+    } = parseContentType(c.req.header('content-type') ?? ''));
+  } catch {}
+  if (type !== 'multipart/form-data' || !boundary)
     throw unsupportedMediaType('Content-Type must be multipart/form-data');
-  }
 
   let form: FormData;
   try {
-    const req = new Request('http://local/', {
-      method: 'POST',
-      headers: { 'content-type': contentType },
-      body: requestBody(event),
-    });
-    form = await req.formData();
+    form = await c.req.formData();
   } catch {
     throw badRequest('invalid multipart body');
   }
@@ -421,60 +411,42 @@ async function readFormImage(event: Event): Promise<Uint8Array> {
   return typeof image === 'string' ? Buffer.from(image) : new Uint8Array(await image.arrayBuffer());
 }
 
-// イベントのボディをバイト列に戻す（isBase64Encoded なら base64 デコード）。
-const requestBody = (event: Event) => Buffer.from(event.body ?? '', event.isBase64Encoded ? 'base64' : 'utf8');
-
-// ヘッダーを名前の大文字小文字を区別せずに取得する。
-function header(event: Event, name: string): string {
-  const entries = Object.entries(event.headers ?? {}).filter((e): e is [string, string] => e[1] !== undefined);
-  return new Headers(entries).get(name) ?? '';
-}
-
 // ---- responses  (↔ jsonResponse / htmlResponse / withCommon in go/internal/handler/handler.go)
+// Headers are set explicitly (not c.json / c.html) so they match the Go version byte for byte.
 
 const COMMON_HEADERS = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 
 // 共通ヘッダー付きの JSON レスポンスを作る。
-function jsonResponse(status: number, body: unknown): Result {
-  return {
-    statusCode: status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', ...COMMON_HEADERS },
-    body: JSON.stringify(body),
-  };
+function jsonResponse(c: Ctx, status: number, body: unknown): Response {
+  return c.body(JSON.stringify(body), status as ContentfulStatusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    ...COMMON_HEADERS,
+  });
 }
 
 // CSP などのセキュリティヘッダー付きの HTML レスポンスを作る。
-function htmlResponse(deps: Deps, status: number, body: string): Result {
-  return {
-    statusCode: status,
-    headers: {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Content-Security-Policy': `default-src 'none'; img-src ${deps.config.publicOrigin}; style-src 'unsafe-inline'`,
-      'Referrer-Policy': 'no-referrer',
-      ...COMMON_HEADERS,
-    },
-    body,
-  };
+function htmlResponse(c: Ctx, deps: Deps, status: number, body: string): Response {
+  return c.body(body, status as ContentfulStatusCode, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Security-Policy': `default-src 'none'; img-src ${deps.config.publicOrigin}; style-src 'unsafe-inline'`,
+    'Referrer-Policy': 'no-referrer',
+    ...COMMON_HEADERS,
+  });
 }
 
-// PNG を base64 にした 200 レスポンスを作る（API Gateway がバイナリに戻す）。
-function pngResponse(png: Buffer): Result {
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'image/png', ...COMMON_HEADERS },
-    body: png.toString('base64'),
-    isBase64Encoded: true,
-  };
+// PNG の 200 レスポンスを作る（Lambda では image/png をアダプターが base64 にする）。
+function pngResponse(c: Ctx, png: Buffer): Response {
+  return c.body(new Uint8Array(png), 200, { 'Content-Type': 'image/png', ...COMMON_HEADERS });
 }
 
 // AppError を JSON のエラーレスポンスにする（A / B-2 用）。
-function jsonError(e: AppError): Result {
-  return jsonResponse(e.status, { error: { code: e.code, message: e.message } });
+function jsonError(c: Ctx, e: AppError): Response {
+  return jsonResponse(c, e.status, { error: { code: e.code, message: e.message } });
 }
 
 // AppError を HTML のエラービューにする（B-1 / B-3 用）。
-function htmlError(deps: Deps, e: AppError): Result {
-  return htmlResponse(deps, e.status, deps.views.error(e.code, e.message));
+function htmlError(c: Ctx, deps: Deps, e: AppError): Response {
+  return htmlResponse(c, deps, e.status, deps.views.error(e.code, e.message));
 }
 
 // =================================================================================================

@@ -1,11 +1,9 @@
-// Local development server (not bundled). Serves the ticket endpoints on :8080 and the example.com
-// QR on :8081, converting each request into an API Gateway HTTP API (v2) event with its routeKey,
-// like go/internal/localhttp.
+// Local development server (not bundled). Serves the ticket app on :8080 (plus an upload form) and the
+// example.com QR app on :8081 with @hono/node-server — the same Hono apps the Lambda functions run.
 
-import { randomUUID } from 'node:crypto';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { serve } from '@hono/node-server';
 import { fileURLToPath } from 'node:url';
-import { EXAMPLE_ROUTE_KEY, exampleQr, loadDeps, route, ROUTE_KEYS, type Event, type Handler } from './lib.ts';
+import { createApp, createExampleApp, loadDeps } from './lib.ts';
 
 const port = Number(process.env.PORT ?? 8080);
 const examplePort = Number(process.env.EXAMPLE_PORT ?? 8081);
@@ -18,57 +16,6 @@ const defaults: Record<string, string> = {
   TEMPLATES_DIR: fileURLToPath(new URL('../../templates/', import.meta.url)),
 };
 for (const [k, v] of Object.entries(defaults)) process.env[k] ??= v;
-
-type Route = { key: string; method: string; pattern: RegExp; handler: Handler };
-
-function compile(key: string, handler: Handler): Route {
-  const [method, path] = key.split(' ');
-  const pattern = new RegExp(`^${path.replace(/\{(\w+)\}/g, '(?<$1>[^/]+)')}$`);
-  return { key, method, pattern, handler };
-}
-
-async function toEvent(req: IncomingMessage, r: Route, url: URL, params: Record<string, string>): Promise<Event> {
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(req.headers))
-    if (v !== undefined) headers[k] = Array.isArray(v) ? v.join(',') : v;
-  const query: Record<string, string> = {};
-  for (const k of new Set(url.searchParams.keys())) query[k] = url.searchParams.getAll(k).join(',');
-
-  // Only the fields the handlers read; the rest of the API Gateway envelope is irrelevant locally.
-  return {
-    version: '2.0',
-    routeKey: r.key,
-    rawPath: url.pathname,
-    rawQueryString: url.search.slice(1),
-    headers,
-    queryStringParameters: query,
-    pathParameters: params,
-    body: Buffer.concat(chunks).toString('base64'),
-    isBase64Encoded: true,
-    requestContext: { requestId: randomUUID(), http: { method: req.method ?? '', path: url.pathname } },
-  } as unknown as Event;
-}
-
-function serve(listenPort: number, routes: Route[], index?: string) {
-  createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? '/', `http://localhost:${listenPort}`);
-    if (index && req.method === 'GET' && url.pathname === '/') {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(index);
-      return;
-    }
-    for (const r of routes) {
-      const m = r.method === req.method ? r.pattern.exec(url.pathname) : null;
-      if (!m) continue;
-      const out = await r.handler(await toEvent(req, r, url, { ...m.groups }));
-      const body = Buffer.from(out.body ?? '', out.isBase64Encoded ? 'base64' : 'utf8');
-      res.writeHead(out.statusCode ?? 200, out.headers as Record<string, string>).end(body);
-      return;
-    }
-    res.writeHead(404, { 'Content-Type': 'text/plain' }).end('404 page not found\n');
-  }).listen(listenPort, () => console.log(`listening on :${listenPort} (open http://localhost:${listenPort}/)`));
-}
 
 // Stands in for the client page that calls patterns A and B-1 (same as the Go local server).
 const uploadForm = `<!doctype html>
@@ -103,10 +50,9 @@ const uploadForm = `<!doctype html>
 </html>
 `;
 
-const tickets = route(await loadDeps());
-serve(
-  port,
-  ROUTE_KEYS.map((k) => compile(k, tickets)),
-  uploadForm,
+// Added to the ticket app itself (not a parent app) so its 404 JSON handler still applies.
+const tickets = createApp(await loadDeps()).get('/', (c) => c.html(uploadForm));
+serve({ fetch: tickets.fetch, port }, () => console.log(`listening on :${port} (open http://localhost:${port}/)`));
+serve({ fetch: createExampleApp().fetch, port: examplePort }, () =>
+  console.log(`listening on :${examplePort} (open http://localhost:${examplePort}/v1/example/qr)`),
 );
-serve(examplePort, [compile(EXAMPLE_ROUTE_KEY, exampleQr)]);

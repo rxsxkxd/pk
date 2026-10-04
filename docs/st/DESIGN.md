@@ -461,10 +461,10 @@ st/
 | 項目 | Go | Node.js |
 |---|---|---|
 | ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs24.x`（arm64、`index.handler`） |
-| Lambda アダプタ | `aws-lambda-go` | 標準ハンドラ |
+| Lambda アダプタ | `aws-lambda-go` | Hono + `@hono/aws-lambda`（NODE.md 5.1） |
 | AWS SDK | aws-sdk-go-v2（Secrets Manager のみ） | AWS SDK for JavaScript v3（同左） |
 | QR ライブラリ | `github.com/skip2/go-qrcode` | `lean-qr`（NODE.md 3章） |
-| multipart 解析 | 標準 `mime/multipart` | 標準 `Request.formData()`（NODE.md 2.2） |
+| multipart 解析 | 標準 `mime/multipart` | Hono の `c.req.formData()` + `content-type`（NODE.md 5.2） |
 | HTMLテンプレート | `html/template` + `embed` | テンプレートをバンドルに同梱、エスケープ付きで描画 |
 | ビルド | `GOOS=linux GOARCH=arm64 go build` | esbuild でバンドル（tree-shaking） |
 

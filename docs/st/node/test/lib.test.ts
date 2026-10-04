@@ -4,23 +4,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { handle } from '@hono/aws-lambda';
+import type { APIGatewayProxyEventV2 as Event, APIGatewayProxyStructuredResultV2 as Result } from 'aws-lambda';
 import { correction, generate } from 'lean-qr';
 import {
   alwaysValid,
   AnalyzerError,
-  exampleQr,
+  createApp,
+  createExampleApp,
   generateTicket,
   loadConfig,
   loadViews,
   MAX_IMAGE_BYTES,
   newSigner,
   qrPng,
-  route,
   ROUTE_KEYS,
   type Analyzer,
   type Deps,
-  type Event,
-  type Result,
 } from '../src/lib.ts';
 
 const root = new URL('../../', import.meta.url);
@@ -32,18 +32,24 @@ const PNG_MAGIC = PNG.subarray(0, 8);
 const CODE_RE = /^\d{14}-[0-9A-HJKMNP-TV-Z]{8}$/;
 const BASE = 'https://api.example.com';
 
-const ROUTE_ISSUE_INLINE = 'POST /v1/tickets/qr-inline';
-const ROUTE_ISSUE = 'POST /v1/tickets';
-const ROUTE_GET_VIEW = 'GET /v1/tickets/{ticketCode}/view';
-const ROUTE_GET_QR = 'GET /v1/tickets/{ticketCode}/qr';
+const ISSUE_INLINE = '/v1/tickets/qr-inline';
+const ISSUE = '/v1/tickets';
 
 test('route table matches the API Gateway route keys (same as Go handler.RouteKeys)', () => {
-  assert.deepEqual(ROUTE_KEYS, [ROUTE_ISSUE_INLINE, ROUTE_ISSUE, ROUTE_GET_VIEW, ROUTE_GET_QR]);
+  assert.deepEqual(ROUTE_KEYS, [
+    'POST /v1/tickets/qr-inline',
+    'POST /v1/tickets',
+    'GET /v1/tickets/{ticketCode}/view',
+    'GET /v1/tickets/{ticketCode}/qr',
+  ]);
 });
 
 // ---------------------------------------------------------------- helpers
+// Requests go through @hono/aws-lambda, so the tests also cover the Lambda event conversion.
 
 const views = loadViews(fileURLToPath(new URL('templates/', root)));
+
+type LambdaHandler = (event: Event) => Promise<Result>;
 
 function newRoute(analyzer: Analyzer = alwaysValid) {
   const deps: Deps = {
@@ -54,32 +60,54 @@ function newRoute(analyzer: Analyzer = alwaysValid) {
     newTicket: () => generateTicket(8),
     log: () => {},
   };
-  return { deps, handle: route(deps) };
+  return { deps, handle: handle(createApp(deps)) as LambdaHandler };
 }
 
-const event = (e: Partial<Event>) => ({ requestContext: { requestId: 'test' }, headers: {}, ...e }) as unknown as Event;
+type EventInit = {
+  method?: string;
+  path: string;
+  query?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  base64?: boolean;
+};
 
-async function formEvent(routeKey: string, field: string, data: Uint8Array): Promise<Event> {
+// API Gateway HTTP API (payload v2) event with only the fields the adapter reads.
+const event = ({ method = 'GET', path, query = '', headers = {}, body, base64 = false }: EventInit) =>
+  ({
+    version: '2.0',
+    routeKey: '$default',
+    rawPath: path,
+    rawQueryString: query,
+    headers: { host: 'api.example.com', ...headers },
+    body,
+    isBase64Encoded: base64,
+    requestContext: { requestId: 'test', domainName: 'api.example.com', http: { method, path } },
+  }) as unknown as Event;
+
+async function formEvent(path: string, field: string, data: Uint8Array): Promise<Event> {
   const fd = new FormData();
   fd.append(field, new Blob([new Uint8Array(data)]), 'upload.jpg');
   const req = new Request('http://local/', { method: 'POST', body: fd });
   const body = Buffer.from(await req.arrayBuffer()).toString('base64');
   return event({
-    routeKey,
+    method: 'POST',
+    path,
     headers: { 'content-type': req.headers.get('content-type')! },
     body,
-    isBase64Encoded: true,
+    base64: true,
   });
 }
 
-// rawEvent builds a request whose body is sent as-is (for non-multipart and malformed bodies).
-const rawEvent = (routeKey: string, contentType: string, body: string) =>
-  event({ routeKey, headers: { 'content-type': contentType }, body });
+// rawEvent builds a POST whose body is sent as-is (for non-multipart and malformed bodies).
+const rawEvent = (path: string, contentType: string, body: string) =>
+  event({ method: 'POST', path, headers: { 'content-type': contentType }, body });
 
-const signedGet = (routeKey: string, code: string | undefined, sig: string) =>
-  event({ routeKey, pathParameters: code === undefined ? {} : { ticketCode: code }, queryStringParameters: { sig } });
+const signedGet = (resource: 'view' | 'qr', code: string, sig: string) =>
+  event({ path: `/v1/tickets/${encodeURIComponent(code)}/${resource}`, query: `sig=${encodeURIComponent(sig)}` });
 
-const header = (res: Result, name: string) => String(res.headers?.[name] ?? '');
+const header = (res: Result, name: string) =>
+  String(Object.entries(res.headers ?? {}).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1] ?? '');
 const errorCode = (res: Result) => JSON.parse(res.body ?? '').error.code as string;
 const stub =
   (result: Partial<{ valid: boolean; reason: string }>, err?: Error): Analyzer =>
@@ -189,7 +217,7 @@ describe('A: POST /v1/tickets/qr-inline', () => {
   test('issues a ticket and returns the QR as base64 JSON', async () => {
     let sent: Uint8Array | undefined;
     const { handle } = newRoute(async (img) => ((sent = img.data), { valid: true, reason: '' }));
-    const res = await handle(await formEvent(ROUTE_ISSUE_INLINE, 'image', JPEG));
+    const res = await handle(await formEvent(ISSUE_INLINE, 'image', JPEG));
 
     assert.equal(res.statusCode, 201, String(res.body));
     assertCommonHeaders(res);
@@ -207,59 +235,59 @@ describe('A: POST /v1/tickets/qr-inline', () => {
     [
       'json instead of form',
       alwaysValid,
-      async () => rawEvent(ROUTE_ISSUE_INLINE, 'application/json', '{}'),
+      async () => rawEvent(ISSUE_INLINE, 'application/json', '{}'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'no boundary',
       alwaysValid,
-      async () => rawEvent(ROUTE_ISSUE_INLINE, 'multipart/form-data', 'x'),
+      async () => rawEvent(ISSUE_INLINE, 'multipart/form-data', 'x'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'broken multipart',
       alwaysValid,
-      async () => rawEvent(ROUTE_ISSUE_INLINE, 'multipart/form-data; boundary=xyz', 'garbage'),
+      async () => rawEvent(ISSUE_INLINE, 'multipart/form-data; boundary=xyz', 'garbage'),
       400,
       'BAD_REQUEST',
     ],
-    ['missing image field', alwaysValid, () => formEvent(ROUTE_ISSUE_INLINE, 'file', JPEG), 400, 'BAD_REQUEST'],
-    ['empty image', alwaysValid, () => formEvent(ROUTE_ISSUE_INLINE, 'image', new Uint8Array()), 400, 'BAD_REQUEST'],
+    ['missing image field', alwaysValid, () => formEvent(ISSUE_INLINE, 'file', JPEG), 400, 'BAD_REQUEST'],
+    ['empty image', alwaysValid, () => formEvent(ISSUE_INLINE, 'image', new Uint8Array()), 400, 'BAD_REQUEST'],
     [
       'not an image',
       alwaysValid,
-      () => formEvent(ROUTE_ISSUE_INLINE, 'image', Buffer.from('hello')),
+      () => formEvent(ISSUE_INLINE, 'image', Buffer.from('hello')),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    ['too large', alwaysValid, () => formEvent(ROUTE_ISSUE_INLINE, 'image', big), 413, 'PAYLOAD_TOO_LARGE'],
+    ['too large', alwaysValid, () => formEvent(ISSUE_INLINE, 'image', big), 413, 'PAYLOAD_TOO_LARGE'],
     [
       'rejected',
       stub({ valid: false, reason: 'blurry' }),
-      () => formEvent(ROUTE_ISSUE_INLINE, 'image', JPEG),
+      () => formEvent(ISSUE_INLINE, 'image', JPEG),
       422,
       'IMAGE_INVALID',
     ],
     [
       'upstream error',
       stub({}, new AnalyzerError('upstream', 'boom')),
-      () => formEvent(ROUTE_ISSUE_INLINE, 'image', JPEG),
+      () => formEvent(ISSUE_INLINE, 'image', JPEG),
       502,
       'ANALYSIS_UPSTREAM_ERROR',
     ],
     [
       'timeout',
       stub({}, new AnalyzerError('timeout', 'slow')),
-      () => formEvent(ROUTE_ISSUE_INLINE, 'image', JPEG),
+      () => formEvent(ISSUE_INLINE, 'image', JPEG),
       504,
       'ANALYSIS_TIMEOUT',
     ],
     [
       'unexpected analyzer error',
       stub({}, new Error('bug')),
-      () => formEvent(ROUTE_ISSUE_INLINE, 'image', JPEG),
+      () => formEvent(ISSUE_INLINE, 'image', JPEG),
       502,
       'ANALYSIS_UPSTREAM_ERROR',
     ],
@@ -277,7 +305,7 @@ describe('A: POST /v1/tickets/qr-inline', () => {
 test('B: PRG flow', async () => {
   const { handle } = newRoute();
 
-  let res = await handle(await formEvent(ROUTE_ISSUE, 'image', PNG));
+  let res = await handle(await formEvent(ISSUE, 'image', PNG));
   assert.equal(res.statusCode, 303, String(res.body));
   assertCommonHeaders(res);
   const loc = new URL(header(res, 'Location'));
@@ -287,14 +315,14 @@ test('B: PRG flow', async () => {
   const code = m![1];
   const sig = loc.searchParams.get('sig')!;
 
-  res = await handle(signedGet(ROUTE_GET_VIEW, code, sig));
+  res = await handle(signedGet('view', code, sig));
   assert.equal(res.statusCode, 200);
   assert.match(header(res, 'Content-Type'), /^text\/html/);
   assert.match(header(res, 'Content-Security-Policy'), new RegExp(`img-src ${BASE}`));
   assert.ok(res.body!.includes(`src="${BASE}/v1/tickets/${code}/qr?sig=${encodeURIComponent(sig)}"`), String(res.body));
   assert.ok(res.body!.includes(`data-ticket-code="${code}"`));
 
-  res = await handle(signedGet(ROUTE_GET_QR, code, sig));
+  res = await handle(signedGet('qr', code, sig));
   assert.equal(res.statusCode, 200);
   assert.equal(header(res, 'Content-Type'), 'image/png');
   assert.equal(res.isBase64Encoded, true);
@@ -306,19 +334,13 @@ describe('B-1 errors are HTML views', () => {
     [
       'json instead of form',
       alwaysValid,
-      async () => rawEvent(ROUTE_ISSUE, 'application/json', '{}'),
+      async () => rawEvent(ISSUE, 'application/json', '{}'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    ['missing image field', alwaysValid, () => formEvent(ROUTE_ISSUE, 'file', JPEG), 400, 'BAD_REQUEST'],
-    [
-      'not an image',
-      alwaysValid,
-      () => formEvent(ROUTE_ISSUE, 'image', Buffer.from('hello')),
-      415,
-      'UNSUPPORTED_MEDIA_TYPE',
-    ],
-    ['rejected', stub({ valid: false }), () => formEvent(ROUTE_ISSUE, 'image', JPEG), 422, 'IMAGE_INVALID'],
+    ['missing image field', alwaysValid, () => formEvent(ISSUE, 'file', JPEG), 400, 'BAD_REQUEST'],
+    ['not an image', alwaysValid, () => formEvent(ISSUE, 'image', Buffer.from('hello')), 415, 'UNSUPPORTED_MEDIA_TYPE'],
+    ['rejected', stub({ valid: false }), () => formEvent(ISSUE, 'image', JPEG), 422, 'IMAGE_INVALID'],
   ];
   for (const [name, analyzer, makeEvent, status, code] of cases) {
     test(name, async () => {
@@ -334,35 +356,43 @@ describe('B-1 errors are HTML views', () => {
 describe('signature required', () => {
   const { deps, handle } = newRoute();
   const code = '20261001194300-7K3QX9MZ';
-  const cases: Array<[string, string | undefined, string]> = [
+  const cases: Array<[string, string, string]> = [
     ['missing sig', code, ''],
     ['sig for other code', code, deps.signer.sign('20261001000000-00000000')],
     ['garbage sig', code, 'x'.repeat(22)],
-    ['missing code', undefined, deps.signer.sign(code)],
   ];
   for (const [name, c, sig] of cases) {
     test(name, async () => {
-      const view = await handle(signedGet(ROUTE_GET_VIEW, c, sig));
+      const view = await handle(signedGet('view', c, sig));
       assert.equal(view.statusCode, 403);
       assert.ok(view.body!.includes('data-error-code="FORBIDDEN"'));
-      const qr = await handle(signedGet(ROUTE_GET_QR, c, sig));
+      const qr = await handle(signedGet('qr', c, sig));
       assert.equal(qr.statusCode, 403);
       assert.equal(errorCode(qr), 'FORBIDDEN');
     });
   }
+
+  // An empty path segment matches no route, as on API Gateway (Go returns 403 only when invoked directly).
+  test('missing code is 404', async () => {
+    for (const resource of ['view', 'qr']) {
+      const res = await handle(event({ path: `/v1/tickets//${resource}`, query: `sig=${deps.signer.sign(code)}` }));
+      assert.equal(res.statusCode, 404);
+      assert.equal(errorCode(res), 'NOT_FOUND');
+    }
+  });
 });
 
 test('view escapes a signed but hostile ticket code', async () => {
   // The code is not format-checked, so a signed hostile value must still be escaped.
   const { deps, handle } = newRoute();
   const code = '"><script>alert(1)</script>';
-  const res = await handle(signedGet(ROUTE_GET_VIEW, code, deps.signer.sign(code)));
+  const res = await handle(signedGet('view', code, deps.signer.sign(code)));
   assert.equal(res.statusCode, 200);
   assert.ok(!res.body!.includes('<script>'), String(res.body));
 });
 
 test('unknown route is 404 JSON', async () => {
-  const res = await newRoute().handle(event({ routeKey: 'GET /v1/unknown' }));
+  const res = await newRoute().handle(event({ path: '/v1/unknown' }));
   assert.equal(res.statusCode, 404);
   assert.equal(errorCode(res), 'NOT_FOUND');
 });
@@ -375,7 +405,7 @@ test('views reject template syntax other than {{.Field}}', () => {
 });
 
 test('example.com QR', async () => {
-  const res = await exampleQr(event({ routeKey: 'GET /v1/example/qr' }));
+  const res = await (handle(createExampleApp()) as LambdaHandler)(event({ path: '/v1/example/qr' }));
   assert.equal(res.statusCode, 200);
   assert.equal(header(res, 'Content-Type'), 'image/png');
   assert.equal(header(res, 'Cache-Control'), 'no-store');

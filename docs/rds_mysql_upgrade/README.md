@@ -57,6 +57,7 @@ Step の詳細を掘り下げる際に参照する:
 - [report-generation-flows.md](report-generation-flows.md) — **レポート生成の全体像**。3 つの生成器（設定レビュー / パラメータ変換 / Green 検証）の役割・入力・実行タイミングを図で整理
 - [migration-catalog-er.md](docs/migration-catalog-er.md) — 移行カタログ(アプリケーション、接続、環境、パラメータグループ)の ER 図。YAML 構造の正本
 - [direct-blue-green-execution.md](docs/direct-blue-green-execution.md) — `scripts/*.rb` を直接実行する場合の、構築前チェック（移行先パラメータグループの確認）から後始末までの一連手順
+- [local-build-verify-green.md](docs/local-build-verify-green.md) — BuildGreen（Step 3）と VerifyGreen（Step 4）だけをローカルで実行する手順
 - [ci/verify-green-vpc-architecture.md](ci/verify-green-vpc-architecture.md) — Step 4 を「Go のビルド」と「検証の実行」に分け、実行側だけを RDS のある VPC 内へ置く構成（図つき）
 - [ci/verify-green-security-group-setup.md](ci/verify-green-security-group-setup.md) — 上記構成で必要なセキュリティグループの設定手順（テンプレートは SG を作らない）
 - [ci/build-report-tool-troubleshooting.md](ci/build-report-tool-troubleshooting.md) — Go ビルド（BuildReportTool）が失敗したときの切り分け。ログの何を見て何をするかの対応表

@@ -2,7 +2,7 @@
 
 本書は、CodeBuild Local Agent を使わずに `scripts/*.rb` を `ruby` で直接実行して、RDS for MySQL 8.0 から 8.4 への Blue/Green 移行を進める手順である。
 
-CodeBuild Local Agent の buildspec 互換性確認は [ci/codebuild-local-verification.md](../ci/codebuild-local-verification.md) を参照する。本書は実運用の直接実行に必要な順序・安全ゲート・コマンドを対象とする。
+BuildGreen と VerifyGreen だけをローカルで実行したい場合は、それに絞った [local-build-verify-green.md](local-build-verify-green.md) を使う。CodeBuild Local Agent の buildspec 互換性確認は [ci/codebuild-local-verification.md](../ci/codebuild-local-verification.md) を参照する。本書は実運用の直接実行に必要な順序・安全ゲート・コマンドを対象とする。
 
 ## 1. 対象範囲と実行順序
 

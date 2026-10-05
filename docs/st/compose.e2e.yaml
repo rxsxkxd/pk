@@ -1,0 +1,42 @@
+# E2E environment (E2E.md): storage (S3-compatible, serves the SPA), api (Lambda RIE + API Gateway role),
+# e2e (deploys the SPA, then runs Playwright). Build web/ first: (cd web && npm ci && npm run build).
+#
+#   docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
+#   API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
+services:
+  storage:
+    build: { context: ., dockerfile: docker/storage.Dockerfile }
+    tmpfs: [/var/lib/garage] # fresh data on every start, so the setup script always runs on an empty node
+    networks:
+      default:
+        aliases: [web, evil] # http://web:3902 and http://evil:3902 serve the buckets "web" and "evil"
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/ready"]
+      interval: 1s
+      retries: 30
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      target: api-${API_IMPL:-go}
+    environment:
+      # Read by the function (local settings: plain-text salt is only allowed with APP_ENV=local).
+      APP_ENV: local
+      ANALYZER_MODE: mock
+      SIGNING_SALT: e2e-salt
+      PUBLIC_BASE_URL: http://api:3000
+      ALLOWED_ORIGINS: http://web:3902
+      # Read by the gateway: the HTTP API's CORS configuration.
+      CORS_ALLOW_ORIGINS: http://web:3902
+
+  e2e:
+    build: { context: ., dockerfile: docker/e2e.Dockerfile }
+    depends_on:
+      storage: { condition: service_healthy }
+      api: { condition: service_started }
+    volumes:
+      - ./web/dist:/web-dist:ro
+      - ./testdata/images:/fixtures:ro
+      - ./e2e/test-results:/e2e/test-results
+      - ./e2e/playwright-report:/e2e/playwright-report

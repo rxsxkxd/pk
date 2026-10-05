@@ -306,19 +306,13 @@ Strict-Transport-Security: max-age=31536000
 - `connect-src {apiBaseUrl}` は、チケット発行 API と QR 同梱発行 API への `fetch` のため
 - `form-action` は `default-src` を引き継がないので、明示する。既定は `'none'`（SPA はフォーム送信をしない）。フォーム送信方式（`form`）を有効にする環境だけ `form-action {apiBaseUrl}` にする
 
-### デプロイ手順（概要）
+### デプロイ手順
 
-```sh
-npm run build
-aws s3 sync dist/ s3://$WEB_BUCKET/ --delete --exclude index.html --exclude config.json \
-  --cache-control 'public, max-age=31536000, immutable'
-aws s3 cp dist/index.html s3://$WEB_BUCKET/index.html --cache-control no-cache
-aws s3 cp config/$ENV.json s3://$WEB_BUCKET/config.json --cache-control no-cache   # 環境ごとの設定
-aws cloudfront create-invalidation --distribution-id $DIST_ID --paths /index.html /config.json
-```
+手順は [../DEPLOY.md](../DEPLOY.md) 6章にまとめてある。
 
-- S3 バケット・CloudFront・OAC・Response Headers Policy は、CloudFormation テンプレート（`web/infra/template.yaml`）として用意する（実装時）
-- CloudFront のドメインを、API の `AllowedOrigins`（7章）に設定する
+- S3 バケット・CloudFront・OAC・Response Headers Policy は、API とは別の CloudFormation テンプレート `infra/cloudformation/web.yaml`（スタック `ticketqr-web-{impl}`）で作る。手動（AWS CLI）の手順もある
+- `config.json` は環境ごとに作ってアップロードする。ビルドに含まれる `dist/config.json`（ローカル開発用）はアップロードしない
+- CloudFront のドメインを、API Gateway の CORS 設定（`AllowOrigins`）に入れる。`api.yaml` にはまだ CORS の設定がないため、今は `aws apigatewayv2 update-api` で設定する（DEPLOY.md 6.5）
 
 ## 10. テスト
 

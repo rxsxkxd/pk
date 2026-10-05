@@ -6,8 +6,10 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/google/uuid"
@@ -25,6 +27,7 @@ func Adapt(routeKey string, fn HandlerFunc) http.Handler {
 			return
 		}
 		req := events.APIGatewayV2HTTPRequest{
+			Version:               "2.0",
 			RouteKey:              routeKey,
 			RawPath:               r.URL.Path,
 			RawQueryString:        r.URL.RawQuery,
@@ -35,6 +38,13 @@ func Adapt(routeKey string, fn HandlerFunc) http.Handler {
 			IsBase64Encoded:       true,
 		}
 		req.RequestContext.RequestID = uuid.NewString()
+		req.RequestContext.RouteKey = routeKey
+		req.RequestContext.Stage = "$default"
+		req.RequestContext.DomainName = r.Host
+		req.RequestContext.TimeEpoch = time.Now().UnixMilli()
+		req.RequestContext.HTTP.Protocol = r.Proto
+		req.RequestContext.HTTP.SourceIP, _, _ = net.SplitHostPort(r.RemoteAddr)
+		req.RequestContext.HTTP.UserAgent = r.UserAgent()
 		req.RequestContext.HTTP.Method = r.Method
 		req.RequestContext.HTTP.Path = r.URL.Path
 		for k, v := range r.Header {

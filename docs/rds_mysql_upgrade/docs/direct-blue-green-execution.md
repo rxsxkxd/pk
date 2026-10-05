@@ -22,9 +22,21 @@ CloudFormation で 8.4 パラメータグループを作成済み
 
 各 Step のスクリプトは、設定ファイルの `actions` が `approved` でなければ AWS を呼ばずに終わる。
 
+### パイプラインの準備ステージは要らない
+
+CodePipeline は BuildGreen の前に準備ステージ（ReadApprovals・BuildReportTool・PrecheckParameterGroup）を並列で動かすが、直接実行ではどれも不要である。いずれもパイプラインだから必要な処理で、直接実行ではスクリプト自身が同じことを行う。
+
+| パイプラインの準備 | 直接実行で要らない理由 |
+|---|---|
+| ReadApprovals | パイプラインで、承認されていないステージ（手動承認を含む）を飛ばすためだけのもの。`build_green.rb`・`switchover.rb` は設定の `actions` を自分で読み、`approved` でなければ AWS を呼ばずに終わる |
+| BuildReportTool | VerifyGreen が Go も外部ネットワークも持たない前提だから必要なもの。`verify_green.rb` は `GREEN_REPORT_GENERATOR` / `GREEN_RUNTIME_COLLECTOR` でビルド済みバイナリを渡せばそれを使い、渡さなければ `.tools/green-report/` へその場でビルドする（Go が必要。5-1 を参照） |
+| PrecheckParameterGroup | BuildGreen の前に早く落とすための関門。`build_green.rb` も新規作成の直前に移行先パラメータグループのファミリーが `mysql8.4` であることを確かめて止まるので、省いても安全である。確認結果の記録（`target-parameter-group-check.md`）を残したいときだけ、3 章のとおり手で実行する |
+
+したがって直接実行は、`ruby scripts/build_green.rb` → `ruby scripts/verify_green.rb` → `ruby scripts/switchover.rb --approve` の 3 本でパイプラインと同じ結果になる（後始末は `go run ./tools/cleanup`）。
+
 ## 2. 共通準備
 
-リポジトリのルートで実行する。直接実行には Bash、AWS CLI v2、Ruby、jq、GNU `date` が必要である。`verify_green.rb` は `date -d` を使うため、macOS の標準 `date` だけでは動作しない。Linux 環境または GNU coreutils を提供するコンテナで実行する。
+リポジトリのルートで実行する。直接実行には AWS CLI v2 と Ruby が必要である。`verify_green.rb` はビルド済みバイナリを渡さない場合に Go でビルドするので、そのときは Go も要る。jq と GNU `date` は使わない（macOS でもそのまま動く）。
 
 ```bash
 export CONFIG_FILE=config/blue-green/staging.deployment.yml
@@ -39,8 +51,6 @@ aws sts get-caller-identity --profile "$AWS_PROFILE"
 # スクリプトの実行と設定 YAML の読み取りに必要。
 # 設定 YAML の読み取りは Ruby の標準ライブラリで行う（追加導入は不要）。
 ruby --version
-# JSON の読み取りに jq を使う。無い場合は該当スクリプトが起動直後に停止する。
-jq --version
 ```
 
 `CONFIG_FILE` の `aws_region` を既定で使用する。別リージョンを使う場合だけ、各コマンドに `--region <region>` を追加する。

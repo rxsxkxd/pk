@@ -215,7 +215,7 @@ flowchart TD
 | 症状 | 原因 | 対処 |
 |---|---|---|
 | `VerifyGreen` が起動時に失敗する | Elastic Network Interface 作成権限が無い | `VpcId` を指定してテンプレートを更新する（`VerifyGreenRole` へ条件付きで付く） |
-| `Report generator is absent` で停止 | artifact を受け取れていない | `BuildReportTool` ステージの成否と `PrimarySource` の指定を確認する |
+| `Report generator is absent` で停止 | artifact を受け取れていない | `Prepare` ステージの `BuildReportTool` アクションの成否と `PrimarySource` の指定を確認する |
 | `The runtime value collector is absent` で停止 | 実効値収集バイナリの artifact を受け取れていない | `BuildReportTool` が 2 本ビルドできているか、`InputArtifacts` に `ReportToolOutput` があるかを確認する |
 | AWS API 呼び出しがタイムアウトする | VPC endpoint が足りない | 上の表の 5 種（+ `kms`）を確認する |
 | Green DB へ接続できない | SG / subnet のルーティング | [セキュリティグループ設定](verify-green-security-group-setup.md) の「よくある失敗」を見る |

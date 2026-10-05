@@ -11,7 +11,7 @@ Description: >-
 #   codepipeline-all-in-one  … 本ファイル。S3 バケット（省略時は新規作成）、IAM、CI リソースを作成する。
 #                              検証環境や、スタック単位で権限を閉じたい場合に使う。
 #
-# 環境（staging / production）ごとに 1 スタックを作成する。サービスはパイプライン変数で
+# 環境（development / staging / production）ごとに 1 スタックを作成する。サービスはパイプライン変数で
 # 切り替えるため、同一環境の複数サービスで 1 つのパイプラインを共用できる。
 
 Metadata:
@@ -43,9 +43,10 @@ Parameters:
 
   EnvironmentName:
     Type: String
-    AllowedValues: [staging, production]
+    AllowedValues: [development, staging, production]
     Description: >-
-      対象環境。config/blue-green/<環境>.yml を CONFIG_FILE として使う。
+      対象環境。config/blue-green/<環境>.deployment.yml を CONFIG_FILE として使う
+      （リポジトリにそのファイルが無いと、パイプラインの最初の CodeBuild で失敗する）。
 
   DefaultServiceName:
     Type: String
@@ -710,7 +711,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   PrecheckProject:
@@ -728,7 +729,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   BuildGreenProject:
@@ -748,7 +749,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   # Go レポート生成器をビルドするだけのプロジェクト。
@@ -801,7 +802,7 @@ Resources:
         # カスタムイメージも ECR からの pull も要らない。
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
           - { Name: COLLECT_MYSQL_RUNTIME_VALUES, Type: PLAINTEXT, Value: !Ref CollectMySqlRuntimeValues }
       # BuildReportTool と同一 VPC の、**レポート実行専用**の private subnet で実行する。
@@ -831,7 +832,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
 
@@ -879,9 +880,16 @@ Resources:
                 OutputArtifacts: [{ Name: SourceOutput }]
                 RunOrder: 1
 
-        # config の actions を読み、後続ステージの条件で使う変数として公開する。
-        # Namespace を付けることで #{Approvals.SWITCHOVER_APPROVED} の形で参照できる。
-        - Name: ReadApprovals
+        # 準備: 互いに依存しない 3 つを並列に動かす（同じ RunOrder のアクションは並列に走る）。
+        # どれも入力は SourceOutput だけで、結果を使うのは後ろのステージである。
+        # 1 つでも失敗すればステージが失敗し、BuildGreen へは進まない（直列だったときと同じ安全性）。
+        #
+        #   ReadApprovals          config の actions を変数として公開する。Namespace を付けたので
+        #                          後ろのステージの条件から #{Approvals.SWITCHOVER_APPROVED} で参照できる
+        #   BuildReportTool        Step 4 で使う Go バイナリをビルドし、artifact で VerifyGreen へ渡す。
+        #                          VerifyGreen を VPC 内へ置く構成でも、外部ネットワークが要るのはここだけになる
+        #   PrecheckParameterGroup Step 2 の成果物（8.4 パラメータグループ）が適用済みかを確かめる
+        - Name: Prepare
           Actions:
             - Name: ReadApprovals
               Namespace: Approvals
@@ -891,11 +899,6 @@ Resources:
                 EnvironmentVariables: '[{"name":"SERVICE_NAME","value":"#{variables.ServiceName}","type":"PLAINTEXT"}]'
               InputArtifacts: [{ Name: SourceOutput }]
               RunOrder: 1
-
-        # Step 4 で使う Go レポート生成器を先にビルドし、artifact で後段へ渡す。
-        # VerifyGreen を VPC 内へ置く構成でも、外部ネットワークが要るのはこのステージだけになる。
-        - Name: BuildReportTool
-          Actions:
             - Name: BuildReportTool
               ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
               Configuration:
@@ -903,10 +906,6 @@ Resources:
               InputArtifacts: [{ Name: SourceOutput }]
               OutputArtifacts: [{ Name: ReportToolOutput }]
               RunOrder: 1
-
-        # Step 2 の成果物（8.4 パラメータグループ）が適用済みかを確認する。
-        - Name: PrecheckParameterGroup
-          Actions:
             - Name: PrecheckParameterGroup
               ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
               Configuration:
@@ -915,7 +914,7 @@ Resources:
               InputArtifacts: [{ Name: SourceOutput }]
               OutputArtifacts: [{ Name: PrecheckOutput }]
               RunOrder: 1
-
+        
         - Name: BuildGreen
           Actions:
             - Name: BuildGreen

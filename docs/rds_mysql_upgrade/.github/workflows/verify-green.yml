@@ -41,7 +41,7 @@ jobs:
           unzip -q "$package_path" -d "$temporary_dir"
           sudo "$temporary_dir/aws/install" --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin --update
           aws --version
-      - uses: aws-actions/configure-aws-credentials@v5
+      - uses: aws-actions/configure-aws-credentials@v6
         # nektos/act は GitHub OIDC トークンを発行できない。ローカルでは .actrc が
         # read-only でマウントする AWS プロファイルをそのまま使う。
         if: ${{ !env.ACT }}

@@ -83,7 +83,7 @@ ci/codebuild/verify-green.yml        ← 実行だけ。Go を使わない
 | `BuildReportToolProject` | **必要**（Go module の取得） | 呼ばない | 不要 |
 | `VerifyGreenProject` | **不要** | 読み取りのみ | Green DB へ接続する場合だけ必要 |
 
-CodePipeline は `BuildReportTool` ステージの出力 artifact（`ReportToolOutput`）を `VerifyGreen` の 2 つ目の input artifact として渡す。入力が複数になるため、アクションの `Configuration` に `PrimarySource: SourceOutput` を指定して、どちらをソースとして展開するかを明示している。2 つ目の artifact は `CODEBUILD_SRC_DIR_ReportToolOutput` に展開される。
+CodePipeline は `Prepare` ステージの `BuildReportTool` アクションの出力 artifact（`ReportToolOutput`）を `VerifyGreen` の 2 つ目の input artifact として渡す。入力が複数になるため、アクションの `Configuration` に `PrimarySource: SourceOutput` を指定して、どちらをソースとして展開するかを明示している。2 つ目の artifact は `CODEBUILD_SRC_DIR_ReportToolOutput` に展開される。
 
 > **`verify-green.yml` はレポート生成器をビルドしない。**artifact を受け取れない場合は、理由と対処（`build-report-tool.yml` を実行して artifact を渡す、または `GREEN_REPORT_GENERATOR` に既存バイナリを指定する）を出して停止する。外部へ出ないという前提を崩さないためである。
 

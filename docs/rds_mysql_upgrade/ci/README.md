@@ -24,15 +24,17 @@ codepipeline.yml:
                                Step 3       Step 4          人の承認        Step 5
 
 codepipeline-all-in-one.yml:
-  Source (GitHub / CodeCommit) → ReadApprovals → PrecheckPG → BuildGreen → VerifyGreen
-                             config を読む   構築前チェック  Step 3      Step 4
-                                                                           切替前検証
+  Source (GitHub / CodeCommit) → Prepare → BuildGreen → VerifyGreen
+                                 ├ ReadApprovals    config を読む     Step 3      Step 4
+                                 ├ BuildReportTool  Go バイナリ                   切替前検証
+                                 └ PrecheckPG       構築前チェック
+                                 （3 つは並列に動く）
     → [Switchover]  承認 → 切替          ※ actions.switchover が approved のときだけ入る
 
 後始末（Step 7）はパイプラインに含まれない → tools/cleanup/ を人が実行する
 ```
 
-`[ ]` で囲んだステージには**入場条件**が付いている。`ReadApprovals` が config の `actions` をパイプライン変数として公開し、`BeforeEntry` の `VariableCheck` が `approved` でなければ**ステージごとスキップ**する。
+`[ ]` で囲んだステージには**入場条件**が付いている。`Prepare` ステージの `ReadApprovals` が config の `actions` をパイプライン変数として公開し、`BeforeEntry` の `VariableCheck` が `approved` でなければ**ステージごとスキップ**する。
 
 このため 1 本のパイプラインを各フェーズで繰り返し実行できる。
 
@@ -126,7 +128,7 @@ CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`�
 | | `codepipeline.yml` | `codepipeline-all-in-one.yml` |
 |---|---|---|
 | サービス指定 | **スタックパラメータ**（サービスごとに 1 スタック） | **パイプライン実行時の変数**（環境ごとに 1 スタックで複数サービスを扱える） |
-| ステージ | Source → BuildGreen → VerifyGreen → 承認 → Switchover | Source → PrecheckPG → BuildGreen → VerifyGreen → 承認 → Switchover |
+| ステージ | Source → BuildGreen → VerifyGreen → 承認 → Switchover | Source → Prepare（ReadApprovals・BuildReportTool・PrecheckPG を並列）→ BuildGreen → VerifyGreen → 承認 → Switchover |
 | IAM の分割 | 全 Step で 1 ロール | **Step ごとに別ロール**（破壊的権限を持つロールは無い） |
 
 ## デプロイ例（IAM・CI 作成版）

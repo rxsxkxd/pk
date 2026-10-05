@@ -52,7 +52,7 @@ flowchart TD
 | 名前 | いつ | どこで | 何を確かめるか | 実体 | 結果が効く先 |
 |---|---|---|---|---|---|
 | **成立条件チェック** | パイプラインを動かす**前** | ローカル（A-1） | 既存 Blue で Blue/Green が作れるか（Step 1、項目 0-1-01〜14） | `go run ./tools/collect_blue_green_prereqs` → `tools/evaluate_blue_green_prereqs/` | ゲート① |
-| **構築前チェック** | パイプライン中、**Blue/Green を作る直前** | CI（ステージ `PrecheckParameterGroup`） | 移行先 8.4 パラメータグループが存在し、family が合っているか | `scripts/check_target_parameter_group.rb` | 失敗なら BuildGreen へ進まない |
+| **構築前チェック** | パイプライン中、**Blue/Green を作る直前** | CI（`Prepare` ステージのアクション `PrecheckParameterGroup`） | 移行先 8.4 パラメータグループが存在し、family が合っているか | `scripts/check_target_parameter_group.rb` | 失敗なら BuildGreen へ進まない |
 | **切替前検証** | パイプライン中、**Blue/Green を作ったあと・切り替える前** | CI（ステージ `VerifyGreen`、Step 4） | Green の構成・パラメータ・レプリカ遅延が設定どおりか | `scripts/verify_green.rb` | ゲート③ |
 
 ステージ名・CodeBuild プロジェクト名・ファイル名にある `precheck` は**構築前チェックのことではない場合がある**点に注意する（`docs/phase-0-precheck.md` は成立条件チェック、`PrecheckParameterGroup` は構築前チェック）。これらは既存のリソース名・リンク先を変えないため、名前はそのまま残している。
@@ -181,7 +181,13 @@ aws codepipeline start-pipeline-execution \
 
 ```mermaid
 flowchart LR
-    S["Source"] --> RA["ReadApprovals"] --> BRT["BuildReportTool"] --> PC["PrecheckPG<br/>構築前チェック"] --> BG["BuildGreen"] --> VG["VerifyGreen<br/>切替前検証"]
+    S["Source"] --> RA & BRT & PC
+    subgraph P["Prepare（並列）"]
+        RA["ReadApprovals"]
+        BRT["BuildReportTool"]
+        PC["PrecheckPG<br/>構築前チェック"]
+    end
+    RA & BRT & PC --> BG["BuildGreen"] --> VG["VerifyGreen<br/>切替前検証"]
     VG --> SW["Switchover<br/>承認付き"]
 
     classDef gate fill:#fff4e6,stroke:#d97706,stroke-width:2px
@@ -191,16 +197,17 @@ flowchart LR
 | ステージ | 何をするか | 承認の影響 |
 |---|---|---|
 | `Source` | リポジトリを取得 | — |
-| `ReadApprovals` | `actions` を読み、後続ステージの条件に使う変数として公開 | — |
-| `BuildReportTool` | Go のバイナリ 2 本（DB 実効値の収集・判定とレポート）をビルドし artifact で渡す。**AWS を呼ばない** | — |
-| `PrecheckParameterGroup` | **構築前チェック。**8.4 パラメータグループの存在と family を確認（読み取りのみ）。失敗すれば BuildGreen へ進まない | — |
+| `Prepare` | 次の 3 つを**並列**に動かす。1 つでも失敗すれば BuildGreen へ進まない | — |
+| └ `ReadApprovals` | `actions` を読み、後続ステージの条件に使う変数として公開 | — |
+| └ `BuildReportTool` | Go のバイナリ 2 本（DB 実効値の収集・判定とレポート）をビルドし artifact で渡す。**AWS を呼ばない** | — |
+| └ `PrecheckParameterGroup` | **構築前チェック。**8.4 パラメータグループの存在と family を確認（読み取りのみ）。失敗すれば BuildGreen へ進まない | — |
 | `BuildGreen` | 保護スナップショット＋Blue/Green の作成 | `build: pending` なら**何もせず正常終了** |
 | `VerifyGreen` | **切替前検証。**Green の構成・レプリカ遅延を検証し、**ゲート③のレポートを出す** | — |
 | `Switchover` | 手動承認 → 切替 | `switchover: pending` なら**ステージごとスキップ**（承認ボタンも出ない） |
 
 **`pending` のときステージごとスキップされるのは意図的である。**「承認しても何も起きない」クリックを発生させないためで、手動承認が表示された時点で実行される状態になっている。
 
-`BuildReportTool` を早い位置に置いているのは、**AWS リソースに触る前にビルドを済ませる**ためである。ビルドが失敗しても RDS には影響しない。
+準備の 3 つは互いに依存しないので、同じステージで並列に動かして待ち時間を減らしている。`BuildReportTool` を BuildGreen より前に置いているのは、**AWS リソースに触る前にビルドを済ませる**ためである。ビルドが失敗しても RDS には影響しない。
 
 ### B-3. ゲート③ — 切り替えてよいか
 

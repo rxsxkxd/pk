@@ -55,7 +55,7 @@ flowchart TD
 
 **意味**：`Stages` の定義とアクションの `RunOrder` の問題で、`BuildReportTool` が実行されていない。
 
-**やること**：`BuildReportTool` は `ReadApprovals` の直後に置く設計である（**AWS リソースに触る前にビルドを済ませる**ため。ビルドが失敗しても RDS には影響が無い）。`VerifyGreen` より前のステージにあることを確認する。
+**やること**：`BuildReportTool` は `Prepare` ステージに `ReadApprovals`・`PrecheckParameterGroup` と並列で置く設計である（**AWS リソースに触る前にビルドを済ませる**ため。ビルドが失敗すれば `Prepare` ごと失敗し、BuildGreen へ進まないので RDS には影響が無い）。`VerifyGreen` より前のステージにあることを確認する。
 
 ### S3: ソースアーティファクトが取れない
 

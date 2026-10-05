@@ -30,33 +30,34 @@
 │    DetectChanges: false（push で起動せず）│                    │ （既存バケット名）   │
 └─────────────────────────────────────────┘                    │ 組織の既存設定を利用 │
    │                                                            │ （同一リージョン）   │
-   ▼                                                            │                     │
-┌─────────────────────────────────────────┐                    └──────────────────────┘
-│ 2. ReadApprovals        Namespace: Approvals                 │
-│    config の actions を読み、変数として公開                    │
-│    → BUILD_APPROVED / SWITCHOVER_APPROVED                    │
-└─────────────────────────────────────────┘
+   │                                                            └──────────────────────┘
+   ▼
+┌───────────────────────────────────────────────────────────────┐
+│ 2. Prepare（3 つのアクションを RunOrder 1 で並列に動かす）        │
+│  ├ ReadApprovals          Namespace: Approvals                 │
+│  │   config の actions を読み、変数として公開                    │
+│  │   → BUILD_APPROVED / SWITCHOVER_APPROVED                    │
+│  ├ BuildReportTool        Step 4 の Go バイナリ 2 本をビルド     │
+│  │   → ReportToolOutput（VerifyGreen が受け取る）               │
+│  └ PrecheckParameterGroup 構築前チェック: 8.4 PG の存在と family │
+│  1 つでも失敗すればステージが失敗し、BuildGreen へ進まない          │
+└───────────────────────────────────────────────────────────────┘
    │
    ▼
 ┌─────────────────────────────────────────┐
-│ 3. PrecheckParameterGroup                │  構築前チェック: 8.4 パラメータグループの存在と family
-└─────────────────────────────────────────┘
-   │
-   ▼
-┌─────────────────────────────────────────┐
-│ 4. BuildGreen               [Step 3]     │  保護スナップショット → Blue/Green 作成
+│ 3. BuildGreen               [Step 3]     │  保護スナップショット → Blue/Green 作成
 │    timeout 120 分                        │  actions.build が pending なら no-op
 └─────────────────────────────────────────┘
    │
    ▼
 ┌─────────────────────────────────────────┐
-│ 5. VerifyGreen              [Step 4]     │  切替前検証: Green 構成 + ReplicaLag の検証
-│    Go は BuildReportTool が事前ビルド     │  切替後は「対象なし」で成功
+│ 4. VerifyGreen              [Step 4]     │  切替前検証: Green 構成 + ReplicaLag の検証
+│    Go は Prepare の BuildReportTool が事前ビルド │  切替後は「対象なし」で成功
 └─────────────────────────────────────────┘
    │
    ▼
 ╔═════════════════════════════════════════╗
-║ 6. Switchover               [Step 5]     ║  ◄── 入場条件
+║ 5. Switchover               [Step 5]     ║  ◄── 入場条件
 ║    ┌───────────────────────────────────┐ ║      #{Approvals.SWITCHOVER_APPROVED}
 ║    │ RunOrder 1: ManualApproval        │ ║      == "approved" でなければ
 ║    │ RunOrder 2: Switchover (CodeBuild)│ ║      ステージごと SKIP
@@ -73,11 +74,10 @@
 | # | ステージ | アクション | 入場条件 | 変更操作 |
 |---|---|---|---|---|
 | 1 | `Source` | `SourceFromGitHub` または `SourceFromCodeCommit`（`SourceProvider` で切り替え） | なし | なし |
-| 2 | `ReadApprovals` | `ReadApprovals` | なし | なし（config を読むだけ） |
-| 3 | `PrecheckParameterGroup`（構築前チェック） | `PrecheckParameterGroup` | なし | なし（読み取り API のみ） |
-| 4 | `BuildGreen` | `BuildGreen` | なし | **あり**（`actions.build` が `approved` のときのみ） |
-| 5 | `VerifyGreen`（切替前検証） | `VerifyGreen` | なし | なし |
-| 6 | `Switchover` | `ManualApproval` → `Switchover` | `SWITCHOVER_APPROVED == approved` | **あり・本番影響** |
+| 2 | `Prepare` | `ReadApprovals`・`BuildReportTool`・`PrecheckParameterGroup`（構築前チェック）を**並列**（すべて `RunOrder: 1`） | なし | なし（config を読む・Go のビルド・読み取り API のみ） |
+| 3 | `BuildGreen` | `BuildGreen` | なし | **あり**（`actions.build` が `approved` のときのみ） |
+| 4 | `VerifyGreen`（切替前検証） | `VerifyGreen` | なし | なし |
+| 5 | `Switchover` | `ManualApproval` → `Switchover` | `SWITCHOVER_APPROVED == approved` | **あり・本番影響** |
 
 **Step 7（後始末）はパイプラインに含まれない。**旧 Blue の削除は不可逆で、切り戻し不要の判断や逆方向レプリケーションの確認と一体で行うべき作業のため、人がツール `tools/cleanup/` で実行する（手順は [移行の実行](../operations-migration-run.md) の B-4）。
 
@@ -88,7 +88,7 @@
 ### 1 回目: 構築フェーズ（`build: approved`、他は `pending`）
 
 ```
-Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓ → VerifyGreen ✓
+Source ✓ → Prepare ✓ → BuildGreen ✓ → VerifyGreen ✓
   → Switchover [SKIP]                                           ⇒ 成功で終了
 ```
 
@@ -97,7 +97,7 @@ Blue/Green が作成され、検証まで完了する。切替はステージご
 ### 2 回目: 切替フェーズ（`switchover: approved` を追加）
 
 ```
-Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) → VerifyGreen ✓
+Source ✓ → Prepare ✓ → BuildGreen ✓(no-op) → VerifyGreen ✓
   → Switchover ▶ 承認待ち → 切替実行 ✓                          ⇒ 成功で終了
 ```
 
@@ -106,7 +106,7 @@ Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) �
 ### 切替後にもう一度実行した場合
 
 ```
-Source ✓ → ReadApprovals ✓ → PrecheckPG ✓ → BuildGreen ✓(no-op) → VerifyGreen ✓(対象なし)
+Source ✓ → Prepare ✓ → BuildGreen ✓(no-op) → VerifyGreen ✓(対象なし)
   → Switchover ▶ 承認待ち → 切替 ✓(完了済み)                    ⇒ 成功で終了
 ```
 

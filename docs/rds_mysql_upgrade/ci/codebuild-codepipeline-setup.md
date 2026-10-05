@@ -27,13 +27,13 @@ CodePipeline（サービス・環境ごとに 1 本）
 
 ## 0. CodeBuild の動作環境コンテナと追加導入物
 
-AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS 管理イメージ `aws/codebuild/standard:7.0` を指定する。このイメージは Ubuntu 22.04 の CodeBuild managed image である。AWS CLI を含む CodeBuild の標準ツール群はイメージ側のものを利用し、buildspec から AWS CLI を追加インストールしない。ローカルの CodeBuild Local Agent 用だけは、軽量な [Dockerfile.codebuild-runner](Dockerfile.codebuild-runner) を使用できる。AWS 上の CodeBuild image はこの代替 image に変更しない。
+AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS 管理イメージ `aws/codebuild/standard:8.0` を指定する。このイメージは Ubuntu 24.04 の CodeBuild managed image である。AWS CLI を含む CodeBuild の標準ツール群はイメージ側のものを利用し、buildspec から AWS CLI を追加インストールしない。ローカルの CodeBuild Local Agent 用だけは、軽量な [Dockerfile.codebuild-runner](Dockerfile.codebuild-runner) を使用できる。AWS 上の CodeBuild image はこの代替 image に変更しない。
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
-| BuildGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 3 を実行 |
-| VerifyGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` と `runtime-versions: golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | BuildReportTool がビルドした Go バイナリを受け取り、Ruby スクリプトから実行 |
-| Switchover | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 5 を実行 |
+| BuildGreen | `aws/codebuild/standard:8.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 3 を実行 |
+| VerifyGreen | `aws/codebuild/standard:8.0` | `rbenv local 3.4.10` と `runtime-versions: golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | BuildReportTool がビルドした Go バイナリを受け取り、Ruby スクリプトから実行 |
+| Switchover | `aws/codebuild/standard:8.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 5 を実行 |
 
 ### 共通コンテナ
 
@@ -104,7 +104,7 @@ VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb        # 検証専用。RDS へ到�
 VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティグループ設定」で作る SG
 ```
 
-**イメージの指定は要らない。**`VerifyGreen` は `aws/codebuild/standard:7.0` 固定で、テンプレートはカスタムイメージを受け付けない。
+**イメージの指定は要らない。**`VerifyGreen` は `aws/codebuild/standard:8.0` 固定で、テンプレートはカスタムイメージを受け付けない。
 
 `VpcId` が空なら `VerifyGreen` も VPC 外で動き、AWS API による検証だけを行う（既定）。
 
@@ -137,7 +137,7 @@ VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティ
 
 private subnet では apt リポジトリへ到達できないため、**buildspec は `apt-get` を呼ばない。**実効値の収集は `collect_green_runtime_values`（静的リンクの Go バイナリ）が行う。`BuildReportTool` がレポート生成器と一緒にビルドし、artifact で渡す。
 
-**そのため `VerifyGreen` のイメージは `aws/codebuild/standard:7.0` 固定である。**同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。**テンプレートからはカスタムイメージの指定（`VerifyGreenImage` パラメータ、`ImagePullCredentialsType`、ECR 読み取り権限）を削除した。**
+**そのため `VerifyGreen` のイメージは `aws/codebuild/standard:8.0` 固定である。**同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。**テンプレートからはカスタムイメージの指定（`VerifyGreenImage` パラメータ、`ImagePullCredentialsType`、ECR 読み取り権限）を削除した。**
 
 > 以前の方式（MySQL クライアント入りのイメージを ECR へ置く）で使っていた [Dockerfile.verify-green](Dockerfile.verify-green) は、**参考として残してあるが未使用である。**テンプレートから指定する経路は無い。
 

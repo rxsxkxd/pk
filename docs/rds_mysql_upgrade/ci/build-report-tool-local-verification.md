@@ -6,9 +6,9 @@
 
 ## 1. なぜこの構成か
 
-AWS 上の `BuildReportToolProject` は `aws/codebuild/standard:7.0` を使うが、**このイメージは 10GB を超えるためローカルには置かない。**代わりに、確認したい相違点だけを満たす小さな既存イメージで代替する。
+AWS 上の `BuildReportToolProject` は `aws/codebuild/standard:8.0` を使うが、**このイメージは 10GB を超えるためローカルには置かない。**代わりに、確認したい相違点だけを満たす小さな既存イメージで代替する。
 
-| 確認したい点 | `standard:7.0` | 代替（`golang:1.25`） |
+| 確認したい点 | `standard:8.0` | 代替（`golang:1.25`） |
 |---|---|---|
 | OS | Ubuntu（Debian 系） | Debian GNU/Linux |
 | `find` / `grep` / `dirname` | GNU coreutils / GNU grep | GNU coreutils / **GNU grep 3.11** |
@@ -17,7 +17,7 @@ AWS 上の `BuildReportToolProject` は `aws/codebuild/standard:7.0` を使う�
 | `GOPATH` | `/go` | `/go` |
 | `/bin/sh` | dash | dash |
 
-**`runtime-versions` を解釈するのは AWS 側のマネージドイメージだけである。**Local Agent もこれを解決しない。`golang:1.25` は最初から Go 1.25 なので結果としては同じ状態になるが、「`standard:7.0` が `golang: 1.25` を選べるか」はローカルでは確認できない（[I1](build-report-tool-troubleshooting.md#i1-unknown-runtime-version-named-125-of-golang)）。
+**`runtime-versions` を解釈するのは AWS 側のマネージドイメージだけである。**Local Agent もこれを解決しない。`golang:1.25` は最初から Go 1.25 なので結果としては同じ状態になるが、「`standard:8.0` が `golang: 1.25` を選べるか」はローカルでは確認できない（[I1](build-report-tool-troubleshooting.md#i1-unknown-runtime-version-named-125-of-golang)）。
 
 **新しく pull・build するイメージは無い。**必要なものはこのリポジトリの既存手順で既に揃っている。
 
@@ -138,7 +138,7 @@ unzip -p artifacts/codebuild-local/build-report-tool/artifacts.zip \
 | | `-o` の絶対パス指定が `artifacts.files` の宣言と噛み合うこと |
 | | フェーズ遷移と、失敗時に後続フェーズを飛ばす挙動 |
 | | `env.variables`（`GOTOOLCHAIN: auto`）が適用されること |
-| **できない** | `runtime-versions: golang: 1.25` が `standard:7.0` で解決できるか |
+| **できない** | `runtime-versions: golang: 1.25` が `standard:8.0` で解決できるか |
 | | VPC・ネットワーク到達性（`proxy.golang.org` へ出られるか） |
 | | IAM（CodePipeline の `codebuild:StartBuild` 権限など） |
 

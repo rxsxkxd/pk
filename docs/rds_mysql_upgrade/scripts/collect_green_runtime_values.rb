@@ -19,7 +19,7 @@
 #
 # 収集そのものは Go のバイナリ（scripts/collect_green_runtime_values/）が行う。
 # **MySQL クライアントは使わない**（VerifyGreen は VPC 内から apt へ到達できず、
-# aws/codebuild/standard:7.0 は mysql クライアントを含まない）。バイナリの場所は
+# aws/codebuild/standard:8.0 は mysql クライアントを含まない）。バイナリの場所は
 # lib/resolve_green_tools.rb が決め、ローカルで見つからなければその場でビルドする。
 #
 # **パスワードは環境変数だけで Go のバイナリへ渡す。**コマンド引数・標準出力・成果物には出さない。

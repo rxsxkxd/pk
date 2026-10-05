@@ -41,7 +41,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - **RDS パラメータグループの変更は CloudFormation のみ。**変換ルールの正本は `config/mysql80-to-84-parameter-rules.yml`（コードではなくこれを直す）。
 - **破壊的 RDS 権限はパイプラインのどのロールも持たない。**Step 7 は人が `tools/cleanup` で行い、`actions.cleanup: approved` が無ければ何もしない。
 
-**CI**——主系は **CodePipeline + CodeBuild**（`ci/codebuild/*.yml`、`examples/rds-blue-green-deployment/codepipeline-all-in-one.yml`）。イメージは全プロジェクト `aws/codebuild/standard:7.0` 固定。`.github/workflows/` にも同じ `scripts/*.rb` を呼ぶ定義があるので、スクリプトの引数を変えたら併せて確認する。
+**CI**——主系は **CodePipeline + CodeBuild**（`ci/codebuild/*.yml`、`examples/rds-blue-green-deployment/codepipeline-all-in-one.yml`）。イメージは全プロジェクト `aws/codebuild/standard:8.0` 固定。`.github/workflows/` にも同じ `scripts/*.rb` を呼ぶ定義があるので、スクリプトの引数を変えたら併せて確認する。
 
 ## コマンド
 

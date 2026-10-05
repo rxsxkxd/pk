@@ -44,7 +44,7 @@ Local Agent と実行 image は別のコンテナである。
 | CodeBuild Local Agent | `public.ecr.aws/codebuild/local-builds:latest`（ARM では `:aarch64`） | `codebuild_build.sh` から受け取ったソース、AWS 設定、環境変数、artifact 出力先、buildspec を実行 image へ受け渡す制御役 |
 | 実行 image | `rds-codebuild-runner:local-amd64` または `rds-codebuild-runner:local-arm64` | AWS 上と同じ buildspec の `install`／`build` フェーズを、ローカル検証用の軽量 image で実行する環境 |
 
-`codebuild_build.sh` の `-i rds-codebuild-runner:local-<architecture>` は後者の実行 image を指定する。Local Agent 自体は buildspec を直接実行するための汎用制御コンテナであり、Python・AWS CLI・本リポジトリのスクリプトは実行 image 側で動く。VerifyGreen だけは、実行 image の中からさらに `golang:1.25` を一時的に起動し、Go レポート生成バイナリをビルドする。AWS 上の CodeBuild はこの image を使わず、引き続き `aws/codebuild/standard:7.0` を使う。
+`codebuild_build.sh` の `-i rds-codebuild-runner:local-<architecture>` は後者の実行 image を指定する。Local Agent 自体は buildspec を直接実行するための汎用制御コンテナであり、Python・AWS CLI・本リポジトリのスクリプトは実行 image 側で動く。VerifyGreen だけは、実行 image の中からさらに `golang:1.25` を一時的に起動し、Go レポート生成バイナリをビルドする。AWS 上の CodeBuild はこの image を使わず、引き続き `aws/codebuild/standard:8.0` を使う。
 
 Local Agent と実行 image は同じ CPU アーキテクチャでそろえる。ネイティブ実行を基本とし、`x86_64`（Docker の platform 表記では `linux/amd64`）と `arm64` で混在させない。
 
@@ -142,7 +142,7 @@ mkdir -p .local
 
 | オプション | 用途 |
 |---|---|
-| `-i` | Local Agent 用の軽量実行 image を指定。AWS 上は CloudFormation 定義どおり `aws/codebuild/standard:7.0` を使う |
+| `-i` | Local Agent 用の軽量実行 image を指定。AWS 上は CloudFormation 定義どおり `aws/codebuild/standard:8.0` を使う |
 | `-a` | buildspec の `artifacts` をローカルへ出力するディレクトリ |
 | `-s .` | 現在のリポジトリを primary source として指定 |
 | `-b` | 実行する buildspec を指定。上記の local helper 修正後に使用する |

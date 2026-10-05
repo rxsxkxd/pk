@@ -12,7 +12,7 @@
 #
 # 実効値収集を Go にしてある理由: VerifyGreen は RDS のある VPC 内で動かす場合があり、
 # そこから apt リポジトリへ到達できないため mysql クライアントを実行時に導入できない。
-# aws/codebuild/standard:7.0 も mysql クライアントを含まない。
+# aws/codebuild/standard:8.0 も mysql クライアントを含まない。
 #
 # 各コマンドは POSIX シェル互換で書いてある（`[[ ]]` / `<<<` / `-o pipefail` を使わない）。
 version: 0.2

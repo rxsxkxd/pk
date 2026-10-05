@@ -3,7 +3,7 @@ package handler
 import (
 	"context"
 
-	"ticketqr/go/internal/apperr"
+	"ticketqr/internal/apperr"
 )
 
 // Route keys exactly as configured on API Gateway HTTP API. The local server registers the same strings.

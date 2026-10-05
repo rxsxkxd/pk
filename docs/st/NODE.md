@@ -51,7 +51,7 @@ API の仕様は [DESIGN.md](DESIGN.md) を参照。Go 版（`go/`）と**同じ
 | 乱数（suffix の生成） | `crypto.randomBytes` | `nanoid` など |
 | リクエスト ID（ローカル実行時） | `crypto.randomUUID` | `uuid` |
 | JST の日時の整形 | `Intl.DateTimeFormat`（`timeZone: 'Asia/Tokyo'`、`hourCycle: 'h23'`）の `formatToParts`。タイムゾーンのデータは Node 内蔵の ICU（Lambda の Node.js 24 でも利用できることを確認済み） | `dayjs`、`date-fns` |
-| HTML の生成とエスケープ | **`hono/html`** の `html` タグ付きテンプレート（埋め込む値を自動でエスケープ。hono に含まれるので依存は増えない） | `handlebars`、`ejs`、`escape-html`、Go の `templates/*.html` の共有（ファイル読み込み・構文検査・テンプレートの zip 同梱が必要になるためやめた） |
+| HTML の生成とエスケープ | **`hono/html`** の `html` タグ付きテンプレート（埋め込む値を自動でエスケープ。hono に含まれるので依存は増えない） | `handlebars`、`ejs`、`escape-html`、Go の `go/internal/view/templates/*.html` の共有（ファイル読み込み・構文検査・テンプレートの zip 同梱が必要になるためやめた） |
 | ルーティング | **Hono**（ルート表から `app.on()` で登録） | `middy`（複数パッケージ、エラー形式は結局自作） |
 | ローカル HTTP サーバー | **@hono/node-server**（Lambda と同じ Hono アプリを起動） | `express` |
 | 設定値の検証 | 手書き（約20行） | `valibot`（画像解析の本物のクライアントでレスポンス検証が必要になった時点で、設定・salt とあわせて再検討する） |
@@ -211,7 +211,7 @@ if (!(form.get('image') instanceof File)) throw badRequest('image is required');
 ### 5.3 HTML ビュー
 
 - `app.ts` の `ticketView` / `errorView` が、`hono/html` の `html` タグ付きテンプレートで HTML を作る。埋め込む値は自動でエスケープされる（`&amp;`、`&lt;`、`&gt;`、`&quot;`、`&#39;`）。不正なチケットコードもエスケープされることはテストで確認する
-- Go 版の `templates/*.html` とは共有しない。内容（文言・`data-*` 属性・`<img>`・スタイル）は同じにそろえるが、空白や `<meta ... />` の書き方などは一致させない。文言やデザインを変えるときは両方を直す
+- Go 版の `go/internal/view/templates/*.html` とは共有しない。内容（文言・`data-*` 属性・`<img>`・スタイル）は同じにそろえるが、空白や `<meta ... />` の書き方などは一致させない。文言やデザインを変えるときは両方を直す
 - 共通のスタイルは文字列定数 `STYLE` にして `raw()` で埋め込む。モジュール直下で `html` を呼ぶと esbuild が削除できず、HTML を出さない exampleqr のバンドルに残るため
 - レスポンスは `c.html(body, status, headers)`。CSP などのヘッダーは明示的に付ける（`Content-Type` は Hono が付ける `text/html; charset=UTF-8`）
 

@@ -10,7 +10,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 
-	"ticketqr/go/internal/qr"
+	"ticketqr/internal/qr"
 )
 
 const (

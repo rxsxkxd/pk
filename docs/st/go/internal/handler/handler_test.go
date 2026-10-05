@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"ticketqr/go/internal/analyzer"
-	"ticketqr/go/internal/imageinput"
-	"ticketqr/go/internal/signer"
-	"ticketqr/go/internal/ticketcode"
-	"ticketqr/go/internal/usecase"
-	"ticketqr/go/internal/view"
+	"ticketqr/internal/analyzer"
+	"ticketqr/internal/imageinput"
+	"ticketqr/internal/signer"
+	"ticketqr/internal/ticketcode"
+	"ticketqr/internal/usecase"
+	"ticketqr/internal/view"
 )
 
 // Real 32x32 images (../../../testdata/images, shared with the Node version): the format check parses

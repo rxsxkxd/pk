@@ -19,12 +19,12 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 
-	"ticketqr/go/internal/apperr"
-	"ticketqr/go/internal/imageinput"
-	"ticketqr/go/internal/qr"
-	"ticketqr/go/internal/signer"
-	"ticketqr/go/internal/usecase"
-	"ticketqr/go/internal/view"
+	"ticketqr/internal/apperr"
+	"ticketqr/internal/imageinput"
+	"ticketqr/internal/qr"
+	"ticketqr/internal/signer"
+	"ticketqr/internal/usecase"
+	"ticketqr/internal/view"
 )
 
 type (

@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"time"
 
-	"ticketqr/go/internal/analyzer"
-	"ticketqr/go/internal/apperr"
-	"ticketqr/go/internal/ticketcode"
+	"ticketqr/internal/analyzer"
+	"ticketqr/internal/apperr"
+	"ticketqr/internal/ticketcode"
 )
 
 type Issuer struct {

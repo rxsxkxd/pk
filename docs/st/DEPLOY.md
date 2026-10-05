@@ -29,7 +29,7 @@ Parameter Store（SecureString）: /ticketqr/{impl}/signing-salt（スタック�
 ## 1. 前提
 
 - AWS CLI v2 と、デプロイ先アカウントの認証情報
-- Go（`docs/st/go.mod` のバージョン）、`make`、`zip`、`openssl`
+- Go（`docs/st/go/go.mod` のバージョン）、`make`、`zip`、`openssl`
 - 作業ディレクトリは `docs/st`
 
 ```sh

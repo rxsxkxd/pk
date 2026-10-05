@@ -9,7 +9,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/lambda"
 
-	"ticketqr/go/internal/app"
+	"ticketqr/internal/app"
 )
 
 func main() {

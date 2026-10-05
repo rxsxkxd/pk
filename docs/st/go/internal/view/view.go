@@ -1,12 +1,15 @@
-// Package view renders the shared HTML templates.
+// Package view renders the HTML views of the Go version (templates/*.html, embedded in the binary). The
+// Node version builds the same pages with hono/html; the files are not shared (NODE.md 5.3).
 package view
 
 import (
 	"bytes"
+	"embed"
 	"html/template"
-
-	"ticketqr/templates"
 )
+
+//go:embed templates/*.html
+var files embed.FS
 
 type Renderer struct {
 	ticket *template.Template
@@ -14,11 +17,11 @@ type Renderer struct {
 }
 
 func New() (*Renderer, error) {
-	ticket, err := template.ParseFS(templates.FS, "ticket.html")
+	ticket, err := template.ParseFS(files, "templates/ticket.html")
 	if err != nil {
 		return nil, err
 	}
-	errorT, err := template.ParseFS(templates.FS, "error.html")
+	errorT, err := template.ParseFS(files, "templates/error.html")
 	if err != nil {
 		return nil, err
 	}

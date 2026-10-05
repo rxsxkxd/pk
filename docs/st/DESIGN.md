@@ -321,7 +321,7 @@ Response `200 OK`, `Content-Type: text/html; charset=utf-8`
 
 | 項目 | 方針 |
 |---|---|
-| テンプレート | Go は `templates/ticket.html` / `templates/error.html` を `embed` で同梱。Node は `hono/html` で同じ内容の HTML を作る（ファイルは共有しない。NODE.md 5.3） |
+| テンプレート | Go は `go/internal/view/templates/ticket.html` / `error.html` を `embed` で同梱。Node は `hono/html` で同じ内容の HTML を作る（ファイルは共有しない。NODE.md 5.3） |
 | 埋め込みデータ | `ticketCode`, `qrUrl` のみ。発行日時は保存していないため別途は表示しない（日時はコードの先頭14桁に含まれる） |
 | `qrUrl` | **絶対URL**。`PUBLIC_BASE_URL` から組み立てる |
 | エスケープ | 自動エスケープ必須（Go: `html/template`、Node: `hono/html`）。属性値・本文とも |
@@ -449,10 +449,10 @@ ImageAnalyzer はインターフェースとして抽象化し、テスト時は
 ```
 st/
 ├── DESIGN.md
-├── go.mod                     # Go モジュールルート（templates/ を embed するため st/ 直下）
-├── templates/                 # HTMLビュー / エラービュー（Go 版が使う。Node は hono/html で同じ内容を持つ）
+├── PAGES.md                   # 画面と HTML テンプレートの構成（SPA・API の HTML・ローカル試験フォーム）
 ├── testdata/                  # 両実装共通のテストベクタ（ticketcode.json, signature.json）
-├── go/
+├── go/                       # Go モジュールルート（go.mod）
+│   ├── go.mod
 │   ├── Makefile               # run / run-example / test / build（ticketqr.zip と exampleqr.zip）
 │   ├── cmd/ticketqr/          # 唯一のエントリポイント。Lambda 上ならハンドラとして、それ以外ならローカル HTTP サーバーとして起動
 │   │   ├── main.go            # AWS_LAMBDA_RUNTIME_API の有無で起動方法を切り替える
@@ -471,7 +471,7 @@ st/
 │       ├── signer/            # 署名（salt + HMAC）
 │       ├── secret/            # salt 取得（Parameter Store）
 │       ├── config/            # 環境変数
-│       └── view/              # HTMLレンダリング
+│       └── view/              # HTMLレンダリング（templates/ticket.html・error.html を embed。Node は hono/html で同じ内容を持つ）
 ├── node/                      # 詳細は NODE.md（domain.ts / infra.ts / app.ts / image.ts / shared.ts / example.ts + 入口の ticketqr.ts / exampleqr.ts / local.ts）
 ├── infra/cloudformation/      # IaC（impl=go|node でパラメータ化）: api.yaml（チケット API）、example.yaml（EX。別スタック）
 └── tests/

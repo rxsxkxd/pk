@@ -218,7 +218,7 @@ function isMultipart(contentType = ''): boolean {
 
 // =================================================================================================
 // Views: HTML  (↔ go/internal/view; the QR PNG is rendered by shared.ts)
-// Node's own HTML; the Go version uses ../../templates — kept equivalent, not byte-identical.
+// Node's own HTML; the Go version uses go/internal/view/templates — kept equivalent, not byte-identical.
 // =================================================================================================
 
 type View = ReturnType<typeof html>;

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"ticketqr/go/internal/analyzer"
+	"ticketqr/internal/analyzer"
 )
 
 func TestRoute(t *testing.T) {

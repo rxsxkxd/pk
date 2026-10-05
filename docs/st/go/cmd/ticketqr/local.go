@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"os"
 
-	"ticketqr/go/internal/app"
-	"ticketqr/go/internal/handler"
-	"ticketqr/go/internal/localhttp"
+	"ticketqr/internal/app"
+	"ticketqr/internal/handler"
+	"ticketqr/internal/localhttp"
 )
 
 // runLocal serves the handler over plain HTTP for local development (see localhttp).

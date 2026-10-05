@@ -6,14 +6,14 @@ import (
 	"log/slog"
 	"os"
 
-	"ticketqr/go/internal/analyzer"
-	"ticketqr/go/internal/config"
-	"ticketqr/go/internal/handler"
-	"ticketqr/go/internal/secret"
-	"ticketqr/go/internal/signer"
-	"ticketqr/go/internal/ticketcode"
-	"ticketqr/go/internal/usecase"
-	"ticketqr/go/internal/view"
+	"ticketqr/internal/analyzer"
+	"ticketqr/internal/config"
+	"ticketqr/internal/handler"
+	"ticketqr/internal/secret"
+	"ticketqr/internal/signer"
+	"ticketqr/internal/ticketcode"
+	"ticketqr/internal/usecase"
+	"ticketqr/internal/view"
 )
 
 func New(ctx context.Context) (*handler.Handlers, error) {

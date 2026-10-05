@@ -11,8 +11,8 @@ import (
 
 	"github.com/aws/aws-lambda-go/lambda"
 
-	"ticketqr/go/internal/exampleqr"
-	"ticketqr/go/internal/localhttp"
+	"ticketqr/internal/exampleqr"
+	"ticketqr/internal/localhttp"
 )
 
 func main() {

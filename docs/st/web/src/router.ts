@@ -1,0 +1,14 @@
+// hash モード: S3 に直接置いても、リロードや直接アクセスで 404 にならない。
+import { createRouter, createWebHashHistory, type RouterHistory, type RouteRecordRaw } from 'vue-router';
+import IssuePage from './pages/IssuePage.vue';
+import TicketPage from './pages/TicketPage.vue';
+
+export const routes: RouteRecordRaw[] = [
+  { path: '/', component: IssuePage },
+  { path: '/tickets/:code', component: TicketPage },
+  { path: '/:pathMatch(.*)*', redirect: '/' },
+];
+
+export function createAppRouter(history: RouterHistory = createWebHashHistory()) {
+  return createRouter({ history, routes });
+}

@@ -1,0 +1,4 @@
+{
+  "apiBaseUrl": "",
+  "modes": ["page", "inline", "form"]
+}

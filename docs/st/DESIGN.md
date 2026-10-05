@@ -67,7 +67,7 @@ flowchart LR
 
 API が変えるのは**送り方（multipart → octet-stream）だけ**。画像の中身はパススルーで、圧縮・リサイズ・形式変換・メタデータ（EXIF など）の除去は行わない。
 
-1. **入力検証**: Content-Type が `multipart/form-data` か、`image` フィールドがあるか、サイズ上限、マジックバイトで画像形式判定（JPEG/PNG 等）
+1. **入力検証**: Content-Type が `multipart/form-data` か、`image` フィールドがあるか、サイズ上限、画像形式の判定（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone・主要 Android の写真をそのまま送った場合の形式）
 2. **画像解析連携**: 検証済みの画像バイト列を `application/octet-stream` でそのまま送る（7章）。タイムアウト付きHTTP呼び出し。5xx/タイムアウトのみ限定リトライ（例: 最大1回）
 3. **採番**: valid 時のみ実施。外部ストアを参照せずに生成する（4章）
 4. 発行の記録は構造化ログにのみ残す
@@ -220,7 +220,8 @@ sequenceDiagram
 - ベースパス: `/v1`
 - 画像の受け取り: A・B-1 とも `multipart/form-data` の `image` フィールド（ブラウザの `<input type="file">` / `FormData` で送る形式に統一）
 - 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため）
-- 画像の形式判定はマジックバイトで行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）
+- 画像の形式判定はファイルの中身で行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）。Node 版は `image-size` でヘッダーを解析し、Go 版は先頭のバイトと ISO BMFF の ftyp ブランド（HEIC / HEIF / AVIF）で判定する
+- 受け付ける形式: JPEG、PNG、HEIC / HEIF（iPhone の標準、Samsung などの HEIF）、AVIF、WebP。画像は変換せずにそのまま解析サーバーへ送る
 - `Cache-Control: no-store`（全エンドポイント）
 
 ### 5.1 パターンA: `POST /v1/tickets/qr-inline`
@@ -231,7 +232,7 @@ Request `Content-Type: multipart/form-data`
 
 | フィールド | 内容 |
 |---|---|
-| `image` | 画像ファイル（JPEG / PNG） |
+| `image` | 画像ファイル（JPEG / PNG / HEIC / HEIF / AVIF / WebP） |
 
 ```js
 const body = new FormData();

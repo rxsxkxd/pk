@@ -6,6 +6,9 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { html, raw } from 'hono/html';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { imageSize } from 'image-size';
+import { correction, generate } from 'lean-qr';
+import { toPngBuffer } from 'lean-qr/extras/node_export';
 import {
   AppError,
   badRequest,
@@ -15,18 +18,20 @@ import {
   issueTicket,
   newSigner,
   notFound,
+  payloadTooLarge,
   unsupportedMediaType,
   type Analyzer,
   type Log,
   type Signer,
   type Ticket,
+  type UploadedImage,
 } from './domain.ts';
-import { consoleLog, loadConfig, loadSalts, newAnalyzer, qrPng, type Config } from './infra.ts';
+import { consoleLog, loadConfig, loadSalts, newAnalyzer, type Config } from './infra.ts';
 
 type Route = { name: string; errors: 'json' | 'html' };
 
 // Bindings: Lambda passes the API Gateway request context (the local server passes none).
-// Variables: the matched route, set by the route table for logging and the error format.
+// Variables: the matched route, set by routes() for logging and the error format.
 type Env = { Bindings: { requestContext?: { requestId?: string } }; Variables: { route?: Route } };
 type Ctx = Context<Env>;
 
@@ -44,16 +49,6 @@ export type Deps = {
 
 type Endpoint = (c: Ctx, deps: Deps) => Promise<Response>;
 
-// Same routes as API Gateway HTTP API ({ticketCode} is written :ticketCode in Hono).
-// prettier-ignore
-const ROUTES: ReadonlyArray<readonly ['GET' | 'POST', string, string, 'json' | 'html', Endpoint]> = [
-  // method  path                            log name        errors  handler
-  ['POST',   '/v1/tickets/qr-inline',        'issue-inline', 'json', issueInline],
-  ['POST',   '/v1/tickets',                  'issue',        'html', issue],
-  ['GET',    '/v1/tickets/:ticketCode/view', 'get-view',     'html', getView],
-  ['GET',    '/v1/tickets/:ticketCode/qr',   'get-qr',       'json', getQr],
-];
-
 // 設定と salt を読み込み依存部品を組み立てる（Lambda 実行環境ごとに初期化時に1回だけ呼ぶ）。
 export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<Deps> {
   const config = loadConfig(env);
@@ -63,13 +58,18 @@ export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<De
   return { config, analyzer, signer, newTicket: () => generateTicket(config.suffixLength), log: consoleLog };
 }
 
-// ルート表からチケット系エンドポイントの Hono アプリを組み立てる（ログ・共通ヘッダー・エラー変換を含む）。
+// チケット系エンドポイントの Hono アプリを組み立てる（ログ・共通ヘッダー・エラー変換を含む）。
 export function createApp(deps: Deps): Hono<Env> {
   const csp = `default-src 'none'; img-src ${deps.config.publicOrigin}; style-src 'unsafe-inline'`;
   const app = new Hono<Env>().use(requestLog(deps.log), commonHeaders(csp));
-  for (const [method, path, name, errors, endpoint] of ROUTES) {
-    app.on(method, path, setRoute({ name, errors }), (c) => endpoint(c, deps));
-  }
+
+  // Same routes as API Gateway HTTP API ({ticketCode} is written :ticketCode in Hono).
+  routes(app, deps)
+    .post('/v1/tickets/qr-inline', { name: 'issue-inline', errors: 'json' }, issueInline) // A
+    .post('/v1/tickets', { name: 'issue', errors: 'html' }, issue) // B-1
+    .get('/v1/tickets/:ticketCode/view', { name: 'get-view', errors: 'html' }, getView) // B-3
+    .get('/v1/tickets/:ticketCode/qr', { name: 'get-qr', errors: 'json' }, getQr); // B-2
+
   app.notFound((c) => c.json(errorBody(notFound()), 404));
   app.onError((err, c) => {
     const e = err instanceof AppError ? err : internal();
@@ -80,6 +80,16 @@ export function createApp(deps: Deps): Hono<Env> {
       : c.json(errorBody(e), status);
   });
   return app;
+}
+
+// Hono アプリを包み、ルートごとにログ名・エラー形式・処理を宣言して登録できるようにする。
+function routes(app: Hono<Env>, deps: Deps) {
+  const add = (method: 'GET' | 'POST') => (path: string, route: Route, endpoint: Endpoint) => {
+    app.on(method, path, setRoute(route), (c) => endpoint(c, deps));
+    return api;
+  };
+  const api = { get: add('GET'), post: add('POST') };
+  return api;
 }
 
 // =================================================================================================
@@ -134,7 +144,7 @@ function errorBody(e: AppError) {
 
 // A: 画像を受け取って発行し、QR を base64 で埋め込んだ JSON を返す（DESIGN.md 5.1）。
 async function issueInline(c: Ctx, deps: Deps): Promise<Response> {
-  const t = await issueTicket(deps, await readFormImage(c));
+  const t = await issueTicket(deps, await readImage(c));
   const png = qrPng(t.code);
   return c.json(
     { ticketCode: t.code, issuedAt: t.issuedAt, qr: { mimeType: 'image/png', data: png.toString('base64') } },
@@ -144,7 +154,7 @@ async function issueInline(c: Ctx, deps: Deps): Promise<Response> {
 
 // B-1: フォーム送信された画像で発行し、署名付きビュー URL へ 303 で転送する（DESIGN.md 5.2）。
 async function issue(c: Ctx, deps: Deps): Promise<Response> {
-  const t = await issueTicket(deps, await readFormImage(c));
+  const t = await issueTicket(deps, await readImage(c));
   return c.redirect(ticketUrl(deps, t.code, 'view'), 303);
 }
 
@@ -172,17 +182,45 @@ function ticketUrl(deps: Deps, code: string, resource: 'view' | 'qr'): string {
   return `${deps.config.publicBaseUrl}${path}?sig=${encodeURIComponent(deps.signer.sign(code))}`;
 }
 
-// multipart/form-data の image ファイルのバイト列をそのまま取り出す（multipart 以外は 415、壊れた形式は 400）。
-async function readFormImage(c: Ctx): Promise<Uint8Array> {
+export const MAX_IMAGE_BYTES = 4 << 20;
+
+// Formats sent as-is by iPhone (HEIC, JPEG, PNG screenshots) and major Android phones (JPEG, HEIF,
+// AVIF, WebP), keyed by image-size's type (heic / mif1 are HEIF brands).
+const ACCEPTED_TYPES: Record<string, string> = {
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  mif1: 'image/heif',
+  avif: 'image/avif',
+  webp: 'image/webp',
+};
+
+// multipart/form-data の image ファイルを取り出し、サイズと形式を検証する（バイト列は加工しない）。
+async function readImage(c: Ctx): Promise<UploadedImage> {
   if (!/^multipart\/form-data\b/i.test(c.req.header('content-type') ?? '')) {
     throw unsupportedMediaType('Content-Type must be multipart/form-data');
   }
-  const image = await c.req.formData().then(
+  const file = await c.req.formData().then(
     (form) => form.get('image'),
     () => null,
   );
-  if (!(image instanceof File)) throw badRequest('image file is required');
-  return new Uint8Array(await image.arrayBuffer());
+  if (!(file instanceof File)) throw badRequest('image file is required');
+  const data = new Uint8Array(await file.arrayBuffer());
+  return { data, mimeType: validateImage(data) };
+}
+
+// サイズ上限と画像ヘッダー（image-size で解析）を検証し、受け付ける形式なら MIME タイプを返す。
+export function validateImage(data: Uint8Array): string {
+  if (data.length === 0) throw badRequest('image is empty');
+  if (data.length > MAX_IMAGE_BYTES) throw payloadTooLarge(`image must be ${MAX_IMAGE_BYTES} bytes or less`);
+  let type: string | undefined;
+  try {
+    type = imageSize(data).type;
+  } catch {}
+  const mimeType = type && ACCEPTED_TYPES[type];
+  if (!mimeType) throw unsupportedMediaType('image must be JPEG, PNG, HEIC/HEIF, AVIF or WebP');
+  return mimeType;
 }
 
 // PNG の 200 レスポンスを作る（Lambda では image/png をアダプターが base64 にする）。
@@ -199,7 +237,8 @@ export function createExampleApp(): Hono<Env> {
 }
 
 // =================================================================================================
-// Views  (Node's own HTML; the Go version uses ../../templates — kept equivalent, not byte-identical)
+// Views: HTML and the QR PNG — how responses are rendered  (↔ go/internal/view, go/internal/qr)
+// Node's own HTML; the Go version uses ../../templates — kept equivalent, not byte-identical.
 // =================================================================================================
 
 type View = ReturnType<typeof html>;
@@ -249,4 +288,15 @@ function errorView(code: string, message: string): View {
         </main>
       </body>
     </html> `;
+}
+
+const QR_MAX_PX = 256;
+const QUIET_ZONE = 4;
+
+// テキストを誤り訂正 M・余白4モジュールの QR PNG にする（256px 以内に収まる最大の整数倍。NODE.md 3）。
+export function qrPng(text: string): Buffer {
+  const code = generate(text, { minCorrectionLevel: correction.M, maxCorrectionLevel: correction.M });
+  const scale = Math.max(1, Math.floor(QR_MAX_PX / (code.size + 2 * QUIET_ZONE)));
+  const png = toPngBuffer(code, { on: [0, 0, 0], off: [255, 255, 255], pad: QUIET_ZONE, scale });
+  return Buffer.from(png.buffer, png.byteOffset, png.byteLength);
 }

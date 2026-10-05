@@ -13,10 +13,10 @@ make run            # http://localhost:8080/
 
 ```sh
 # パターンA
-curl -s -F image=@sample.jpg localhost:8080/v1/tickets/qr-inline
+curl -s -F image=@../testdata/images/photo.jpg localhost:8080/v1/tickets/qr-inline
 
 # パターンB（303 → view → qr）
-curl -sL -F image=@sample.jpg localhost:8080/v1/tickets
+curl -sL -F image=@../testdata/images/photo.heic localhost:8080/v1/tickets   # HEIC など他の形式も可
 ```
 
 ### example.com の QR（別パッケージ）

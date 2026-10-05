@@ -1,4 +1,5 @@
 // Business logic of the ticket QR API: the rules shared with the ticket consumer and the issue flow.
+// (Upload size/format checks live in app.ts, since format detection uses the image-size library.)
 // No I/O here — external systems are reached through the Analyzer and Log ports, implemented in
 // infra.ts. Rules are checked against ../testdata, shared with the Go version.
 
@@ -10,13 +11,11 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export type IssuePorts = { analyzer: Analyzer; newTicket: () => Ticket; log: Log };
 
-// 画像を検証して解析サーバーに問い合わせ、valid のときだけチケットコードを採番する。
-export async function issueTicket(ports: IssuePorts, image: Uint8Array): Promise<Ticket> {
-  const mimeType = validateImage(image);
-
+// 検証済みの画像を解析サーバーに問い合わせ、valid のときだけチケットコードを採番する。
+export async function issueTicket(ports: IssuePorts, image: UploadedImage): Promise<Ticket> {
   let res: AnalyzerResult;
   try {
-    res = await ports.analyzer({ data: image, mimeType });
+    res = await ports.analyzer(image);
   } catch (err) {
     if (err instanceof AnalyzerError && err.kind === 'timeout') throw analysisTimeout();
     ports.log('ERROR', 'image analysis failed', { error: String(err) });
@@ -37,7 +36,19 @@ export async function issueTicket(ports: IssuePorts, image: Uint8Array): Promise
 // =================================================================================================
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford Base32 (no I, L, O, U)
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000; // fixed offset; no tz database needed
+
+// Formats the issue time in JST. hourCycle h23 gives "00" (not "24") at midnight. Pure, so bundles that
+// never issue tickets (exampleqr) drop it.
+const JST = /* @__PURE__ */ new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Tokyo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
 
 export type Ticket = { code: string; issuedAt: string }; // issuedAt: RFC 3339 in JST
 
@@ -52,16 +63,8 @@ export function generateTicket(
   // 256 is a multiple of 32, so the low 5 bits of each byte are uniform.
   const suffix = Array.from(bytes.subarray(0, suffixLength), (b) => ALPHABET[b & 31]).join('');
 
-  const jst = new Date(now.getTime() + JST_OFFSET_MS);
-  const p = (n: number) => String(n).padStart(2, '0');
-  const [y, mo, d, h, mi, s] = [
-    String(jst.getUTCFullYear()),
-    p(jst.getUTCMonth() + 1),
-    p(jst.getUTCDate()),
-    p(jst.getUTCHours()),
-    p(jst.getUTCMinutes()),
-    p(jst.getUTCSeconds()),
-  ];
+  const part = Object.fromEntries(JST.formatToParts(now).map((p) => [p.type, p.value]));
+  const { year: y, month: mo, day: d, hour: h, minute: mi, second: s } = part;
   return { code: `${y}${mo}${d}${h}${mi}${s}-${suffix}`, issuedAt: `${y}-${mo}-${d}T${h}:${mi}:${s}+09:00` };
 }
 
@@ -91,33 +94,15 @@ export function newSigner(current: string, previous?: string): Signer {
 }
 
 // =================================================================================================
-// Image check  (↔ go/internal/imageinput)
-// =================================================================================================
-
-export const MAX_IMAGE_BYTES = 4 << 20;
-
-const SIGNATURES: ReadonlyArray<readonly [string, readonly number[]]> = [
-  ['image/jpeg', [0xff, 0xd8, 0xff]],
-  ['image/png', [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]],
-];
-
-// サイズ上限とマジックバイトで画像を検証し、判定した MIME タイプを返す。
-export function validateImage(data: Uint8Array): string {
-  if (data.length === 0) throw badRequest('image is empty');
-  if (data.length > MAX_IMAGE_BYTES) throw payloadTooLarge(`image must be ${MAX_IMAGE_BYTES} bytes or less`);
-  for (const [mime, magic] of SIGNATURES) {
-    if (magic.every((b, i) => data[i] === b)) return mime;
-  }
-  throw unsupportedMediaType('image must be JPEG or PNG');
-}
-
-// =================================================================================================
 // Ports implemented in infra.ts  (↔ go/internal/analyzer, slog)
 // =================================================================================================
 
+// An upload that passed the size and format checks in app.ts; data is the bytes exactly as received.
+export type UploadedImage = { data: Uint8Array; mimeType: string };
+
 // Image analysis: POST application/octet-stream with the uploaded bytes as-is (DESIGN.md 7).
 export type AnalyzerResult = { valid: boolean; reason: string };
-export type Analyzer = (image: { data: Uint8Array; mimeType: string }) => Promise<AnalyzerResult>;
+export type Analyzer = (image: UploadedImage) => Promise<AnalyzerResult>;
 
 // 解析サーバーの通信失敗（502）/ タイムアウト（504）を表すエラー（解析クライアントが投げる）。
 export class AnalyzerError extends Error {

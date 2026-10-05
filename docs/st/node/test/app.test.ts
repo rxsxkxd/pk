@@ -6,15 +6,17 @@ import { after, describe, test } from 'node:test';
 import { handle } from '@hono/aws-lambda';
 import type { APIGatewayProxyEventV2 as Event, APIGatewayProxyStructuredResultV2 as Result } from 'aws-lambda';
 import { correction, generate } from 'lean-qr';
-import { createApp, createExampleApp, type Deps } from '../src/app.ts';
-import { AnalyzerError, generateTicket, MAX_IMAGE_BYTES, newSigner, type Analyzer } from '../src/domain.ts';
-import { alwaysValid, httpAnalyzer, loadConfig, newAnalyzer, qrPng } from '../src/infra.ts';
+import { createApp, createExampleApp, MAX_IMAGE_BYTES, qrPng, type Deps } from '../src/app.ts';
+import { AnalyzerError, generateTicket, newSigner, type Analyzer } from '../src/domain.ts';
+import { alwaysValid, httpAnalyzer, loadConfig, newAnalyzer } from '../src/infra.ts';
 
 const root = new URL('../../', import.meta.url);
 const vectors = (name: string) => JSON.parse(readFileSync(new URL(`testdata/${name}`, root), 'utf8'));
 
-const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
-const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]);
+// Real 32x32 images in each accepted format (../testdata/images, shared with Go).
+const image = (name: string) => new Uint8Array(readFileSync(new URL(`testdata/images/${name}`, root)));
+const JPEG = image('photo.jpg');
+const PNG = image('photo.png');
 const PNG_MAGIC = PNG.subarray(0, 8);
 const CODE_RE = /^\d{14}-[0-9A-HJKMNP-TV-Z]{8}$/;
 const BASE = 'https://api.example.com';
@@ -492,4 +494,43 @@ describe('http analyzer client', () => {
     });
     assert.equal(typeof a, 'function');
   });
+});
+
+// ---------------------------------------------------------------- accepted upload formats
+
+describe('upload formats (iPhone / Android photos as-is)', () => {
+  const accepted: Array<[string, string]> = [
+    ['photo.jpg', 'image/jpeg'],
+    ['photo.png', 'image/png'],
+    ['photo.heic', 'image/heic'],
+    ['photo-mif1.heif', 'image/heif'],
+    ['photo.avif', 'image/avif'],
+    ['photo.webp', 'image/webp'],
+  ];
+  for (const [file, mimeType] of accepted) {
+    test(`${file} is accepted as ${mimeType} and forwarded unchanged`, async () => {
+      let sent: { data: Uint8Array; mimeType: string } | undefined;
+      const { handle } = newRoute(async (img) => ((sent = img), { valid: true, reason: '' }));
+      const res = await handle(await formEvent(ISSUE_INLINE, 'image', image(file)));
+      assert.equal(res.statusCode, 201, String(res.body));
+      assert.equal(sent?.mimeType, mimeType);
+      assert.deepEqual(sent?.data, image(file));
+    });
+  }
+
+  const rejected: Array<[string, Uint8Array]> = [
+    ['plain text', image('not-image.txt')],
+    [
+      'JPEG magic bytes only (not a real image)',
+      Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]),
+    ],
+    ['PNG signature only', Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])],
+  ];
+  for (const [name, data] of rejected) {
+    test(`${name} is 415`, async () => {
+      const res = await newRoute().handle(await formEvent(ISSUE_INLINE, 'image', data));
+      assert.equal(res.statusCode, 415);
+      assert.equal(errorCode(res), 'UNSUPPORTED_MEDIA_TYPE');
+    });
+  }
 });

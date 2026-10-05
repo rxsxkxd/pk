@@ -22,7 +22,7 @@ const uploadForm = `<!doctype html>
 <body>
   <h1>パターンA 動作確認（fetch + FormData → JSON）</h1>
   <form id="inline">
-    <input type="file" name="image" accept="image/jpeg,image/png" required>
+    <input type="file" name="image" accept="image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp" required>
     <button type="submit">発行</button>
   </form>
   <p id="inline-result"></p>
@@ -30,7 +30,7 @@ const uploadForm = `<!doctype html>
 
   <h1>パターンB-1 動作確認（フォーム送信 → 303）</h1>
   <form method="post" action="/v1/tickets" enctype="multipart/form-data">
-    <input type="file" name="image" accept="image/jpeg,image/png" required>
+    <input type="file" name="image" accept="image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp" required>
     <button type="submit">発行</button>
   </form>
 

@@ -1,9 +1,7 @@
-// Implementations that talk to the outside world: environment variables, Parameter Store, the QR
-// library, the image analysis server (HTTP client or in-process mock) and log output. The business
+// Implementations that talk to the outside world: environment variables, Parameter Store, the image
+// analysis server (HTTP client or in-process mock) and log output. The business
 // logic in domain.ts only sees the Analyzer / Log ports.
 
-import { correction, generate } from 'lean-qr';
-import { toPngBuffer } from 'lean-qr/extras/node_export';
 import { AnalyzerError, type Analyzer, type AnalyzerResult, type Log } from './domain.ts';
 
 // =================================================================================================
@@ -147,21 +145,6 @@ function parseAnalyzerResponse(body: unknown): AnalyzerResult {
   const { valid, reason } = (body ?? {}) as { valid?: unknown; reason?: unknown };
   if (typeof valid !== 'boolean') throw new Error('"valid" must be a boolean');
   return { valid, reason: typeof reason === 'string' ? reason : '' };
-}
-
-// =================================================================================================
-// QR  (↔ go/internal/qr)
-// =================================================================================================
-
-const QR_MAX_PX = 256;
-const QUIET_ZONE = 4;
-
-// テキストを誤り訂正 M・余白4モジュールの QR PNG にする（256px 以内に収まる最大の整数倍。NODE.md 3）。
-export function qrPng(text: string): Buffer {
-  const code = generate(text, { minCorrectionLevel: correction.M, maxCorrectionLevel: correction.M });
-  const scale = Math.max(1, Math.floor(QR_MAX_PX / (code.size + 2 * QUIET_ZONE)));
-  const png = toPngBuffer(code, { on: [0, 0, 0], off: [255, 255, 255], pad: QUIET_ZONE, scale });
-  return Buffer.from(png.buffer, png.byteOffset, png.byteLength);
 }
 
 // =================================================================================================

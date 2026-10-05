@@ -66,7 +66,7 @@ x-api-key: {API キー}
 | 401 | `{ "error": "invalid api key" }` | `x-api-key` がない、または一致しない | 502（設定ミス扱い） |
 | 404 | `{ "error": "not found" }` | `POST /v1/analyze` 以外 | 502（設定ミス扱い） |
 
-- 画像の形式（JPEG / PNG かどうか）はスタブでは見ない。形式の判定は API 側で済んでいるため
+- 画像の形式（JPEG / PNG / HEIC など）はスタブでは見ない。形式の判定は API 側で済んでいるため
 - 6MB を超えるリクエストは、Function URL が Lambda に届く前に拒否する（API 側で 4MB に制限しているので、通常は起きない）
 
 ### 3.3 認証（仮）
@@ -204,7 +204,7 @@ ANALYZE_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-
 
 # 3. 動作確認
 KEY=$(aws ssm get-parameter --name $ANALYZER_KEY_PARAM --with-decryption --query Parameter.Value --output text)
-curl -s -X POST -H 'content-type: application/octet-stream' -H "x-api-key: $KEY" --data-binary @sample.jpg "$ANALYZE_URL"
+curl -s -X POST -H 'content-type: application/octet-stream' -H "x-api-key: $KEY" --data-binary @testdata/images/photo.jpg "$ANALYZE_URL"
 
 # 4. 確認が終わったら削除する（API キーはスタックの外にあるので別に削除する）
 aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL

@@ -423,11 +423,10 @@ aws cloudformation deploy \
 #### 手順4: 動作確認
 
 ```sh
-printf '\xff\xd8\xff\xe0test' > /tmp/sample.jpg
-curl -s -F image=@/tmp/sample.jpg $API_URL/v1/tickets/qr-inline | head -c 120; echo   # 201（スタブ経由で valid）
+curl -s -F image=@testdata/images/photo.jpg $API_URL/v1/tickets/qr-inline | head -c 120; echo   # 201（スタブ経由で valid）
 
 # スタブが受け取った画像のハッシュが、送ったファイルと一致することを確認する（画像が加工されずに届いている）
-shasum -a 256 /tmp/sample.jpg
+shasum -a 256 testdata/images/photo.jpg
 aws logs tail /aws/lambda/ticketqr-analyzer-stub-$STUB_IMPL --since 5m | grep '"msg":"analyzed"'
 
 # スタブにつながらない・API キーが合わないときは、API が 502 ANALYSIS_UPSTREAM_ERROR を返し、ログに原因が出る
@@ -463,16 +462,14 @@ API を `http` のままスタブを削除すると、画像の発行（A / B-1�
 
 ## 5. 動作確認
 
-モックの画像解析は、JPEG / PNG のマジックバイトさえあれば通る。
+動作確認には `testdata/images/` の小さな画像（JPEG / PNG / HEIC / HEIF / AVIF / WebP。各32×32）を使う。画像の形式は API が判定するので（Node 版はヘッダーを解析するため、先頭数バイトだけの偽の画像は 415 になる）、手元の写真を使ってもよい。
 
 ```sh
-printf '\xff\xd8\xff\xe0test' > /tmp/sample.jpg
-
 # パターンA → 201 JSON
-curl -s -F image=@/tmp/sample.jpg $API_URL/v1/tickets/qr-inline | head -c 200; echo
+curl -s -F image=@testdata/images/photo.jpg $API_URL/v1/tickets/qr-inline | head -c 200; echo
 
 # パターンB-1 → 303 とビューの URL
-LOC=$(curl -s -o /dev/null -w '%{redirect_url}' -F image=@/tmp/sample.jpg $API_URL/v1/tickets); echo $LOC
+LOC=$(curl -s -o /dev/null -w '%{redirect_url}' -F image=@testdata/images/photo.jpg $API_URL/v1/tickets); echo $LOC
 
 # B-3 → 200 HTML、B-2 → 200 image/png
 curl -s -o /dev/null -w '%{http_code} %{content_type}\n' "$LOC"

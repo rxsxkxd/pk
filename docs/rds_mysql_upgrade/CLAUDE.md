@@ -27,6 +27,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 - **パイプラインにシェルスクリプトを置かない。**buildspec は `ruby scripts/<名前>.rb` を直接呼ぶ。AWS 操作は Ruby、MySQL クエリは Go に置き、`aws` / `mysql` を buildspec から直接実行しない。唯一の例外は `scripts/resolve_go_module_root.sh`（BuildReportTool のローカル検証イメージ `golang:1.25` が Ruby を持たないため）。
 - `.rb` は `ruby <パス>` で呼ぶ（CodePipeline の artifact で実行ビットが落ちるため。`tests/ruby_invocation_test.sh`）。buildspec は chmod しない。
 - 外部コマンドの出力を `eval` するときは**変数へ受けてから 2 行で**。`eval "$(...)"` は失敗が `set -e` をすり抜ける。
+- **buildspec のシェルに `set -e` / `set -u` を残さない。**CodeBuild はフェーズの終わりに自分の後処理も同じシェルで動かすため、残るとビルドが止まったままタイムアウトする（ReadApprovals で実際に起きた）。コマンドを 1 行ずつ分けて失敗の検出は CodeBuild に任せ、まとめて止めたいときはサブシェル `( set -e; ... )` の中で使う（`tests/ruby_invocation_test.sh`）。
 - `scripts/` と `tools/` はコードを共有しない。同じ規則を両側で持つもの（フェーズ判定・設定の読み取り・`cfn`）は、変えるときに両側を直す。
 - スクリプトに Python を書かない。背景は `docs/decisions/implementation-language-policy.md`。
 

@@ -45,13 +45,15 @@ phases:
       #    見つからなければ Ruby が理由と探索先を出して終了コード 1 を返す。
       #
       #    **eval "$(...)" と書かない。**その形だと Ruby が失敗しても終了コードが
-      #    eval のものに化け、set -e をすり抜けて「空のまま先へ進む」ことになる。
-      #    いったん変数へ受けて失敗を捕まえる。
-      - |
-        set -eu
-        green_tools=$(ruby scripts/lib/resolve_green_tools.rb)
-        eval "$green_tools"
-        export GREEN_RUNTIME_COLLECTOR GREEN_REPORT_GENERATOR
+      #    eval のものに化け、「空のまま先へ進む」ことになる。いったん変数へ受ける
+      #    （代入の行は Ruby の終了コードを返すので、失敗すればここで止まる）。
+      #
+      #    **set -e / set -u をこのシェルに残さない。**CodeBuild はフェーズの終わりに自分の
+      #    後処理も同じシェルで動かす。nounset が残っているとそこでシェルが落ち、ビルドが
+      #    止まったままタイムアウトする（read-approvals.yml で実際に起きた）。
+      - green_tools=$(ruby scripts/lib/resolve_green_tools.rb)
+      - eval "$green_tools"
+      - export GREEN_RUNTIME_COLLECTOR GREEN_REPORT_GENERATOR
       # 2. 実行ビットを復元する。CodePipeline の artifact では実行ビットが落ちうる。
       - chmod +x "$GREEN_RUNTIME_COLLECTOR" "$GREEN_REPORT_GENERATOR"
 

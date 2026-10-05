@@ -44,18 +44,21 @@ phases:
       # 標準出力にはモジュールルートだけが載る。診断は標準エラーへ出る。
       # 構成が期待と違えば `構成が…` で始まるメッセージを出して終了コード 1 を返す。
       #
-      # **代入の形で受ける。**`$(...)` の失敗は代入文なら set -e が拾うが、
-      # `eval "$(...)"` の形にすると終了コードが eval のものに化けてすり抜ける。
+      # **代入の形で受ける。**代入の行は `$(...)` の終了コードを返すので、失敗すれば
+      # CodeBuild がここで止める。`eval "$(...)"` の形にすると終了コードが eval のものに化ける。
+      #
+      # **set -e / set -u をこのシェルに残さない。**CodeBuild はフェーズの終わりに自分の
+      # 後処理も同じシェルで動かすため、残っているとビルドが止まったままタイムアウトする
+      # ことがある（read-approvals.yml で実際に起きた）。コマンドを 1 行ずつ分けて、
+      # 失敗の検出は CodeBuild に任せる。
       #
       # 実行ビットは CodePipeline の artifact で落ちることがあるため、
       # chmod に頼らず bash へ明示的に渡す。
-      - |
-        set -e
-        module_dir=$(bash scripts/resolve_go_module_root.sh)
-        echo "MODULE_DIR=$module_dir"
-        # build フェーズへ渡す。シェル変数や cwd がフェーズをまたいで残るかは
-        # 保証されないため、ファイル経由という確実な方法にしておく。
-        echo "$module_dir" > /tmp/module_dir
+      - module_dir=$(bash scripts/resolve_go_module_root.sh)
+      - echo "MODULE_DIR=$module_dir"
+      # build フェーズへ渡す。シェル変数や cwd がフェーズをまたいで残るかは
+      # 保証されないため、ファイル経由という確実な方法にしておく。
+      - echo "$module_dir" > /tmp/module_dir
 
 
   build:
@@ -65,7 +68,10 @@ phases:
       # -o は絶対パスで CODEBUILD_SRC_DIR 直下へ出す。モジュールルートが
       # CODEBUILD_SRC_DIR と一致しない場合でも、artifacts の files
       # （CODEBUILD_SRC_DIR 相対）が常に成立するようにするためである。
+      # 複数の命令を失敗でまとめて止めたいので、set -e はサブシェル（( )）の中だけで使う。
+      # 外側の CodeBuild のシェルへは残らない。
       - |
+        (
         set -e
         out_dir=${CODEBUILD_SRC_DIR:-$(pwd)}/.tools/green-report
         mkdir -p "$out_dir"
@@ -76,6 +82,7 @@ phases:
         # 実行側は VPC 内から外部へ出られないため、実行時に取得する選択肢が無い。
         CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
           -o "$out_dir/collect_green_runtime_values" ./scripts/collect_green_runtime_values
+        )
 
 artifacts:
   files:

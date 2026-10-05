@@ -58,6 +58,24 @@ while IFS= read -r pattern; do
   fi
 done < <(grep -hE 'chmod \+x scripts/' ci/codebuild/*.yml | sed 's/.*chmod +x //' | tr ' ' '\n' | grep '^scripts/' | sort -u)
 
+# buildspec のシェルに set -e / set -u を残さないこと。CodeBuild はフェーズの終わりに自分の後処理も
+# 同じシェルで動かすため、nounset などが残るとそこでシェルが落ち、ビルドが止まったまま
+# タイムアウトする（ReadApprovals で実際に起きた）。サブシェル（( で始まるコマンド）の中は許す。
+leaked=$(ruby -ryaml -e '
+  ARGV.each do |file|
+    (YAML.safe_load(File.read(file))["phases"] || {}).each do |phase, body|
+      Array(body && body["commands"]).each do |command|
+        next if command.lstrip.start_with?("(")
+        puts "#{file} #{phase}: #{command.lines.first.strip}" if command =~ /^\s*set\s+-[a-zA-Z]*[eu]/
+      end
+    end
+  end' ci/codebuild/*.yml)
+if [[ -z "$leaked" ]]; then
+  echo 'ok    buildspec のシェルに set -e / set -u を残していない'
+else
+  printf 'FAIL  buildspec のシェルに set -e / set -u が残る（サブシェルの中で使う）:\n%s\n' "$leaked"; failed=$((failed + 1))
+fi
+
 echo
 if [[ "$failed" -eq 0 ]]; then echo 'すべて期待どおり。'; exit 0; fi
 echo "不適合: ${failed} 件" >&2; exit 1

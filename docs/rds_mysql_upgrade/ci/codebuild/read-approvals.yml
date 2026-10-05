@@ -26,18 +26,21 @@ phases:
       - ruby --version
   build:
     commands:
-      # eval で shell 変数にした後、exported-variables として拾わせるため export する。
+      # **set -e / set -u をこのシェルに残さない。**CodeBuild は同じフェーズのコマンドを 1 つの
+      # シェルで続けて実行し、フェーズの終わりに自分の後処理（exported-variables の回収など）も
+      # 同じシェルで動かす。nounset（-u）が残っていると後処理の中でシェルが落ち、エージェントが
+      # 終わりを受け取れずに**止まったままタイムアウトする**（このビルドで実際に起きた）。
+      # 失敗の検出は CodeBuild に任せる。コマンドを 1 行ずつ分ければ、0 以外でフェーズが止まる。
       #
+      # eval で shell 変数にした後、exported-variables として拾わせるため export する。
       # **eval "$(...)" と書かない。**その形だとスクリプトが失敗しても終了コードが
       # eval のものに化け、承認状態が空のまま後続ステージへ渡ってしまう。
-      # いったん変数へ受けて失敗を捕まえる。
-      - |
-        set -eu
-        # 未定義のアクションは pending として扱う（承認されていない側に倒す）。
-        approvals=$(ruby scripts/lib/deployment_config.rb vars "$CONFIG_FILE" "$SERVICE_NAME" \
-          BUILD_APPROVED=optional:service.actions.build=pending \
-          SWITCHOVER_APPROVED=optional:service.actions.switchover=pending)
-        eval "$approvals"
-        export BUILD_APPROVED SWITCHOVER_APPROVED
-      - |
-        echo "service=${SERVICE_NAME} build=${BUILD_APPROVED} switchover=${SWITCHOVER_APPROVED}"
+      # 代入の行は Ruby の終了コードをそのまま返すので、失敗すればここで止まる。
+      # 未定義のアクションは pending として扱う（承認されていない側に倒す）。
+      - >-
+        approvals=$(ruby scripts/lib/deployment_config.rb vars "$CONFIG_FILE" "$SERVICE_NAME"
+        BUILD_APPROVED=optional:service.actions.build=pending
+        SWITCHOVER_APPROVED=optional:service.actions.switchover=pending)
+      - eval "$approvals"
+      - export BUILD_APPROVED SWITCHOVER_APPROVED
+      - echo "service=${SERVICE_NAME} build=${BUILD_APPROVED} switchover=${SWITCHOVER_APPROVED}"

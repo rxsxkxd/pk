@@ -45,7 +45,7 @@ API の仕様は [DESIGN.md](DESIGN.md) を参照。Go 版（`go/`）と**同じ
 | 用途 | 使う標準機能 | 採用しなかったライブラリ |
 |---|---|---|
 | multipart/form-data の解析 | Hono の `c.req.formData()`（中身は標準の `Request.formData()`） | `busboy`（`streamsearch` に依存）、`formidable` |
-| Content-Type の確認 | `multipart/form-data` で始まるかを正規表現で1行確認する（boundary などの細部は `formData()` に任せる） | `content-type`（一度入れたが、Go と細部の挙動を合わせるためだけだったので外した） |
+| Content-Type の確認 | Node 組み込みの `node:util` の `MIMEType`（WHATWG の規則。`formData()` と同じ読み方なので、判定と解析の結果が食い違わない） | `content-type`、`fast-content-type-parse`（Go と一致するケースは少し多いが、npm が増え、`formData()` と規則が違うため Content-Type の作り直しが要る） |
 | ヘッダーの取得 | Hono の `c.req.header()` | - |
 | 署名（HMAC-SHA256 と base64url） | `crypto.createHmac(...).digest('base64url')`、`crypto.timingSafeEqual` | - |
 | 乱数（suffix の生成） | `crypto.randomBytes` | `nanoid` など |
@@ -57,7 +57,7 @@ API の仕様は [DESIGN.md](DESIGN.md) を参照。Go 版（`go/`）と**同じ
 | 設定値の検証 | 手書き（約20行） | `valibot`（画像解析の本物のクライアントでレスポンス検証が必要になった時点で、設定・salt とあわせて再検討する） |
 | 環境変数ファイル | `node --env-file` | `dotenv` |
 
-Hono の `c.req.formData()` は `application/x-www-form-urlencoded` も受け付けるので、Content-Type が `multipart/form-data` で始まるかだけは先に確かめて 415 を返す（仕様上の要件）。それ以外の形式の崩れ（boundary なし、壊れたボディ、`image` がファイルでない）はまとめて 400 にする。
+Hono の `c.req.formData()` は `application/x-www-form-urlencoded` も受け付けるので、Content-Type が boundary 付きの `multipart/form-data` かを先に確かめて 415 を返す。ステータスとメッセージは Go と同じにする（5.2）。
 
 ## 3. QR 生成: lean-qr
 
@@ -106,7 +106,10 @@ st/
     ├── src/
     │   ├── domain.ts          # ビジネスロジック（外部入出力なし。node:crypto だけ使う）
     │   ├── infra.ts           # 外部とのやり取りの実装（環境変数・Parameter Store・解析クライアント・ログ）
-    │   ├── app.ts             # HTTP 層（Hono）: ルート・エンドポイント・リクエスト / レスポンス・ビュー（HTML と QR の PNG）、依存の組み立て
+    │   ├── app.ts             # HTTP 層（Hono）: チケット系のルート・エンドポイント・リクエスト / レスポンス・HTML ビュー、依存の組み立て
+    │   ├── image.ts           # アップロード画像の形式判定とサイズ上限（image-size。↔ go/internal/imageinput）
+    │   ├── shared.ts          # チケット系と example で共有する HTTP 部品（共通ヘッダー・PNG レスポンス・QR の PNG 生成）
+    │   ├── example.ts         # example.com の QR アプリ（createExampleApp）。チケット系のコードには依存しない
     │   ├── ticketqr.ts        # Lambda エントリ: handler = handle(createApp(await loadDeps()))
     │   ├── exampleqr.ts       # Lambda エントリ: handler = handle(createExampleApp())
     │   └── local.ts           # ローカルサーバー（@hono/node-server で同じアプリを起動。開発専用でバンドルしない）
@@ -120,23 +123,28 @@ st/
 
 ```
 app.ts ──▶ domain.ts ◀── infra.ts
-   └──────────────────────▶ infra.ts
-（domain.ts はどこにも依存しない。infra.ts は domain.ts の型だけを参照する）
+   ├──────────────────────▶ infra.ts
+   ├──▶ image.ts
+   └──▶ shared.ts ◀── example.ts
+（domain.ts、image.ts、shared.ts は他のファイルに依存しない。infra.ts は domain.ts の型だけを参照する。example.ts は shared.ts だけを使う）
 ```
 
 | ファイル | 層 | 主な関数・型 | 対応する Go |
 |---|---|---|---|
 | `domain.ts` | ビジネスロジック | `issueTicket`（受け付けるかの判断 → 解析 → 採番。`ACCEPTED_IMAGE_TYPES`）、`generateTicket`、`newSigner`、外部とのインターフェース（`Analyzer`、`Log`、`AnalyzerError`）、`AppError` と各エラー | `usecase`、`ticketcode`、`signer`、`imageinput`、`analyzer`（型）、`apperr` |
 | `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Parameter Store）、`newAnalyzer` / `alwaysValid` / `httpAnalyzer`（画像解析クライアント。モックと HTTP）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、slog |
-| `app.ts` | HTTP 層と組み立て | `createApp`（ルートの宣言・ミドルウェア・`onError`・`notFound`）、`routes`（ルート登録のラッパー）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`issueInline` / `issue` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readFormImage`、`createExampleApp`、`ticketView` / `errorView`、`qrPng`（lean-qr）、`loadDeps` | `app`、`handler`、`view`、`qr`、`exampleqr` |
+| `image.ts` | HTTP 層（入力の技術的な検査） | `MAX_IMAGE_BYTES`、`detectImageType`（image-size） | `imageinput` |
+| `app.ts` | HTTP 層と組み立て | `createApp`（ルートの宣言・ミドルウェア・`onError`・`notFound`）、`routes`（ルート登録のラッパー）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`issueInline` / `issue` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readUpload` / `readFormImage` / `isMultipart`、`ticketView` / `errorView`、`loadDeps` | `app`、`handler`、`view` |
+| `shared.ts` | HTTP の共通部品 | `commonHeaders`、`pngResponse`、`qrPng`（lean-qr） | `qr` |
+| `example.ts` | example アプリ | `createExampleApp`、`EXAMPLE_CONTENT` | `exampleqr` |
 
 - `domain.ts` は外部と直接やり取りしない。画像解析とログは、`issueTicket` が受け取る `IssuePorts`（`analyzer`、`newTicket`、`log`）を通して使う。テストでは、ここに差し替え用の実装（スタブ）を渡す
 - 関数はすべてモジュール直下に置き、依存部品は引数（`deps` と Hono の `c`）で受け取る
 - ルートは `createApp` の中で、`routes(app, deps).post(パス, { name, errors }, 処理)` の形で1行ずつ宣言する。モジュール直下のルート表やそのための型は持たない
-- `qrPng`（QR の PNG 生成）は、外部とのやり取りをしない純粋な変換で、レスポンスの表現を作る処理なので、HTML ビューと同じく `app.ts` の Views セクションに置く。infra には外部とのやり取り（環境変数・Parameter Store・画像解析サーバー・ログ）だけを置き、domain はライブラリに依存させない
+- `qrPng`（QR の PNG 生成）は、外部とのやり取りをしない純粋な変換で、レスポンスの表現を作る処理なので HTTP 層に置く。チケット系と example の両方で使うので `shared.ts` に置く。infra には外部とのやり取り（環境変数・Parameter Store・画像解析サーバー・ログ）だけを置き、domain はライブラリに依存させない
 - Go は `routeKey` で振り分けるが、Node（Hono）はパスで振り分ける。API Gateway で一致したルートのパスがそのまま届くので、結果は同じ
 - エントリポイントのファイル（`ticketqr.ts`、`exampleqr.ts`）は10行程度にする。初期化（設定と salt の取得）は、`ticketqr.ts` のトップレベル `await` で、Lambda の初期化フェーズ中に1回だけ行う
-- `exampleqr.ts` は `app.ts` の `createExampleApp`（と、その中で使う `qrPng`）だけを使う。esbuild の tree shaking で、チケット系のコードはバンドルに含まれない
+- `exampleqr.ts` は `example.ts`（と、その中で使う `shared.ts`）だけを読み込む。ファイルを分けたので、tree shaking に頼らずにチケット系のコード（image-size、チケットコード、SSM など）がバンドルから外れる
 
 ## 5. 実装方針の詳細
 
@@ -148,7 +156,7 @@ export function createApp(deps) {
 
   routes(app, deps)
     .post('/v1/tickets/qr-inline', { name: 'issue-inline', errors: 'json' }, issueInline) // A
-    .post('/v1/tickets', { name: 'issue', errors: 'html' }, issue) // B-1
+    .post('/v1/tickets', { name: 'issue', errors: 'accept' }, issue) // B-1（Accept で 303 か JSON）
     .get('/v1/tickets/:ticketCode/view', { name: 'get-view', errors: 'html' }, getView) // B-3
     .get('/v1/tickets/:ticketCode/qr', { name: 'get-qr', errors: 'json' }, getQr); // B-2
 
@@ -172,7 +180,7 @@ function routes(app, deps) {
 |---|---|
 | `routes` / `setRoute` | `routes` が各ルートの前に `setRoute` を挟んで登録する。`setRoute` は宣言されたログ名とエラー形式を `c.set('route', …)` で記録する |
 | `requestLog`（全体のミドルウェア） | 完了ログ（`requestId`、`endpoint`、`status`、`durationMs`）を出す。ログ名は Go と同じ（`issue-inline` など） |
-| `commonHeaders`（全体のミドルウェア） | すべてのレスポンス（エラー・404 を含む）に `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、CSP を付ける。example アプリは CSP なし |
+| `commonHeaders`（全体のミドルウェア） | すべてのレスポンス（エラー・404 を含む）に `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、CSP を付ける。`shared.ts` にあり、example アプリでも使う（example は CSP なし） |
 | `app.onError` | `AppError` をルートのエラー形式（HTML / JSON）のレスポンスにする。それ以外の例外は 500 にしてログを出す |
 | `app.notFound` | 404 JSON |
 
@@ -184,14 +192,18 @@ function routes(app, deps) {
 ### 5.2 multipart の読み取り
 
 ```ts
-if (!/^multipart\/form-data\b/i.test(c.req.header('content-type') ?? '')) throw unsupportedMediaType(...); // 415
-const image = await c.req.formData().then((form) => form.get('image'), () => null);
-if (!(image instanceof File)) throw badRequest('image file is required');                               // 400
+if (!isMultipart(c.req.header('content-type'))) throw unsupportedMediaType(...);                  // 415
+const form = await c.req.formData().catch(() => { throw badRequest('invalid multipart body'); }); // 400
+if (!(form.get('image') instanceof File)) throw badRequest('image is required');                   // 400
 ```
 
-- 要件として守るのは「multipart 以外は 415」「`image` ファイルを受け取る」の2点だけ。boundary がない、ボディが壊れている、`image` がない、`image` がファイルでない（文字列）は、まとめて 400 にする
+- `readUpload` はリクエストを usecase の入力（`Upload`）に変換する（サイズ上限と形式の判定）。multipart の読み取りは `readFormImage` に分ける（Go の `readUpload` / `readFormImage` と同じ分け方）
+- ステータスとメッセージは Go の `readFormImage` と同じ: boundary がない → 415、ボディが壊れている → 400 `invalid multipart body`、`image` がない → 400 `image is required`
+- Content-Type は `node:util` の `MIMEType`（WHATWG の規則）で読む（`isMultipart`）。`formData()`（undici）も同じ規則で読むので、判定を通った Content-Type はそのまま解析に使える。ブラウザが送る形（`multipart/form-data; boundary=…`）、引用符付きの値、大文字のメディアタイプ、末尾の `;`、同じ値の重複は Go と同じ結果になる。ブラウザが送らない珍しい書き方の3つは Go と違う（既知の差、10章）
+- ボディは全体が正しい multipart でなければ 400 にする。`image` パートより後ろが壊れていても 400（Go も同じ。Lambda ではボディが最初から全部メモリにあるので、`image` パートで読むのをやめても得がない）
+- `image` がファイルでない（文字列）ときだけ Go と違い、Node は 400 にする（既知の差、10章）
 - 検証は性質で置き場所を分ける（Go と同じ）
-  - `app.ts`（外側）: multipart の読み取り、4MB の上限（Lambda の実行環境の制約、413）、形式の判定（`detectImageType`。**`image-size`**（依存なし、バンドル後 約12KB）でヘッダーを解析し、先頭数バイトだけの偽の画像は判定できない扱いにする）
+  - `app.ts` / `image.ts`（外側）: multipart の読み取り（`app.ts`）、4MB の上限（Lambda の実行環境の制約、413）と形式の判定（`image.ts` の `detectImageType`。**`image-size`**（依存なし、バンドル後 約12KB）でヘッダーを解析し、先頭数バイトだけの偽の画像は判定できない扱いにする）
   - `domain.ts`（内側）: `issueTicket` が受け付けるかを判断する。空の画像は 400、形式が `ACCEPTED_IMAGE_TYPES`（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone と主要 Android の写真の形式）にないものは 415
   - `issueTicket` は `Upload`（受け取ったままのバイト列と、判定した形式）を受け取る。domain は判定に使うライブラリに依存しない
 - パートの `Content-Type` は見ない
@@ -236,7 +248,7 @@ if (!(image instanceof File)) throw badRequest('image file is required');       
 ```
 
 - zip の名前は Go 版と同じ（`ticketqr.zip`、`exampleqr.zip`）。CloudFormation の `Impl=node` では、`ImplMap` の Runtime（`nodejs24.x`）と Handler（`index.handler`）だけが変わる
-- 実測サイズ（10章）: `ticketqr.zip` 22KB、`exampleqr.zip` 18KB（image-size 導入前は 17KB / 14KB、Hono 導入前は 9.0KB / 4.8KB。Go 版は 4.9MB / 2.9MB）。コールドスタートの比較ポイントになる
+- 実測サイズ（10章）: `ticketqr.zip` 22KB、`exampleqr.zip` 13.5KB（example.ts 分離前は 22KB / 18KB、image-size 導入前は 17KB / 14KB、Hono 導入前は 9.0KB / 4.8KB。Go 版は 4.9MB / 2.9MB。Go は形式判定の mimetype と go4.org で +0.1MB）。コールドスタートの比較ポイントになる
 
 ### テスト方針
 
@@ -305,16 +317,20 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 | B-1 の 303 | `Location` の形が一致（`{PUBLIC_BASE_URL}/v1/tickets/{code}/view?sig=…`） |
 | B-2 の QR PNG | Go は 256×256、Node は 232×232（許容済み）。どちらも Go の gozxing で読み取ると同じチケットコードになる |
 | Lambda での動作 | `public.ecr.aws/lambda/nodejs:24`（Lambda のエミュレーター入り）で `dist/*.zip` に API Gateway v2 のイベントを送り、A（201）、B-1（303）、B-3（200 HTML）、B-2（200 PNG、base64）、署名不一致（403）、未定義のルート（404 JSON）、example（200 PNG）を確認 |
-| zip サイズ | ticketqr 22KB / exampleqr 18KB（Go: 4.9MB / 2.9MB）。exampleqr には使わない image-size も含まれる（image-size が読み込み時に処理を持つため、esbuild が削除できない。動作には影響しない） |
+| zip サイズ | ticketqr 22KB / exampleqr 13.5KB（Go: 4.9MB / 2.9MB）。example.ts / shared.ts に分けたので、exampleqr には image-size もチケット系のコードも含まれない |
 | HTML の差 | 空白・インデント、`<meta ... />` の書き方、エスケープの書き方（Go は `&#34;`、Node は `&quot;` など）。いずれも表示と意味は同じ |
 
-既知の差（いずれも要件外の細部。Node はビジネス要件だけを満たす簡略な実装にしているため）:
+既知の差（いずれもスマートフォン（iPhone / Android）の写真やブラウザの `FormData` では起きない、要件外の細部のため許容する）:
 
 | ケース | Go | Node |
 |---|---|---|
-| `multipart/form-data` だが boundary がない | 415 `UNSUPPORTED_MEDIA_TYPE` | 400 `BAD_REQUEST` |
-| 壊れた multipart、`image` がない | 400 `BAD_REQUEST` / `image is required` など | 400 `BAD_REQUEST` / `image file is required` |
 | `image` がファイルではなく文字列で送られた | その文字列を画像として扱い、形式判定で 415 | 400 `BAD_REQUEST` |
+| AVIF の連番画像（ftyp ブランド `avis`） | `image/avif` として受け付ける | image-size が対応しておらず 415 |
+| PNG の IHDR の CRC が壊れている、または IHDR の幅と高さの直後（先頭24バイト以降）で切れている | `png.DecodeConfig` が IHDR 全体と CRC を検査して 415 | image-size は幅と高さまでしか読まず、CRC も見ないので受け付ける（偽物を通しても解析サーバーが 422 にする） |
+| Content-Type の `=` の前後に空白（`BOUNDARY = …`） | 受け付ける | 415（WHATWG の規則ではパラメータとして読まない） |
+| Content-Type の boundary が値の違う重複（`boundary=a; boundary=b`） | 415 | 最初の値を使う |
+| Content-Type の boundary の後ろに余計な文字（`boundary=a x`） | 415 | boundary が `a x` になり、ボディと合わないので 400 |
+| HEIF の連番画像（ftyp ブランド `hevc` / `hevx` / `msf1`） | mimetype が `image/heic-sequence` / `image/heif-sequence` と判定するので 415 | `image/heic` / `image/heif` として受け付ける |
 | パスのチケットコードが空（`/v1/tickets//view`） | ハンドラーを直接呼ぶと 403 | ルートに一致しないので 404。API Gateway 経由では Go も同じ（ルートに一致しない） |
 
 ## 11. 画像解析サーバーとの接続（HTTP クライアント）

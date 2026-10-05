@@ -3,12 +3,10 @@
 // version (spec: ../../DESIGN.md, Node-specific decisions: ../../NODE.md).
 
 import { randomUUID } from 'node:crypto';
+import { MIMEType } from 'node:util';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { html, raw } from 'hono/html';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import { imageSize } from 'image-size';
-import { correction, generate } from 'lean-qr';
-import { toPngBuffer } from 'lean-qr/extras/node_export';
 import {
   AppError,
   badRequest,
@@ -27,8 +25,11 @@ import {
   type Upload,
 } from './domain.ts';
 import { consoleLog, loadConfig, loadSalts, newAnalyzer, type Config } from './infra.ts';
+import { detectImageType, MAX_IMAGE_BYTES } from './image.ts';
+import { commonHeaders, pngResponse, qrPng } from './shared.ts';
 
-type Route = { name: string; errors: 'json' | 'html' };
+// errors: response format of errors. 'accept' = JSON when the client asks for it (Accept), else HTML.
+type Route = { name: string; errors: 'json' | 'html' | 'accept' };
 
 // Bindings: Lambda passes the API Gateway request context (the local server passes none).
 // Variables: the matched route, set by routes() for logging and the error format.
@@ -66,7 +67,7 @@ export function createApp(deps: Deps): Hono<Env> {
   // Same routes as API Gateway HTTP API ({ticketCode} is written :ticketCode in Hono).
   routes(app, deps)
     .post('/v1/tickets/qr-inline', { name: 'issue-inline', errors: 'json' }, issueInline) // A
-    .post('/v1/tickets', { name: 'issue', errors: 'html' }, issue) // B-1
+    .post('/v1/tickets', { name: 'issue', errors: 'accept' }, issue) // B-1
     .get('/v1/tickets/:ticketCode/view', { name: 'get-view', errors: 'html' }, getView) // B-3
     .get('/v1/tickets/:ticketCode/qr', { name: 'get-qr', errors: 'json' }, getQr); // B-2
 
@@ -75,7 +76,8 @@ export function createApp(deps: Deps): Hono<Env> {
     const e = err instanceof AppError ? err : internal();
     if (e.status >= 500) deps.log('ERROR', 'request failed', { ...logContext(c), error: String(err) });
     const status = e.status as ContentfulStatusCode;
-    return c.get('route')?.errors === 'html'
+    const errors = c.get('route')?.errors;
+    return errors === 'html' || (errors === 'accept' && !acceptsJson(c))
       ? c.html(errorView(e.code, e.message), status)
       : c.json(errorBody(e), status);
   });
@@ -117,17 +119,6 @@ const requestLog =
     });
   };
 
-// すべてのレスポンスに共通ヘッダー（キャッシュ禁止・nosniff・Referrer-Policy、指定があれば CSP）を付ける。
-const commonHeaders =
-  (csp?: string): MiddlewareHandler<Env> =>
-  async (c, next) => {
-    await next();
-    c.header('Cache-Control', 'no-store');
-    c.header('X-Content-Type-Options', 'nosniff');
-    c.header('Referrer-Policy', 'no-referrer');
-    if (csp) c.header('Content-Security-Policy', csp);
-  };
-
 // ログに付けるリクエスト ID とルート名を返す（ローカル実行では ID を生成する）。
 function logContext(c: Ctx) {
   return { requestId: c.env?.requestContext?.requestId ?? randomUUID(), endpoint: c.get('route')?.name ?? 'unknown' };
@@ -139,7 +130,7 @@ function errorBody(e: AppError) {
 }
 
 // =================================================================================================
-// Endpoints  (↔ go/internal/handler/handler.go, go/internal/exampleqr)
+// Endpoints  (↔ go/internal/handler/handler.go)
 // =================================================================================================
 
 // A: 画像を受け取って発行し、QR を base64 で埋め込んだ JSON を返す（DESIGN.md 5.1）。
@@ -152,10 +143,19 @@ async function issueInline(c: Ctx, deps: Deps): Promise<Response> {
   );
 }
 
-// B-1: フォーム送信された画像で発行し、署名付きビュー URL へ 303 で転送する（DESIGN.md 5.2）。
+// B-1: 画像で発行する。フォーム送信には署名付きビュー URL への 303、Accept: application/json（SPA）には
+// 署名付き QR URL の JSON を返す（DESIGN.md 5.2）。
 async function issue(c: Ctx, deps: Deps): Promise<Response> {
   const t = await issueTicket(deps, await readUpload(c));
-  return c.redirect(ticketUrl(deps, t.code, 'view'), 303);
+  c.header('Vary', 'Accept');
+  if (!acceptsJson(c)) return c.redirect(ticketUrl(deps, t.code, 'view'), 303);
+  const sig = deps.signer.sign(t.code);
+  return c.json({ ticketCode: t.code, issuedAt: t.issuedAt, sig, qrUrl: ticketUrl(deps, t.code, 'qr') }, 201);
+}
+
+// クライアントが JSON の応答を求めているか（Accept に application/json を含むか）を返す。
+function acceptsJson(c: Ctx): boolean {
+  return /application\/json/i.test(c.req.header('accept') ?? '');
 }
 
 // B-3: sig を検証し、署名付き QR URL を埋め込んだ HTML を返す（DESIGN.md 5.3）。
@@ -182,66 +182,48 @@ function ticketUrl(deps: Deps, code: string, resource: 'view' | 'qr'): string {
   return `${deps.config.publicBaseUrl}${path}?sig=${encodeURIComponent(deps.signer.sign(code))}`;
 }
 
-// Upload limit set by the runtime: a Lambda request is at most 6MB and binary bodies are base64 (×4/3).
-export const MAX_IMAGE_BYTES = 4 << 20;
+// =================================================================================================
+// Request → usecase input  (↔ go/internal/handler readUpload / readFormImage)
+// =================================================================================================
 
-// image-size's type → MIME type (heic / mif1 are HEIF brands). Which of these are accepted is decided in
-// domain.ts.
-const DETECTED_TYPES: Record<string, string> = {
-  jpg: 'image/jpeg',
-  png: 'image/png',
-  heic: 'image/heic',
-  heif: 'image/heif',
-  mif1: 'image/heif',
-  avif: 'image/avif',
-  webp: 'image/webp',
-};
-
-// multipart/form-data の image ファイルを取り出し、サイズ上限を確かめて形式を判定する（バイト列は加工しない）。
+// リクエストを usecase の入力（Upload）に変換する。バイト列は加工せず、サイズ上限の確認と形式の判定だけ行う。
 async function readUpload(c: Ctx): Promise<Upload> {
-  if (!/^multipart\/form-data\b/i.test(c.req.header('content-type') ?? '')) {
+  const data = await readFormImage(c);
+  if (data.length > MAX_IMAGE_BYTES) throw payloadTooLarge(`image must be ${MAX_IMAGE_BYTES} bytes or less`);
+  return { data, detectedType: detectImageType(data) } satisfies Upload;
+}
+
+// multipart/form-data から image ファイルのバイト列を取り出す（HTTP の都合だけを扱う）。
+async function readFormImage(c: Ctx): Promise<Uint8Array> {
+  if (!isMultipart(c.req.header('content-type'))) {
     throw unsupportedMediaType('Content-Type must be multipart/form-data');
   }
-  const file = await c.req.formData().then(
-    (form) => form.get('image'),
-    () => null,
-  );
-  if (!(file instanceof File)) throw badRequest('image file is required');
-  const data = new Uint8Array(await file.arrayBuffer());
-  if (data.length > MAX_IMAGE_BYTES) throw payloadTooLarge(`image must be ${MAX_IMAGE_BYTES} bytes or less`);
-  return { data, detectedType: detectImageType(data) };
+  const form = await c.req.formData().catch(() => {
+    throw badRequest('invalid multipart body');
+  });
+  const file = form.get('image');
+  if (!(file instanceof File)) throw badRequest('image is required');
+  return new Uint8Array(await file.arrayBuffer());
 }
 
-// 画像ヘッダーを image-size で解析して MIME タイプを返す（画像として読めなければ undefined）。
-export function detectImageType(data: Uint8Array): string | undefined {
+// Content-Type が boundary 付きの multipart/form-data か判定する（formData() と同じ WHATWG の規則で読む）。
+function isMultipart(contentType = ''): boolean {
   try {
-    return DETECTED_TYPES[imageSize(data).type ?? ''];
+    const m = new MIMEType(contentType);
+    return m.essence === 'multipart/form-data' && !!m.params.get('boundary');
   } catch {
-    return undefined;
+    return false;
   }
-}
-
-// PNG の 200 レスポンスを作る（Lambda では image/png をアダプターが base64 にする）。
-function pngResponse(c: Ctx, png: Buffer): Response {
-  return c.body(new Uint8Array(png), 200, { 'Content-Type': 'image/png' });
-}
-
-// GET /v1/example/qr — fixed QR for https://example.com, deployed as its own package (exampleqr.zip).
-export const EXAMPLE_CONTENT = 'https://example.com'; // with scheme so readers open it as a link
-
-// example.com の固定 QR を PNG で返す Hono アプリを作る（別パッケージ exampleqr.zip 用。設定不要）。
-export function createExampleApp(): Hono<Env> {
-  return new Hono<Env>().use(commonHeaders()).get('/v1/example/qr', (c) => pngResponse(c, qrPng(EXAMPLE_CONTENT)));
 }
 
 // =================================================================================================
-// Views: HTML and the QR PNG — how responses are rendered  (↔ go/internal/view, go/internal/qr)
+// Views: HTML  (↔ go/internal/view; the QR PNG is rendered by shared.ts)
 // Node's own HTML; the Go version uses ../../templates — kept equivalent, not byte-identical.
 // =================================================================================================
 
 type View = ReturnType<typeof html>;
 
-// A plain string embedded with raw(), so bundles that render no HTML (exampleqr) drop it.
+// A plain string embedded with raw(), so it stays out of the module's side effects.
 const STYLE = `<style>
   body { margin: 0; font-family: system-ui, sans-serif; background: #fff; color: #111; }
   main { max-width: 360px; margin: 0 auto; padding: 32px 16px; text-align: center; }
@@ -286,15 +268,4 @@ function errorView(code: string, message: string): View {
         </main>
       </body>
     </html> `;
-}
-
-const QR_MAX_PX = 256;
-const QUIET_ZONE = 4;
-
-// テキストを誤り訂正 M・余白4モジュールの QR PNG にする（256px 以内に収まる最大の整数倍。NODE.md 3）。
-export function qrPng(text: string): Buffer {
-  const code = generate(text, { minCorrectionLevel: correction.M, maxCorrectionLevel: correction.M });
-  const scale = Math.max(1, Math.floor(QR_MAX_PX / (code.size + 2 * QUIET_ZONE)));
-  const png = toPngBuffer(code, { on: [0, 0, 0], off: [255, 255, 255], pad: QUIET_ZONE, scale });
-  return Buffer.from(png.buffer, png.byteOffset, png.byteLength);
 }

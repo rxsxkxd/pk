@@ -23,12 +23,12 @@
 | ID | メソッド / パス | リクエスト | 成功時レスポンス |
 |---|---|---|---|
 | A | `POST /v1/tickets/qr-inline` | `multipart/form-data`（画像ファイル） | `201` JSON（QR base64） |
-| B-1 | `POST /v1/tickets` | `multipart/form-data`（画像ファイル） | `303 See Other` → B-3 |
+| B-1 | `POST /v1/tickets` | `multipart/form-data`（画像ファイル） | `303 See Other` → B-3。`Accept: application/json` のときは `201` JSON（署名付き QR URL。SPA 用） |
 | B-3 | `GET /v1/tickets/{ticketCode}/view?sig=...` | - | `200` HTML（`<img src=B-2>`） |
 | B-2 | `GET /v1/tickets/{ticketCode}/qr?sig=...` | - | `200` `image/png` |
 | EX | `GET /v1/example/qr` | - | `200` `image/png`（`https://example.com` の QR。固定） |
 
-EX はチケット機能とは独立した、固定の QR を返すだけのエンドポイント。デプロイパッケージ（`exampleqr.zip`）も実行ロールも、チケット系とは分ける。設定・シークレット・署名・画像解析は使わない。
+EX はチケット機能とは独立した、固定の QR を返すだけのエンドポイント。デプロイパッケージ（`exampleqr.zip`）、実行ロール、HTTP API、CloudFormation テンプレート（`infra/cloudformation/example.yaml`）も、チケット系（`api.yaml`）とは分ける。設定・シークレット・署名・画像解析は使わない。
 
 ## 2. 全体構成
 
@@ -68,7 +68,7 @@ flowchart LR
 API が変えるのは**送り方（multipart → octet-stream）だけ**。画像の中身はパススルーで、圧縮・リサイズ・形式変換・メタデータ（EXIF など）の除去は行わない。
 
 1. **入力検証**（置き場所を性質で分ける）
-   - HTTP 層: Content-Type が `multipart/form-data` か、`image` フィールドがあるか、サイズ上限（4MB。実行環境の制約）、画像形式の判定（技術的な処理）
+   - HTTP 層: Content-Type が boundary 付きの `multipart/form-data` か（なければ 415）、ボディ全体が正しい multipart か（壊れていれば 400）、`image` フィールドがあるか、サイズ上限（4MB。実行環境の制約）、画像形式の判定（技術的な処理）
    - ユースケース: 受け付ける形式か（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone・主要 Android の写真をそのまま送った場合の形式）、空でないか（業務上のルール）
 2. **画像解析連携**: 検証済みの画像バイト列を `application/octet-stream` でそのまま送る（7章）。タイムアウト付きHTTP呼び出し。5xx/タイムアウトのみ限定リトライ（例: 最大1回）
 3. **採番**: valid 時のみ実施。外部ストアを参照せずに生成する（4章）
@@ -222,7 +222,9 @@ sequenceDiagram
 - ベースパス: `/v1`
 - 画像の受け取り: A・B-1 とも `multipart/form-data` の `image` フィールド（ブラウザの `<input type="file">` / `FormData` で送る形式に統一）
 - 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため）
-- 画像の形式判定はファイルの中身で行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）。JPEG / PNG / WebP はヘッダーを画像サイズまで解析し（Node: `image-size`、Go: 標準の `image/jpeg`・`image/png` の `DecodeConfig` と `golang.org/x/image/webp`）、HEIF / AVIF は ISO BMFF の ftyp ブランドで判定する。先頭数バイトだけの偽の画像は 415
+- 画像の形式判定はファイルの中身で行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）。先頭のバイトで形式を決め、その形式のヘッダーを画像サイズまで解析できることまで確かめる（画像本体はデコードしない）。先頭数バイトだけの偽の画像は 415
+  - Node: `image-size` が両方を行う
+  - Go: 形式は `github.com/gabriel-vasile/mimetype`、確認は形式ごとのパーサー（JPEG / PNG は標準の `DecodeConfig`、WebP は `golang.org/x/image/webp`、HEIC / HEIF / AVIF は `go4.org/media/heif` で primary item の ispe ボックスを読む）。バイト列を直接比べる処理は自前で持たない
 - 受け付ける形式: JPEG、PNG、HEIC / HEIF（iPhone の標準、Samsung などの HEIF）、AVIF、WebP。画像は変換せずにそのまま解析サーバーへ送る
 - `Cache-Control: no-store`（全エンドポイント）
 
@@ -256,23 +258,40 @@ Response `201 Created`, `Content-Type: application/json`
 
 ### 5.2 パターンB-1: `POST /v1/tickets`
 
-ブラウザのフォーム送信で呼ばれる想定（6章 案1）。
+ブラウザのフォーム送信（6章 案1）と、SPA（`web/`）の `fetch` の両方から呼ばれる。返し方は `Accept` ヘッダーで切り替える。
 
 Request `Content-Type: multipart/form-data`
 
 | フィールド | 内容 |
 |---|---|
-| `image` | 画像ファイル（`<input type="file" name="image" accept="image/jpeg,image/png">`） |
+| `image` | 画像ファイル（`<input type="file" name="image" accept="image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp">`） |
 
-Response（成功）
+Response（成功。フォーム送信など、`Accept` に `application/json` を含まないとき）
 ```
 HTTP/1.1 303 See Other
 Location: https://api.example.com/v1/tickets/20261001194300-7K3QX9MZ/view?sig=Xq3v9bJk2mPz8RtY1cWnHA
 Cache-Control: no-store
 ```
 
-- `Location` は `PUBLIC_BASE_URL` から組み立てた絶対URL（`Host` ヘッダは信用しない）
-- エラー時はリダイレクトせず、HTMLエラービューを該当ステータスで直接返す
+Response（成功。`Accept: application/json` のとき。SPA がチケット画面を自分で描画する）
+```
+HTTP/1.1 201 Created
+Content-Type: application/json
+Vary: Accept
+
+{
+  "ticketCode": "20261001194300-7K3QX9MZ",
+  "issuedAt": "2026-10-01T19:43:00+09:00",
+  "sig": "Xq3v9bJk2mPz8RtY1cWnHA",
+  "qrUrl": "https://api.example.com/v1/tickets/20261001194300-7K3QX9MZ/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
+}
+```
+
+- `Location` / `qrUrl` は `PUBLIC_BASE_URL` から組み立てた絶対URL（`Host` ヘッダは信用しない）
+- `qrUrl` は B-2 の URL。SPA は `<img src="{qrUrl}">` で表示し、`ticketCode` と `sig` を自分の URL（`#/tickets/{code}?sig=…`）に入れて、リロードや共有に使う（web/DESIGN.md）
+- 判定は `Accept` に `application/json` が含まれるかどうか。ブラウザのフォーム送信の `Accept`（`text/html,…`）は含まないので 303 になる。`Accept` は CORS の単純リクエストで許されるヘッダーなので、SPA が付けてもプリフライトは発生しない
+- エラー時はリダイレクトせず、該当ステータスで直接返す。形式は成功時と同じ基準で、JSON（`Accept: application/json`）か HTMLエラービュー
+- どちらの応答にも `Vary: Accept` を付ける
 
 ### 5.3 パターンB-3: `GET /v1/tickets/{ticketCode}/view`
 
@@ -349,7 +368,8 @@ sig = base64url( HMAC-SHA256(salt, ticketCode) ) の先頭 22 文字（128bit）
 | エンドポイント | エラー形式 |
 |---|---|
 | A, B-2 | JSON `{ "error": { "code": "IMAGE_INVALID", "message": "..." } }` |
-| B-1, B-3 | HTMLエラービュー（`<main data-error-code="IMAGE_INVALID">` に code を載せる） |
+| B-3、B-1（フォーム送信） | HTMLエラービュー（`<main data-error-code="IMAGE_INVALID">` に code を載せる） |
+| B-1（`Accept: application/json`） | JSON（A・B-2 と同じ） |
 
 | HTTP | code | 条件 |
 |---|---|---|
@@ -452,8 +472,8 @@ st/
 │       ├── secret/            # salt 取得（Parameter Store）
 │       ├── config/            # 環境変数
 │       └── view/              # HTMLレンダリング
-├── node/                      # 詳細は NODE.md（domain.ts / infra.ts / app.ts + 入口の ticketqr.ts / exampleqr.ts / local.ts）
-├── infra/                     # IaC（impl=go|node でパラメータ化）
+├── node/                      # 詳細は NODE.md（domain.ts / infra.ts / app.ts / image.ts / shared.ts / example.ts + 入口の ticketqr.ts / exampleqr.ts / local.ts）
+├── infra/cloudformation/      # IaC（impl=go|node でパラメータ化）: api.yaml（チケット API）、example.yaml（EX。別スタック）
 └── tests/
     ├── contract/              # 両実装に同一ケースを流す
     └── load/                  # k6 シナリオ

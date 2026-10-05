@@ -7,18 +7,19 @@ API の設計は [DESIGN.md](DESIGN.md) を参照。デプロイの方法は2つ
 | [手動（AWS CLI）](#3-手動デプロイaws-cli) | 一度試すとき、構成を理解するとき |
 | [CloudFormation](#4-cloudformation-デプロイ) | 繰り返しデプロイするとき、環境を複製するとき、CI からデプロイするとき（推奨） |
 
-どちらの方法でも、出来上がる構成は同じになる。
+どちらの方法でも、出来上がる構成は同じになる。チケット API と、example.com の QR エンドポイント（4.8）は、**別々の HTTP API・別々のスタック**にする。
 
 ```
-API Gateway HTTP API（$default ステージ、自動デプロイ、スロットリング）
+チケット API: API Gateway HTTP API ticketqr-{impl}（$default ステージ、自動デプロイ、スロットリング）
  ├─ POST /v1/tickets/qr-inline        ┐
  ├─ POST /v1/tickets                  ├→ Lambda ticketqr-{impl}-tickets（画像解析・採番・ビュー）
  ├─ GET  /v1/tickets/{ticketCode}/view ┘
- ├─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr（QR 画像の生成）
+ └─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr（QR 画像の生成）
+example: API Gateway HTTP API ticketqr-{impl}-example（4.8。チケット API とは無関係）
  └─ GET  /v1/example/qr                → Lambda ticketqr-{impl}-example-qr
 チケット系（上の2関数）: provided.al2023 / arm64 / 256MB、パッケージ ticketqr.zip を共有（どのハンドラを呼ぶかは routeKey で決まる）
                       実行ロールは Parameter Store の salt（と、http モードのときは解析サーバーの API キー）だけを読める
-example-qr:           provided.al2023 / arm64 / 128MB、別パッケージ exampleqr.zip、設定もシークレットも不要
+example-qr:           provided.al2023 / arm64 / 128MB、別パッケージ exampleqr.zip、別テンプレート example.yaml、設定もシークレットも不要
                       実行ロールはログ出力だけ（チケット系とは別のロール）
 Parameter Store（SecureString）: /ticketqr/{impl}/signing-salt（スタックの外で管理する）
 ```
@@ -67,7 +68,7 @@ ls node/dist/*.zip   # ticketqr.zip、exampleqr.zip
 |---|---|---|
 | `IMPL` | `go` | `node` |
 | zip の場所 | `go/bin/*.zip` | `node/dist/*.zip` |
-| 手動デプロイ（3.3、3.6）の `--runtime` / `--handler` | `provided.al2023` / `bootstrap` | `nodejs24.x` / `index.handler` |
+| 手動デプロイ（3.3、4.8）の `--runtime` / `--handler` | `provided.al2023` / `bootstrap` | `nodejs24.x` / `index.handler` |
 | CloudFormation（4.4） | `Impl=go` | `Impl=node`（Runtime と Handler はテンプレートの `ImplMap` が切り替える） |
 
 salt のパラメータ（2.2）は実装ごとに作る（`/ticketqr/node/signing-salt`）。
@@ -206,44 +207,7 @@ aws apigatewayv2 create-stage --api-id $API_ID --stage-name '$default' --auto-de
 
 この時点で API が公開される。動作確認は [5章](#5-動作確認)。
 
-### 3.6 example.com の QR エンドポイント（別パッケージ）
-
-salt を読まないので、ログ出力の権限だけを持つ実行ロールを別に作る。
-
-```sh
-EXAMPLE_ROLE_NAME=ticketqr-$IMPL-example-lambda
-aws iam create-role --role-name $EXAMPLE_ROLE_NAME \
-  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-aws iam attach-role-policy --role-name $EXAMPLE_ROLE_NAME \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-EXAMPLE_ROLE_ARN=$(aws iam get-role --role-name $EXAMPLE_ROLE_NAME --query Role.Arn --output text)
-sleep 10
-
-aws logs create-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr
-aws logs put-retention-policy --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr --retention-in-days 30
-
-FN_ARN=$(aws lambda create-function \
-  --function-name ticketqr-$IMPL-example-qr \
-  --runtime provided.al2023 --architectures arm64 --handler bootstrap \
-  --role $EXAMPLE_ROLE_ARN --memory-size 128 --timeout 5 \
-  --zip-file fileb://go/bin/exampleqr.zip \
-  --query FunctionArn --output text)
-
-INTEGRATION_ID=$(aws apigatewayv2 create-integration --api-id $API_ID \
-  --integration-type AWS_PROXY --integration-uri $FN_ARN \
-  --payload-format-version 2.0 --timeout-in-millis 10000 \
-  --query IntegrationId --output text)
-aws apigatewayv2 create-route --api-id $API_ID \
-  --route-key 'GET /v1/example/qr' --target integrations/$INTEGRATION_ID >/dev/null
-aws lambda add-permission --function-name ticketqr-$IMPL-example-qr \
-  --statement-id apigateway-invoke --action lambda:InvokeFunction \
-  --principal apigateway.amazonaws.com \
-  --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCOUNT_ID:$API_ID/*/*" >/dev/null
-```
-
-ステージは自動デプロイなので、ルートを追加するとすぐに公開される。
-
-### 3.7 コードの更新
+### 3.6 コードの更新
 
 ```sh
 make -C go build
@@ -251,13 +215,11 @@ aws lambda update-function-code --function-name ticketqr-$IMPL-tickets \
   --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
 aws lambda update-function-code --function-name ticketqr-$IMPL-get-qr \
   --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
-aws lambda update-function-code --function-name ticketqr-$IMPL-example-qr \
-  --zip-file fileb://go/bin/exampleqr.zip --query LastUpdateStatus --output text
 ```
 
 環境変数を変えるときは `aws lambda update-function-configuration --environment ...` を使う。指定した変数で全体が置き換わるので、既存の変数もすべて指定し直す。
 
-### 3.8 削除
+### 3.7 削除
 
 ```sh
 aws apigatewayv2 delete-api --api-id $API_ID
@@ -268,16 +230,14 @@ aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-get-qr
 aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-signing-salt
 aws iam detach-role-policy --role-name ticketqr-$IMPL-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 aws iam delete-role --role-name ticketqr-$IMPL-lambda
-aws lambda delete-function --function-name ticketqr-$IMPL-example-qr
-aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr
-aws iam detach-role-policy --role-name ticketqr-$IMPL-example-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
 # salt のパラメータは、必要がなくなったときだけ削除する（aws ssm delete-parameter --name $SALT_PARAM）
 ```
 
 ## 4. CloudFormation デプロイ
 
-テンプレート: [`infra/cloudformation/api.yaml`](infra/cloudformation/api.yaml)（cfn-lint で検証済み）
+テンプレート（どちらも cfn-lint で検証済み）:
+- [`infra/cloudformation/api.yaml`](infra/cloudformation/api.yaml): チケット API（4.1〜4.7）
+- [`infra/cloudformation/example.yaml`](infra/cloudformation/example.yaml): example.com の QR エンドポイント（4.8）
 
 ### 4.1 主なパラメータ
 
@@ -460,6 +420,89 @@ aws ssm delete-parameter --name $ANALYZER_KEY_PARAM   # API キーはスタッ�
 
 API を `http` のままスタブを削除すると、画像の発行（A / B-1）がすべて 502 になる。
 
+### 4.8 example.com の QR エンドポイント（別スタック・別 API）
+
+`GET /v1/example/qr` は、チケット API とは無関係なエンドポイント。パッケージ（`exampleqr.zip`）、テンプレート（`example.yaml`）、HTTP API、実行ロールをすべて分け、チケット API とは独立して作成・削除できるようにする。設定もシークレットも使わないので、実行ロールはログ出力だけ。
+
+#### CloudFormation
+
+`exampleqr.zip` は 4.3 でチケット API の zip と一緒にアップロードしてある。
+
+```sh
+aws cloudformation deploy \
+  --stack-name ticketqr-$IMPL-example \
+  --template-file infra/cloudformation/example.yaml \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    Impl=$IMPL \
+    ArtifactBucket=$ARTIFACT_BUCKET \
+    ArtifactPrefix=$ARTIFACT_PREFIX
+
+export EXAMPLE_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-$IMPL-example \
+  --query "Stacks[0].Outputs[?OutputKey=='ExampleQrUrl'].OutputValue" --output text)
+echo $EXAMPLE_URL
+
+# 削除
+aws cloudformation delete-stack --stack-name ticketqr-$IMPL-example
+```
+
+| パラメータ | 既定値 | 内容 |
+|---|---|---|
+| `Impl` / `ArtifactBucket` / `ArtifactPrefix` | - | 4.1 と同じ |
+| `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `10` / `20` | example 用の HTTP API のスロットリング |
+| `LogRetentionDays` | `30` | ログの保持日数 |
+
+#### 手動（AWS CLI）
+
+```sh
+# 実行ロール（ログ出力だけ）
+aws iam create-role --role-name ticketqr-$IMPL-example-lambda \
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+aws iam attach-role-policy --role-name ticketqr-$IMPL-example-lambda \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+EXAMPLE_ROLE_ARN=$(aws iam get-role --role-name ticketqr-$IMPL-example-lambda --query Role.Arn --output text)
+sleep 10
+
+# Lambda
+aws logs create-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr
+aws logs put-retention-policy --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr --retention-in-days 30
+EXAMPLE_FN_ARN=$(aws lambda create-function \
+  --function-name ticketqr-$IMPL-example-qr \
+  --runtime provided.al2023 --architectures arm64 --handler bootstrap \
+  --role $EXAMPLE_ROLE_ARN --memory-size 128 --timeout 5 \
+  --zip-file fileb://go/bin/exampleqr.zip \
+  --query FunctionArn --output text)
+
+# 専用の HTTP API・ルート・ステージ
+read EXAMPLE_API_ID EXAMPLE_API_URL < <(aws apigatewayv2 create-api \
+  --name ticketqr-$IMPL-example --protocol-type HTTP --query '[ApiId,ApiEndpoint]' --output text)
+EXAMPLE_INTEGRATION=$(aws apigatewayv2 create-integration --api-id $EXAMPLE_API_ID \
+  --integration-type AWS_PROXY --integration-uri $EXAMPLE_FN_ARN \
+  --payload-format-version 2.0 --timeout-in-millis 10000 --query IntegrationId --output text)
+aws apigatewayv2 create-route --api-id $EXAMPLE_API_ID --route-key 'GET /v1/example/qr' \
+  --target integrations/$EXAMPLE_INTEGRATION
+aws lambda add-permission --function-name ticketqr-$IMPL-example-qr \
+  --statement-id apigateway-invoke --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCOUNT_ID:$EXAMPLE_API_ID/*/*"
+aws apigatewayv2 create-stage --api-id $EXAMPLE_API_ID --stage-name '$default' --auto-deploy \
+  --default-route-settings ThrottlingRateLimit=10,ThrottlingBurstLimit=20
+export EXAMPLE_URL=$EXAMPLE_API_URL/v1/example/qr
+
+# コードの更新
+aws lambda update-function-code --function-name ticketqr-$IMPL-example-qr \
+  --zip-file fileb://go/bin/exampleqr.zip --query LastUpdateStatus --output text
+
+# 削除
+aws apigatewayv2 delete-api --api-id $EXAMPLE_API_ID
+aws lambda delete-function --function-name ticketqr-$IMPL-example-qr
+aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr
+aws iam detach-role-policy --role-name ticketqr-$IMPL-example-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
+```
+
+Node 版は、zip を `node/dist/exampleqr.zip`、`--runtime nodejs24.x --handler index.handler` に読み替える（2.1.1）。
+
 ## 5. 動作確認
 
 動作確認には `testdata/images/` の小さな画像（JPEG / PNG / HEIC / HEIF / AVIF / WebP。各32×32）を使う。画像の形式は API が判定するので（Node 版はヘッダーを解析するため、先頭数バイトだけの偽の画像は 415 になる）、手元の写真を使ってもよい。
@@ -480,7 +523,7 @@ curl -s -o /tmp/qr.png -w '%{http_code} %{content_type}\n' "$QR"
 curl -s -o /dev/null -w '%{http_code}\n' "${LOC%sig=*}sig=AAAAAAAAAAAAAAAAAAAAAA"
 
 # example.com の QR → 200 image/png
-curl -s -o /tmp/example.png -w '%{http_code} %{content_type}\n' $API_URL/v1/example/qr
+curl -s -o /tmp/example.png -w '%{http_code} %{content_type}\n' $EXAMPLE_URL   # 4.8 の別 API
 ```
 
 ブラウザで `$LOC` を開くと、QR の画面が表示される。

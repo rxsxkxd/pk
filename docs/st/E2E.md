@@ -53,6 +53,8 @@ flowchart LR
 
 ## 3. 静的サイト（`web/`）
 
+> この章の「素の HTML / JS の静的サイト」案は、Vue 3.5 の SPA（[web/DESIGN.md](web/DESIGN.md)）で置き換える。E2E の構成（`web` コンテナで静的ファイルを配信する）は変わらず、配信するファイルが `web/` のビルド結果（`dist/`）になる。
+
 ### 3.1 画面
 
 `index.html` 1枚に、2つのパターンを並べる。

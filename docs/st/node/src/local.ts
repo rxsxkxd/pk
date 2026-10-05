@@ -2,7 +2,8 @@
 // example.com QR app on :8081 with @hono/node-server — the same Hono apps the Lambda functions run.
 
 import { serve } from '@hono/node-server';
-import { createApp, createExampleApp, loadDeps } from './app.ts';
+import { createApp, loadDeps } from './app.ts';
+import { createExampleApp } from './example.ts';
 
 const port = Number(process.env.PORT ?? 8080);
 const examplePort = Number(process.env.EXAMPLE_PORT ?? 8081);

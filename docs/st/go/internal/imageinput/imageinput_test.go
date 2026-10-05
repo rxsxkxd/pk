@@ -40,6 +40,8 @@ func TestDetectUnknown(t *testing.T) {
 		"RIFF but not WebP":        []byte("RIFF\x10\x00\x00\x00WAVEfmt "),
 		"WebP header without data": []byte("RIFF\x04\x00\x00\x00WEBP"),
 		"unknown ftyp brand":       []byte("\x00\x00\x00\x18ftypisom\x00\x00\x00\x00"),
+		"HEIC ftyp box only":       []byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"),
+		"AVIF ftyp box only":       []byte("\x00\x00\x00\x18ftypavif\x00\x00\x00\x00mif1avif"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got := Detect(data); got != "" {

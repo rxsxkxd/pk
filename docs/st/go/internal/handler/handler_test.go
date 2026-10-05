@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -93,6 +94,32 @@ func formRequest(t *testing.T, field string, data []byte) Request {
 	}
 }
 
+// withContentType rewrites the Content-Type of a form request; format gets the request's boundary (%s).
+func withContentType(t *testing.T, req Request, format string) Request {
+	t.Helper()
+	_, params, err := mime.ParseMediaType(req.Headers["content-type"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Headers = map[string]string{"content-type": strings.ReplaceAll(format, "%s", params["boundary"])}
+	return req
+}
+
+// brokenAfterImage is a valid image part followed by a part whose headers never end.
+func brokenAfterImage(t *testing.T) Request {
+	t.Helper()
+	req := formRequest(t, "image", jpeg)
+	_, params, _ := mime.ParseMediaType(req.Headers["content-type"])
+	body, _ := base64.StdEncoding.DecodeString(req.Body)
+	closing := "--" + params["boundary"] + "--\r\n"
+	if !bytes.HasSuffix(body, []byte(closing)) {
+		t.Fatal("unexpected multipart body")
+	}
+	body = append(body[:len(body)-len(closing)], "--"+params["boundary"]+"\r\nX-Broken"...)
+	req.Body = base64.StdEncoding.EncodeToString(body)
+	return req
+}
+
 func signedGet(h *Handlers, code, sig string) Request {
 	return Request{
 		PathParameters:        map[string]string{"ticketCode": code},
@@ -168,6 +195,11 @@ func TestIssueInlineErrors(t *testing.T) {
 		{"json instead of form", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "application/json"}, Body: "{}"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
 		{"no boundary", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "multipart/form-data"}, Body: "x"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
 		{"broken multipart", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "multipart/form-data; boundary=xyz"}, Body: "garbage"}, 400, "BAD_REQUEST"},
+		{"empty boundary", analyzer.AlwaysValid{}, withContentType(t, formRequest(t, "image", jpeg), `multipart/form-data; boundary=""`), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"boundary without value", analyzer.AlwaysValid{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary"), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"conflicting boundaries", analyzer.AlwaysValid{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary=%s; boundary=other"), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"garbage after boundary", analyzer.AlwaysValid{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary=%s x"), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"broken after the image part", analyzer.AlwaysValid{}, brokenAfterImage(t), 400, "BAD_REQUEST"},
 		{"missing image field", analyzer.AlwaysValid{}, formRequest(t, "file", jpeg), 400, "BAD_REQUEST"},
 		{"empty image", analyzer.AlwaysValid{}, formRequest(t, "image", nil), 400, "BAD_REQUEST"},
 		{"not an image", analyzer.AlwaysValid{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
@@ -184,6 +216,26 @@ func TestIssueInlineErrors(t *testing.T) {
 			}
 			if res.StatusCode != tt.status || errorCode(t, res) != tt.code {
 				t.Errorf("got %d %s, want %d %s", res.StatusCode, errorCode(t, res), tt.status, tt.code)
+			}
+		})
+	}
+}
+
+// TestContentTypeVariants: valid spellings of a multipart Content-Type. The Node tests have the same cases
+// except spaces around "=", a known difference (NODE.md 10).
+func TestContentTypeVariants(t *testing.T) {
+	for _, format := range []string{
+		`multipart/form-data; boundary="%s"`,
+		"Multipart/Form-Data; boundary=%s",
+		"multipart/form-data; boundary=%s;",
+		"multipart/form-data ; charset=utf-8; BOUNDARY = %s",
+		"multipart/form-data; boundary=%s; boundary=%s",
+	} {
+		t.Run(format, func(t *testing.T) {
+			req := withContentType(t, formRequest(t, "image", jpeg), format)
+			res, _ := newHandlers(t, analyzer.AlwaysValid{}).IssueInline(context.Background(), req)
+			if res.StatusCode != http.StatusCreated {
+				t.Errorf("status = %d, body = %s", res.StatusCode, res.Body)
 			}
 		})
 	}
@@ -367,5 +419,52 @@ func TestUploadFormats(t *testing.T) {
 				t.Errorf("status = %d, want 415", res.StatusCode)
 			}
 		})
+	}
+}
+
+// TestIssueAcceptJSON checks the SPA path of B-1: Accept: application/json gets the signed QR URL as JSON
+// (and JSON errors) instead of a redirect.
+func TestIssueAcceptJSON(t *testing.T) {
+	h := newHandlers(t, analyzer.AlwaysValid{})
+	req := formRequest(t, "image", jpeg)
+	req.Headers["accept"] = "application/json"
+
+	res, _ := h.Issue(context.Background(), req)
+	if res.StatusCode != http.StatusCreated || !strings.HasPrefix(res.Headers["Content-Type"], "application/json") {
+		t.Fatalf("status = %d, content-type = %q, body = %s", res.StatusCode, res.Headers["Content-Type"], res.Body)
+	}
+	if res.Headers["Location"] != "" || res.Headers["Vary"] != "Accept" {
+		t.Errorf("Location = %q, Vary = %q", res.Headers["Location"], res.Headers["Vary"])
+	}
+	var body struct{ TicketCode, IssuedAt, Sig, QRURL string }
+	if err := json.Unmarshal([]byte(res.Body), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !codeRe.MatchString(body.TicketCode) || !strings.HasSuffix(body.IssuedAt, "+09:00") || !h.Signer.Verify(body.TicketCode, body.Sig) {
+		t.Fatalf("unexpected body %+v", body)
+	}
+	if want := "https://api.example.com/v1/tickets/" + body.TicketCode + "/qr?sig=" + url.QueryEscape(body.Sig); body.QRURL != want {
+		t.Errorf("qrUrl = %q, want %q", body.QRURL, want)
+	}
+
+	// The returned URL serves the QR (B-2), so the SPA can render <img src=qrUrl>.
+	res, _ = h.GetQR(context.Background(), signedGet(h, body.TicketCode, body.Sig))
+	if res.StatusCode != http.StatusOK || res.Headers["Content-Type"] != "image/png" {
+		t.Errorf("qr status = %d", res.StatusCode)
+	}
+
+	// Errors are JSON too.
+	bad := formRequest(t, "image", []byte("hello"))
+	bad.Headers["accept"] = "application/json"
+	res, _ = h.Issue(context.Background(), bad)
+	if res.StatusCode != http.StatusUnsupportedMediaType || errorCode(t, res) != "UNSUPPORTED_MEDIA_TYPE" {
+		t.Errorf("error: status = %d, body = %s", res.StatusCode, res.Body)
+	}
+
+	// A browser form (Accept: text/html,...) still gets the redirect.
+	form := formRequest(t, "image", jpeg)
+	form.Headers["accept"] = "text/html,application/xhtml+xml,*/*;q=0.8"
+	if res, _ = h.Issue(context.Background(), form); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("form: status = %d, want 303", res.StatusCode)
 	}
 }

@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Ticket QR API (ticketqr package on 2 functions + exampleqr package, behind one HTTP API). See docs/st/DEPLOY.md.
+Description: Ticket QR API (ticketqr package on 2 functions behind one HTTP API). The example.com QR endpoint is a separate stack (example.yaml). See docs/st/DEPLOY.md.
 
 Parameters:
   Impl:
@@ -12,7 +12,7 @@ Parameters:
     Description: S3 bucket holding the Lambda zip files.
   ArtifactPrefix:
     Type: String
-    Description: Key prefix of ticketqr.zip and exampleqr.zip, e.g. ticketqr/go/<git-sha>. Change it on every deploy so Lambda picks up new code.
+    Description: Key prefix of ticketqr.zip, e.g. ticketqr/go/<git-sha>. Change it on every deploy so Lambda picks up new code.
   SigningSaltParameterName:
     Type: String
     AllowedPattern: ^/.+
@@ -102,19 +102,6 @@ Resources:
                   Action: ssm:GetParameter
                   Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AnalyzerApiKeyParameterName}
           - !Ref AWS::NoValue
-
-  # exampleqr reads no secrets, so it gets a role with logging only.
-  ExampleFunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
   # ---------- HTTP API ----------
   HttpApi:
@@ -253,48 +240,6 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref GetQRFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
-
-  # ---------- GET /v1/example/qr (separate package: exampleqr.zip) ----------
-  ExampleQRLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /aws/lambda/ticketqr-${Impl}-example-qr
-      RetentionInDays: !Ref LogRetentionDays
-  ExampleQRFunction:
-    Type: AWS::Lambda::Function
-    DependsOn: ExampleQRLogGroup
-    Properties:
-      FunctionName: !Sub ticketqr-${Impl}-example-qr
-      Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
-      Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
-      Architectures: [arm64]
-      MemorySize: 128
-      Timeout: 5
-      Role: !GetAtt ExampleFunctionRole.Arn
-      Code:
-        S3Bucket: !Ref ArtifactBucket
-        S3Key: !Sub ${ArtifactPrefix}/exampleqr.zip
-  ExampleQRIntegration:
-    Type: AWS::ApiGatewayV2::Integration
-    Properties:
-      ApiId: !Ref HttpApi
-      IntegrationType: AWS_PROXY
-      IntegrationUri: !GetAtt ExampleQRFunction.Arn
-      PayloadFormatVersion: "2.0"
-      TimeoutInMillis: 10000
-  ExampleQRRoute:
-    Type: AWS::ApiGatewayV2::Route
-    Properties:
-      ApiId: !Ref HttpApi
-      RouteKey: GET /v1/example/qr
-      Target: !Sub integrations/${ExampleQRIntegration}
-  ExampleQRPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref ExampleQRFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
 

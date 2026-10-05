@@ -6,7 +6,10 @@ import { after, describe, test } from 'node:test';
 import { handle } from '@hono/aws-lambda';
 import type { APIGatewayProxyEventV2 as Event, APIGatewayProxyStructuredResultV2 as Result } from 'aws-lambda';
 import { correction, generate } from 'lean-qr';
-import { createApp, createExampleApp, MAX_IMAGE_BYTES, qrPng, type Deps } from '../src/app.ts';
+import { createApp, type Deps } from '../src/app.ts';
+import { MAX_IMAGE_BYTES } from '../src/image.ts';
+import { createExampleApp } from '../src/example.ts';
+import { qrPng } from '../src/shared.ts';
 import { AnalyzerError, generateTicket, newSigner, type Analyzer } from '../src/domain.ts';
 import { alwaysValid, httpAnalyzer, loadConfig, newAnalyzer } from '../src/infra.ts';
 
@@ -74,6 +77,25 @@ async function formEvent(path: string, field: string, data: Uint8Array): Promise
     body,
     base64: true,
   });
+}
+
+// withContentType rewrites the Content-Type of a form event; %s in format is replaced by its boundary.
+async function withContentType(ev: Promise<Event>, format: string): Promise<Event> {
+  const e = (await ev) as unknown as { headers: Record<string, string> };
+  const boundary = /boundary=(\S+)/.exec(e.headers['content-type'])![1];
+  e.headers = { ...e.headers, 'content-type': format.replaceAll('%s', boundary) };
+  return e as unknown as Event;
+}
+
+// brokenAfterImage is a valid image part followed by a part whose headers never end.
+async function brokenAfterImage(path: string): Promise<Event> {
+  const e = (await formEvent(path, 'image', JPEG)) as unknown as { headers: Record<string, string>; body: string };
+  const boundary = /boundary=(\S+)/.exec(e.headers['content-type'])![1];
+  const body = Buffer.from(e.body, 'base64').toString('latin1');
+  const closing = `--${boundary}--\r\n`;
+  assert.ok(body.endsWith(closing));
+  e.body = Buffer.from(`${body.slice(0, -closing.length)}--${boundary}\r\nX-Broken`, 'latin1').toString('base64');
+  return e as unknown as Event;
 }
 
 // rawEvent builds a POST whose body is sent as-is (for non-multipart and malformed bodies).
@@ -222,8 +244,13 @@ describe('A: POST /v1/tickets/qr-inline', () => {
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    // Malformed multipart is a single 400 (Go returns 415 for a missing boundary; NODE.md 10).
-    ['no boundary', alwaysValid, async () => rawEvent(ISSUE_INLINE, 'multipart/form-data', 'x'), 400, 'BAD_REQUEST'],
+    [
+      'no boundary',
+      alwaysValid,
+      async () => rawEvent(ISSUE_INLINE, 'multipart/form-data', 'x'),
+      415,
+      'UNSUPPORTED_MEDIA_TYPE',
+    ],
     [
       'image sent as a text field',
       alwaysValid,
@@ -243,6 +270,21 @@ describe('A: POST /v1/tickets/qr-inline', () => {
       400,
       'BAD_REQUEST',
     ],
+    [
+      'empty boundary',
+      alwaysValid,
+      () => withContentType(formEvent(ISSUE_INLINE, 'image', JPEG), 'multipart/form-data; boundary=""'),
+      415,
+      'UNSUPPORTED_MEDIA_TYPE',
+    ],
+    [
+      'boundary without value',
+      alwaysValid,
+      () => withContentType(formEvent(ISSUE_INLINE, 'image', JPEG), 'multipart/form-data; boundary'),
+      415,
+      'UNSUPPORTED_MEDIA_TYPE',
+    ],
+    ['broken after the image part', alwaysValid, () => brokenAfterImage(ISSUE_INLINE), 400, 'BAD_REQUEST'],
     ['missing image field', alwaysValid, () => formEvent(ISSUE_INLINE, 'file', JPEG), 400, 'BAD_REQUEST'],
     ['empty image', alwaysValid, () => formEvent(ISSUE_INLINE, 'image', new Uint8Array()), 400, 'BAD_REQUEST'],
     [
@@ -317,6 +359,38 @@ test('B: PRG flow', async () => {
   assert.equal(header(res, 'Content-Type'), 'image/png');
   assert.equal(res.isBase64Encoded, true);
   assert.deepEqual(Buffer.from(res.body!, 'base64').subarray(0, 8), Buffer.from(PNG_MAGIC));
+});
+
+describe('valid spellings of a multipart Content-Type (same as the Go tests, minus known differences)', () => {
+  for (const format of [
+    'multipart/form-data; boundary="%s"',
+    'Multipart/Form-Data; boundary=%s',
+    'multipart/form-data; boundary=%s;',
+    'multipart/form-data ; charset=utf-8; boundary=%s',
+    'multipart/form-data; boundary=%s; boundary=%s',
+  ]) {
+    test(format, async () => {
+      const { handle } = newRoute();
+      const res = await handle(await withContentType(formEvent(ISSUE_INLINE, 'image', JPEG), format));
+      assert.equal(res.statusCode, 201, String(res.body));
+    });
+  }
+});
+
+// Unusual spellings that browsers never send, where Node (WHATWG rules, like formData()) differs from
+// Go (mime.ParseMediaType). Known differences, NODE.md 10.
+describe('Content-Type spellings that differ from Go (known differences)', () => {
+  const cases: Array<[string, number]> = [
+    ['multipart/form-data; BOUNDARY = %s', 415], // Go: 201 (spaces around "=")
+    ['multipart/form-data; boundary=%s; boundary=other', 201], // Go: 415 (conflicting values; the first wins)
+    ['multipart/form-data; boundary=%s x', 400], // Go: 415 (the boundary becomes "… x" and the body does not match)
+  ];
+  for (const [format, status] of cases) {
+    test(format, async () => {
+      const res = await newRoute().handle(await withContentType(formEvent(ISSUE_INLINE, 'image', JPEG), format));
+      assert.equal(res.statusCode, status, String(res.body));
+    });
+  }
 });
 
 describe('B-1 errors are HTML views', () => {
@@ -525,6 +599,9 @@ describe('upload formats (iPhone / Android photos as-is)', () => {
       Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]),
     ],
     ['PNG signature only', Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0])],
+    ['WebP header without data', Buffer.from('RIFF\x04\x00\x00\x00WEBP', 'latin1')],
+    ['HEIC ftyp box only', Buffer.from('\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic', 'latin1')],
+    ['AVIF ftyp box only', Buffer.from('\x00\x00\x00\x18ftypavif\x00\x00\x00\x00mif1avif', 'latin1')],
   ];
   for (const [name, data] of rejected) {
     test(`${name} is 415`, async () => {
@@ -533,4 +610,41 @@ describe('upload formats (iPhone / Android photos as-is)', () => {
       assert.equal(errorCode(res), 'UNSUPPORTED_MEDIA_TYPE');
     });
   }
+});
+
+// ---------------------------------------------------------------- B-1 for the SPA (Accept: application/json)
+
+describe('B-1 with Accept: application/json', () => {
+  const asJson = (e: Event) => ((e.headers.accept = 'application/json'), e);
+
+  test('returns the signed QR URL as JSON instead of a redirect', async () => {
+    const { deps, handle } = newRoute();
+    const res = await handle(asJson(await formEvent(ISSUE, 'image', JPEG)));
+    assert.equal(res.statusCode, 201, String(res.body));
+    assert.match(header(res, 'Content-Type'), /^application\/json/);
+    assert.equal(header(res, 'Location'), '');
+    assert.equal(header(res, 'Vary'), 'Accept');
+    const body = JSON.parse(res.body!);
+    assert.match(body.ticketCode, CODE_RE);
+    assert.match(body.issuedAt, /\+09:00$/);
+    assert.ok(deps.signer.verify(body.ticketCode, body.sig));
+    assert.equal(body.qrUrl, `${BASE}/v1/tickets/${body.ticketCode}/qr?sig=${encodeURIComponent(body.sig)}`);
+
+    // The returned URL serves the QR (B-2), so the SPA can render <img src=qrUrl>.
+    const qr = await handle(signedGet('qr', body.ticketCode, body.sig));
+    assert.equal(qr.statusCode, 200);
+    assert.equal(header(qr, 'Content-Type'), 'image/png');
+  });
+
+  test('errors are JSON', async () => {
+    const res = await newRoute().handle(asJson(await formEvent(ISSUE, 'image', Buffer.from('hello'))));
+    assert.equal(res.statusCode, 415);
+    assert.equal(errorCode(res), 'UNSUPPORTED_MEDIA_TYPE');
+  });
+
+  test('a browser form (Accept: text/html, ...) still gets the redirect', async () => {
+    const e = await formEvent(ISSUE, 'image', JPEG);
+    e.headers.accept = 'text/html,application/xhtml+xml,*/*;q=0.8';
+    assert.equal((await newRoute().handle(e)).statusCode, 303);
+  });
 });

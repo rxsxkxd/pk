@@ -126,7 +126,7 @@ app.ts ──▶ domain.ts ◀── infra.ts
 
 | ファイル | 層 | 主な関数・型 | 対応する Go |
 |---|---|---|---|
-| `domain.ts` | ビジネスロジック | `issueTicket`（検証済みの画像 → 解析 → 採番）、`generateTicket`、`newSigner`、外部とのインターフェース（`Analyzer`、`Log`、`AnalyzerError`）、`AppError` と各エラー | `usecase`、`ticketcode`、`signer`、`imageinput`、`analyzer`（型）、`apperr` |
+| `domain.ts` | ビジネスロジック | `issueTicket`（受け付けるかの判断 → 解析 → 採番。`ACCEPTED_IMAGE_TYPES`）、`generateTicket`、`newSigner`、外部とのインターフェース（`Analyzer`、`Log`、`AnalyzerError`）、`AppError` と各エラー | `usecase`、`ticketcode`、`signer`、`imageinput`、`analyzer`（型）、`apperr` |
 | `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Parameter Store）、`newAnalyzer` / `alwaysValid` / `httpAnalyzer`（画像解析クライアント。モックと HTTP）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、slog |
 | `app.ts` | HTTP 層と組み立て | `createApp`（ルートの宣言・ミドルウェア・`onError`・`notFound`）、`routes`（ルート登録のラッパー）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`issueInline` / `issue` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readFormImage`、`createExampleApp`、`ticketView` / `errorView`、`qrPng`（lean-qr）、`loadDeps` | `app`、`handler`、`view`、`qr`、`exampleqr` |
 
@@ -190,8 +190,10 @@ if (!(image instanceof File)) throw badRequest('image file is required');       
 ```
 
 - 要件として守るのは「multipart 以外は 415」「`image` ファイルを受け取る」の2点だけ。boundary がない、ボディが壊れている、`image` がない、`image` がファイルでない（文字列）は、まとめて 400 にする
-- サイズ（4MB 超 → 413）と形式は `app.ts` の `validateImage` で判定する（Go と同じ順番）。形式は **`image-size`**（依存なし、バンドル後 約12KB）でヘッダーを解析し、JPEG / PNG / HEIC / HEIF（`mif1`）/ AVIF / WebP を受け付ける。先頭数バイトだけの偽の画像は弾く
-- 判定に外部ライブラリを使うので、`validateImage` は `domain.ts` ではなく `app.ts` に置く（domain はライブラリに依存させない）。`issueTicket` は検証済みの `UploadedImage`（バイト列と MIME タイプ）を受け取る
+- 検証は性質で置き場所を分ける（Go と同じ）
+  - `app.ts`（外側）: multipart の読み取り、4MB の上限（Lambda の実行環境の制約、413）、形式の判定（`detectImageType`。**`image-size`**（依存なし、バンドル後 約12KB）でヘッダーを解析し、先頭数バイトだけの偽の画像は判定できない扱いにする）
+  - `domain.ts`（内側）: `issueTicket` が受け付けるかを判断する。空の画像は 400、形式が `ACCEPTED_IMAGE_TYPES`（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone と主要 Android の写真の形式）にないものは 415
+  - `issueTicket` は `Upload`（受け取ったままのバイト列と、判定した形式）を受け取る。domain は判定に使うライブラリに依存しない
 - パートの `Content-Type` は見ない
 
 ### 5.3 HTML ビュー
@@ -282,7 +284,7 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 
 | 環境変数 | 内容 |
 |---|---|
-| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_PARAMETER_NAME`、`TICKET_SUFFIX_LENGTH`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。ただし `ANALYZER_MODE` は `mock` に加えて `http` も使える（Node 版のみ） |
+| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_PARAMETER_NAME`、`TICKET_SUFFIX_LENGTH`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。`ANALYZER_MODE` は `mock` / `http` |
 | `ANALYZER_URL` | `ANALYZER_MODE=http` のときの POST 先（例: `http://localhost:8090/v1/analyze`） |
 | `ANALYZER_API_KEY_PARAMETER_NAME` | `ANALYZER_MODE=http` のときの API キーのパラメータ名（Parameter Store の SecureString）。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
 | `ANALYZER_TIMEOUT_MS` | 1回の呼び出しのタイムアウト（既定 5000） |
@@ -312,7 +314,6 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 |---|---|---|
 | `multipart/form-data` だが boundary がない | 415 `UNSUPPORTED_MEDIA_TYPE` | 400 `BAD_REQUEST` |
 | 壊れた multipart、`image` がない | 400 `BAD_REQUEST` / `image is required` など | 400 `BAD_REQUEST` / `image file is required` |
-| 先頭のバイトだけ画像のふりをしたファイル（例: `\xff\xd8\xff\xe0` + 任意の文字列） | 先頭のバイトだけで判定するので受け付ける（201） | image-size がヘッダーを解析するので 415 |
 | `image` がファイルではなく文字列で送られた | その文字列を画像として扱い、形式判定で 415 | 400 `BAD_REQUEST` |
 | パスのチケットコードが空（`/v1/tickets//view`） | ハンドラーを直接呼ぶと 403 | ルートに一致しないので 404。API Gateway 経由では Go も同じ（ルートに一致しない） |
 

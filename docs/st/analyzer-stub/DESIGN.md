@@ -2,7 +2,7 @@
 
 API の設計は [../DESIGN.md](../DESIGN.md)（7章 画像解析サーバー連携）を参照。
 
-> **実装状況**: スタブは Node 版（`node/`、5章）と Rust 版（`rust/`、6章）の両方が実装済み。API 側の HTTP クライアントは Node 版のみ実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 4.7。
+> **実装状況**: スタブは Node 版（`node/`、5章）と Rust 版（`rust/`、6章）の両方が実装済み。API 側の HTTP クライアントは Go 版・Node 版とも実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 4.7。
 
 ## 1. 目的
 
@@ -215,7 +215,7 @@ aws ssm delete-parameter --name $ANALYZER_KEY_PARAM
 - 予約同時実行数は 5（パラメータ `ReservedConcurrency`）。URL が漏れても、使える量を抑えるため
 - Function URL を `AuthType: NONE` で公開するには、`lambda:InvokeFunctionUrl` と `lambda:InvokeFunction`（`InvokedViaFunctionUrl: true`）の両方の権限が必要。テンプレートに両方を入れている
 
-## 8. API 側の変更（Node 版は実装済み、Go 版は未着手）
+## 8. API 側の変更（Go 版・Node 版とも実装済み）
 
 | 対象 | 内容 |
 |---|---|

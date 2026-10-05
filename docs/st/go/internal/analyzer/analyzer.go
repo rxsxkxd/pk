@@ -1,8 +1,8 @@
 // Package analyzer is the client for the external image analysis server.
 //
 // Request format is fixed: POST with Content-Type application/octet-stream and the raw image
-// bytes (Image.Data) as the body. Endpoint, auth and response format are not decided yet, so
-// only a mock that always returns valid exists.
+// bytes (Image.Data) as the body. ANALYZER_MODE=mock answers valid in-process; ANALYZER_MODE=http
+// posts to the server (http.go) using the provisional protocol in analyzer-stub/DESIGN.md 3.
 package analyzer
 
 import (
@@ -13,7 +13,7 @@ import (
 
 type Image struct {
 	Data     []byte // sent as-is as the application/octet-stream body
-	MimeType string // detected from magic bytes; not part of the request until the protocol says so
+	MimeType string // detected from the file header; not part of the request until the protocol says so
 }
 
 type Result struct {
@@ -31,11 +31,13 @@ var (
 	ErrTimeout  = errors.New("analyzer timeout")
 )
 
-// New returns the analyzer selected by ANALYZER_MODE.
-func New(mode string) (Analyzer, error) {
+// New returns the analyzer selected by ANALYZER_MODE. httpCfg is used only for "http".
+func New(mode string, httpCfg HTTPConfig) (Analyzer, error) {
 	switch mode {
 	case "mock":
 		return AlwaysValid{}, nil
+	case "http":
+		return NewHTTP(httpCfg), nil
 	default:
 		return nil, fmt.Errorf("unsupported ANALYZER_MODE %q", mode)
 	}

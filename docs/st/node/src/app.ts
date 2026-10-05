@@ -24,7 +24,7 @@ import {
   type Log,
   type Signer,
   type Ticket,
-  type UploadedImage,
+  type Upload,
 } from './domain.ts';
 import { consoleLog, loadConfig, loadSalts, newAnalyzer, type Config } from './infra.ts';
 
@@ -144,7 +144,7 @@ function errorBody(e: AppError) {
 
 // A: 画像を受け取って発行し、QR を base64 で埋め込んだ JSON を返す（DESIGN.md 5.1）。
 async function issueInline(c: Ctx, deps: Deps): Promise<Response> {
-  const t = await issueTicket(deps, await readImage(c));
+  const t = await issueTicket(deps, await readUpload(c));
   const png = qrPng(t.code);
   return c.json(
     { ticketCode: t.code, issuedAt: t.issuedAt, qr: { mimeType: 'image/png', data: png.toString('base64') } },
@@ -154,7 +154,7 @@ async function issueInline(c: Ctx, deps: Deps): Promise<Response> {
 
 // B-1: フォーム送信された画像で発行し、署名付きビュー URL へ 303 で転送する（DESIGN.md 5.2）。
 async function issue(c: Ctx, deps: Deps): Promise<Response> {
-  const t = await issueTicket(deps, await readImage(c));
+  const t = await issueTicket(deps, await readUpload(c));
   return c.redirect(ticketUrl(deps, t.code, 'view'), 303);
 }
 
@@ -182,11 +182,12 @@ function ticketUrl(deps: Deps, code: string, resource: 'view' | 'qr'): string {
   return `${deps.config.publicBaseUrl}${path}?sig=${encodeURIComponent(deps.signer.sign(code))}`;
 }
 
+// Upload limit set by the runtime: a Lambda request is at most 6MB and binary bodies are base64 (×4/3).
 export const MAX_IMAGE_BYTES = 4 << 20;
 
-// Formats sent as-is by iPhone (HEIC, JPEG, PNG screenshots) and major Android phones (JPEG, HEIF,
-// AVIF, WebP), keyed by image-size's type (heic / mif1 are HEIF brands).
-const ACCEPTED_TYPES: Record<string, string> = {
+// image-size's type → MIME type (heic / mif1 are HEIF brands). Which of these are accepted is decided in
+// domain.ts.
+const DETECTED_TYPES: Record<string, string> = {
   jpg: 'image/jpeg',
   png: 'image/png',
   heic: 'image/heic',
@@ -196,8 +197,8 @@ const ACCEPTED_TYPES: Record<string, string> = {
   webp: 'image/webp',
 };
 
-// multipart/form-data の image ファイルを取り出し、サイズと形式を検証する（バイト列は加工しない）。
-async function readImage(c: Ctx): Promise<UploadedImage> {
+// multipart/form-data の image ファイルを取り出し、サイズ上限を確かめて形式を判定する（バイト列は加工しない）。
+async function readUpload(c: Ctx): Promise<Upload> {
   if (!/^multipart\/form-data\b/i.test(c.req.header('content-type') ?? '')) {
     throw unsupportedMediaType('Content-Type must be multipart/form-data');
   }
@@ -207,20 +208,17 @@ async function readImage(c: Ctx): Promise<UploadedImage> {
   );
   if (!(file instanceof File)) throw badRequest('image file is required');
   const data = new Uint8Array(await file.arrayBuffer());
-  return { data, mimeType: validateImage(data) };
+  if (data.length > MAX_IMAGE_BYTES) throw payloadTooLarge(`image must be ${MAX_IMAGE_BYTES} bytes or less`);
+  return { data, detectedType: detectImageType(data) };
 }
 
-// サイズ上限と画像ヘッダー（image-size で解析）を検証し、受け付ける形式なら MIME タイプを返す。
-export function validateImage(data: Uint8Array): string {
-  if (data.length === 0) throw badRequest('image is empty');
-  if (data.length > MAX_IMAGE_BYTES) throw payloadTooLarge(`image must be ${MAX_IMAGE_BYTES} bytes or less`);
-  let type: string | undefined;
+// 画像ヘッダーを image-size で解析して MIME タイプを返す（画像として読めなければ undefined）。
+export function detectImageType(data: Uint8Array): string | undefined {
   try {
-    type = imageSize(data).type;
-  } catch {}
-  const mimeType = type && ACCEPTED_TYPES[type];
-  if (!mimeType) throw unsupportedMediaType('image must be JPEG, PNG, HEIC/HEIF, AVIF or WebP');
-  return mimeType;
+    return DETECTED_TYPES[imageSize(data).type ?? ''];
+  } catch {
+    return undefined;
+  }
 }
 
 // PNG の 200 レスポンスを作る（Lambda では image/png をアダプターが base64 にする）。

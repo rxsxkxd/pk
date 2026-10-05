@@ -1,5 +1,5 @@
 // Business logic of the ticket QR API: the rules shared with the ticket consumer and the issue flow.
-// (Upload size/format checks live in app.ts, since format detection uses the image-size library.)
+// (Format detection and the runtime size limit live in app.ts; which formats are accepted is decided here.)
 // No I/O here — external systems are reached through the Analyzer and Log ports, implemented in
 // infra.ts. Rules are checked against ../testdata, shared with the Go version.
 
@@ -11,11 +11,26 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export type IssuePorts = { analyzer: Analyzer; newTicket: () => Ticket; log: Log };
 
-// 検証済みの画像を解析サーバーに問い合わせ、valid のときだけチケットコードを採番する。
-export async function issueTicket(ports: IssuePorts, image: UploadedImage): Promise<Ticket> {
+// Formats iPhone and major Android phones upload as-is (business rule).
+const ACCEPTED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/heic',
+  'image/heif',
+  'image/avif',
+  'image/webp',
+]);
+
+// 受け付けてよい画像か判断し、解析サーバーに問い合わせて、valid のときだけチケットコードを採番する。
+export async function issueTicket(ports: IssuePorts, upload: Upload): Promise<Ticket> {
+  if (upload.data.length === 0) throw badRequest('image is empty');
+  if (!upload.detectedType || !ACCEPTED_IMAGE_TYPES.has(upload.detectedType)) {
+    throw unsupportedMediaType('image must be JPEG, PNG, HEIC/HEIF, AVIF or WebP');
+  }
+
   let res: AnalyzerResult;
   try {
-    res = await ports.analyzer(image);
+    res = await ports.analyzer({ data: upload.data, mimeType: upload.detectedType });
   } catch (err) {
     if (err instanceof AnalyzerError && err.kind === 'timeout') throw analysisTimeout();
     ports.log('ERROR', 'image analysis failed', { error: String(err) });
@@ -97,12 +112,12 @@ export function newSigner(current: string, previous?: string): Signer {
 // Ports implemented in infra.ts  (↔ go/internal/analyzer, slog)
 // =================================================================================================
 
-// An upload that passed the size and format checks in app.ts; data is the bytes exactly as received.
-export type UploadedImage = { data: Uint8Array; mimeType: string };
+// An image exactly as received, with the format detected by the HTTP layer (undefined if unknown).
+export type Upload = { data: Uint8Array; detectedType: string | undefined };
 
 // Image analysis: POST application/octet-stream with the uploaded bytes as-is (DESIGN.md 7).
 export type AnalyzerResult = { valid: boolean; reason: string };
-export type Analyzer = (image: UploadedImage) => Promise<AnalyzerResult>;
+export type Analyzer = (image: { data: Uint8Array; mimeType: string }) => Promise<AnalyzerResult>;
 
 // 解析サーバーの通信失敗（502）/ タイムアウト（504）を表すエラー（解析クライアントが投げる）。
 export class AnalyzerError extends Error {

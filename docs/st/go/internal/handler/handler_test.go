@@ -9,10 +9,13 @@ import (
 	"log/slog"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"ticketqr/go/internal/analyzer"
 	"ticketqr/go/internal/imageinput"
@@ -22,12 +25,22 @@ import (
 	"ticketqr/go/internal/view"
 )
 
+// Real 32x32 images (../../../testdata/images, shared with the Node version): the format check parses
+// headers, so bytes that only start like an image are not accepted.
 var (
-	jpeg     = []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
-	png      = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n', 0, 0}
+	jpeg     = mustRead("photo.jpg")
+	png      = mustRead("photo.png")
 	codeRe   = regexp.MustCompile(`^\d{14}-[0-9A-HJKMNP-TV-Z]{10}$`)
-	pngMagic = png[:8]
+	pngMagic = []byte("\x89PNG\r\n\x1a\n")
 )
+
+func mustRead(name string) []byte {
+	b, err := os.ReadFile("../../../testdata/images/" + name)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
 
 type stubAnalyzer struct {
 	res analyzer.Result
@@ -282,5 +295,77 @@ func TestViewEscapesTicketCode(t *testing.T) {
 	}
 	if strings.Contains(res.Body, "<script>") {
 		t.Fatalf("ticket code was not escaped:\n%s", res.Body)
+	}
+}
+
+// TestIssueInlineWithHTTPAnalyzer checks the real HTTP client end to end: the analysis server's answer or
+// failure becomes 201 / 422 / 502 / 504.
+func TestIssueInlineWithHTTPAnalyzer(t *testing.T) {
+	tests := []struct {
+		name   string
+		handle http.HandlerFunc
+		status int
+		code   string
+	}{
+		{"valid", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{"valid":true}`) }, 201, ""},
+		{"invalid", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{"valid":false}`) }, 422, "IMAGE_INVALID"},
+		{"5xx", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(500) }, 502, "ANALYSIS_UPSTREAM_ERROR"},
+		{"no answer", hang, 504, "ANALYSIS_TIMEOUT"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handle)
+			defer srv.Close()
+			an := analyzer.NewHTTP(analyzer.HTTPConfig{URL: srv.URL, APIKey: "k", Timeout: 100 * time.Millisecond})
+
+			res, _ := newHandlers(t, an).IssueInline(context.Background(), formRequest(t, "image", jpeg))
+
+			if res.StatusCode != tt.status {
+				t.Fatalf("status = %d, body = %s", res.StatusCode, res.Body)
+			}
+			if tt.code != "" && errorCode(t, res) != tt.code {
+				t.Errorf("code = %s, want %s", errorCode(t, res), tt.code)
+			}
+		})
+	}
+}
+
+// hang never answers. It reads the body first: the server only notices the client giving up (and
+// cancels r.Context()) once the body has been consumed; the cap keeps a broken test from hanging.
+func hang(_ http.ResponseWriter, r *http.Request) {
+	io.Copy(io.Discard, r.Body)
+	select {
+	case <-r.Context().Done():
+	case <-time.After(5 * time.Second):
+	}
+}
+
+// TestUploadFormats checks the split of responsibilities: the handler detects the format, the use case
+// accepts only the formats phones upload, and the bytes reach the analyzer unchanged.
+func TestUploadFormats(t *testing.T) {
+	for file, want := range map[string]string{
+		"photo.jpg": "image/jpeg", "photo.png": "image/png", "photo.heic": "image/heic",
+		"photo-mif1.heif": "image/heif", "photo.avif": "image/avif", "photo.webp": "image/webp",
+	} {
+		t.Run(file, func(t *testing.T) {
+			var sent analyzer.Image
+			h := newHandlers(t, stubAnalyzer{res: analyzer.Result{Valid: true}, got: &sent})
+			data := mustRead(file)
+			res, _ := h.IssueInline(context.Background(), formRequest(t, "image", data))
+			if res.StatusCode != http.StatusCreated || sent.MimeType != want || !bytes.Equal(sent.Data, data) {
+				t.Errorf("status %d, mime %q, unchanged %v", res.StatusCode, sent.MimeType, bytes.Equal(sent.Data, data))
+			}
+		})
+	}
+	for name, data := range map[string][]byte{
+		"text":                  mustRead("not-image.txt"),
+		"JPEG magic bytes only": {0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, _ := newHandlers(t, analyzer.AlwaysValid{}).IssueInline(context.Background(), formRequest(t, "image", data))
+			if res.StatusCode != http.StatusUnsupportedMediaType {
+				t.Errorf("status = %d, want 415", res.StatusCode)
+			}
+		})
 	}
 }

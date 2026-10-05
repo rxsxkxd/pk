@@ -9,7 +9,6 @@ import (
 
 	"ticketqr/go/internal/analyzer"
 	"ticketqr/go/internal/apperr"
-	"ticketqr/go/internal/imageinput"
 	"ticketqr/go/internal/ticketcode"
 )
 
@@ -19,14 +18,29 @@ type Issuer struct {
 	Logger    *slog.Logger
 }
 
-// Issue validates the image, asks the analyzer, and generates a ticket code only when it is valid.
-func (i *Issuer) Issue(ctx context.Context, image []byte) (ticketcode.Ticket, error) {
-	mime, err := imageinput.Validate(image)
-	if err != nil {
-		return ticketcode.Ticket{}, err
+// Upload is an image exactly as received, with the format detected by the HTTP layer ("" if unknown).
+type Upload struct {
+	Data         []byte
+	DetectedType string
+}
+
+// acceptedTypes are the formats iPhone and major Android phones upload as-is (business rule).
+var acceptedTypes = map[string]bool{
+	"image/jpeg": true, "image/png": true, "image/heic": true, "image/heif": true,
+	"image/avif": true, "image/webp": true,
+}
+
+// Issue accepts the upload by the business rules, asks the analyzer, and generates a ticket code only
+// when the image is valid.
+func (i *Issuer) Issue(ctx context.Context, up Upload) (ticketcode.Ticket, error) {
+	if len(up.Data) == 0 {
+		return ticketcode.Ticket{}, apperr.BadRequest("image is empty")
+	}
+	if !acceptedTypes[up.DetectedType] {
+		return ticketcode.Ticket{}, apperr.UnsupportedMediaType("image must be JPEG, PNG, HEIC/HEIF, AVIF or WebP")
 	}
 
-	res, err := i.Analyzer.Analyze(ctx, analyzer.Image{Data: image, MimeType: mime})
+	res, err := i.Analyzer.Analyze(ctx, analyzer.Image{Data: up.Data, MimeType: up.DetectedType})
 	switch {
 	case errors.Is(err, analyzer.ErrTimeout):
 		return ticketcode.Ticket{}, apperr.AnalysisTimeout()

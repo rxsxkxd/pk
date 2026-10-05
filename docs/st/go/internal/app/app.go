@@ -23,7 +23,15 @@ func New(ctx context.Context) (*handler.Handlers, error) {
 	if err != nil {
 		return nil, err
 	}
-	an, err := analyzer.New(cfg.AnalyzerMode)
+	var httpCfg analyzer.HTTPConfig
+	if cfg.AnalyzerMode == "http" {
+		key, err := secret.LoadAnalyzerAPIKey(ctx)
+		if err != nil {
+			return nil, err
+		}
+		httpCfg = analyzer.HTTPConfig{URL: cfg.AnalyzerURL, APIKey: key, Timeout: cfg.AnalyzerTimeout}
+	}
+	an, err := analyzer.New(cfg.AnalyzerMode, httpCfg)
 	if err != nil {
 		return nil, err
 	}

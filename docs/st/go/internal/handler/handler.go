@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -43,11 +44,11 @@ type Handlers struct {
 // IssueInline is pattern A: POST /v1/tickets/qr-inline (multipart image in, JSON with base64 QR out).
 func (h *Handlers) IssueInline(ctx context.Context, req Request) (Response, error) {
 	return h.run(ctx, req, "issue-inline", h.jsonError, func() (Response, error) {
-		image, err := readFormImage(req)
+		upload, err := readUpload(req)
 		if err != nil {
 			return Response{}, err
 		}
-		t, err := h.Issuer.Issue(ctx, image)
+		t, err := h.Issuer.Issue(ctx, upload)
 		if err != nil {
 			return Response{}, err
 		}
@@ -75,11 +76,11 @@ func (h *Handlers) IssueInline(ctx context.Context, req Request) (Response, erro
 // Issue is pattern B-1: POST /v1/tickets (multipart image from a browser form) → 303 to the view.
 func (h *Handlers) Issue(ctx context.Context, req Request) (Response, error) {
 	return h.run(ctx, req, "issue", h.htmlError, func() (Response, error) {
-		image, err := readFormImage(req)
+		upload, err := readUpload(req)
 		if err != nil {
 			return Response{}, err
 		}
-		t, err := h.Issuer.Issue(ctx, image)
+		t, err := h.Issuer.Issue(ctx, upload)
 		if err != nil {
 			return Response{}, err
 		}
@@ -222,6 +223,19 @@ func header(req Request, name string) string {
 		}
 	}
 	return ""
+}
+
+// readUpload reads the multipart "image" field, enforces the runtime size limit and detects the format.
+// Whether the format is accepted is decided by the use case.
+func readUpload(req Request) (usecase.Upload, error) {
+	data, err := readFormImage(req)
+	if err != nil {
+		return usecase.Upload{}, err
+	}
+	if len(data) > imageinput.MaxBytes {
+		return usecase.Upload{}, apperr.PayloadTooLarge(fmt.Sprintf("image must be %d bytes or less", imageinput.MaxBytes))
+	}
+	return usecase.Upload{Data: data, DetectedType: imageinput.Detect(data)}, nil
 }
 
 // readFormImage returns the raw bytes of the multipart "image" field. The part's own

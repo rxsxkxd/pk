@@ -23,7 +23,7 @@ example-qr:           provided.al2023 / arm64 / 128MB、別パッケージ examp
 Parameter Store（SecureString）: /ticketqr/{impl}/signing-salt（スタックの外で管理する）
 ```
 
-> 現在の実装の状態: Go 版・Node 版とも実装済み（同じ手順でデプロイできる。2.1.1）。画像解析は `ANALYZER_MODE=mock`（プロセス内で常に valid）と `ANALYZER_MODE=http`（画像解析サーバーに POST。Node 版のみ）から選ぶ（[4.7](#47-画像解析サーバーの切り替えanalyzer_mode)）。`ALLOWED_ORIGINS`（Origin の照合と CORS）は未実装（E2E.md 4章）。静的サイトはまだ無いため、この手順の対象は API だけ。
+> 現在の実装の状態: Go 版・Node 版とも実装済み（同じ手順でデプロイできる。2.1.1）。画像解析は `ANALYZER_MODE=mock`（プロセス内で常に valid）と `ANALYZER_MODE=http`（画像解析サーバーに POST）から選ぶ（どちらも Go 版・Node 版で対応）（[4.7](#47-画像解析サーバーの切り替えanalyzer_mode)）。`ALLOWED_ORIGINS`（Origin の照合と CORS）は未実装（E2E.md 4章）。静的サイトはまだ無いため、この手順の対象は API だけ。
 
 ## 1. 前提
 
@@ -287,7 +287,7 @@ aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
 | `ArtifactBucket` | - | Lambda の zip を置く S3 バケット |
 | `ArtifactPrefix` | - | zip のキーの接頭辞。**デプロイのたびに変える**（例: `ticketqr/go/<git sha>`） |
 | `SigningSaltParameterName` | - | 2.2 で作った salt のパラメータ名（例: `/ticketqr/go/signing-salt`） |
-| `AnalyzerMode` | `mock` | 画像解析クライアントの種類。`mock`（プロセス内で常に valid）/ `http`（`AnalyzerUrl` に POST。**Node 版のみ対応**）。4.7 |
+| `AnalyzerMode` | `mock` | 画像解析クライアントの種類。`mock`（プロセス内で常に valid）/ `http`（`AnalyzerUrl` に POST）。4.7 |
 | `AnalyzerUrl` | 空 | `AnalyzerMode=http` のときの POST 先（例: スタブのスタックの出力 `AnalyzeUrl`） |
 | `AnalyzerApiKeyParameterName` | 空 | `AnalyzerMode=http` のときの API キーのパラメータ名（例: `/ticketqr/analyzer-stub/node/api-key`）。指定すると、Lambda の実行ロールに読み取り権限が付く |
 | `TicketSuffixLength` | `8` | suffix の桁数 |
@@ -357,7 +357,7 @@ aws cloudformation wait stack-delete-complete --stack-name ticketqr-$IMPL
 | モード | 動き | 必要なパラメータ | 対応する実装 |
 |---|---|---|---|
 | `mock`（既定） | API の中で、通信せずに常に valid を返す | なし | Go 版・Node 版 |
-| `http` | `AnalyzerUrl` に画像をそのまま POST する（`application/octet-stream`、`x-api-key` 付き。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） | `AnalyzerUrl`、`AnalyzerApiKeyParameterName` | **Node 版のみ**（Go 版で `http` を指定すると、Lambda の初期化でエラーになる） |
+| `http` | `AnalyzerUrl` に画像をそのまま POST する（`application/octet-stream`、`x-api-key` 付き。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） | `AnalyzerUrl`、`AnalyzerApiKeyParameterName` | Go 版・Node 版 |
 
 本物の画像解析サーバーができるまでは、`http` の接続先に画像解析サーバーのスタブ（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md)。解析はせず常に valid を返す）を使う。
 
@@ -397,12 +397,12 @@ echo $ANALYZER_URL
 
 スタブを直接 curl で叩くときは、`aws ssm get-parameter --name $ANALYZER_KEY_PARAM --with-decryption --query Parameter.Value --output text` で API キーの値を取り出す。
 
-#### 手順3: API を `http` モードでデプロイする（Node 版）
+#### 手順3: API を `http` モードでデプロイする
 
-4.3 で Node 版の zip（`node/dist/*.zip`）をアップロードしたうえで、4.4 のコマンドにパラメータを3つ足す。
+4.3 で zip（Go 版は `go/bin/*.zip`、Node 版は `node/dist/*.zip`）をアップロードしたうえで、4.4 のコマンドにパラメータを3つ足す。以下は Go 版の例（Node 版は `IMPL=node`）。
 
 ```sh
-export IMPL=node
+export IMPL=go
 aws cloudformation deploy \
   --stack-name ticketqr-$IMPL \
   --template-file infra/cloudformation/api.yaml \
@@ -509,6 +509,6 @@ aws logs tail /aws/apigateway/ticketqr-$IMPL --since 10m   # CloudFormation の�
 | `ALLOWED_ORIGINS`（Origin の照合）と、HTTP API の CORS 設定 | 未実装（E2E.md 4章）。実装したら、テンプレートの `CorsConfiguration` と環境変数を追加する |
 | 静的サイト（S3 + CloudFront） | 未作成（E2E.md 3章） |
 | 独自ドメイン | `PublicBaseUrl` パラメータだけ用意してある。ACM 証明書と `AWS::ApiGatewayV2::DomainName`、`ApiMapping` は別途追加する |
-| 本物の画像解析サーバーへの接続 | Node 版の HTTP クライアント（4.7）は仮のプロトコル（analyzer-stub/DESIGN.md 3）で実装済み。本物の仕様が決まったらレスポンスの解釈部分を差し替える。VPC の設定が必要になる可能性がある。Go 版の HTTP クライアントは未実装 |
+| 本物の画像解析サーバーへの接続 | HTTP クライアント（4.7）は Go 版・Node 版とも、仮のプロトコル（analyzer-stub/DESIGN.md 3）で実装済み。本物の仕様が決まったら、レスポンスの解釈部分（Go: `parseResponse`、Node: `parseAnalyzerResponse`）を差し替える。VPC の設定が必要になる可能性がある |
 | WAF | HTTP API に直接は付けられない。手前に CloudFront を置く場合に検討する |
 | GitHub Actions からのデプロイ | OIDC で IAM ロールを引き受けて、4.3〜4.4 を実行する形を想定 |

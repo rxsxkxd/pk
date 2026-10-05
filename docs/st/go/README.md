@@ -39,7 +39,10 @@ make build          # bin/ticketqr.zip（チケット系4エンドポイント�
 | 変数 | 必須 | 内容 |
 |---|---|---|
 | `PUBLIC_BASE_URL` | ○ | リダイレクト先と `<img src>` に使う絶対URL。例: `https://api.example.com` |
-| `ANALYZER_MODE` | ○ | 画像解析クライアントの種類。現在選べるのは `mock`（常に valid を返す）だけ |
+| `ANALYZER_MODE` | ○ | 画像解析クライアントの種類。`mock`（通信せず常に valid）/ `http`（`ANALYZER_URL` に画像をそのまま POST。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） |
+| `ANALYZER_URL` | http のとき ○ | 画像解析サーバーの POST 先（例: `http://localhost:8090/v1/analyze`） |
+| `ANALYZER_API_KEY_PARAMETER_NAME` | http のとき ○ | API キーの Parameter Store の SecureString の名前。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
+| `ANALYZER_TIMEOUT_MS` | | 1回の呼び出しのタイムアウト（既定 5000） |
 | `SIGNING_SALT_PARAMETER_NAME` | ○ | 署名用 salt を保存した Parameter Store の SecureString の名前（例: `/ticketqr/go/signing-salt`）。中身は `{"current":"...","previous":"..."}` 形式 |
 | `TICKET_SUFFIX_LENGTH` | | suffix の桁数（既定値 8。根拠は DESIGN.md 4章） |
 | `APP_ENV` / `SIGNING_SALT` | | `APP_ENV=local` のときに限り、`SIGNING_SALT` に平文で書いた salt を使う（ローカル専用） |

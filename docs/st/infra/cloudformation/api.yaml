@@ -21,7 +21,7 @@ Parameters:
     Type: String
     Default: mock
     AllowedValues: [mock, http]
-    Description: mock = in-process, always valid. http = POST to AnalyzerUrl (Node version only for now).
+    Description: mock = in-process, always valid. http = POST to AnalyzerUrl (Go and Node).
   AnalyzerUrl:
     Type: String
     Default: ""

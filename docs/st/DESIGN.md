@@ -67,7 +67,9 @@ flowchart LR
 
 API が変えるのは**送り方（multipart → octet-stream）だけ**。画像の中身はパススルーで、圧縮・リサイズ・形式変換・メタデータ（EXIF など）の除去は行わない。
 
-1. **入力検証**: Content-Type が `multipart/form-data` か、`image` フィールドがあるか、サイズ上限、画像形式の判定（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone・主要 Android の写真をそのまま送った場合の形式）
+1. **入力検証**（置き場所を性質で分ける）
+   - HTTP 層: Content-Type が `multipart/form-data` か、`image` フィールドがあるか、サイズ上限（4MB。実行環境の制約）、画像形式の判定（技術的な処理）
+   - ユースケース: 受け付ける形式か（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone・主要 Android の写真をそのまま送った場合の形式）、空でないか（業務上のルール）
 2. **画像解析連携**: 検証済みの画像バイト列を `application/octet-stream` でそのまま送る（7章）。タイムアウト付きHTTP呼び出し。5xx/タイムアウトのみ限定リトライ（例: 最大1回）
 3. **採番**: valid 時のみ実施。外部ストアを参照せずに生成する（4章）
 4. 発行の記録は構造化ログにのみ残す
@@ -220,7 +222,7 @@ sequenceDiagram
 - ベースパス: `/v1`
 - 画像の受け取り: A・B-1 とも `multipart/form-data` の `image` フィールド（ブラウザの `<input type="file">` / `FormData` で送る形式に統一）
 - 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため）
-- 画像の形式判定はファイルの中身で行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）。Node 版は `image-size` でヘッダーを解析し、Go 版は先頭のバイトと ISO BMFF の ftyp ブランド（HEIC / HEIF / AVIF）で判定する
+- 画像の形式判定はファイルの中身で行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）。JPEG / PNG / WebP はヘッダーを画像サイズまで解析し（Node: `image-size`、Go: 標準の `image/jpeg`・`image/png` の `DecodeConfig` と `golang.org/x/image/webp`）、HEIF / AVIF は ISO BMFF の ftyp ブランドで判定する。先頭数バイトだけの偽の画像は 415
 - 受け付ける形式: JPEG、PNG、HEIC / HEIF（iPhone の標準、Samsung などの HEIF）、AVIF、WebP。画像は変換せずにそのまま解析サーバーへ送る
 - `Cache-Control: no-store`（全エンドポイント）
 
@@ -404,7 +406,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 
 ImageAnalyzer はインターフェースとして抽象化し、テスト時はスタブに差し替える。
 
-> 実装状況: Node 版は HTTP クライアント（`ANALYZER_MODE=http`）を、仮のプロトコル（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`、レスポンス `{valid, reason}`）で実装済み。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。Go 版は常に valid を返すモック（`ANALYZER_MODE=mock`）のみ。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 4.7。
+> 実装状況: Go 版・Node 版とも HTTP クライアント（`ANALYZER_MODE=http`）を、仮のプロトコル（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`、レスポンス `{valid, reason}`）で実装済み。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。`ANALYZER_MODE=mock` では、通信せずに常に valid を返す。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 4.7。
 
 ## 8. 状態・データ
 
@@ -441,11 +443,11 @@ st/
 │       ├── exampleqr/         # example.com の QR を返すハンドラ
 │       ├── localhttp/         # ローカル実行用 net/http → Lambda イベント変換（routeKey を付与。両パッケージで共有）
 │       ├── handler/           # API Gateway イベント ⇔ ユースケース（JSON / multipart / HTML / PNG）、routeKey による振り分け
-│       ├── usecase/           # 発行フロー（検証 → 解析 → 採番）
+│       ├── usecase/           # 発行フロー（受け付ける形式か・空でないかの判断 → 解析 → 採番）
 │       ├── ticketcode/        # 採番ルール（生成）
 │       ├── qr/                # QR生成
 │       ├── analyzer/          # 画像解析クライアント（現状は常に valid のモックのみ）
-│       ├── imageinput/        # 画像サイズ・形式チェック
+│       ├── imageinput/        # 画像形式の判定とサイズ上限（HTTP 層で使う。受け付けるかは usecase が判断）
 │       ├── signer/            # 署名（salt + HMAC）
 │       ├── secret/            # salt 取得（Parameter Store）
 │       ├── config/            # 環境変数

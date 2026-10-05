@@ -275,7 +275,7 @@ jobs:
 
 - API Gateway の CORS 設定、ルーティング、スロットリング
 - ペイロードの上限（6MB）、base64 への変換、バイナリレスポンスの扱い
-- Lambda のコールドスタート、Secrets Manager からの salt の取得
+- Lambda のコールドスタート、Parameter Store からの salt の取得
 
 これらは、IaC が決まった段階で、**実際の AWS の検証用ステージにデプロイし、同じ Playwright テストを `baseURL` だけ差し替えて流す**ことで確認する（`sam local start-api` も候補だが、CI 上で docker-in-docker が必要になり、遅くなる）。
 

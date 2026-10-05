@@ -17,10 +17,10 @@ API Gateway HTTP API（$default ステージ、自動デプロイ、スロット
  ├─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr（QR 画像の生成）
  └─ GET  /v1/example/qr                → Lambda ticketqr-{impl}-example-qr
 チケット系（上の2関数）: provided.al2023 / arm64 / 256MB、パッケージ ticketqr.zip を共有（どのハンドラを呼ぶかは routeKey で決まる）
-                      実行ロールは Secrets Manager の salt だけを読める
+                      実行ロールは Parameter Store の salt（と、http モードのときは解析サーバーの API キー）だけを読める
 example-qr:           provided.al2023 / arm64 / 128MB、別パッケージ exampleqr.zip、設定もシークレットも不要
                       実行ロールはログ出力だけ（チケット系とは別のロール）
-Secrets Manager: ticketqr/{impl}/signing-salt（スタックの外で管理する）
+Parameter Store（SecureString）: /ticketqr/{impl}/signing-salt（スタックの外で管理する）
 ```
 
 > 現在の実装の状態: Go 版・Node 版とも実装済み（同じ手順でデプロイできる。2.1.1）。画像解析は `ANALYZER_MODE=mock`（プロセス内で常に valid）と `ANALYZER_MODE=http`（画像解析サーバーに POST。Node 版のみ）から選ぶ（[4.7](#47-画像解析サーバーの切り替えanalyzer_mode)）。`ALLOWED_ORIGINS`（Origin の照合と CORS）は未実装（E2E.md 4章）。静的サイトはまだ無いため、この手順の対象は API だけ。
@@ -40,7 +40,7 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 ### デプロイする人に必要な権限（目安）
 
-`iam:CreateRole` / `PassRole` / `PutRolePolicy` / `AttachRolePolicy`、`lambda:*`、`apigateway:*`（`/apis*`）、`logs:CreateLogGroup` / `PutRetentionPolicy`、`secretsmanager:CreateSecret` / `PutSecretValue`、`s3:PutObject`（CloudFormation の場合は、成果物バケットへの書き込み）、`cloudformation:*`（CloudFormation の場合）。
+`iam:CreateRole` / `PassRole` / `PutRolePolicy` / `AttachRolePolicy`、`lambda:*`、`apigateway:*`（`/apis*`）、`logs:CreateLogGroup` / `PutRetentionPolicy`、`ssm:PutParameter` / `GetParameter`、`s3:PutObject`（CloudFormation の場合は、成果物バケットへの書き込み）、`cloudformation:*`（CloudFormation の場合）。
 
 ## 2. 共通の準備
 
@@ -70,7 +70,7 @@ ls node/dist/*.zip   # ticketqr.zip、exampleqr.zip
 | 手動デプロイ（3.3、3.6）の `--runtime` / `--handler` | `provided.al2023` / `bootstrap` | `nodejs24.x` / `index.handler` |
 | CloudFormation（4.4） | `Impl=go` | `Impl=node`（Runtime と Handler はテンプレートの `ImplMap` が切り替える） |
 
-salt のシークレット（2.2）は実装ごとに作る（`ticketqr/node/signing-salt`）。
+salt のパラメータ（2.2）は実装ごとに作る（`/ticketqr/node/signing-salt`）。
 
 ### 2.2 署名用 salt の作成（初回だけ）
 
@@ -79,22 +79,24 @@ salt はスタックの外で作る。理由は2つある。
 - salt の値がテンプレートやパラメータに出ないようにするため
 
 ```sh
+export SALT_PARAM=/ticketqr/$IMPL/signing-salt
+
 umask 077
 SALT_FILE=$(mktemp)
 printf '{"current":"%s"}' "$(openssl rand -base64 32)" > "$SALT_FILE"
 
-export SECRET_ARN=$(aws secretsmanager create-secret \
-  --name ticketqr/$IMPL/signing-salt \
+aws ssm put-parameter \
+  --name $SALT_PARAM \
+  --type SecureString \
   --description "Ticket QR signing salt ($IMPL)" \
-  --secret-string file://"$SALT_FILE" \
-  --query ARN --output text)
+  --value file://"$SALT_FILE"
 
 rm -f "$SALT_FILE"
-echo $SECRET_ARN
 ```
 
-- salt を引数に直接書かない（シェルの履歴やプロセス一覧に残るため）
-- 暗号化は既定の `aws/secretsmanager` キーを使う。独自の KMS キーを使う場合は、実行ロールに `kms:Decrypt` を追加する
+- Parameter Store の SecureString（Standard ティア、無料）に、`{"current":"…","previous":"…"}` の JSON を保存する。CloudFormation は SecureString を作れないので、CLI で作る
+- salt を引数に直接書かない（シェルの履歴やプロセス一覧に残るため。`--value file://…` でファイルから渡す）
+- 暗号化は既定の `aws/ssm` キーを使う。この場合、実行ロールには `ssm:GetParameter` だけを付ければよい。独自の KMS キーを使う場合は、実行ロールに `kms:Decrypt` を追加する
 - Go 版と Node 版で同じ salt を使う必要はない（スタックごとに URL が別になるため）
 
 ## 3. 手動デプロイ（AWS CLI）
@@ -111,7 +113,7 @@ aws iam attach-role-policy --role-name $ROLE_NAME \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
 aws iam put-role-policy --role-name $ROLE_NAME --policy-name read-signing-salt \
-  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"$SECRET_ARN\"}]}"
+  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ssm:GetParameter\",\"Resource\":\"arn:aws:ssm:$AWS_REGION:$ACCOUNT_ID:parameter$SALT_PARAM\"}]}"
 
 export ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query Role.Arn --output text)
 sleep 10   # 作ったばかりの IAM ロールが反映されるまで待つ
@@ -137,20 +139,25 @@ echo $API_URL   # https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com
 | `ticketqr-$IMPL-get-qr` | B-2 `GET .../qr`（QR 画像の生成） | 5秒 |
 
 ```sh
-for f in tickets get-qr; do
-  case $f in tickets) TIMEOUT=15 ;; *) TIMEOUT=5 ;; esac
+aws logs create-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-tickets
+aws logs put-retention-policy --log-group-name /aws/lambda/ticketqr-$IMPL-tickets --retention-in-days 30
+aws lambda create-function \
+  --function-name ticketqr-$IMPL-tickets \
+  --runtime provided.al2023 --architectures arm64 --handler bootstrap \
+  --role $ROLE_ARN --memory-size 256 --timeout 15 \
+  --zip-file fileb://go/bin/ticketqr.zip \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --query FunctionArn --output text
 
-  aws logs create-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-$f
-  aws logs put-retention-policy --log-group-name /aws/lambda/ticketqr-$IMPL-$f --retention-in-days 30
-
-  aws lambda create-function \
-    --function-name ticketqr-$IMPL-$f \
-    --runtime provided.al2023 --architectures arm64 --handler bootstrap \
-    --role $ROLE_ARN --memory-size 256 --timeout $TIMEOUT \
-    --zip-file fileb://go/bin/ticketqr.zip \
-    --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_SECRET_ID=$SECRET_ARN,TICKET_SUFFIX_LENGTH=8}" \
-    --query FunctionArn --output text
-done
+aws logs create-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-get-qr
+aws logs put-retention-policy --log-group-name /aws/lambda/ticketqr-$IMPL-get-qr --retention-in-days 30
+aws lambda create-function \
+  --function-name ticketqr-$IMPL-get-qr \
+  --runtime provided.al2023 --architectures arm64 --handler bootstrap \
+  --role $ROLE_ARN --memory-size 256 --timeout 5 \
+  --zip-file fileb://go/bin/ticketqr.zip \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --query FunctionArn --output text
 ```
 
 - 2関数とも同じ zip（`ticketqr.zip`）を使う。どのハンドラーを呼ぶかは、イベントの `routeKey` で決まる（コードは関数の分け方に依存しない）
@@ -163,24 +170,31 @@ done
 1つの統合（integration）を複数のルートから使う。
 
 ```sh
-for f in tickets get-qr; do
-  FN_ARN=$(aws lambda get-function --function-name ticketqr-$IMPL-$f --query Configuration.FunctionArn --output text)
-  INTEGRATION_ID=$(aws apigatewayv2 create-integration --api-id $API_ID \
-    --integration-type AWS_PROXY --integration-uri $FN_ARN \
-    --payload-format-version 2.0 --timeout-in-millis 20000 \
-    --query IntegrationId --output text)
-  eval "INTEGRATION_${f//-/_}=$INTEGRATION_ID"
+# tickets: 統合1つに3ルート
+TICKETS_ARN=$(aws lambda get-function --function-name ticketqr-$IMPL-tickets --query Configuration.FunctionArn --output text)
+TICKETS_INTEGRATION=$(aws apigatewayv2 create-integration --api-id $API_ID \
+  --integration-type AWS_PROXY --integration-uri $TICKETS_ARN \
+  --payload-format-version 2.0 --timeout-in-millis 20000 \
+  --query IntegrationId --output text)
+aws apigatewayv2 create-route --api-id $API_ID --route-key 'POST /v1/tickets/qr-inline' --target integrations/$TICKETS_INTEGRATION
+aws apigatewayv2 create-route --api-id $API_ID --route-key 'POST /v1/tickets' --target integrations/$TICKETS_INTEGRATION
+aws apigatewayv2 create-route --api-id $API_ID --route-key 'GET /v1/tickets/{ticketCode}/view' --target integrations/$TICKETS_INTEGRATION
+aws lambda add-permission --function-name ticketqr-$IMPL-tickets \
+  --statement-id apigateway-invoke --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCOUNT_ID:$API_ID/*/*"
 
-  aws lambda add-permission --function-name ticketqr-$IMPL-$f \
-    --statement-id apigateway-invoke --action lambda:InvokeFunction \
-    --principal apigateway.amazonaws.com \
-    --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCOUNT_ID:$API_ID/*/*" >/dev/null
-done
-
-for route in 'POST /v1/tickets/qr-inline' 'POST /v1/tickets' 'GET /v1/tickets/{ticketCode}/view'; do
-  aws apigatewayv2 create-route --api-id $API_ID --route-key "$route" --target integrations/$INTEGRATION_tickets >/dev/null
-done
-aws apigatewayv2 create-route --api-id $API_ID --route-key 'GET /v1/tickets/{ticketCode}/qr' --target integrations/$INTEGRATION_get_qr >/dev/null
+# get-qr: 統合1つに1ルート
+GET_QR_ARN=$(aws lambda get-function --function-name ticketqr-$IMPL-get-qr --query Configuration.FunctionArn --output text)
+GET_QR_INTEGRATION=$(aws apigatewayv2 create-integration --api-id $API_ID \
+  --integration-type AWS_PROXY --integration-uri $GET_QR_ARN \
+  --payload-format-version 2.0 --timeout-in-millis 20000 \
+  --query IntegrationId --output text)
+aws apigatewayv2 create-route --api-id $API_ID --route-key 'GET /v1/tickets/{ticketCode}/qr' --target integrations/$GET_QR_INTEGRATION
+aws lambda add-permission --function-name ticketqr-$IMPL-get-qr \
+  --statement-id apigateway-invoke --action lambda:InvokeFunction \
+  --principal apigateway.amazonaws.com \
+  --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCOUNT_ID:$API_ID/*/*"
 ```
 
 ### 3.5 ステージ（スロットリングを含む）
@@ -233,10 +247,10 @@ aws lambda add-permission --function-name ticketqr-$IMPL-example-qr \
 
 ```sh
 make -C go build
-for f in tickets get-qr; do
-  aws lambda update-function-code --function-name ticketqr-$IMPL-$f \
-    --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
-done
+aws lambda update-function-code --function-name ticketqr-$IMPL-tickets \
+  --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
+aws lambda update-function-code --function-name ticketqr-$IMPL-get-qr \
+  --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
 aws lambda update-function-code --function-name ticketqr-$IMPL-example-qr \
   --zip-file fileb://go/bin/exampleqr.zip --query LastUpdateStatus --output text
 ```
@@ -247,10 +261,10 @@ aws lambda update-function-code --function-name ticketqr-$IMPL-example-qr \
 
 ```sh
 aws apigatewayv2 delete-api --api-id $API_ID
-for f in tickets get-qr; do
-  aws lambda delete-function --function-name ticketqr-$IMPL-$f
-  aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-$f
-done
+aws lambda delete-function --function-name ticketqr-$IMPL-tickets
+aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-tickets
+aws lambda delete-function --function-name ticketqr-$IMPL-get-qr
+aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-get-qr
 aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-signing-salt
 aws iam detach-role-policy --role-name ticketqr-$IMPL-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 aws iam delete-role --role-name ticketqr-$IMPL-lambda
@@ -258,7 +272,7 @@ aws lambda delete-function --function-name ticketqr-$IMPL-example-qr
 aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-example-qr
 aws iam detach-role-policy --role-name ticketqr-$IMPL-example-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
-# salt は、必要がなくなったときだけ削除する（2.2 を参照）
+# salt のパラメータは、必要がなくなったときだけ削除する（aws ssm delete-parameter --name $SALT_PARAM）
 ```
 
 ## 4. CloudFormation デプロイ
@@ -272,10 +286,10 @@ aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
 | `Impl` | `go` | `go` / `node`。実装ごとにスタックを分ける |
 | `ArtifactBucket` | - | Lambda の zip を置く S3 バケット |
 | `ArtifactPrefix` | - | zip のキーの接頭辞。**デプロイのたびに変える**（例: `ticketqr/go/<git sha>`） |
-| `SigningSaltSecretArn` | - | 2.2 で作ったシークレットの ARN |
+| `SigningSaltParameterName` | - | 2.2 で作った salt のパラメータ名（例: `/ticketqr/go/signing-salt`） |
 | `AnalyzerMode` | `mock` | 画像解析クライアントの種類。`mock`（プロセス内で常に valid）/ `http`（`AnalyzerUrl` に POST。**Node 版のみ対応**）。4.7 |
 | `AnalyzerUrl` | 空 | `AnalyzerMode=http` のときの POST 先（例: スタブのスタックの出力 `AnalyzeUrl`） |
-| `AnalyzerApiKeySecretArn` | 空 | `AnalyzerMode=http` のときの API キーのシークレット（例: スタブのスタックの出力 `ApiKeySecretArn`）。指定すると、Lambda の実行ロールに読み取り権限が付く |
+| `AnalyzerApiKeyParameterName` | 空 | `AnalyzerMode=http` のときの API キーのパラメータ名（例: `/ticketqr/analyzer-stub/node/api-key`）。指定すると、Lambda の実行ロールに読み取り権限が付く |
 | `TicketSuffixLength` | `8` | suffix の桁数 |
 | `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。空なら execute-api の URL を自動で使う |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `50` / `100` | 全ルートに共通のスロットリング |
@@ -298,10 +312,8 @@ aws s3api put-bucket-versioning --bucket $ARTIFACT_BUCKET --versioning-configura
 ```sh
 make -C go build
 export ARTIFACT_PREFIX=ticketqr/$IMPL/$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty-$(date +%s))
-BIN_DIR=$([ $IMPL = node ] && echo node/dist || echo go/bin)
-for p in ticketqr exampleqr; do
-  aws s3 cp $BIN_DIR/$p.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/$p.zip
-done
+aws s3 cp go/bin/ticketqr.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip     # Node 版は node/dist/ticketqr.zip
+aws s3 cp go/bin/exampleqr.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.zip   # Node 版は node/dist/exampleqr.zip
 ```
 
 CloudFormation は、`S3Key` が変わらない限り Lambda のコードを更新しない。そのため、デプロイのたびに接頭辞を変える。コミットしていない変更がある場合は、接頭辞に `-dirty-<時刻>` を付ける。
@@ -317,7 +329,7 @@ aws cloudformation deploy \
     Impl=$IMPL \
     ArtifactBucket=$ARTIFACT_BUCKET \
     ArtifactPrefix=$ARTIFACT_PREFIX \
-    SigningSaltSecretArn=$SECRET_ARN
+    SigningSaltParameterName=$SALT_PARAM
 
 export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-$IMPL \
   --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
@@ -338,42 +350,54 @@ aws cloudformation delete-stack --stack-name ticketqr-$IMPL
 aws cloudformation wait stack-delete-complete --stack-name ticketqr-$IMPL
 ```
 
-スタックの外にある salt のシークレットと成果物バケットは残る。
+スタックの外にある salt のパラメータと成果物バケットは残る。
 
 ### 4.7 画像解析サーバーの切り替え（ANALYZER_MODE）
 
 | モード | 動き | 必要なパラメータ | 対応する実装 |
 |---|---|---|---|
 | `mock`（既定） | API の中で、通信せずに常に valid を返す | なし | Go 版・Node 版 |
-| `http` | `AnalyzerUrl` に画像をそのまま POST する（`application/octet-stream`、`x-api-key` 付き。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） | `AnalyzerUrl`、`AnalyzerApiKeySecretArn` | **Node 版のみ**（Go 版で `http` を指定すると、Lambda の初期化でエラーになる） |
+| `http` | `AnalyzerUrl` に画像をそのまま POST する（`application/octet-stream`、`x-api-key` 付き。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） | `AnalyzerUrl`、`AnalyzerApiKeyParameterName` | **Node 版のみ**（Go 版で `http` を指定すると、Lambda の初期化でエラーになる） |
 
 本物の画像解析サーバーができるまでは、`http` の接続先に画像解析サーバーのスタブ（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md)。解析はせず常に valid を返す）を使う。
 
-#### 手順1: スタブをデプロイする（初回、またはスタブを更新するとき）
+#### 手順1: スタブの API キーを作る（初回だけ）
+
+スタブと API の両方が読む API キーを、Parameter Store の SecureString に作る（CloudFormation は SecureString を作れないため、CLI で作る）。
 
 ```sh
 cd docs/st
-npm --prefix analyzer-stub/node run build
-export STUB_IMPL=node
+export STUB_IMPL=node   # スタブの実装: node / rust（どちらも同じ動き。analyzer-stub/DESIGN.md 5・6章）
+export ANALYZER_KEY_PARAM=/ticketqr/analyzer-stub/$STUB_IMPL/api-key
+
+umask 077
+KEY_FILE=$(mktemp)
+openssl rand -hex 20 | tr -d '\n' > "$KEY_FILE"
+aws ssm put-parameter --name $ANALYZER_KEY_PARAM --type SecureString \
+  --description "API key for the image analysis stub ($STUB_IMPL)" --value file://"$KEY_FILE"
+rm -f "$KEY_FILE"
+```
+
+#### 手順2: スタブをデプロイする（初回、またはスタブを更新するとき）
+
+```sh
+npm --prefix analyzer-stub/node run build     # Rust 版は: analyzer-stub/rust/build.sh
 export STUB_PREFIX=analyzer-stub/$STUB_IMPL/$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty-$(date +%s))
-aws s3 cp analyzer-stub/node/dist/analyzer-stub.zip s3://$ARTIFACT_BUCKET/$STUB_PREFIX/analyzer-stub.zip
+aws s3 cp analyzer-stub/$STUB_IMPL/dist/analyzer-stub.zip s3://$ARTIFACT_BUCKET/$STUB_PREFIX/analyzer-stub.zip
 
 aws cloudformation deploy --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
   --template-file analyzer-stub/template.yaml --capabilities CAPABILITY_IAM \
-  --parameter-overrides Impl=$STUB_IMPL ArtifactBucket=$ARTIFACT_BUCKET ArtifactPrefix=$STUB_PREFIX
+  --parameter-overrides Impl=$STUB_IMPL ArtifactBucket=$ARTIFACT_BUCKET ArtifactPrefix=$STUB_PREFIX \
+    ApiKeyParameterName=$ANALYZER_KEY_PARAM
 
-stub_output() {
-  aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
-    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
-}
-export ANALYZER_URL=$(stub_output AnalyzeUrl)
-export ANALYZER_KEY_ARN=$(stub_output ApiKeySecretArn)
+export ANALYZER_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
+  --query "Stacks[0].Outputs[?OutputKey=='AnalyzeUrl'].OutputValue" --output text)
 echo $ANALYZER_URL
 ```
 
-API キーはスタブのスタックが自動生成する。値を知る必要があるのは、スタブを直接 curl で叩くときだけ（`aws secretsmanager get-secret-value --secret-id $ANALYZER_KEY_ARN --query SecretString --output text`）。
+スタブを直接 curl で叩くときは、`aws ssm get-parameter --name $ANALYZER_KEY_PARAM --with-decryption --query Parameter.Value --output text` で API キーの値を取り出す。
 
-#### 手順2: API を `http` モードでデプロイする（Node 版）
+#### 手順3: API を `http` モードでデプロイする（Node 版）
 
 4.3 で Node 版の zip（`node/dist/*.zip`）をアップロードしたうえで、4.4 のコマンドにパラメータを3つ足す。
 
@@ -387,16 +411,16 @@ aws cloudformation deploy \
     Impl=$IMPL \
     ArtifactBucket=$ARTIFACT_BUCKET \
     ArtifactPrefix=$ARTIFACT_PREFIX \
-    SigningSaltSecretArn=$SECRET_ARN \
+    SigningSaltParameterName=$SALT_PARAM \
     AnalyzerMode=http \
     AnalyzerUrl=$ANALYZER_URL \
-    AnalyzerApiKeySecretArn=$ANALYZER_KEY_ARN
+    AnalyzerApiKeyParameterName=$ANALYZER_KEY_PARAM
 ```
 
-- `tickets` と `get-qr` の両方の Lambda に `ANALYZER_MODE`、`ANALYZER_URL`、`ANALYZER_API_KEY_SECRET_ID` が入り、実行ロールに API キーの読み取り権限が付く（2つの関数は同じ初期化処理を通るため、`get-qr` にも必要）
+- `tickets` と `get-qr` の両方の Lambda に `ANALYZER_MODE`、`ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` が入り、実行ロールに API キーの読み取り権限が付く（2つの関数は同じ初期化処理を通るため、`get-qr` にも必要）
 - `aws cloudformation deploy` は、指定しなかったパラメータを既定値に戻す。`http` のまま別の変更をデプロイするときも、3つのパラメータを毎回指定する
 
-#### 手順3: 動作確認
+#### 手順4: 動作確認
 
 ```sh
 printf '\xff\xd8\xff\xe0test' > /tmp/sample.jpg
@@ -412,17 +436,18 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 5m | grep 'image analys
 
 #### 手動デプロイ（3章）の場合
 
-3.3 の環境変数に `ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_SECRET_ID=$ANALYZER_KEY_ARN` を加え、3.1 の実行ロールに読み取り権限を足す。
+3.1 の実行ロールに API キーの読み取り権限を足し、2つの Lambda の環境変数に `ANALYZER_MODE=http`、`ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` を加える。
 
 ```sh
 aws iam put-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-analyzer-api-key \
-  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"secretsmanager:GetSecretValue\",\"Resource\":\"$ANALYZER_KEY_ARN\"}]}"
+  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ssm:GetParameter\",\"Resource\":\"arn:aws:ssm:$AWS_REGION:$ACCOUNT_ID:parameter$ANALYZER_KEY_PARAM\"}]}"
 
-for f in tickets get-qr; do
-  aws lambda update-function-configuration --function-name ticketqr-$IMPL-$f \
-    --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_SECRET_ID=$ANALYZER_KEY_ARN,SIGNING_SALT_SECRET_ID=$SECRET_ARN,TICKET_SUFFIX_LENGTH=8}" \
-    --query LastUpdateStatus --output text
-done
+aws lambda update-function-configuration --function-name ticketqr-$IMPL-tickets \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_PARAMETER_NAME=$ANALYZER_KEY_PARAM,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --query LastUpdateStatus --output text
+aws lambda update-function-configuration --function-name ticketqr-$IMPL-get-qr \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_PARAMETER_NAME=$ANALYZER_KEY_PARAM,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --query LastUpdateStatus --output text
 ```
 
 #### `mock` に戻す・スタブを削除する
@@ -431,6 +456,7 @@ done
 # mock に戻す: 4.4 のコマンドを AnalyzerMode などを付けずに実行する（既定値の mock に戻る）
 # スタブを削除する（API を mock に戻してから）
 aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL
+aws ssm delete-parameter --name $ANALYZER_KEY_PARAM   # API キーはスタックの外にあるので別に削除する
 ```
 
 API を `http` のままスタブを削除すると、画像の発行（A / B-1）がすべて 502 になる。
@@ -473,7 +499,7 @@ aws logs tail /aws/apigateway/ticketqr-$IMPL --since 10m   # CloudFormation の�
 
 ### salt のローテーション
 
-1. シークレットを `{"current":"<新しい salt>","previous":"<今の salt>"}` に更新する（`aws secretsmanager put-secret-value`）
+1. パラメータを `{"current":"<新しい salt>","previous":"<今の salt>"}` に更新する（`aws ssm put-parameter --name $SALT_PARAM --type SecureString --overwrite --value file://…`）
 2. Lambda は起動したときに salt を読んでキャッシュする。そのため、実行環境を作り直させる必要がある
    - CloudFormation の場合: 新しい `ArtifactPrefix` で再デプロイする
    - 手動の場合: `update-function-configuration` で環境変数を変える

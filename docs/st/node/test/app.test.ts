@@ -480,7 +480,7 @@ describe('http analyzer client', () => {
     await assert.rejects(newAnalyzer({ ANALYZER_MODE: 'http' }), /ANALYZER_URL/);
     await assert.rejects(
       newAnalyzer({ ANALYZER_MODE: 'http', ANALYZER_URL: 'http://x/v1/analyze' }),
-      /ANALYZER_API_KEY_SECRET_ID/,
+      /ANALYZER_API_KEY_PARAMETER_NAME/,
     );
     await assert.rejects(newAnalyzer({ ANALYZER_MODE: 'nope' }), /unsupported/);
     assert.equal(await newAnalyzer({ ANALYZER_MODE: 'mock' }), alwaysValid);

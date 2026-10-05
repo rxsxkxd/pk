@@ -8,16 +8,18 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 let ready;
 export const handler = async (event) => (await (ready ??= loadApiKey(process.env).then(createHandler)))(event);
 
-// Secrets Manager から API キーを読み込む（APP_ENV=local のときだけ STUB_API_KEY の平文を使う）。
+// Parameter Store の SecureString から API キーを読み込む（APP_ENV=local のときだけ STUB_API_KEY の平文を使う）。
 export async function loadApiKey(env) {
-  if (env.API_KEY_SECRET_ID) {
-    const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
-    const out = await new SecretsManagerClient({}).send(new GetSecretValueCommand({ SecretId: env.API_KEY_SECRET_ID }));
-    if (out.SecretString) return out.SecretString;
+  if (env.API_KEY_PARAMETER_NAME) {
+    const { SSMClient, GetParameterCommand } = await import('@aws-sdk/client-ssm');
+    const out = await new SSMClient({}).send(
+      new GetParameterCommand({ Name: env.API_KEY_PARAMETER_NAME, WithDecryption: true }),
+    );
+    if (out.Parameter?.Value) return out.Parameter.Value;
   } else if (env.APP_ENV === 'local' && env.STUB_API_KEY) {
     return env.STUB_API_KEY;
   }
-  throw new Error('API_KEY_SECRET_ID is not set');
+  throw new Error('API_KEY_PARAMETER_NAME is not set');
 }
 
 // API キーからリクエスト処理関数を作る（ログ出力はテスト用に差し替え可能）。

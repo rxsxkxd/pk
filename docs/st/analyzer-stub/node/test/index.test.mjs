@@ -41,8 +41,8 @@ test('header names are case-insensitive', async () => {
   assert.equal(res.statusCode, 200);
 });
 
-test('API key comes from Secrets Manager, or from STUB_API_KEY only when APP_ENV=local', async () => {
+test('API key comes from Parameter Store, or from STUB_API_KEY only when APP_ENV=local', async () => {
   assert.equal(await loadApiKey({ APP_ENV: 'local', STUB_API_KEY: 'k' }), 'k');
-  await assert.rejects(loadApiKey({}), /API_KEY_SECRET_ID/);
-  await assert.rejects(loadApiKey({ STUB_API_KEY: 'k' }), /API_KEY_SECRET_ID/);
+  await assert.rejects(loadApiKey({}), /API_KEY_PARAMETER_NAME/);
+  await assert.rejects(loadApiKey({ STUB_API_KEY: 'k' }), /API_KEY_PARAMETER_NAME/);
 });

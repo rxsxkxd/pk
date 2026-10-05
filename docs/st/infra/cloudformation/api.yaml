@@ -13,9 +13,10 @@ Parameters:
   ArtifactPrefix:
     Type: String
     Description: Key prefix of ticketqr.zip and exampleqr.zip, e.g. ticketqr/go/<git-sha>. Change it on every deploy so Lambda picks up new code.
-  SigningSaltSecretArn:
+  SigningSaltParameterName:
     Type: String
-    Description: ARN of the Secrets Manager secret {"current":"...","previous":"..."} (created outside this stack).
+    AllowedPattern: ^/.+
+    Description: Parameter Store SecureString {"current":"...","previous":"..."}, e.g. /ticketqr/go/signing-salt (created outside this stack).
   AnalyzerMode:
     Type: String
     Default: mock
@@ -25,10 +26,11 @@ Parameters:
     Type: String
     Default: ""
     Description: Image analysis endpoint for AnalyzerMode=http, e.g. the analyzer-stub stack's AnalyzeUrl output.
-  AnalyzerApiKeySecretArn:
+  AnalyzerApiKeyParameterName:
     Type: String
     Default: ""
-    Description: Secret holding the analysis server's x-api-key (AnalyzerMode=http), e.g. the analyzer-stub stack's ApiKeySecretArn output.
+    AllowedPattern: ^(/.+)?$
+    Description: Parameter Store SecureString holding the analysis server's x-api-key (AnalyzerMode=http), e.g. /ticketqr/analyzer-stub/node/api-key.
   TicketSuffixLength:
     Type: Number
     Default: 8
@@ -66,7 +68,7 @@ Mappings:
 Conditions:
   UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]
   HasIssueReservedConcurrency: !Not [!Equals [!Ref IssueReservedConcurrency, -1]]
-  HasAnalyzerApiKey: !Not [!Equals [!Ref AnalyzerApiKeySecretArn, ""]]
+  HasAnalyzerApiKey: !Not [!Equals [!Ref AnalyzerApiKeyParameterName, ""]]
 
 Resources:
   # ---------- IAM ----------
@@ -82,13 +84,14 @@ Resources:
       ManagedPolicyArns:
         - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
+        # SecureString with the AWS managed key (aws/ssm) needs no kms:Decrypt; add it if a custom KMS key is used.
         - PolicyName: read-signing-salt
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
-                Resource: !Ref SigningSaltSecretArn
+                Action: ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
         - !If
           - HasAnalyzerApiKey
           - PolicyName: read-analyzer-api-key
@@ -96,8 +99,8 @@ Resources:
               Version: "2012-10-17"
               Statement:
                 - Effect: Allow
-                  Action: secretsmanager:GetSecretValue
-                  Resource: !Ref AnalyzerApiKeySecretArn
+                  Action: ssm:GetParameter
+                  Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AnalyzerApiKeyParameterName}
           - !Ref AWS::NoValue
 
   # exampleqr reads no secrets, so it gets a role with logging only.
@@ -166,8 +169,8 @@ Resources:
           PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
           ANALYZER_MODE: !Ref AnalyzerMode
           ANALYZER_URL: !Ref AnalyzerUrl
-          ANALYZER_API_KEY_SECRET_ID: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeySecretArn, !Ref AWS::NoValue]
-          SIGNING_SALT_SECRET_ID: !Ref SigningSaltSecretArn
+          ANALYZER_API_KEY_PARAMETER_NAME: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeyParameterName, !Ref AWS::NoValue]
+          SIGNING_SALT_PARAMETER_NAME: !Ref SigningSaltParameterName
           TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
   TicketsIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -228,8 +231,8 @@ Resources:
           PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
           ANALYZER_MODE: !Ref AnalyzerMode
           ANALYZER_URL: !Ref AnalyzerUrl
-          ANALYZER_API_KEY_SECRET_ID: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeySecretArn, !Ref AWS::NoValue]
-          SIGNING_SALT_SECRET_ID: !Ref SigningSaltSecretArn
+          ANALYZER_API_KEY_PARAMETER_NAME: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeyParameterName, !Ref AWS::NoValue]
+          SIGNING_SALT_PARAMETER_NAME: !Ref SigningSaltParameterName
           TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
   GetQRIntegration:
     Type: AWS::ApiGatewayV2::Integration

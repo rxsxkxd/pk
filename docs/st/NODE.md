@@ -35,7 +35,7 @@ API の仕様は [DESIGN.md](DESIGN.md) を参照。Go 版（`go/`）と**同じ
 | devDependencies | `@hono/node-server` 2.1.3 | ローカルサーバー |
 | devDependencies | `typescript` 7.0.2、`esbuild` 0.28.2、`@types/node`、`@types/aws-lambda` | 型チェック、バンドル、型定義（実行時には使わない） |
 | devDependencies | `prettier` 3.9.9 | 整形（`printWidth` 120、シングルクォート）。設定は `.prettierrc.json` |
-| devDependencies（型チェック用。バンドルしない） | `@aws-sdk/client-secrets-manager` | salt の取得。実行時は Lambda ランタイム同梱のものを `import()` で読む |
+| devDependencies（型チェック用。バンドルしない） | `@aws-sdk/client-ssm` | salt と画像解析サーバーの API キーの取得（Parameter Store）。実行時は Lambda ランタイム同梱のものを `import()` で読む |
 
 バージョンはすべて `package.json` で固定する（`--save-exact`）。
 
@@ -104,7 +104,7 @@ st/
     ├── .prettierrc.json
     ├── src/
     │   ├── domain.ts          # ビジネスロジック（外部入出力なし。node:crypto だけ使う）
-    │   ├── infra.ts           # 外部とのやり取りの実装（環境変数・Secrets Manager・lean-qr・解析クライアント・ログ）
+    │   ├── infra.ts           # 外部とのやり取りの実装（環境変数・Parameter Store・lean-qr・解析クライアント・ログ）
     │   ├── app.ts             # HTTP 層（Hono）: ルート表・エンドポイント・リクエスト / レスポンス・HTML ビュー、依存の組み立て
     │   ├── ticketqr.ts        # Lambda エントリ: handler = handle(createApp(await loadDeps()))
     │   ├── exampleqr.ts       # Lambda エントリ: handler = handle(createExampleApp())
@@ -126,7 +126,7 @@ app.ts ──▶ domain.ts ◀── infra.ts
 | ファイル | 層 | 主な関数・型 | 対応する Go |
 |---|---|---|---|
 | `domain.ts` | ビジネスロジック | `issueTicket`（画像チェック → 解析 → 採番）、`generateTicket`、`newSigner`、`validateImage`、外部とのインターフェース（`Analyzer`、`Log`、`AnalyzerError`）、`AppError` と各エラー | `usecase`、`ticketcode`、`signer`、`imageinput`、`analyzer`（型）、`apperr` |
-| `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Secrets Manager）、`newAnalyzer` / `alwaysValid` / `httpAnalyzer`（画像解析クライアント。モックと HTTP）、`qrPng`（lean-qr）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、`qr`、slog |
+| `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Parameter Store）、`newAnalyzer` / `alwaysValid` / `httpAnalyzer`（画像解析クライアント。モックと HTTP）、`qrPng`（lean-qr）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、`qr`、slog |
 | `app.ts` | HTTP 層と組み立て | `ROUTES`、`createApp`（ミドルウェア・`onError`・`notFound`）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`issueInline` / `issue` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readFormImage`、`createExampleApp`、`ticketView` / `errorView`、`loadDeps` | `app`、`handler`、`view`、`exampleqr` |
 
 - `domain.ts` は外部と直接やり取りしない。画像解析とログは、`issueTicket` が受け取る `IssuePorts`（`analyzer`、`newTicket`、`log`）を通して使う。テストでは、ここに差し替え用の実装（スタブ）を渡す
@@ -193,7 +193,7 @@ if (!(image instanceof File)) throw badRequest('image file is required');       
 
 ### 5.4 salt の取得
 
-- `@aws-sdk/client-secrets-manager` はランタイム同梱のものを使う（esbuild では `--external:@aws-sdk/*`）
+- salt は Parameter Store の SecureString から `GetParameter`（`WithDecryption: true`）で読む。`@aws-sdk/client-ssm` はランタイム同梱のものを使う（esbuild では `--external:@aws-sdk/*`。Node.js 24 ランタイムに含まれることを確認済み）
 - Go と同じく、`APP_ENV=local` のときに限り `SIGNING_SALT` の平文を使う
 
 ### 5.5 ログ
@@ -272,9 +272,9 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 
 | 環境変数 | 内容 |
 |---|---|
-| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_SECRET_ID`、`TICKET_SUFFIX_LENGTH`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。ただし `ANALYZER_MODE` は `mock` に加えて `http` も使える（Node 版のみ） |
+| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_PARAMETER_NAME`、`TICKET_SUFFIX_LENGTH`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。ただし `ANALYZER_MODE` は `mock` に加えて `http` も使える（Node 版のみ） |
 | `ANALYZER_URL` | `ANALYZER_MODE=http` のときの POST 先（例: `http://localhost:8090/v1/analyze`） |
-| `ANALYZER_API_KEY_SECRET_ID` | `ANALYZER_MODE=http` のときの API キーのシークレット。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
+| `ANALYZER_API_KEY_PARAMETER_NAME` | `ANALYZER_MODE=http` のときの API キーのパラメータ名（Parameter Store の SecureString）。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
 | `ANALYZER_TIMEOUT_MS` | 1回の呼び出しのタイムアウト（既定 5000） |
 | `PORT` / `EXAMPLE_PORT` | `npm run dev` の待ち受けポート（既定値 8080 / 8081） |
 
@@ -317,5 +317,5 @@ ANALYZER_MODE=http ANALYZER_URL=http://localhost:8090/v1/analyze ANALYZER_API_KE
 
 - 依存は増やさない（標準の `fetch` と `AbortSignal.timeout` を使う）
 - 1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライする。失敗は `AnalyzerError`（`timeout` / `upstream`）として `domain.ts` に返し、API のエラー（504 / 502）になる。`valid: false` は 422
-- AWS へのデプロイは DEPLOY.md 4.7（`AnalyzerMode=http`、`AnalyzerUrl`、`AnalyzerApiKeySecretArn`）
+- AWS へのデプロイは DEPLOY.md 4.7（`AnalyzerMode=http`、`AnalyzerUrl`、`AnalyzerApiKeyParameterName`）
 

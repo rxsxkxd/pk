@@ -40,7 +40,7 @@ make build          # bin/ticketqr.zip（チケット系4エンドポイント�
 |---|---|---|
 | `PUBLIC_BASE_URL` | ○ | リダイレクト先と `<img src>` に使う絶対URL。例: `https://api.example.com` |
 | `ANALYZER_MODE` | ○ | 画像解析クライアントの種類。現在選べるのは `mock`（常に valid を返す）だけ |
-| `SIGNING_SALT_SECRET_ID` | ○ | 署名用 salt を保存した Secrets Manager のシークレット。中身は `{"current":"...","previous":"..."}` 形式 |
+| `SIGNING_SALT_PARAMETER_NAME` | ○ | 署名用 salt を保存した Parameter Store の SecureString の名前（例: `/ticketqr/go/signing-salt`）。中身は `{"current":"...","previous":"..."}` 形式 |
 | `TICKET_SUFFIX_LENGTH` | | suffix の桁数（既定値 8。根拠は DESIGN.md 4章） |
 | `APP_ENV` / `SIGNING_SALT` | | `APP_ENV=local` のときに限り、`SIGNING_SALT` に平文で書いた salt を使う（ローカル専用） |
 

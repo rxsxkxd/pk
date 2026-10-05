@@ -2,7 +2,7 @@
 
 API の設計は [../DESIGN.md](../DESIGN.md)（7章 画像解析サーバー連携）を参照。
 
-> **実装状況**: Node 版のスタブは実装済み（`node/`）。Rust 版は未着手（`rust/`、6章）。API 側の HTTP クライアントは Node 版のみ実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 4.7。
+> **実装状況**: スタブは Node 版（`node/`、5章）と Rust 版（`rust/`、6章）の両方が実装済み。API 側の HTTP クライアントは Node 版のみ実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 4.7。
 
 ## 1. 目的
 
@@ -10,7 +10,7 @@ API の設計は [../DESIGN.md](../DESIGN.md)（7章 画像解析サーバー連
 - これによって、次の点を AWS 上で動作確認できるようにする
   - API 側の HTTP 版の画像解析クライアント（`ANALYZER_MODE=http`。これから実装する）
   - 画像を `application/octet-stream` でそのまま送る経路（確定済みの仕様）
-  - API キーの受け渡し（Secrets Manager）
+  - API キーの受け渡し（Parameter Store の SecureString）
 - **解析は何もしない**。受け付けた画像は常に `valid` を返す
 - **本番用ではない**。動作確認が終わったら削除する。本物のサーバーの仕様が決まったら、API 側のクライアントを本物に合わせる
 
@@ -30,7 +30,7 @@ flowchart LR
   APIGW --> L[Lambda tickets<br/>ANALYZER_MODE=http]
   L -->|POST octet-stream<br/>x-api-key| FURL[Lambda Function URL]
   FURL --> S[Lambda<br/>ticketqr-analyzer-stub-{node,rust}]
-  L -.-> SM[Secrets Manager<br/>stub API キー]
+  L -.-> SM[Parameter Store<br/>stub API キー（SecureString）]
   S -.-> SM
 ```
 
@@ -72,8 +72,8 @@ x-api-key: {API キー}
 ### 3.3 認証（仮）
 
 - `x-api-key` ヘッダーで、共有の API キーを照合する。どちらも SHA-256 にしてから定数時間で比較し、長さの違いでも時間が変わらないようにする
-- API キーは、スタックの作成時に Secrets Manager の `ticketqr/analyzer-stub/{impl}/api-key` に自動生成する（テンプレートやパラメータに値を書かない）
-- スタブと API の両方の Lambda に、このシークレットの読み取り権限を与える。スタブは初回の呼び出し時にキーを読み込み、メモリに保持する
+- API キーは Parameter Store の SecureString `/ticketqr/analyzer-stub/{impl}/api-key` に置く。CloudFormation は SecureString を作れないので、デプロイ前に CLI で作る（7章）。値はテンプレートやパラメータに書かない
+- スタブと API の両方の Lambda に、このパラメータの読み取り権限（`ssm:GetParameter`）を与える。スタブは初回の呼び出し時にキーを読み込み、メモリに保持する
 
 ### 3.4 ログ
 
@@ -130,7 +130,7 @@ npm run build     # dist/analyzer-stub.zip（index.mjs のみ）
 
 | 環境変数 | 内容 |
 |---|---|
-| `API_KEY_SECRET_ID` | API キーのシークレット（Lambda 上では必須） |
+| `API_KEY_PARAMETER_NAME` | API キーのパラメータ名（Lambda 上では必須） |
 | `APP_ENV=local` + `STUB_API_KEY` | ローカル実行・テスト用。平文の API キー（`APP_ENV=local` のときだけ使える） |
 | `PORT` | `npm run dev` の待ち受けポート（既定 8090） |
 
@@ -140,35 +140,75 @@ npm run build     # dist/analyzer-stub.zip（index.mjs のみ）
 - Lambda エミュレーター（`public.ecr.aws/lambda/nodejs:24`）に Function URL 形式のイベントを送り、200 / 401 / 400 とログ出力を確認
 - `template.yaml`: cfn-lint でエラー・警告なし
 
-## 6. Rust 版（未着手）
+## 6. Rust 版（実装済み）
 
-- Node 版と同じ仕様（3章）で実装する。`testdata/cases.json` を同じテストケースとして使う
-- Lambda は `provided.al2023`（arm64）。`lambda_http` クレートで Function URL のイベントを扱い、`cargo lambda build --release --arm64 --output-format zip` で `analyzer-stub.zip`（`bootstrap` 入り）を作る想定
-- Secrets Manager の読み込みは `aws-sdk-secretsmanager` クレート（または Lambda の Parameters and Secrets 拡張機能）
-- デプロイは同じ `template.yaml` に `Impl=rust` を指定する
+Node 版と同じ仕様（3章）で、`testdata/cases.json` を同じテストケースとして使う。
+
+```
+analyzer-stub/rust/
+├── Cargo.toml / Cargo.lock
+├── rustfmt.toml
+├── src/lib.rs           # Stub（リクエストの検証と応答。テストから直接呼べる）
+├── src/main.rs          # Lambda の入口（bootstrap）。起動時に API キーを読み込む
+├── tests/cases.rs       # 共通ケース全件 + Function URL イベント（base64 ボディ）の解析 + API キーの読み込み
+├── Dockerfile.build     # ビルド環境（Amazon Linux 2023 + rustup + rustfmt / clippy）
+└── build.sh             # コンテナ内で test / lint / build を実行する
+```
+
+| 項目 | 内容 |
+|---|---|
+| ランタイム | `provided.al2023`（arm64）。バイナリ名は `bootstrap` |
+| 主な crate | `lambda_http` 1.3（Function URL のイベント。base64 のボディは `Body::Binary` に戻される）、`aws-sdk-ssm` 1.128 + `aws-config`、`sha2`、`subtle`（定数時間比較）、`serde_json`、`humantime`（ログの時刻） |
+| API キー | 起動時に1回だけ読み込む（Node 版は初回の呼び出し時）。`API_KEY_PARAMETER_NAME`、ローカルでは `APP_ENV=local` + `STUB_API_KEY` |
+| ビルド | ホストには何もインストールしない。`build.sh` が Amazon Linux 2023（arm64）のコンテナでビルドする。Lambda と同じ OS なので glibc が一致する。cargo のレジストリと `target/` は Docker ボリュームに保持する |
+| サイズ | `analyzer-stub.zip` 4.5MB（`bootstrap` 9.4MB。ほとんどが AWS SDK。Node 版の zip は 1KB 程度） |
+
+```sh
+cd docs/st/analyzer-stub/rust
+./build.sh test     # cargo test（3件。共通ケースは1件のテストの中で全件確認する）
+./build.sh lint     # cargo fmt --check と cargo clippy（警告はエラー扱い）
+./build.sh          # cargo build --release → dist/analyzer-stub.zip
+```
+
+確認済み:
+- `./build.sh test` / `./build.sh lint`: すべて成功、警告なし
+- Lambda エミュレーター（`public.ecr.aws/lambda/provided:al2023`）に Function URL 形式のイベントを送り、Node 版と同じ結果（200 / 401 / 401 / 400 / 404 / 400）とログ（`bytes`、`sha256`、`requestId`）を確認
+- Node 版との違いは、レスポンスの JSON のキーの順序（Rust は `{"reason":…,"valid":…}`）と、ログのキーの順序だけ
 
 ## 7. デプロイと削除
 
+手順の詳細は [../DEPLOY.md](../DEPLOY.md) 4.7。要点は次のとおり。
+
 ```sh
 cd docs/st
-npm --prefix analyzer-stub/node run build
-export STUB_IMPL=node
-export STUB_PREFIX=analyzer-stub/$STUB_IMPL/$(git rev-parse --short HEAD)
-aws s3 cp analyzer-stub/node/dist/analyzer-stub.zip s3://$ARTIFACT_BUCKET/$STUB_PREFIX/analyzer-stub.zip
+export STUB_IMPL=node                                        # Rust 版なら: rust
+export ANALYZER_KEY_PARAM=/ticketqr/analyzer-stub/$STUB_IMPL/api-key
 
+# 1. API キーを Parameter Store の SecureString に作る（初回だけ。CloudFormation は SecureString を作れない）
+umask 077; KEY_FILE=$(mktemp); openssl rand -hex 20 | tr -d '\n' > "$KEY_FILE"
+aws ssm put-parameter --name $ANALYZER_KEY_PARAM --type SecureString --value file://"$KEY_FILE"
+rm -f "$KEY_FILE"
+
+# 2. ビルドしてアップロードし、スタックをデプロイする
+npm --prefix analyzer-stub/node run build                    # Rust 版なら: analyzer-stub/rust/build.sh
+export STUB_PREFIX=analyzer-stub/$STUB_IMPL/$(git rev-parse --short HEAD)
+aws s3 cp analyzer-stub/$STUB_IMPL/dist/analyzer-stub.zip s3://$ARTIFACT_BUCKET/$STUB_PREFIX/analyzer-stub.zip
 aws cloudformation deploy --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
   --template-file analyzer-stub/template.yaml --capabilities CAPABILITY_IAM \
-  --parameter-overrides Impl=$STUB_IMPL ArtifactBucket=$ARTIFACT_BUCKET ArtifactPrefix=$STUB_PREFIX
+  --parameter-overrides Impl=$STUB_IMPL ArtifactBucket=$ARTIFACT_BUCKET ArtifactPrefix=$STUB_PREFIX \
+    ApiKeyParameterName=$ANALYZER_KEY_PARAM
 
-# 出力: AnalyzeUrl（API の ANALYZER_URL）、ApiKeySecretArn（API に渡すシークレット）
-aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-$STUB_IMPL --query 'Stacks[0].Outputs'
+# 出力: AnalyzeUrl（API の ANALYZER_URL）、ApiKeyParameterName（API の AnalyzerApiKeyParameterName）
+ANALYZE_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
+  --query "Stacks[0].Outputs[?OutputKey=='AnalyzeUrl'].OutputValue" --output text)
 
-# 動作確認
-KEY=$(aws secretsmanager get-secret-value --secret-id ticketqr/analyzer-stub/$STUB_IMPL/api-key --query SecretString --output text)
+# 3. 動作確認
+KEY=$(aws ssm get-parameter --name $ANALYZER_KEY_PARAM --with-decryption --query Parameter.Value --output text)
 curl -s -X POST -H 'content-type: application/octet-stream' -H "x-api-key: $KEY" --data-binary @sample.jpg "$ANALYZE_URL"
 
-# 確認が終わったら削除する（API キーのシークレットもスタックと一緒に削除される）
+# 4. 確認が終わったら削除する（API キーはスタックの外にあるので別に削除する）
 aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL
+aws ssm delete-parameter --name $ANALYZER_KEY_PARAM
 ```
 
 - `ARTIFACT_BUCKET` は API と同じ成果物バケットを使う（DEPLOY.md 4.2）
@@ -180,9 +220,9 @@ aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL
 | 対象 | 内容 |
 |---|---|
 | 画像解析クライアント | `ANALYZER_MODE=http` を追加する。`ANALYZER_URL` に POST する（octet-stream、`x-api-key` 付き）。接続1秒・全体5秒でタイムアウトし、5xx とタイムアウトのときだけ1回リトライする（DESIGN.md 7章） |
-| 設定 | `ANALYZER_URL`、`ANALYZER_API_KEY_SECRET_ID` を追加する |
+| 設定 | `ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` を追加する |
 | エラーの変換 | タイムアウト → `ANALYSIS_TIMEOUT`（504）、それ以外の失敗 → 502、`valid: false` → 422。すでに `AnalyzerError`（Node）と `ErrUpstream` / `ErrTimeout`（Go）で用意してある |
-| CloudFormation（`infra/cloudformation/api.yaml`） | パラメータ `AnalyzerUrl`、`AnalyzerApiKeySecretArn` を追加する。Lambda の環境変数と、シークレットの読み取り権限を追加する |
+| CloudFormation（`infra/cloudformation/api.yaml`） | パラメータ `AnalyzerUrl`、`AnalyzerApiKeyParameterName` を追加する。Lambda の環境変数と、パラメータの読み取り権限を追加する |
 | テスト | API のテストでは、ローカルの HTTP サーバー（このスタブの `local.mjs` など）を立てて、クライアントの挙動（タイムアウト、リトライ、エラーの変換）を確かめる |
 
 レスポンスの形式（3.2）は仮のものなので、クライアント側では解釈部分を1か所にまとめ、本物の仕様が決まったらそこだけを差し替える。
@@ -191,7 +231,7 @@ Node 版の実装（`node/src/infra.ts`）:
 
 | 項目 | 内容 |
 |---|---|
-| `newAnalyzer(env)` | `ANALYZER_MODE=mock` → プロセス内のモック、`http` → `httpAnalyzer`。`http` のときは `ANALYZER_URL`（必須）、`ANALYZER_API_KEY_SECRET_ID`（Lambda 上。ローカルは `APP_ENV=local` + `ANALYZER_API_KEY`）、`ANALYZER_TIMEOUT_MS`（既定 5000）を読む |
+| `newAnalyzer(env)` | `ANALYZER_MODE=mock` → プロセス内のモック、`http` → `httpAnalyzer`。`http` のときは `ANALYZER_URL`（必須）、`ANALYZER_API_KEY_PARAMETER_NAME`（Lambda 上。ローカルは `APP_ENV=local` + `ANALYZER_API_KEY`）、`ANALYZER_TIMEOUT_MS`（既定 5000）を読む |
 | `httpAnalyzer` | 標準の `fetch` で POST する（依存なし）。1回ごとに `AbortSignal.timeout` で打ち切る。5xx・タイムアウト・通信エラーのときだけ1回リトライし、4xx と形式の崩れたレスポンスはリトライしない |
 | `parseAnalyzerResponse` | 仮の形式 `{valid: boolean, reason?: string}` の解釈。本物の仕様が決まったら、ここだけを差し替える |
 | テスト | `node/test/app.test.ts` の `http analyzer client`。ローカルの HTTP サーバーを立てて、送ったバイト列とヘッダー、リトライの回数、タイムアウト、API のエラー（422 / 502 / 504）への変換を確認する |
@@ -202,4 +242,3 @@ Node 版の実装（`node/src/infra.ts`）:
 
 1. 仮のレスポンス形式（3.2）と認証（3.3）を、この内容で進めてよいか
 2. Go 版の HTTP クライアントに着手する時期（Node 版は実装済み）
-3. Rust 版のスタブ（6章）に着手する時期

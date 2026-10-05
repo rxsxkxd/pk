@@ -1,0 +1,22 @@
+[package]
+name = "analyzer-stub"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Image analysis server stub (Rust) for checking the ticket QR API on AWS Lambda. See ../DESIGN.md."
+
+[dependencies]
+lambda_http = "1.3"
+tokio = { version = "1", features = ["macros"] }
+serde_json = "1"
+sha2 = "0.11"
+hex = "0.4"
+subtle = "2.6"
+humantime = "2.4"
+aws-config = { version = "1.12", features = ["behavior-version-latest"] }
+aws-sdk-ssm = "1.128"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

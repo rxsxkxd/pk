@@ -38,14 +38,14 @@ flowchart LR
   APIGW -->|A / B-1 / B-3| L1[Lambda<br/>tickets]
   APIGW --> L3[Lambda<br/>get-qr]
   L1 -->|画像検証| IA[画像解析サーバー]
-  L1 & L3 -.-> SM[Secrets Manager<br/>解析サーバー認証情報 / 署名salt]
+  L1 & L3 -.-> SM[Parameter Store<br/>解析サーバーの API キー / 署名 salt]
 ```
 
 | リソース | 用途 |
 |---|---|
 | API Gateway (HTTP API) | ルーティング、認証、スロットリング |
 | Lambda × 2（チケット系） | `tickets`（A / B-1 / B-3: 画像解析・採番・ビュー）と `get-qr`（B-2: QR 画像の生成）。コードは**1つのパッケージを共有**し、イベントの `routeKey` で振り分ける（関数の分け方はインフラ設定だけで変えられる）。`get-qr` を分けるのは、`<img>` から呼ばれる QR 生成を、画像解析の同時実行数の上限から切り離すため |
-| Secrets Manager / SSM | 画像解析サーバーのAPIキー、署名用salt（発行側と検証側で共有） |
+| Parameter Store（SecureString） | 画像解析サーバーのAPIキー、署名用salt（発行側と検証側で共有）。CloudFormation の外で作る |
 | CloudWatch Logs | 発行ログ（唯一の記録） |
 
 データストア（DynamoDB / S3）は使わない。
@@ -332,7 +332,7 @@ sig = base64url( HMAC-SHA256(salt, ticketCode) ) の先頭 22 文字（128bit）
 | 長さ | 128bit に切り詰め（URLを短く保ちつつ総当たりは非現実的） |
 | エンコード | base64url、パディングなし |
 | 比較 | 定数時間比較（Go: `hmac.Equal`、Node: `crypto.timingSafeEqual`） |
-| salt 管理 | Secrets Manager / SSM SecureString。コールド起動時に取得しメモリに保持 |
+| salt 管理 | Parameter Store の SecureString（`/ticketqr/{impl}/signing-salt`）。コールド起動時に取得しメモリに保持 |
 | salt ローテーション | 検証側は「現行 + 旧」の2つの salt を受け入れる期間を設けて切り替える |
 | 有効期限 | なし（簡易チェックのため）。必要になれば `exp` を署名対象に追加する拡張余地のみ残す |
 
@@ -396,7 +396,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 | 送信形式 | **確定**: `POST`、`Content-Type: application/octet-stream`、ボディは画像バイト列そのもの（multipart から取り出した `image` パートの中身。圧縮・リサイズ・形式変換・再エンコードはしないパススルー） |
 | 送信先URL / メソッド以外のヘッダ | 要確認（画像形式を `X-Image-Type` 等で伝えるか、ファイル名などのメタデータを送るか） |
 | レスポンス | 要確認。想定: `{ "valid": true/false, "reason": "..." }` |
-| 認証 | APIキー等を Secrets Manager から取得し、コールド起動時にキャッシュ（メモリ内のみ） |
+| 認証 | APIキー等を Parameter Store（SecureString）から取得し、コールド起動時にキャッシュ（メモリ内のみ） |
 | タイムアウト | 接続 1s / 全体 5s 程度（解析時間の実測で調整）。API Gateway の 29s 上限内に収める |
 | リトライ | 5xx・タイムアウトのみ 1回。4xx はリトライしない |
 | ネットワーク | 解析サーバーがVPC内ならLambdaをVPC配置（NAT/エンドポイント設計が必要） |
@@ -446,7 +446,7 @@ st/
 │       ├── analyzer/          # 画像解析クライアント（現状は常に valid のモックのみ）
 │       ├── imageinput/        # 画像サイズ・形式チェック
 │       ├── signer/            # 署名（salt + HMAC）
-│       ├── secret/            # salt 取得（Secrets Manager）
+│       ├── secret/            # salt 取得（Parameter Store）
 │       ├── config/            # 環境変数
 │       └── view/              # HTMLレンダリング
 ├── node/                      # 詳細は NODE.md（domain.ts / infra.ts / app.ts + 入口の ticketqr.ts / exampleqr.ts / local.ts）
@@ -462,7 +462,7 @@ st/
 |---|---|---|
 | ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs24.x`（arm64、`index.handler`） |
 | Lambda アダプタ | `aws-lambda-go` | Hono + `@hono/aws-lambda`（NODE.md 5.1） |
-| AWS SDK | aws-sdk-go-v2（Secrets Manager のみ） | AWS SDK for JavaScript v3（同左） |
+| AWS SDK | aws-sdk-go-v2（SSM のみ） | AWS SDK for JavaScript v3（SSM のみ。Lambda ランタイム同梱） |
 | QR ライブラリ | `github.com/skip2/go-qrcode` | `lean-qr`（NODE.md 3章） |
 | multipart 解析 | 標準 `mime/multipart` | Hono の `c.req.formData()`（NODE.md 5.2） |
 | HTMLテンプレート | `html/template` + `embed` | `hono/html` のタグ付きテンプレート（コード内） |

@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-lambda-go v1.55.1
 	github.com/aws/aws-sdk-go-v2 v1.47.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.6
-	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.50.1
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.79.0
 	github.com/google/uuid v1.6.0
 	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e

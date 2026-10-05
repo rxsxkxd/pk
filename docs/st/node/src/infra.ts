@@ -1,4 +1,4 @@
-// Implementations that talk to the outside world: environment variables, Secrets Manager, the QR
+// Implementations that talk to the outside world: environment variables, Parameter Store, the QR
 // library, the image analysis server (HTTP client or in-process mock) and log output. The business
 // logic in domain.ts only sees the Analyzer / Log ports.
 
@@ -46,25 +46,25 @@ function absoluteUrl(name: string, value: string | undefined): URL {
   return url;
 }
 
-// Secrets Manager からシークレットの文字列を取得する（SDK は Lambda ランタイム同梱のものを使い、バンドルしない）。
-async function readSecret(secretId: string): Promise<string> {
-  const { SecretsManagerClient, GetSecretValueCommand } = await import('@aws-sdk/client-secrets-manager');
-  const out = await new SecretsManagerClient({}).send(new GetSecretValueCommand({ SecretId: secretId }));
-  if (!out.SecretString) throw new Error(`secret ${secretId} is empty`);
-  return out.SecretString;
-}
-
 export type Salts = { current: string; previous?: string };
 
-// Secrets Manager から salt を取得する（APP_ENV=local のときだけ環境変数 SIGNING_SALT の平文を使う）。
+// Parameter Store の SecureString から salt を取得する（APP_ENV=local のときだけ環境変数 SIGNING_SALT の平文を使う）。
 export async function loadSalts(env: NodeJS.ProcessEnv): Promise<Salts> {
-  if (env.SIGNING_SALT_SECRET_ID) {
-    return JSON.parse(await readSecret(env.SIGNING_SALT_SECRET_ID)) as Salts;
+  if (env.SIGNING_SALT_PARAMETER_NAME) {
+    return JSON.parse(await readParameter(env.SIGNING_SALT_PARAMETER_NAME)) as Salts;
   }
   if (env.APP_ENV === 'local' && env.SIGNING_SALT) {
     return { current: env.SIGNING_SALT };
   }
-  throw new Error('SIGNING_SALT_SECRET_ID is not set');
+  throw new Error('SIGNING_SALT_PARAMETER_NAME is not set');
+}
+
+// Parameter Store から SecureString を復号して取得する（SDK は Lambda ランタイム同梱のものを使い、バンドルしない）。
+async function readParameter(name: string): Promise<string> {
+  const { SSMClient, GetParameterCommand } = await import('@aws-sdk/client-ssm');
+  const out = await new SSMClient({}).send(new GetParameterCommand({ Name: name, WithDecryption: true }));
+  if (!out.Parameter?.Value) throw new Error(`parameter ${name} is empty`);
+  return out.Parameter.Value;
 }
 
 // =================================================================================================
@@ -93,11 +93,11 @@ export async function newAnalyzer(env: NodeJS.ProcessEnv): Promise<Analyzer> {
 // 常に valid を返す画像解析のモック（通信しない）。
 export const alwaysValid: Analyzer = async () => ({ valid: true, reason: 'mock' });
 
-// 解析サーバーの API キーを取得する（APP_ENV=local のときだけ環境変数 ANALYZER_API_KEY の平文を使う）。
+// Parameter Store から解析サーバーの API キーを取得する（APP_ENV=local のときだけ環境変数 ANALYZER_API_KEY の平文を使う）。
 async function loadAnalyzerApiKey(env: NodeJS.ProcessEnv): Promise<string> {
-  if (env.ANALYZER_API_KEY_SECRET_ID) return readSecret(env.ANALYZER_API_KEY_SECRET_ID);
+  if (env.ANALYZER_API_KEY_PARAMETER_NAME) return readParameter(env.ANALYZER_API_KEY_PARAMETER_NAME);
   if (env.APP_ENV === 'local' && env.ANALYZER_API_KEY) return env.ANALYZER_API_KEY;
-  throw new Error('ANALYZER_API_KEY_SECRET_ID is not set');
+  throw new Error('ANALYZER_API_KEY_PARAMETER_NAME is not set');
 }
 
 type Attempt = { result: AnalyzerResult } | { error: AnalyzerError; retry: boolean };

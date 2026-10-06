@@ -58,6 +58,9 @@ ruby scripts/build_green.rb  --config config/blue-green/staging.yml --service ex
 ruby scripts/verify_green.rb --config config/blue-green/staging.yml --service example-service
 ruby scripts/switchover.rb   --config config/blue-green/staging.yml --service example-service --approve
 
+# パイプラインのスタックの登録・削除（ローカル。down はアーティファクトバケットを空にしてから削除）
+examples/rds-blue-green-deployment/pipeline-stack.sh up|down
+
 # Step 7（ローカル。破壊的権限を持つロールで実行）
 go run ./tools/cleanup --config config/blue-green/staging.yml --service example-service
 ```

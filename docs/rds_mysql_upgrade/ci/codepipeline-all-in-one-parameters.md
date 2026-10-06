@@ -78,7 +78,7 @@ aws cloudformation deploy \
     ArtifactBucketName=your-existing-codepipeline-artifact-bucket \
 ```
 
-指定するとスタックは `AWS::S3::Bucket` も `AWS::S3::BucketPolicy` も作らない。**バージョニングを有効にしておくこと**（CodePipeline の要件）。
+指定するとスタックは `AWS::S3::Bucket` も `AWS::S3::BucketPolicy` も作らない（バージョニングは必須ではない）。
 
 ## 4. 実効値収集を有効にする
 
@@ -184,7 +184,23 @@ aws cloudformation execute-change-set --change-set-name <名前>
 aws cloudformation delete-stack --stack-name rds-bg-staging
 ```
 
-**自動作成した S3 バケットは残る**（`DeletionPolicy: Retain`）。中身があるとバケットを削除できずスタック削除が失敗するためである。不要なら手で削除する。**IAM ロール・CodeBuild プロジェクト・CodePipeline は削除される。**RDS リソースには一切影響しない。
+**自動作成した S3 バケットも一緒に消える**（`DeletionPolicy: Delete`）。ただし中身があるとバケットを削除できずスタック削除が失敗するので、上のコマンドを直接使うより、先にバケットを空にしてから削除する `pipeline-stack.sh down`（下記）を使う。**IAM ロール・CodeBuild プロジェクト・CodePipeline は削除される。**RDS リソースには一切影響しない。
+
+### ローカルのスクリプトで登録・削除する
+
+登録と削除だけを手元から行う補助として [`examples/rds-blue-green-deployment/pipeline-stack.sh`](../examples/rds-blue-green-deployment/pipeline-stack.sh) がある。中身は上の `aws` コマンドを並べただけである。値はスクリプト冒頭の変数を書き換えるか、同じ名前の環境変数で渡す（`ENVIRONMENT_NAME`・`STACK_NAME`・`DEFAULT_SERVICE_NAME`・`CODESTAR_CONNECTION_ARN`・`REPOSITORY_ID`・`BRANCH_NAME`・`RDS_MONITORING_ROLE_NAME`・`PROTECTED_RDS_RESOURCE_ARNS`）。ここに無いパラメータは既定値になる。
+
+```bash
+ENVIRONMENT_NAME=staging examples/rds-blue-green-deployment/pipeline-stack.sh up     # 登録（既にあれば更新）
+ENVIRONMENT_NAME=staging examples/rds-blue-green-deployment/pipeline-stack.sh down   # 削除
+```
+
+`down` は次の順に進む。**`yes` と入力しない限り何も消さない。**
+
+1. このスタックが作ったアーティファクトバケットを調べる（`ArtifactBucketName` で既存バケットを渡した場合は管理外なので触らない）
+2. 確認を求める（バケットの中身＝移行作業の記録も消える。残したいものは先に取り出す）
+3. バケットを空にする（バージョニングを有効にしていた頃に作ったバケットなら、旧版と削除マーカーも消す）
+4. スタックを削除し、完了まで待つ。バケットもここで消える
 
 ## 7. パラメータ一覧
 

@@ -93,7 +93,7 @@ ruby scripts/check_target_parameter_group.rb \
 最初に `actions.build: pending` のまま実行する。保護スナップショット作成・Blue/Green 作成が行われないことを確認する。
 
 ```bash
-scripts/build_green.rb \
+ruby scripts/build_green.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -107,7 +107,7 @@ scripts/build_green.rb \
 Step 1・2 のレビューが完了し、保護スナップショットと Green を作成してよい時点で、対象サービスの `actions.build` を `approved` に変更する。その後、同じコマンドを実行する。
 
 ```bash
-scripts/build_green.rb \
+ruby scripts/build_green.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -133,7 +133,7 @@ Green 作成中・作成後も、切替は実行しない。`AVAILABLE` を確�
 レポート生成器は Go 版だけである。**`GREEN_REPORT_GENERATOR` を指定しなければ `verify_green.rb` が一時ファイルへビルドして使う**ため、通常は何も用意しなくてよい（Go が必要）。
 
 ```bash
-scripts/verify_green.rb \
+ruby scripts/verify_green.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -146,7 +146,7 @@ scripts/verify_green.rb \
 go build -o .tools/green-report/generate_green_verification_report ./scripts/generate_green_verification_report
 
 GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" \
-  scripts/verify_green.rb \
+  ruby scripts/verify_green.rb \
     --config "$CONFIG_FILE" \
     --service "$SERVICE_NAME" \
     --profile "$AWS_PROFILE" \
@@ -168,7 +168,7 @@ read -rs -p 'Green DB password: ' MYSQL_PASSWORD; echo
 export MYSQL_PASSWORD
 
 GREEN_REPORT_GENERATOR="$PWD/.tools/green-report/generate_green_verification_report" \
-  scripts/verify_green.rb \
+  ruby scripts/verify_green.rb \
     --config "$CONFIG_FILE" \
     --service "$SERVICE_NAME" \
     --profile "$AWS_PROFILE" \
@@ -196,7 +196,7 @@ MySQL 実効値収集の有効・無効、接続方式、TLS の CA（`ssl_ca`�
 `actions.switchover: pending` のまま、必ず `--approve` を付けて実行する。`--approve` は CLI の安全ゲート、`actions.switchover` は設定上の安全ゲートであり、両方が必要である。
 
 ```bash
-scripts/switchover.rb \
+ruby scripts/switchover.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \
@@ -211,7 +211,7 @@ scripts/switchover.rb \
 切替前の検証完了を承認した後にのみ `actions.switchover` を `approved` に変更し、同じコマンドを実行する。
 
 ```bash
-scripts/switchover.rb \
+ruby scripts/switchover.rb \
   --config "$CONFIG_FILE" \
   --service "$SERVICE_NAME" \
   --profile "$AWS_PROFILE" \

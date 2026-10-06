@@ -123,6 +123,8 @@ aws cloudformation deploy \
 
 `--capabilities CAPABILITY_NAMED_IAM` は必須である（IAM ロールを**名前付きで**作るため、`CAPABILITY_IAM` では足りない）。
 
+同じ登録を [`pipeline-stack.sh up`](examples/rds-blue-green-deployment/pipeline-stack.sh) でも行える（値はスクリプト冒頭の変数か環境変数で渡す）。
+
 **全パラメータの一覧・MySQL 実効値収集を有効にする場合の指定・パラメータファイル方式・更新と削除**は [パイプラインのデプロイとパラメータ一覧](ci/codepipeline-all-in-one-parameters.md) にまとめてある。
 
 ### 特に誤りやすい 2 つ
@@ -169,13 +171,15 @@ aws cloudformation describe-stacks --stack-name rds-bg-staging \
 ### 削除
 
 ```bash
-aws cloudformation delete-stack --stack-name rds-bg-staging
+ENVIRONMENT_NAME=staging examples/rds-blue-green-deployment/pipeline-stack.sh down
 ```
+
+アーティファクトバケットを空にしてからスタックを削除する（`yes` と入力するまで何も消さない）。`aws cloudformation delete-stack` を直接使うと、バケットに中身が残っていて `DELETE_FAILED` で止まる。
 
 | | 削除されるか |
 |---|---|
 | IAM ロール・CodeBuild・CodePipeline | **される** |
-| 自動作成した S3 バケット | **されない**（`DeletionPolicy: Retain`。中身があると S3 は削除できずスタック削除が失敗するため） |
+| 自動作成した S3 バケット | **される**（`DeletionPolicy: Delete`。中身があると消せないので、`pipeline-stack.sh down` が先に空にする。残したい記録は先に取り出す） |
 | **RDS リソース** | **一切影響しない** |
 
 ## 6. ローカルで先に確かめる（任意）

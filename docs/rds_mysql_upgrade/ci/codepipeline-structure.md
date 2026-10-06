@@ -166,7 +166,7 @@ arn:aws:rds:<region>:<account>:snapshot:<識別子の接頭辞>*
 
 ## S3 アーティファクト
 
-`codepipeline-all-in-one.yml` は **`ArtifactBucketName` を空にすると S3 バケットを新規作成する**（バージョニング有効、SSE-S3、パブリックアクセス全ブロック、非 TLS 拒否、保持日数経過で失効。`DeletionPolicy: Retain`）。名前は `<PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>` で、スタックの出力 `ArtifactBucket` に出る。
+`codepipeline-all-in-one.yml` は **`ArtifactBucketName` を空にすると S3 バケットを新規作成する**（バージョニングなし、SSE-S3、パブリックアクセス全ブロック、非 TLS 拒否、保持日数経過で失効。`DeletionPolicy: Delete`——削除は `pipeline-stack.sh down` が先に空にしてから行う）。名前は `<PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>` で、スタックの出力 `ArtifactBucket` に出る。
 
 既存バケットを使う場合は `ArtifactBucketName` に、CodePipeline と同一リージョンにあるバケット名を指定する。このときテンプレートは `AWS::S3::Bucket` と `AWS::S3::BucketPolicy` を作成せず、既存バケットの暗号化、パブリックアクセスブロック、ライフサイクル、バケットポリシーを変更しない。組織のバケットポリシーで明示許可している場合は、作成される `CodePipelineRole` と各 CodeBuild ロールからの読み書きを許可しておく。`codepipeline.yml`（役割分担の都合でバケットを作らない版）は常に既存バケットが必須である。
 

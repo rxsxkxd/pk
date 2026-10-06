@@ -15,19 +15,19 @@ Blue/Green Deployment は CloudFormation カスタムリソースを使わず、
 ## Green の作成
 
 ```bash
-scripts/build_green.rb \
+ruby scripts/build_green.rb \
   --config config/blue-green/staging.yml \
   --service example-service
 ```
 
-設定の `actions.build: approved` が無ければ何もしない。移行元に対応する Deployment があれば作り直さず、無ければ保護スナップショットを確保してから作成し、`AVAILABLE` になるまで待機して終了する（内部で `scripts/build_green.rb` を呼ぶ）。応答 JSON は一時ディレクトリに保存される。完了後に Green の接続、レプリケーション、アプリケーション、性能を検証する。
+設定の `actions.build: approved` が無ければ何もしない。移行元に対応する Deployment があれば作り直さず、無ければ保護スナップショットを確保してから作成し、`AVAILABLE` になるまで待機して終了する。応答 JSON は一時ディレクトリに保存される。完了後に Green の接続、レプリケーション、アプリケーション、性能を検証する。
 
 ## 切替
 
 検証完了後のみ実行する。Deployment 識別子は指定しない（移行元から毎回引き当てる）。
 
 ```bash
-scripts/switchover.rb \
+ruby scripts/switchover.rb \
   --config config/blue-green/staging.yml \
   --service example-service \
   --approve

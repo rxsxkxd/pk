@@ -203,14 +203,14 @@ CodeConnections を使う場合は、接続作成後に GitHub 側で認可を�
 
 | 設定 | 値 | 理由 |
 |---|---|---|
-| バージョニング | `Enabled` | **CodePipeline のアーティファクトバケットは必須** |
+| バージョニング | 使わない | CodePipeline がバージョニングを必須とするのは S3 をソースにするアクションのバケットだけで、アーティファクトストアには要らない（ソースは GitHub / CodeCommit） |
 | 暗号化 | SSE-S3（`AES256`、バケットキー有効） | 既定で追加費用が無い |
 | パブリックアクセス | 4 項目すべてブロック | — |
 | Object Ownership | `BucketOwnerEnforced` | ACL を無効化し、IAM とバケットポリシーだけで制御する |
-| ライフサイクル | 現行版は `ArtifactRetentionDays`（既定 90 日）で失効、非現行版 7 日、不完全マルチパートを 7 日で中止 | バージョニングが有効なので、明示的に失効させないと版が積み続ける |
+| ライフサイクル | `ArtifactRetentionDays`（既定 90 日）で失効、不完全マルチパートを 7 日で中止 | 古いアーティファクトを残し続けない |
 | バケットポリシー | 非 TLS（`aws:SecureTransport: false`）を `Deny` | — |
 
-**`DeletionPolicy: Retain` にしてある。**S3 は中身が残っているとバケットを削除できず、スタック削除が `DELETE_FAILED` で止まる。アーティファクトには移行作業の記録（検証レポート、収集した JSON）が入るため、スタックを消しても残す方を選んだ。不要になったら手で削除する。ライフサイクルで保持日数を過ぎれば空になるので、放置してもコストは増え続けない。
+**スタックを削除するとバケットも消える（`DeletionPolicy: Delete`）。**S3 は中身が残っているとバケットを削除できず、スタック削除が `DELETE_FAILED` で止まるので、削除は [`pipeline-stack.sh down`](../examples/rds-blue-green-deployment/pipeline-stack.sh) で行う（先にバケットを空にしてからスタックを削除する）。アーティファクトには移行作業の記録（検証レポート、収集した JSON）が入るので、残したいものは削除の前に取り出しておく。
 
 使ったバケット名はスタックの出力 `ArtifactBucket` で確認できる。
 
@@ -221,7 +221,7 @@ aws cloudformation describe-stacks --stack-name <名前> \
 
 #### 既存バケットを使う場合
 
-`ArtifactBucketName` に名前を渡す。この場合スタックは `AWS::S3::Bucket` も `AWS::S3::BucketPolicy` も作らず、既存バケットの暗号化・パブリックアクセスブロック・ライフサイクル・バケットポリシーを変更しない。CodePipeline 実行リージョンに作成し、組織の要件に従って設定する。**バージョニングは有効にしておく**（CodePipeline の要件である）。KMS カスタマー管理キーを使う場合は、両 IAM ロールにそのキーの利用権限も必要となる。
+`ArtifactBucketName` に名前を渡す。この場合スタックは `AWS::S3::Bucket` も `AWS::S3::BucketPolicy` も作らず、既存バケットの暗号化・パブリックアクセスブロック・ライフサイクル・バケットポリシーを変更しない。CodePipeline 実行リージョンに作成し、組織の要件に従って設定する（バージョニングは必須ではない）。KMS カスタマー管理キーを使う場合は、両 IAM ロールにそのキーの利用権限も必要となる。
 
 ## 2. IAM ロールと最小権限
 
@@ -469,7 +469,7 @@ CodeCommitRepositoryName=your-repository
 BranchName=main
 ```
 
-`codepipeline.yml` では `CodeStarConnectionArn`、artifact bucket、両実行ロールをスタック外で管理する。テンプレートを削除しても、これら既存リソースは削除されない。`codepipeline-all-in-one.yml` が作ったバケットも `DeletionPolicy: Retain` のため削除されない。
+`codepipeline.yml` では `CodeStarConnectionArn`、artifact bucket、両実行ロールをスタック外で管理する。テンプレートを削除しても、これら既存リソースは削除されない。`codepipeline-all-in-one.yml` が自分で作ったバケットは、スタックの削除で一緒に消える（`pipeline-stack.sh down` が先に空にする）。
 
 ## 5. 実行手順
 

@@ -258,7 +258,7 @@ COLLECT_MYSQL_RUNTIME_VALUES=true
 CodeBuild Local Agent の不具合とスクリプト本体の不具合を分けるため、同じ設定でスクリプトを直接実行できる。構築前チェック（移行先パラメータグループ）、BuildGreen、VerifyGreen、Switchover、Cleanup を含む直接実行の一連手順は [direct-blue-green-execution.md](../docs/direct-blue-green-execution.md) を参照する。ここでは切り分け用の VerifyGreen 最小例だけを示す。
 
 ```bash
-scripts/verify_green.rb \
+ruby scripts/verify_green.rb \
   --config config/blue-green/staging.yml \
   --service example-service \
   --profile your-readonly-profile \

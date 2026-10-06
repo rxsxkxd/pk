@@ -251,22 +251,23 @@ Resources:
   # ArtifactBucketName が空のときだけ作る。指定があればそのバケットを使い、
   # このスタックは一切触らない。
   #
-  # **DeletionPolicy: Retain にしてある。**S3 は中身が残っているとバケットを
-  # 削除できず、スタック削除が DELETE_FAILED で止まる。アーティファクトには
-  # 移行作業の記録（検証レポート、収集した JSON）が入るため、スタックを消しても
-  # 残す方が安全である。不要になったら手で削除する。ライフサイクルで
-  # ArtifactRetentionDays 後には空になるので、放置してもコストは増え続けない。
+  # **スタックを削除するとバケットも消える（DeletionPolicy: Delete）。**ただし S3 は中身が
+  # 残っているとバケットを削除できず、スタック削除が DELETE_FAILED で止まる。削除は
+  # pipeline-stack.sh down で行う（先にバケットを空にしてからスタックを削除する）。
+  # アーティファクトには移行作業の記録（検証レポート、収集した JSON）が入るので、
+  # 残したいものは削除の前に取り出しておく。
+  #
+  # **バージョニングは使わない。**CodePipeline がバージョニングを必須とするのは S3 を
+  # ソースにするアクションのバケットだけで、アーティファクトストアには要らない
+  # （このパイプラインのソースは GitHub / CodeCommit）。版が残らないので空にするのも簡単になる。
   ArtifactBucket:
     Type: AWS::S3::Bucket
     Condition: CreateArtifactBucket
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       # グローバルに一意である必要があるため、アカウント ID とリージョンを含める。
       BucketName: !Sub '${PipelineNamePrefix}-${EnvironmentName}-artifacts-${AWS::AccountId}-${AWS::Region}'
-      # **CodePipeline のアーティファクトバケットはバージョニングが必須である。**
-      VersioningConfiguration:
-        Status: Enabled
       # SSE-S3。カスタマー管理キーを使う場合は、両実行ロールへ鍵の利用権限も要る。
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -282,14 +283,12 @@ Resources:
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
-      # バージョニングが有効なので、明示的に失効させないと版が無限に積む。
+      # 保持日数を過ぎたアーティファクトは失効させる。
       LifecycleConfiguration:
         Rules:
           - Id: ExpireArtifacts
             Status: Enabled
             ExpirationInDays: !Ref ArtifactRetentionDays
-            NoncurrentVersionExpiration:
-              NoncurrentDays: 7
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
 
@@ -980,7 +979,7 @@ Outputs:
   ArtifactBucket:
     Description: >-
       使用しているアーティファクト用 S3 バケット。このスタックが作った場合は
-      DeletionPolicy: Retain のため、スタックを削除しても残る
+      スタックの削除で一緒に消える（中身は pipeline-stack.sh down が先に空にする）
     Value: !If [CreateArtifactBucket, !Ref ArtifactBucket, !Ref ArtifactBucketName]
 
   PipelineName:

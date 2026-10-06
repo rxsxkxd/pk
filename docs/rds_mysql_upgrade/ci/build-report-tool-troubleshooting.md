@@ -61,7 +61,7 @@ flowchart TD
 
 `Unable to access the artifact with Amazon S3 object key ...` など。
 
-**やること**：Source ステージの成否、`ArtifactBucketName` のバケットが同一リージョンにあること、バージョニングが有効なことを確認する。これは全プロジェクト共通の問題なので、他のステージも同時に落ちているはずである。
+**やること**：Source ステージの成否、`ArtifactBucketName` のバケットが同一リージョンにあることを確認する。これは全プロジェクト共通の問題なので、他のステージも同時に落ちているはずである。
 
 ## 2. I: install フェーズで落ちる
 

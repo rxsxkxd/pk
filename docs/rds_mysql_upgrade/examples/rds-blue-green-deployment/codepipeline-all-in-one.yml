@@ -709,7 +709,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:8.0
+        Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
@@ -727,7 +727,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:8.0
+        Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
@@ -747,7 +747,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:8.0
+        Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
@@ -769,7 +769,7 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         # buildspec の runtime-versions で Go を用意し、go.mod / go.sum でビルドする。
-        Image: aws/codebuild/standard:8.0
+        Image: aws/codebuild/standard:7.0
       # VpcConfig を付けない。VerifyGreen 以外のプロジェクトと同じく VPC 外で動く。
       # このビルドは AWS API も RDS も呼ばず、Go module の取得で外部へ出るだけである。
       # VPC へ入れると NAT gateway 経由の外向き経路が必須になり、
@@ -800,7 +800,7 @@ Resources:
         #   レポート生成器と実効値収集バイナリ … BuildReportTool の artifact から受け取る
         # MySQL クライアントは使わない（収集は静的リンクの Go バイナリが行う）ため、
         # カスタムイメージも ECR からの pull も要らない。
-        Image: aws/codebuild/standard:8.0
+        Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
@@ -830,7 +830,7 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:8.0
+        Image: aws/codebuild/standard:7.0
         EnvironmentVariables:
           - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }

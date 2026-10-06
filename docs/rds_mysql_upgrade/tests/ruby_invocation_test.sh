@@ -58,9 +58,9 @@ while IFS= read -r pattern; do
   fi
 done < <(grep -hE 'chmod \+x scripts/' ci/codebuild/*.yml | sed 's/.*chmod +x //' | tr ' ' '\n' | grep '^scripts/' | sort -u)
 
-# buildspec のシェルに set -e / set -u を残さないこと。CodeBuild はフェーズの終わりに自分の後処理も
-# 同じシェルで動かすため、nounset などが残るとそこでシェルが落ち、ビルドが止まったまま
-# タイムアウトする（ReadApprovals で実際に起きた）。サブシェル（( で始まるコマンド）の中は許す。
+# buildspec のシェルに set -e / set -u を残さないこと（予防）。CodeBuild はフェーズの終わりに
+# 自分の後処理も同じシェルで動かすので、シェルの設定を後処理へ持ち込まない。
+# サブシェル（( で始まるコマンド）の中は許す。
 leaked=$(ruby -ryaml -e '
   ARGV.each do |file|
     (YAML.safe_load(File.read(file))["phases"] || {}).each do |phase, body|

@@ -125,7 +125,7 @@ Source ✓ → Prepare ✓ → BuildGreen ✓(no-op) → VerifyGreen ✓(対象�
 | `VerifyGreenProject` | `verify-green.yml` | `verify_green.rb` | artifact のバイナリを使うだけ。**Go も外部ネットワークも不要**（`PrivilegedMode` も不要） |
 | `SwitchoverProject` | `switchover.yml` | `switchover.rb` | **timeout 60 分**（切替完了待ち） |
 
-全プロジェクトで `Image: aws/codebuild/standard:8.0`、`ComputeType: BUILD_GENERAL1_SMALL`。
+全プロジェクトで `Image: aws/codebuild/standard:7.0`、`ComputeType: BUILD_GENERAL1_SMALL`。
 
 ### 環境変数
 

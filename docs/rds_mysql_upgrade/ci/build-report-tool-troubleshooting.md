@@ -82,7 +82,7 @@ install:
 
 | 項目 | 値 |
 |---|---|
-| イメージ | `aws/codebuild/standard:8.0` |
+| イメージ | `aws/codebuild/standard:7.0` |
 | `runtime-versions: golang` | `1.25` |
 | `go.mod` の `go` ディレクティブ | `1.25` |
 | `GOTOOLCHAIN` | `auto` |
@@ -120,7 +120,7 @@ Source:
 
 `CLIENT_ERROR: Unable to pull customer's container image` など。
 
-**やること**：テンプレートは全プロジェクトで `aws/codebuild/standard:8.0`（マネージドイメージ）を固定しており、**カスタムイメージを指定する経路は無い**。この症状が出るならイメージ名が書き換えられているので、テンプレートを確認する。
+**やること**：テンプレートは全プロジェクトで `aws/codebuild/standard:7.0`（マネージドイメージ）を固定しており、**カスタムイメージを指定する経路は無い**。この症状が出るならイメージ名が書き換えられているので、テンプレートを確認する。
 
 ### I4: 起動時に Elastic Network Interface を作れない
 

@@ -8,7 +8,7 @@
 // MySQL クライアントの代わりにこれを使う理由:
 //   - VerifyGreen は RDS のある VPC 内で動かす場合があり、そこから apt リポジトリへ
 //     到達できない。つまり実行時に mysql クライアントを導入できない
-//   - aws/codebuild/standard:8.0 は mysql クライアントを含まない
+//   - aws/codebuild/standard:7.0 は mysql クライアントを含まない
 //     （libmysqlclient-dev はあるが開発用ライブラリである）
 //   - 静的リンクの 1 バイナリなら、レポート生成器と同じ artifact 経路で運べる
 //

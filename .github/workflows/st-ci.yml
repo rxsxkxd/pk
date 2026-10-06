@@ -1,0 +1,131 @@
+# docs/st: build, unit tests and E2E (docs/st/CI.md). Also called by st-deploy.yml, which deploys the
+# artifacts built here.
+name: st CI
+
+on:
+  pull_request:
+    paths: ["docs/st/**", ".github/workflows/st-ci.yml"]
+  push:
+    branches: [master]
+    paths: ["docs/st/**", ".github/workflows/st-ci.yml"]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  # github.workflow is the caller's name when called from st-deploy.yml, so a deploy never cancels CI.
+  group: ${{ github.workflow }}-st-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: docs/st
+
+jobs:
+  go:
+    name: Go (test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: docs/st/go/go.mod
+          cache-dependency-path: docs/st/go/go.sum
+      - run: make -C go test
+      - run: make -C go build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lambda-go
+          path: docs/st/go/bin/*.zip
+          retention-days: 7
+
+  node:
+    name: Node (typecheck, test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/st/node/package-lock.json
+      - run: npm --prefix node ci
+      - run: npm --prefix node run typecheck
+      - run: npm --prefix node run format:check
+      - run: npm --prefix node test
+      - run: npm --prefix node run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lambda-node
+          path: docs/st/node/dist/*.zip
+          retention-days: 7
+
+  web:
+    name: Web (test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/st/web/package-lock.json
+      - run: npm --prefix web ci
+      - run: npm --prefix web run format:check
+      - run: npm --prefix web test
+      - run: npm --prefix web run build # vue-tsc + vite build → web/dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist
+          path: docs/st/web/dist
+          retention-days: 7
+
+  infra:
+    name: CloudFormation (cfn-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install cfn-lint==1.57.1
+      - run: cfn-lint --regions=ap-northeast-1 -- infra/cloudformation/*.yaml
+
+  e2e:
+    name: E2E (${{ matrix.impl }})
+    needs: [go, node, web]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        impl: [go, node]
+    steps:
+      - uses: actions/checkout@v7
+      # The SPA is built once (web job) and served to both implementations.
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: docs/st/web/dist
+      - uses: docker/setup-buildx-action@v4
+      - name: Run E2E (storage + api + e2e)
+        run: docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
+        env:
+          API_IMPL: ${{ matrix.impl }}
+      - name: Collect container logs
+        if: failure()
+        run: docker compose -f compose.e2e.yaml logs --no-color storage api > compose-logs.txt
+      - name: Stop containers
+        if: always()
+        run: docker compose -f compose.e2e.yaml down --volumes
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-${{ matrix.impl }}
+          path: |
+            docs/st/e2e/playwright-report
+            docs/st/e2e/test-results
+            docs/st/compose-logs.txt
+          if-no-files-found: ignore
+          retention-days: 7

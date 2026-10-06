@@ -820,4 +820,4 @@ aws apigatewayv2 delete-cors-configuration --api-id $API_ID
 | 独自ドメイン | `PublicBaseUrl` パラメータだけ用意してある。ACM 証明書と `AWS::ApiGatewayV2::DomainName`、`ApiMapping` は別途追加する |
 | 本物の画像解析サーバーへの接続 | HTTP クライアント（4.7）は Go 版・Node 版とも、仮のプロトコル（analyzer-stub/DESIGN.md 3）で実装済み。本物の仕様が決まったら、レスポンスの解釈部分（Go: `parseResponse`、Node: `parseAnalyzerResponse`）を差し替える。VPC の設定が必要になる可能性がある |
 | WAF | HTTP API に直接は付けられない。手前に CloudFront を置く場合に検討する |
-| GitHub Actions からのデプロイ | OIDC で IAM ロールを引き受けて、4.3〜4.4 を実行する形を想定 |
+| GitHub Actions からのデプロイ | `.github/workflows/st-deploy.yml` を定義済み（未検証）。OIDC で IAM ロールを引き受け、4.3、4.4、6.3、6.5、6.6 を実行する。準備と流れは [CI.md](CI.md) 4章 |

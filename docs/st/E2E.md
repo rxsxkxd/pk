@@ -292,57 +292,11 @@ API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container
 
 ## 6. GitHub Actions
 
-ワークフローは、リポジトリルートの `.github/workflows/st-e2e.yml` に置く。
+E2E は `.github/workflows/st-ci.yml` のジョブ `e2e` で動く。構成は [CI.md](CI.md) 3章。
 
-```yaml
-on:
-  pull_request: { paths: [ "docs/st/**" ] }
-  push: { branches: [ master ], paths: [ "docs/st/**" ] }
-
-jobs:
-  unit:
-    runs-on: ubuntu-latest
-    defaults: { run: { working-directory: docs/st } }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version-file: docs/st/go/go.mod }
-      - uses: actions/setup-node@v4
-        with: { node-version: 24 }
-      - run: make -C go test
-      - run: cd node && npm ci && npm run typecheck && npm test
-      - run: cd web && npm ci && npm test && npm run build
-      - uses: actions/upload-artifact@v4
-        with: { name: web-dist, path: docs/st/web/dist }
-
-  e2e:
-    needs: unit
-    runs-on: ubuntu-latest
-    strategy:
-      matrix: { impl: [ go, node ] }
-    defaults: { run: { working-directory: docs/st } }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { name: web-dist, path: docs/st/web/dist }
-      - uses: docker/setup-buildx-action@v3
-      - run: docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
-        env: { API_IMPL: "${{ matrix.impl }}" }
-      - if: failure()
-        run: docker compose -f compose.e2e.yaml logs storage api > compose-logs.txt
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-${{ matrix.impl }}
-          path: |
-            docs/st/e2e/playwright-report
-            docs/st/e2e/test-results
-            docs/st/compose-logs.txt
-```
-
-- SPA は `unit` ジョブで1回だけビルドし、成果物として `e2e` ジョブに渡す（Go 版・Node 版で同じ SPA を使う）
-- ビルドのキャッシュ: compose の `build.cache_from` / `cache_to` に `type=gha` を指定する（または `docker/bake-action` を使う）
-- 失敗したときは、Playwright のトレース（`trace.zip`）を成果物から取り出し、`npx playwright show-trace` で再生する
+- SPA は `web` ジョブで1回だけビルドし、成果物 `web-dist` として `e2e` ジョブに渡す（Go 版・Node 版で同じ SPA を使う）
+- matrix（`go` / `node`）で `API_IMPL` を切り替え、`docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` を実行する
+- 成果物 `e2e-go` / `e2e-node` に、Playwright のレポート・トレースと、失敗したときのコンテナのログを残す
 
 ## 7. 段階的な進め方
 
@@ -352,7 +306,7 @@ jobs:
 | 2 | **一部済み**: `storage`（Garage）と初期設定、`e2e` のアップロード（`globalSetup`）、ケース1。残りはケース2〜8 |
 | 3 | **済み（ケース1）**: Node 版の `api` コンテナ（`API_IMPL=node`）で同じテストを通す |
 | 4 | Origin の照合（Go・Node の `ALLOWED_ORIGINS`）とケース9 |
-| 5 | GitHub Actions に組み込む（matrix で go / node） |
+| 5 | **済み（act で確認）**: GitHub Actions に組み込む（matrix で go / node。CI.md） |
 | 6 | QR の中身を確認する（テスト内で `jsQR` などを使ってデコードし、チケットコードと照合する） |
 | 7 | 本番側: CloudFormation に HTTP API の CORS 設定と `AllowedOrigins` を入れる |
 | 8 | 画像解析サーバーのプロトコルが決まったら、解析サーバーのスタブをコンテナとして追加し、`ANALYZER_MODE=http` で E2E を回す |

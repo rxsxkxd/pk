@@ -1,0 +1,138 @@
+# docs/st: deploy to AWS (docs/st/CI.md 4). Runs the whole CI first, then deploys the artifacts it built:
+# Lambda zips → ticket API stack (api.yaml) → web stack (web.yaml) → SPA files → smoke test.
+# NOT VERIFIED YET: needs the IAM role and the repository / environment settings of CI.md 4.2.
+name: st deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      impl:
+        description: Implementation to deploy
+        type: choice
+        options: [go, node]
+        default: go
+      environment:
+        description: GitHub environment (holds the AWS settings and the approval rule)
+        type: environment
+        default: dev
+
+permissions:
+  contents: read
+
+concurrency:
+  group: st-deploy-${{ inputs.environment }}-${{ inputs.impl }}
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/st-ci.yml
+
+  deploy:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write # OIDC: assume the deploy role without long-lived keys
+    defaults:
+      run:
+        working-directory: docs/st
+    env:
+      IMPL: ${{ inputs.impl }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
+      ARTIFACT_PREFIX: ticketqr/${{ inputs.impl }}/${{ github.sha }}-${{ github.run_attempt }}
+      SALT_PARAM: /ticketqr/${{ inputs.impl }}/signing-salt
+      WEB_MODES: ${{ vars.WEB_MODES || '["page"]' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: lambda-${{ inputs.impl }}
+          path: docs/st/artifacts/lambda
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: docs/st/web/dist
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # DEPLOY.md 4.3: a new key prefix on every deploy, so CloudFormation updates the Lambda code.
+      - name: Upload Lambda packages
+        run: |
+          aws s3 cp artifacts/lambda/ticketqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip"
+          aws s3 cp artifacts/lambda/exampleqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.zip"
+
+      # DEPLOY.md 4.4
+      - name: Deploy ticket API stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "ticketqr-$IMPL" \
+            --template-file infra/cloudformation/api.yaml \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              Impl="$IMPL" \
+              ArtifactBucket="$ARTIFACT_BUCKET" \
+              ArtifactPrefix="$ARTIFACT_PREFIX" \
+              SigningSaltParameterName="$SALT_PARAM"
+          API_URL=$(aws cloudformation describe-stacks --stack-name "ticketqr-$IMPL" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+          echo "API_URL=$API_URL" >> "$GITHUB_ENV"
+
+      # DEPLOY.md 6.3
+      - name: Deploy web stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "ticketqr-web-$IMPL" \
+            --template-file infra/cloudformation/web.yaml \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides ApiBaseUrl="$API_URL"
+          out() {
+            aws cloudformation describe-stacks --stack-name "ticketqr-web-$IMPL" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+          }
+          {
+            echo "WEB_BUCKET=$(out BucketName)"
+            echo "DIST_ID=$(out DistributionId)"
+            echo "WEB_URL=$(out WebUrl)"
+          } >> "$GITHUB_ENV"
+
+      # DEPLOY.md 6.5 (interim until api.yaml has a CorsConfiguration)
+      - name: Allow the SPA origin in the API's CORS
+        run: |
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='ticketqr-$IMPL'].ApiId | [0]" --output text)
+          aws apigatewayv2 update-api --api-id "$API_ID" \
+            --cors-configuration "{\"AllowOrigins\":[\"$WEB_URL\"],\"AllowMethods\":[\"GET\",\"POST\"],\"MaxAge\":300}" \
+            --query CorsConfiguration
+
+      # DEPLOY.md 6.6
+      - name: Upload the SPA and its config
+        run: |
+          printf '{ "apiBaseUrl": "%s", "modes": %s }\n' "$API_URL" "$WEB_MODES" > "$RUNNER_TEMP/config.json"
+          aws s3 sync web/dist/ "s3://$WEB_BUCKET/" --delete \
+            --exclude index.html --exclude config.json \
+            --cache-control 'public, max-age=31536000, immutable'
+          aws s3 cp web/dist/index.html "s3://$WEB_BUCKET/index.html" \
+            --cache-control no-cache --content-type 'text/html; charset=utf-8'
+          aws s3 cp "$RUNNER_TEMP/config.json" "s3://$WEB_BUCKET/config.json" \
+            --cache-control no-cache --content-type application/json
+          aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths /index.html /config.json
+
+      # DEPLOY.md 5, 6.7
+      - name: Smoke test
+        run: |
+          curl -fsS -o /dev/null "$WEB_URL/"
+          curl -fsS "$WEB_URL/config.json"
+          curl -fsS -D headers.txt -o ticket.json -H "Origin: $WEB_URL" -H 'Accept: application/json' \
+            -F image=@testdata/images/photo.jpg "$API_URL/v1/tickets"
+          grep -i "^access-control-allow-origin: $WEB_URL" headers.txt
+          QR_URL=$(python3 -c 'import json;print(json.load(open("ticket.json"))["qrUrl"])')
+          test "$(curl -fsS -o /dev/null -w '%{content_type}' "$QR_URL")" = image/png
+          {
+            echo "### Deployed ($IMPL)"
+            echo "- SPA: $WEB_URL"
+            echo "- API: $API_URL"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -61,7 +61,7 @@ echo $WEB_URL   # https://dxxxxxxxxxxxxx.cloudfront.net
 
 | パラメータ | 既定値 | 内容 |
 |---|---|---|
-| `ApiBaseUrl` | - | チケット API のオリジン（`$API_URL`）。CSP の `img-src` と `connect-src` に入る |
+| `ApiBaseUrl` | - | チケット API のオリジン（`$API_URL`）。CSP の `img-src` と `connect-src` に入る（`connect-src` には、SPA が自分のオリジンから `config.json` を `fetch` するための `'self'` も入る） |
 | `FormActionSource` | `'none'` | CSP の `form-action`。フォーム送信方式（`modes` の `form`）を有効にする環境だけ、`$API_URL` にする |
 | `PriceClass` | `PriceClass_200` | CloudFront の配信地域（日本を含む） |
 
@@ -92,7 +92,7 @@ cat > $WORK/headers.json <<EOF
   "Name": "ticketqr-web-$IMPL-headers",
   "SecurityHeadersConfig": {
     "ContentSecurityPolicy": {
-      "ContentSecurityPolicy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: $API_URL; connect-src $API_URL; form-action 'none'; frame-ancestors 'none'",
+      "ContentSecurityPolicy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: $API_URL; connect-src 'self' $API_URL; form-action 'none'; frame-ancestors 'none'",
       "Override": true
     },
     "ContentTypeOptions": { "Override": true },
@@ -226,12 +226,34 @@ curl -s -o /dev/null -D - -H "Origin: $WEB_URL" -H 'Accept: application/json' \
 |---|---|
 | 「設定を読み込めませんでした」 | `config.json` がアップロードされているか、JSON の形が正しいか（`apiBaseUrl` は `https://` で始まり、末尾に `/` を付けない） |
 | 「発行できませんでした」（ブラウザの開発者ツールに CORS のエラー） | 5章の CORS 設定。`AllowOrigins` が `$WEB_URL` と完全に一致しているか |
-| 開発者ツールに CSP のエラー | CSP の `connect-src` / `img-src` の API のオリジンが `$API_URL` と一致しているか（3章の `ApiBaseUrl`、4章の `headers.json`） |
+| 開発者ツールに CSP のエラー | CSP の `connect-src` / `img-src` の API のオリジンが `$API_URL` と一致しているか（3章の `ApiBaseUrl`、4章の `headers.json`）。`config.json` が読めないときは、`connect-src` に `'self'` があるか |
 | 古い画面のまま | 6章の無効化（`create-invalidation`）をしたか |
 
 ## 8. 更新
 
 SPA を変えたときは、2章のビルドと 6章のアップロード（無効化を含む）を行う。`config.json` だけを変えるときは、6章の `config.json` のアップロードと無効化だけでよい。
+
+セキュリティヘッダー（CSP など）を変えたとき（例: `connect-src` に `'self'` を足したとき）:
+
+```sh
+# CloudFormation（3章）の場合: 同じコマンドをもう一度実行する（Response Headers Policy だけが更新される）
+aws cloudformation deploy \
+  --stack-name ticketqr-web-$IMPL \
+  --template-file infra/cloudformation/web.yaml \
+  --parameter-overrides \
+    ApiBaseUrl=$API_URL
+
+# 手動（4章）の場合: headers.json を直してから、ETag を付けて更新する
+ETAG=$(aws cloudfront get-response-headers-policy --id $HEADERS_ID --query ETag --output text)
+aws cloudfront update-response-headers-policy --id $HEADERS_ID --if-match $ETAG \
+  --response-headers-policy-config file://$WORK/headers.json
+
+# 反映を待って、ヘッダーを確かめる
+aws cloudfront wait distribution-deployed --id $DIST_ID
+curl -sI $WEB_URL/ | grep -i '^content-security-policy'
+```
+
+- ヘッダーは CloudFront が応答のたびに付けるので、キャッシュの無効化は要らない（ディストリビューションへの反映を待つだけ）
 
 ## 9. 削除
 

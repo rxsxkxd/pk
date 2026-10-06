@@ -390,13 +390,14 @@ hash モードのルーティングなので、どちらの方式でも、存在
 
 ```
 Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self';
-  img-src 'self' data: {apiBaseUrl}; connect-src {apiBaseUrl}; form-action 'none'; frame-ancestors 'none'
+  img-src 'self' data: {apiBaseUrl}; connect-src 'self' {apiBaseUrl}; form-action 'none'; frame-ancestors 'none'
 Referrer-Policy: no-referrer
 X-Content-Type-Options: nosniff
 Strict-Transport-Security: max-age=31536000
 ```
 
 - `img-src {apiBaseUrl}` は画面遷移方式の QR（QR 画像 API）、`img-src data:` はその場表示方式の QR（data URL）のため。その場表示方式を使わない環境では `data:` を外してよい
+- `connect-src 'self'` は、起動時に自分のオリジンの `config.json` を `fetch` するため（`fetch` は `default-src` ではなく `connect-src` で制限され、`connect-src` を書くと `default-src 'self'` は引き継がれない）
 - `connect-src {apiBaseUrl}` は、チケット発行 API と QR 同梱発行 API への `fetch` のため
 - `form-action` は `default-src` を引き継がないので、明示する。既定は `'none'`（SPA はフォーム送信をしない）。フォーム送信方式（`form`）を有効にする環境だけ `form-action {apiBaseUrl}` にする
 

@@ -51,7 +51,7 @@ Resources:
         Name: !Sub "${AWS::StackName}-headers"
         SecurityHeadersConfig:
           ContentSecurityPolicy:
-            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: ${ApiBaseUrl}; connect-src ${ApiBaseUrl}; form-action ${FormActionSource}; frame-ancestors 'none'"
+            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: ${ApiBaseUrl}; connect-src 'self' ${ApiBaseUrl}; form-action ${FormActionSource}; frame-ancestors 'none'"
             Override: true
           ContentTypeOptions:
             Override: true

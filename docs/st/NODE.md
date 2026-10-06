@@ -179,7 +179,7 @@ function routes(app, deps) {
 | 仕組み | 役割 |
 |---|---|
 | `routes` / `setRoute` | `routes` が各ルートの前に `setRoute` を挟んで登録する。`setRoute` は宣言されたログ名とエラー形式を `c.set('route', …)` で記録する |
-| `requestLog`（全体のミドルウェア） | 完了ログ（`requestId`、`endpoint`、`status`、`durationMs`）を出す。ログ名は Go と同じ（`issue-inline` など） |
+| `requestLog`（全体のミドルウェア） | 完了ログ（`requestId`、`endpoint`、`status`、`durationMs`）を出す。ログ名は Go と同じ（`issue-inline` など）。写真を受け取る2つの API では `client`（ブラウザの情報）も付ける |
 | `commonHeaders`（全体のミドルウェア） | すべてのレスポンス（エラー・404 を含む）に `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、CSP を付ける。`shared.ts` にあり、example アプリでも使う（example は CSP なし） |
 | `app.onError` | `AppError` をルートのエラー形式（HTML / JSON）のレスポンスにする。それ以外の例外は 500 にしてログを出す |
 | `app.notFound` | 404 JSON |
@@ -224,6 +224,7 @@ if (!(form.get('image') instanceof File)) throw badRequest('image is required');
 
 - `console.log(JSON.stringify({ time, level, msg, requestId, endpoint, status, durationMs, ... }))` で、Go の slog（JSON）と同じキーにそろえる。`requestId` は Lambda では API Gateway のリクエスト ID（Hono の `c.env.requestContext`）、ローカルでは `randomUUID()`
 - 画像データと `sig` はログに出さない
+- QR 同梱発行 API とチケット発行 API の完了ログには、ブラウザが送った `User-Agent` と Client Hints を `client` グループとして生のまま付ける（`requestLog` の `clientInfo`。キーと制約は Go と同じ。DESIGN.md 10章「ブラウザと OS の記録」）
 
 ## 6. ビルド・実行・テスト
 

@@ -468,3 +468,89 @@ func TestIssueAcceptJSON(t *testing.T) {
 		t.Errorf("form: status = %d, want 303", res.StatusCode)
 	}
 }
+
+// completedLogs runs fn with a JSON logger and returns the "request completed" entries.
+func completedLogs(t *testing.T, h *Handlers, fn func()) []map[string]any {
+	t.Helper()
+	var buf bytes.Buffer
+	h.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+	fn()
+	var out []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("log line is not JSON: %s", line)
+		}
+		if entry["msg"] == "request completed" {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+// TestClientLog: the image upload endpoints log the browser's User-Agent and Client Hints (same keys as
+// the Node version), other endpoints do not.
+func TestClientLog(t *testing.T) {
+	const iOS13 = "Mozilla/5.0 (iPhone; CPU iPhone OS 13_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.4 Mobile/15E148 Safari/604.1"
+	h := newHandlers(t, analyzer.AlwaysValid{})
+	ctx := context.Background()
+
+	withClient := func(req Request) Request {
+		req.Headers["user-agent"] = iOS13
+		req.Headers["sec-ch-ua"] = `"Chromium";v="138", "Google Chrome";v="138"`
+		req.Headers["sec-ch-ua-mobile"] = "?1"
+		req.Headers["sec-ch-ua-platform"] = `"Android"`
+		return req
+	}
+	logs := completedLogs(t, h, func() {
+		h.IssueInline(ctx, withClient(formRequest(t, "image", jpeg)))
+		h.Issue(ctx, withClient(formRequest(t, "image", []byte("not an image")))) // errors are logged too
+		h.GetQR(ctx, Request{Headers: map[string]string{"user-agent": iOS13}})
+	})
+	if len(logs) != 3 {
+		t.Fatalf("got %d completion logs, want 3", len(logs))
+	}
+	for _, entry := range logs[:2] {
+		client, ok := entry["client"].(map[string]any)
+		if !ok {
+			t.Fatalf("%v: no client group", entry["endpoint"])
+		}
+		want := map[string]any{
+			"userAgent":       iOS13,
+			"secChUa":         `"Chromium";v="138", "Google Chrome";v="138"`,
+			"secChUaMobile":   "?1",
+			"secChUaPlatform": `"Android"`,
+		}
+		for k, v := range want {
+			if client[k] != v {
+				t.Errorf("%v: client.%s = %v, want %v", entry["endpoint"], k, client[k], v)
+			}
+		}
+		if _, ok := client["secChUaPlatformVersion"]; ok {
+			t.Errorf("%v: absent headers must not be logged", entry["endpoint"])
+		}
+	}
+	if logs[1]["status"] != float64(415) {
+		t.Errorf("issue status = %v, want 415", logs[1]["status"])
+	}
+	if _, ok := logs[2]["client"]; ok {
+		t.Error("get-qr must not log the client")
+	}
+}
+
+func TestClientLogLimits(t *testing.T) {
+	h := newHandlers(t, analyzer.AlwaysValid{})
+	long := strings.Repeat("a", 2000)
+	logs := completedLogs(t, h, func() {
+		req := formRequest(t, "image", jpeg)
+		req.Headers["user-agent"] = long
+		h.IssueInline(context.Background(), req)
+		h.IssueInline(context.Background(), formRequest(t, "image", jpeg)) // no client headers
+	})
+	if ua := logs[0]["client"].(map[string]any)["userAgent"].(string); len(ua) != 512 {
+		t.Errorf("userAgent length = %d, want 512", len(ua))
+	}
+	if _, ok := logs[1]["client"]; ok {
+		t.Error("an empty client group must be omitted")
+	}
+}

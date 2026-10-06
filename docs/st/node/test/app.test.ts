@@ -10,7 +10,7 @@ import { createApp, type Deps } from '../src/app.ts';
 import { MAX_IMAGE_BYTES } from '../src/image.ts';
 import { createExampleApp } from '../src/example.ts';
 import { qrPng } from '../src/shared.ts';
-import { AnalyzerError, generateTicket, newSigner, type Analyzer } from '../src/domain.ts';
+import { AnalyzerError, generateTicket, newSigner, type Analyzer, type Log } from '../src/domain.ts';
 import { alwaysValid, httpAnalyzer, loadConfig, newAnalyzer } from '../src/infra.ts';
 
 const root = new URL('../../', import.meta.url);
@@ -32,13 +32,13 @@ const ISSUE = '/v1/tickets';
 
 type LambdaHandler = (event: Event) => Promise<Result>;
 
-function newRoute(analyzer: Analyzer = alwaysValid) {
+function newRoute(analyzer: Analyzer = alwaysValid, log: Log = () => {}) {
   const deps: Deps = {
     config: { publicBaseUrl: BASE, publicOrigin: BASE, suffixLength: 8 },
     analyzer,
     signer: newSigner('test-salt'),
     newTicket: () => generateTicket(8),
-    log: () => {},
+    log,
   };
   return { deps, handle: handle(createApp(deps)) as LambdaHandler };
 }
@@ -646,5 +646,61 @@ describe('B-1 with Accept: application/json', () => {
     const e = await formEvent(ISSUE, 'image', JPEG);
     e.headers.accept = 'text/html,application/xhtml+xml,*/*;q=0.8';
     assert.equal((await newRoute().handle(e)).statusCode, 303);
+  });
+});
+
+describe('client log (browser and OS of image uploads)', () => {
+  const IOS13 =
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 13_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.4 Mobile/15E148 Safari/604.1';
+  const CLIENT = {
+    'user-agent': IOS13,
+    'sec-ch-ua': '"Chromium";v="138", "Google Chrome";v="138"',
+    'sec-ch-ua-mobile': '?1',
+    'sec-ch-ua-platform': '"Android"',
+  };
+
+  // Runs the events and returns the "request completed" entries.
+  async function completedLogs(...events: Event[]) {
+    const entries: Array<Record<string, unknown>> = [];
+    const { handle } = newRoute(alwaysValid, (_level, msg, fields) => {
+      if (msg === 'request completed') entries.push(fields ?? {});
+    });
+    for (const e of events) await handle(e);
+    return entries;
+  }
+
+  const withHeaders = (e: Event, headers: Record<string, string>) => {
+    const ev = e as unknown as { headers: Record<string, string> };
+    ev.headers = { ...ev.headers, ...headers };
+    return e;
+  };
+
+  test('upload endpoints log the User-Agent and Client Hints (same keys as Go); other endpoints do not', async () => {
+    const logs = await completedLogs(
+      withHeaders(await formEvent(ISSUE_INLINE, 'image', JPEG), CLIENT),
+      withHeaders(await formEvent('/v1/tickets', 'image', Buffer.from('not an image')), CLIENT), // errors too
+      withHeaders(signedGet('qr', 'X', 'Y'), { 'user-agent': IOS13 }),
+    );
+    assert.equal(logs.length, 3);
+    const want = {
+      userAgent: IOS13,
+      secChUa: '"Chromium";v="138", "Google Chrome";v="138"',
+      secChUaMobile: '?1',
+      secChUaPlatform: '"Android"',
+    };
+    assert.deepEqual(logs[0]!.client, want);
+    assert.deepEqual(logs[1]!.client, want);
+    assert.equal(logs[1]!.status, 415);
+    assert.equal(logs[2]!.endpoint, 'get-qr');
+    assert.equal('client' in logs[2]!, false);
+  });
+
+  test('values are cut to 512 characters and an empty client is omitted', async () => {
+    const logs = await completedLogs(
+      withHeaders(await formEvent(ISSUE_INLINE, 'image', JPEG), { 'user-agent': 'a'.repeat(2000) }),
+      await formEvent(ISSUE_INLINE, 'image', JPEG),
+    );
+    assert.equal((logs[0]!.client as { userAgent: string }).userAgent.length, 512);
+    assert.equal('client' in logs[1]!, false);
   });
 });

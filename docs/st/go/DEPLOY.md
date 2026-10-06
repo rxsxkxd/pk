@@ -447,6 +447,13 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --follow
 aws logs tail /aws/apigateway/ticketqr-$IMPL --since 10m   # CloudFormation の場合だけ（アクセスログ）
 ```
 
+写真を受け取る2つの API のログには、ブラウザと OS の情報（`client`。User-Agent などを加工せずに記録）が付く。OS・ブラウザごとに集計するには、後処理のサンプルのスクリプトを使う（../DESIGN.md 10章「ブラウザと OS の記録」）:
+
+```sh
+aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 1d --filter-pattern '"request completed"' \
+  | python3 scripts/client_log_summary.py
+```
+
 次は Web フロントエンド（SPA）のデプロイ: [../web/DEPLOY.md](../web/DEPLOY.md)（`$API_URL` を使う）。
 
 ## 9. 運用

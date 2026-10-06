@@ -451,6 +451,7 @@ st/
 ├── DESIGN.md
 ├── PAGES.md                   # 画面と HTML テンプレートの構成（SPA・API の HTML・ローカル試験フォーム）
 ├── CI.md                      # GitHub Actions（ビルド・テスト・E2E・デプロイ）
+├── scripts/client_log_summary.py  # ログの後処理のサンプル（ブラウザと OS ごとの件数。10章）
 ├── testdata/                  # 両実装共通のテストベクタ（ticketcode.json, signature.json）
 ├── go/                       # Go モジュールルート（go.mod）
 │   ├── go.mod
@@ -509,9 +510,67 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 - **salt の扱い**: salt が漏れると誰でも有効な `sig` を作れるため、ログ・環境変数への平文出力は禁止。Lambda の実行ロールのみ読み取り可とする
 - **ビューURLの扱い**: `sig` 付きURLを知っていれば誰でもチケットを表示できる（有効期限なし）。共有されて困る場合は `exp` 付き署名の導入を検討
 - **偽造耐性**: 利用側がルール適合のみで受け入れる場合、ルールを知る者はAPIを通さずに有効なコードを作れる。偽造耐性が必要ならルール側に秘密鍵ベースの署名・チェックディジットを含めることを検討（利用側との合意事項）
-- **ログ**: JSON 構造化ログ（requestId, ticketCode, 解析結果, レイテンシ）。画像データ・`sig` はログに出さない
+- **ログ**: JSON 構造化ログ（requestId, ticketCode, 解析結果, レイテンシ）。画像データ・`sig` はログに出さない。写真を受け取る2つの API では、ブラウザと OS の情報も記録する（下の「ブラウザと OS の記録」）
 - **トレース / メトリクス**: X-Ray、CloudWatch カスタムメトリクス（発行数、invalid率、解析サーバーレイテンシ）
 - **スロットリング**: API Gateway のレート制限、Lambda 予約同時実行数（解析サーバー保護）
+
+### ブラウザと OS の記録（QR 同梱発行 API・チケット発行 API）
+
+写真を受け取る2つの API（`issue-inline`、`issue`）では、完了ログ（`"msg":"request completed"`）に、ブラウザが送ってきた情報を `client` グループとして**そのまま**記録する。成功もエラーも記録する。ほかの API（チケット表示ページ、QR 画像 API）では記録しない。Go 版・Node 版で同じキーにそろえる。
+
+| キー | リクエストヘッダー | 内容 |
+|---|---|---|
+| `client.userAgent` | `User-Agent` | ブラウザ・OS の名前とバージョン（下の制約あり） |
+| `client.secChUa` | `Sec-CH-UA` | ブラウザのブランドとメジャーバージョン（Chromium 系だけが送る） |
+| `client.secChUaMobile` | `Sec-CH-UA-Mobile` | `?1` ならモバイル |
+| `client.secChUaPlatform` | `Sec-CH-UA-Platform` | OS の名前（`"Android"` など） |
+| `client.secChUaPlatformVersion` | `Sec-CH-UA-Platform-Version` | OS の正確なバージョン。ブラウザに求めたときだけ届く（下の「Android の OS バージョン」） |
+
+```json
+{"time":"…","level":"INFO","msg":"request completed","requestId":"…","endpoint":"issue","status":201,"durationMs":312,
+ "client":{"userAgent":"Mozilla/5.0 (iPhone; CPU iPhone OS 13_3 like Mac OS X) … Version/13.0.4 Mobile/15E148 Safari/604.1"}}
+```
+
+- 届いたヘッダーだけを記録し、1つもなければ `client` を出さない。値はクライアントが自由に送れるので、1つあたり 512 文字で切る
+- API では解析・加工せず、生の値を残す（Go と Node で結果がずれないようにし、解釈の規則を後から変えられるようにするため。解釈は後処理のスクリプトで行う）
+- IP アドレスや端末の型番（`Sec-CH-UA-Model`）は記録しない
+- `Sec-CH-UA*` は、Chromium 系のブラウザが HTTPS の通信にだけ付ける（Safari と Firefox は送らない。ローカルや E2E の `http://` では届かない）
+
+分かること・分からないこと:
+
+| 端末 | ブラウザ | OS のバージョン |
+|---|---|---|
+| iPhone / iPad（iOS 18 まで） | `Version/xx`（Safari のバージョン） | `User-Agent` の `iPhone OS 13_3` から分かる |
+| iPhone / iPad（iOS 26 以降） | 同上 | `User-Agent` の OS は **18_x に固定**されていて分からない。Safari の `Version/26` が iOS のメジャーバージョンとほぼ一致するので、それで代わりに見る |
+| Android（Chrome 110 以降） | `Chrome/138.0.0.0`、`Sec-CH-UA` | `User-Agent` は **`Android 10; K` に固定**されていて分からない（Android 9 の端末も 10 と出る）。`Sec-CH-UA-Platform-Version` が届けば分かる |
+
+Android の OS バージョン（未設定）: SPA と API はオリジンが違うので、正確な OS バージョン（高エントロピーの Client Hints）を API に届けるには、**SPA の HTML の応答**に次の2つのヘッダーを付ける必要がある。CloudFront の Response Headers Policy（`web.yaml`）のカスタムヘッダーで付けられる。今は付けていない。
+
+```
+Accept-CH: Sec-CH-UA-Platform-Version
+Permissions-Policy: ch-ua-platform-version=(self "https://{API のオリジン}")
+```
+
+見方（後処理）: ログは加工せずに残し、集計はログを取り出してから行う。サンプルのスクリプト `scripts/client_log_summary.py`（Python の標準ライブラリだけで動く）が、User-Agent を解釈して、OS・ブラウザごとの件数とエラー数を表にする。上の「分かること・分からないこと」の扱い（iOS 26 以降は Safari の版から推定、Android の固定値は Client Hints があれば使う）も、スクリプトの中で行う。
+
+```sh
+# CloudWatch Logs から直近1日分を取り出して集計する（Go 版・Node 版のどちらのログも読める）
+aws logs tail /aws/lambda/ticketqr-go-tickets --since 1d --filter-pattern '"request completed"' \
+  | python3 scripts/client_log_summary.py             # OS とブラウザの組み合わせごと
+... | python3 scripts/client_log_summary.py --by os   # OS と版ごと（--by browser でブラウザと版ごと）
+```
+
+```
+OS       OS の版                           ブラウザ        ブラウザの版  件数  エラー（4xx/5xx）
+iOS      13.3                              Safari          13            2     0
+iOS      26（推定。UA の OS は 18.6 に固定）  Safari          26            1     1
+Android  不明（UA は 10 に固定）              Chrome          138           1     0
+Android  13                                Chrome          138           1     0
+```
+
+- 入力は1行に1つのログで、JSON の前に付いた文字（Node のログに Lambda が付ける時刻やリクエスト ID、`aws logs tail` の時刻とストリーム名）は読み飛ばす
+- 対象は QR 同梱発行 API・チケット発行 API の完了ログだけ。ほかのログや JSON でない行は無視する
+- あくまでサンプル。User-Agent の解釈の規則は、ブラウザの変化に合わせて直していく
 
 ## 11. Go / Node 比較評価の観点
 

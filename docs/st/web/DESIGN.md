@@ -2,7 +2,7 @@
 
 チケット QR API（[../DESIGN.md](../DESIGN.md)）を使う Web フロントエンド。静的ファイルとしてビルドし、S3 に直接、または CloudFront 経由で配信する SPA。
 
-> **状態**: 実装済み（単体テスト 43件。ローカルの Go 版 API とプロキシ経由で、3つの方式の通信を確認済み）。ブラウザでの通しの確認（E2E）は保留中。API 側の前提（チケット発行 API の `Accept: application/json` 対応）は Go 版・Node 版とも実装済み。CORS と Origin の照合（7章）は未実装。
+> **状態**: 実装済み（単体テスト 43件。E2E はケース1（画面遷移方式）を Go 版・Node 版の API で通過。../E2E.md）。ただし 2.1 の対応ブラウザ（iOS 13 / Android 9）の要件にはまだ対応しておらず、その実装は保留（2.4）。API 側の前提（チケット発行 API の `Accept: application/json` 対応）は Go 版・Node 版とも実装済み。CORS と Origin の照合（7章）は未実装。
 > エンドポイントと画面の名前、API の使い方の3パターンとその評価は [../PAGES.md](../PAGES.md) にまとめてある。
 > [../E2E.md](../E2E.md) 3章の「素の HTML / JS の静的サイト」案は、本設計で置き換える。
 
@@ -34,12 +34,105 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 | UI | **Vue 3.5**（Composition API、`<script setup lang="ts">`） | |
 | ルーティング | **vue-router** 5（hash モード） | SPA の発行画面と SPA のチケット画面の2つ。hash モードなので、S3 に直接置いてもリロードや直接アクセスで 404 にならない |
 | 状態管理 | **Pinia** 4 | 発行の状態（送信中、結果、エラー）を1つのストアにまとめる（5章） |
-| スタイル | **Tailwind CSS** 4（`@tailwindcss/vite`） | `src/style.css` に `@import "tailwindcss";` の1行だけ。設定ファイルは置かない |
+| スタイル | **Tailwind CSS** 4（`@tailwindcss/vite`） | `src/style.css` に `@import "tailwindcss";` の1行だけ。設定ファイルは置かない。**iOS 13 に対応しないため見直す（2.4、11章）** |
 | 検証 | **zod** 4 | 実行時設定（`config.json`）、API のレスポンス（成功・エラー）、チケット画面の URL パラメータを検証する |
 | 言語 | TypeScript **6** | 型チェックは `vue-tsc --noEmit`。vue-tsc が TypeScript 7（Go 製のコンパイラー）に対応していないため、Node 版（7）とは違い 6 系に固定する |
 | テスト | Vitest + `@vue/test-utils` + happy-dom | ストア、API クライアント、コンポーネント。ブラウザでの通しの確認は E2E（Playwright。E2E.md） |
 
 採用しないもの: UI コンポーネントライブラリ（画面が小さく、Tailwind で足りる）、axios（標準の `fetch` で足りる）、画像の縮小・変換ライブラリ（写真はそのまま送る方針）。
+
+### 2.1 対応ブラウザ（最低動作バージョン）
+
+> **状態**: 仕様として決定。今の実装はまだこの要件を満たしていない（2.4。実装は保留）。
+
+| OS | 最低バージョン | ブラウザ | 備考 |
+|---|---|---|---|
+| iOS / iPadOS | **13** | Safari 13（iOS のブラウザはすべて Safari の WebKit を使う） | iOS 13.0〜13.3 の Safari は、`?.`（オプショナルチェーン）と `??` に対応していない（13.4 から）。ビルドで変換する（2.4） |
+| Android | **9** | Chrome（Android System WebView を含む） | Chrome の Android 9 向けの更新は Chrome 138 で終わった（Chrome 139 から Android 10 以上）。Android 9 の端末の Chrome は、多くが 138 以下のどこかの版で止まっている。下限の Chrome の版は 11章で決める |
+
+- 上の OS で動けば、それより新しいブラウザ（PC を含む）でも動く
+- 「動く」の範囲: 写真を選んで画面遷移方式で発行し、SPA のチケット画面で QR を表示できること（メインの機能）。オプションの方式と、2.3 のアップロードの進み具合の表示は、対応しないブラウザでは削ってよい
+
+### 2.2 使う Web 機能
+
+iOS 13 / Android 9 で使えるので、そのまま使う（ポリフィルは要らない）。
+
+| 機能 | 用途 | iOS 13（Safari 13） | 補足 |
+|---|---|---|---|
+| `fetch` | API の呼び出し（発行、`config.json` の取得） | 対応（10.1 から） | |
+| `Promise` | 非同期処理 | 対応 | |
+| `async` / `await` | 非同期処理の書き方 | 対応（10.1 から） | トップレベルの `await` は **Safari 15 から**なので使わない（`main.ts` は関数の中で `await` する） |
+| `AbortController` / `AbortSignal` | 発行のタイムアウトと中断 | 対応（12.1 から） | **`AbortSignal.timeout()` は Safari 16 から**、`AbortSignal.any()` は 17.4 からなので使わない。タイムアウトは `AbortController` と `setTimeout` で作る |
+
+```ts
+// タイムアウト付きの fetch（AbortSignal.timeout を使わない）。
+async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+```
+
+### 2.3 Fetch Upload Streams（対応ブラウザだけで使い、非対応なら機能を削る）
+
+> **検討中**: iOS の Safari は最新版でも Fetch Upload Streams に対応していないため、XMLHttpRequest の `xhr.upload.onprogress` に置き換える案を検討している（[notes/upload-progress.md](notes/upload-progress.md)。一時メモ）。決まったら、この節を書き換える。
+
+写真のアップロードの進み具合（％）を出すために、対応ブラウザでは、リクエストのボディを `ReadableStream` で送る（Fetch Upload Streams。`duplex: 'half'`）。対応しないブラウザでは、進み具合の表示を削り、今までどおり `FormData` で送る。
+
+| | 対応ブラウザ | 非対応ブラウザ（フォールバック） |
+|---|---|---|
+| 対象 | Chrome / Edge 105 以降（Android 9 の Chrome 138 を含む） | Safari（iOS 13 を含むすべての版）、Firefox、Chrome 104 以前 |
+| 送り方 | `multipart/form-data` のボディを自分で組み立て（boundary、パートのヘッダー、`file.stream()` の中身）、`ReadableStream` で送る。送ったバイト数を数える | `FormData` をそのまま `fetch` に渡す（今の実装） |
+| 画面 | 「送信中… 45%」のように進み具合を出す | 「送信中…」だけを出す |
+| サーバーが受け取るもの | 同じ（`multipart/form-data` の `image`。写真は加工しない） | 同じ |
+
+対応の判定（機能の有無で判定し、ブラウザ名では判定しない）:
+
+```ts
+// duplex に対応していて、ReadableStream をボディにしたときに Content-Type が付かない（＝ストリームとして扱われる）なら対応。
+const supportsRequestStreams = (() => {
+  let duplexAccessed = false;
+  const hasContentType = new Request('https://example.invalid', {
+    body: new ReadableStream(),
+    method: 'POST',
+    get duplex() {
+      duplexAccessed = true;
+      return 'half';
+    },
+  } as RequestInit).headers.has('Content-Type');
+  return duplexAccessed && !hasContentType;
+})();
+```
+
+送信時のフォールバック: 判定で対応していても、ストリームの送信が失敗したとき（下の HTTP/2 の条件など）は、**同じ写真を `FormData` でもう一度送る**。ストリームで送れなかったことは記録し、そのページを開いている間は、それ以降ストリームを使わない。
+
+制約と注意:
+
+| 項目 | 内容 |
+|---|---|
+| HTTP/2 以上が必要 | ストリームの送信は HTTP/1.1 では使えない（ボディの長さが事前に分からないため）。サーバーが HTTP/2・HTTP/3 に対応していないと失敗する。**API Gateway HTTP API（execute-api）のエンドポイントが HTTP/2 で応答するかは要確認**（`curl -sI --http2 $API_URL/...` で確かめる）。対応していなければ、常にフォールバックになる。独自ドメインや CloudFront を API の前に置く場合は、そこでも確かめる |
+| CORS のプリフライト | オリジンをまたぐストリームの送信は、必ずプリフライト（`OPTIONS`）が発生する（`FormData` の送信は単純リクエストで発生しない）。API Gateway の CORS 設定でプリフライトに応答できるようにする（7章。`AllowMethods` に `POST`、必要なら `AllowHeaders`） |
+| 進み具合の精度 | 数えられるのは「ブラウザがストリームから読み出した量」で、ネットワークに送り終えた量ではない（ブラウザ内のバッファーの分だけ先に進む）。目安の表示として使い、100% になっても応答が来るまでは「送信中」とする |
+| リダイレクト | ストリームのボディは送り直せないので、リダイレクト（303 以外）されると失敗する。画面遷移方式は 201 の JSON を受け取るので、影響しない |
+| 対象 | 画面遷移方式（メイン）とその場表示方式の `fetch` だけ。フォーム送信方式は普通のフォームなので対象外 |
+
+### 2.4 古いブラウザに対応するための実装の変更（保留）
+
+今の実装は、2.1 の要件を満たしていない。必要な変更を次にまとめる（**実装は保留**）。
+
+| # | 変更 | 理由 |
+|---|---|---|
+| 1 | Vite の `build.target` を iOS 13 / Android 9 の Chrome に合わせる（例: `['es2019', 'safari13']`） | Vite 8 の既定のターゲットは新しいブラウザ（Safari 16 以降など）向けで、`?.` や `??` をそのまま出力する |
+| 2 | `main.ts` のトップレベルの `await` をやめ、関数の中で `await` する | トップレベルの `await` は Safari 15 から。変換もできない（ビルドがエラーになる） |
+| 3 | `AbortSignal.timeout()` を、`AbortController` と `setTimeout` に置き換える（2.2） | Safari 16 から |
+| 4 | **Tailwind CSS 4 をやめる**（Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書く。11章で決める） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。iOS 13 では見た目が大きく崩れる |
+| 5 | 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
+| 6 | Fetch Upload Streams の送信（2.3）と、送信中の進み具合の表示 | 新しい機能 |
+| 7 | 実機での確認: iOS 13 の端末（またはクラウドの実機サービス）と、Android 9 + Chrome 138 以下 | E2E の Playwright の WebKit は最新の WebKit で、Safari 13 の動きは再現しない |
 
 ## 3. 画面と操作
 
@@ -161,7 +254,8 @@ export async function issueInline(apiBaseUrl: string, file: File): Promise<Inlin
 - フォーム送信方式は `fetch` を使わないので、API クライアントには関数がない（フォームの `action` に `{apiBaseUrl}/v1/tickets` を入れるだけ）
 - `issueForPage` と `issueInline` は、どちらも `FormData` で送る。Content-Type はブラウザが boundary 付きで付ける
 - `fetch` の `FormData` 送信は CORS の「単純リクエスト」で、`Accept` ヘッダーを付けても変わらない。そのためプリフライトは発生しない。ただし、レスポンスを読むには API が `Access-Control-Allow-Origin` を返す必要がある（7章）
-- タイムアウト: `AbortSignal.timeout(30_000)`（API Gateway の上限 29 秒より少し長く）。タイムアウトや通信エラーは「通信できませんでした」として扱う
+- タイムアウト: 30秒（API Gateway の上限 29 秒より少し長く）。`AbortController` と `setTimeout` で作る（2.2。今の実装の `AbortSignal.timeout()` は iOS 13 で使えないので置き換える）。タイムアウトや通信エラーは「通信できませんでした」として扱う
+- 対応ブラウザでは、写真を Fetch Upload Streams で送り、進み具合を出す。非対応や失敗のときは `FormData` で送る（2.3）
 - チケット画面の QR は、`issueForPage` の結果の `qrUrl` ではなく、URL のパラメータから `qrUrl()` で組み立てる（リロード後も同じ方法で描画するため）
 
 ### 4.3 検証（zod）
@@ -334,6 +428,7 @@ Strict-Transport-Security: max-age=31536000
 | SPA の発行方式 | **画面遷移方式（チケット発行 API ＋ QR 画像 API）をメインにする**。その場表示方式とフォーム送信方式はオプション（`config.json` の `modes` で有効にする。既定は無効） |
 | API 側の機能 | 3パターンすべてに対応したまま残す（QR 同梱発行 API、チケット発行 API の JSON とリダイレクト、チケット表示ページ、QR 画像 API） |
 | チケット発行 API の返し方 | `Accept: application/json` で JSON に切り替える（API 側は実装済み） |
+| 対応ブラウザ | iOS 13 / Android 9 以上（2.1）。`fetch`・`Promise`・`async`/`await`・`AbortController`/`AbortSignal` を使う（2.2）。Fetch Upload Streams は対応ブラウザだけで使い、非対応なら進み具合の表示を削る（2.3） |
 
 未確定:
 
@@ -341,3 +436,6 @@ Strict-Transport-Security: max-age=31536000
 2. 配置方式（推奨: CloudFront + 非公開 S3）と、独自ドメインを使うか
 3. 7章の API 側の変更（CORS、Origin の照合）を、フロントエンドの実装より先に行ってよいか
 4. 画面の文言・デザインの指定（今はシンプルな2画面を想定）
+5. スタイルの方式: Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書くか（Tailwind CSS 4 は iOS 13 に対応しない。2.4）
+6. Android 9 で対応する Chrome の下限の版（Android 9 の Chrome は 138 で更新が止まっている。2.1）
+7. API Gateway（execute-api）が HTTP/2 に対応しているか（Fetch Upload Streams が使えるかどうかが決まる。2.3）

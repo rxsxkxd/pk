@@ -112,12 +112,39 @@ const requestLog =
   async (c, next) => {
     const start = performance.now();
     await next();
+    const context = logContext(c);
+    const client = CLIENT_ENDPOINTS.has(context.endpoint) ? clientInfo(c) : undefined;
     log('INFO', 'request completed', {
-      ...logContext(c),
+      ...context,
       status: c.res.status,
       durationMs: Math.round(performance.now() - start),
+      ...(client && { client }),
     });
   };
+
+// Endpoints that receive images from browsers. Their completion log also records what the browser says
+// about itself, so browser and OS versions can be counted in CloudWatch Logs (DESIGN.md 10).
+const CLIENT_ENDPOINTS = new Set(['issue-inline', 'issue']);
+
+// Log keys → request headers logged as-is: the User-Agent and the User-Agent Client Hints (same keys as Go).
+const CLIENT_HEADERS = {
+  userAgent: 'user-agent',
+  secChUa: 'sec-ch-ua',
+  secChUaMobile: 'sec-ch-ua-mobile',
+  secChUaPlatform: 'sec-ch-ua-platform',
+  secChUaPlatformVersion: 'sec-ch-ua-platform-version',
+};
+
+// Each value is client-controlled, so it is cut to this many characters.
+const MAX_CLIENT_HEADER_LENGTH = 512;
+
+// リクエストのブラウザ情報（User-Agent と Client Hints のうち、届いたもの）を返す。1つもなければ undefined。
+function clientInfo(c: Ctx): Record<string, string> | undefined {
+  const entries = Object.entries(CLIENT_HEADERS)
+    .map(([key, name]) => [key, c.req.header(name)?.slice(0, MAX_CLIENT_HEADER_LENGTH)] as const)
+    .filter((e): e is readonly [string, string] => !!e[1]);
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
 
 // ログに付けるリクエスト ID とルート名を返す（ローカル実行では ID を生成する）。
 function logContext(c: Ctx) {

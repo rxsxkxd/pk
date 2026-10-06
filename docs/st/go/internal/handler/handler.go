@@ -162,9 +162,45 @@ func (h *Handlers) run(ctx context.Context, req Request, endpoint string,
 		}
 		res = onError(appErr)
 	}
-	log.InfoContext(ctx, "request completed",
-		"status", res.StatusCode, "durationMs", time.Since(start).Milliseconds())
+	fields := []any{"status", res.StatusCode, "durationMs", time.Since(start).Milliseconds()}
+	if clientEndpoints[endpoint] {
+		fields = append(fields, clientAttr(req))
+	}
+	log.InfoContext(ctx, "request completed", fields...)
 	return res, nil
+}
+
+// clientEndpoints receive images from browsers. Their completion log also records what the browser says
+// about itself, so browser and OS versions can be counted in CloudWatch Logs (DESIGN.md 10).
+var clientEndpoints = map[string]bool{"issue-inline": true, "issue": true}
+
+// clientHeaders maps log keys to the request headers logged as-is: the User-Agent and the User-Agent
+// Client Hints (low-entropy ones are sent by Chromium by default; the platform version only when asked).
+var clientHeaders = [][2]string{
+	{"userAgent", "User-Agent"},
+	{"secChUa", "Sec-CH-UA"},
+	{"secChUaMobile", "Sec-CH-UA-Mobile"},
+	{"secChUaPlatform", "Sec-CH-UA-Platform"},
+	{"secChUaPlatformVersion", "Sec-CH-UA-Platform-Version"},
+}
+
+// maxClientHeaderLen bounds each logged header value (they are client-controlled).
+const maxClientHeaderLen = 512
+
+// clientAttr returns the "client" log group with the headers present in req (an empty group is omitted).
+func clientAttr(req Request) slog.Attr {
+	var attrs []any
+	for _, h := range clientHeaders {
+		v := header(req, h[1])
+		if v == "" {
+			continue
+		}
+		if len(v) > maxClientHeaderLen {
+			v = strings.ToValidUTF8(v[:maxClientHeaderLen], "")
+		}
+		attrs = append(attrs, slog.String(h[0], v))
+	}
+	return slog.Group("client", attrs...)
 }
 
 func (h *Handlers) verified(req Request) (string, error) {

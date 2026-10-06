@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Ticket QR API (ticketqr package on 2 functions behind one HTTP API). The example.com QR endpoint is a separate stack (example.yaml). See docs/st/DEPLOY.md.
+Description: Ticket QR API (ticketqr package on 2 functions behind one HTTP API). The example.com QR endpoint is a separate stack (example.yaml). See docs/st/go/DEPLOY.md or docs/st/node/DEPLOY.md.
 
 Parameters:
   Impl:

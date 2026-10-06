@@ -192,7 +192,7 @@ Garage のデータは tmpfs に置く。コンテナを再起動しても、毎
 | 環境変数 `ALLOWED_ORIGINS`（カンマ区切り。完全一致で照合し、ワイルドカードは使わない） | Go・Node の設定 |
 | チケット発行 API と QR 同梱発行 API での Origin の照合と、そのテスト | Go の handler、Node の `app.ts` |
 | ゲートウェイ（イベント変換、ルート、CORS） | 新規 `go/cmd/apigw-local` |
-| HTTP API の CORS 設定と `AllowedOrigins` パラメータ | `infra/cloudformation/api.yaml`、DEPLOY.md |
+| HTTP API の CORS 設定と `AllowedOrigins` パラメータ | `infra/cloudformation/api.yaml`、web/DEPLOY.md 5章 |
 | 仕様への反映 | DESIGN.md の 5.6、10章、12章 |
 
 ## 5. E2E テスト

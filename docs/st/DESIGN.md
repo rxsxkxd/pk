@@ -426,7 +426,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 
 ImageAnalyzer はインターフェースとして抽象化し、テスト時はスタブに差し替える。
 
-> 実装状況: Go 版・Node 版とも HTTP クライアント（`ANALYZER_MODE=http`）を、仮のプロトコル（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`、レスポンス `{valid, reason}`）で実装済み。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。`ANALYZER_MODE=mock` では、通信せずに常に valid を返す。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 4.7。
+> 実装状況: Go 版・Node 版とも HTTP クライアント（`ANALYZER_MODE=http`）を、仮のプロトコル（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`、レスポンス `{valid, reason}`）で実装済み。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。`ANALYZER_MODE=mock` では、通信せずに常に valid を返す。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 3章（スタブ）と go/DEPLOY.md・node/DEPLOY.md 6章（API の切り替え）。
 
 ## 8. 状態・データ
 

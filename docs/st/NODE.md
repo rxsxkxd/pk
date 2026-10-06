@@ -302,7 +302,7 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 | `ANALYZER_TIMEOUT_MS` | 1回の呼び出しのタイムアウト（既定 5000） |
 | `PORT` / `EXAMPLE_PORT` | `npm run dev` の待ち受けポート（既定値 8080 / 8081） |
 
-デプロイは `DEPLOY.md` を参照（`Impl=node` を指定し、`node/dist/*.zip` をアップロードする）。
+デプロイは [node/DEPLOY.md](node/DEPLOY.md) を参照（`Impl=node` を指定し、`node/dist/*.zip` をアップロードする）。
 
 ## 10. Go 版との突き合わせ結果
 
@@ -345,5 +345,5 @@ ANALYZER_MODE=http ANALYZER_URL=http://localhost:8090/v1/analyze ANALYZER_API_KE
 
 - 依存は増やさない（標準の `fetch` と `AbortSignal.timeout` を使う）
 - 1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライする。失敗は `AnalyzerError`（`timeout` / `upstream`）として `domain.ts` に返し、API のエラー（504 / 502）になる。`valid: false` は 422
-- AWS へのデプロイは DEPLOY.md 4.7（`AnalyzerMode=http`、`AnalyzerUrl`、`AnalyzerApiKeyParameterName`）
+- AWS へのデプロイは node/DEPLOY.md 6章（`AnalyzerMode=http`、`AnalyzerUrl`、`AnalyzerApiKeyParameterName`）。スタブの用意は DEPLOY.md 3章
 

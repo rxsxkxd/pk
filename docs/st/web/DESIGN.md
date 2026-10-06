@@ -308,11 +308,11 @@ Strict-Transport-Security: max-age=31536000
 
 ### デプロイ手順
 
-手順は [../DEPLOY.md](../DEPLOY.md) 6章にまとめてある。
+手順は [DEPLOY.md](DEPLOY.md)（web/DEPLOY.md）にまとめてある。
 
 - S3 バケット・CloudFront・OAC・Response Headers Policy は、API とは別の CloudFormation テンプレート `infra/cloudformation/web.yaml`（スタック `ticketqr-web-{impl}`）で作る。手動（AWS CLI）の手順もある
 - `config.json` は環境ごとに作ってアップロードする。ビルドに含まれる `dist/config.json`（ローカル開発用）はアップロードしない
-- CloudFront のドメインを、API Gateway の CORS 設定（`AllowOrigins`）に入れる。`api.yaml` にはまだ CORS の設定がないため、今は `aws apigatewayv2 update-api` で設定する（DEPLOY.md 6.5）
+- CloudFront のドメインを、API Gateway の CORS 設定（`AllowOrigins`）に入れる。`api.yaml` にはまだ CORS の設定がないため、今は `aws apigatewayv2 update-api` で設定する（web/DEPLOY.md 5章）
 
 ## 10. テスト
 

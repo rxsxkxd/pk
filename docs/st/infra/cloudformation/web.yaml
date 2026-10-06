@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Web frontend (SPA) of the ticket QR API — private S3 bucket behind CloudFront (OAC) with security headers. Separate from the API stacks. See docs/st/DEPLOY.md 6.
+Description: Web frontend (SPA) of the ticket QR API — private S3 bucket behind CloudFront (OAC) with security headers. Separate from the API stacks. See docs/st/web/DEPLOY.md.
 
 Parameters:
   ApiBaseUrl:
@@ -111,5 +111,5 @@ Outputs:
   DistributionId:
     Value: !Ref Distribution
   WebUrl:
-    Description: Origin of the SPA. Allow it in the ticket API's CORS (DEPLOY.md 6.3).
+    Description: Origin of the SPA. Allow it in the ticket API's CORS (web/DEPLOY.md 5).
     Value: !Sub "https://${Distribution.DomainName}"

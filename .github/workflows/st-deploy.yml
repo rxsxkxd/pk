@@ -59,13 +59,13 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # DEPLOY.md 4.3: a new key prefix on every deploy, so CloudFormation updates the Lambda code.
+      # docs/st/{go,node}/DEPLOY.md 4.2: a new key prefix on every deploy, so CloudFormation updates the Lambda code.
       - name: Upload Lambda packages
         run: |
           aws s3 cp artifacts/lambda/ticketqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip"
           aws s3 cp artifacts/lambda/exampleqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.zip"
 
-      # DEPLOY.md 4.4
+      # docs/st/{go,node}/DEPLOY.md 4.3
       - name: Deploy ticket API stack
         run: |
           aws cloudformation deploy \
@@ -82,7 +82,7 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
           echo "API_URL=$API_URL" >> "$GITHUB_ENV"
 
-      # DEPLOY.md 6.3
+      # docs/st/web/DEPLOY.md 3
       - name: Deploy web stack
         run: |
           aws cloudformation deploy \
@@ -100,7 +100,7 @@ jobs:
             echo "WEB_URL=$(out WebUrl)"
           } >> "$GITHUB_ENV"
 
-      # DEPLOY.md 6.5 (interim until api.yaml has a CorsConfiguration)
+      # docs/st/web/DEPLOY.md 5 (interim until api.yaml has a CorsConfiguration)
       - name: Allow the SPA origin in the API's CORS
         run: |
           API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='ticketqr-$IMPL'].ApiId | [0]" --output text)
@@ -108,7 +108,7 @@ jobs:
             --cors-configuration "{\"AllowOrigins\":[\"$WEB_URL\"],\"AllowMethods\":[\"GET\",\"POST\"],\"MaxAge\":300}" \
             --query CorsConfiguration
 
-      # DEPLOY.md 6.6
+      # docs/st/web/DEPLOY.md 6
       - name: Upload the SPA and its config
         run: |
           printf '{ "apiBaseUrl": "%s", "modes": %s }\n' "$API_URL" "$WEB_MODES" > "$RUNNER_TEMP/config.json"
@@ -121,7 +121,7 @@ jobs:
             --cache-control no-cache --content-type application/json
           aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths /index.html /config.json
 
-      # DEPLOY.md 5, 6.7
+      # docs/st/{go,node}/DEPLOY.md 8, docs/st/web/DEPLOY.md 7
       - name: Smoke test
         run: |
           curl -fsS -o /dev/null "$WEB_URL/"

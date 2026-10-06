@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: example.com QR endpoint (GET /v1/example/qr) — exampleqr package on its own Lambda and HTTP API, unrelated to the ticket API. See docs/st/DEPLOY.md.
+Description: example.com QR endpoint (GET /v1/example/qr) — exampleqr package on its own Lambda and HTTP API, unrelated to the ticket API. See docs/st/go/DEPLOY.md or docs/st/node/DEPLOY.md (7).
 
 Parameters:
   Impl:

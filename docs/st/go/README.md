@@ -57,6 +57,6 @@ make build          # bin/ticketqr.zip（チケット系4エンドポイント�
 |---|---|
 | `tickets` | `POST /v1/tickets/qr-inline`、`POST /v1/tickets`、`GET /v1/tickets/{ticketCode}/view` |
 | `get-qr` | `GET /v1/tickets/{ticketCode}/qr` |
-| `example-qr`（exampleqr.zip。別テンプレート `example.yaml`・別 HTTP API。DEPLOY.md 4.8） | `GET /v1/example/qr` |
+| `example-qr`（exampleqr.zip。別テンプレート `example.yaml`・別 HTTP API。[DEPLOY.md](DEPLOY.md) 7章） | `GET /v1/example/qr` |
 
 API Gateway の設定で、`multipart/form-data` と `image/png` をバイナリとして扱わせる必要はない。HTTP API の payload v2 では、イベント側で `isBase64Encoded` が自動で付くため。

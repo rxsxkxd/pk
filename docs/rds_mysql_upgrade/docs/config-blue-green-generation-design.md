@@ -2,7 +2,7 @@
 
 ## 1. 目的
 
-既存の `config/blue-green/{staging,production}.deployment.yml` を、RDS の実情報と人が管理する対応表から生成する。設定ファイルへの手入力を減らしつつ、移行の最終確認と承認は人が行う。
+既存の `config/blue-green/{staging,production}.yml` を、RDS の実情報と人が管理する対応表から生成する。設定ファイルへの手入力を減らしつつ、移行の最終確認と承認は人が行う。
 
 このツールは設定を**生成するだけ**であり、RDS、CloudFormation、Blue/Green deployment を変更しない。
 
@@ -29,7 +29,7 @@ tools/internal/generate/                 # カタログの検証・解決と YAM
 tools/internal/cfn/                      # CloudFormation テンプレートの読み取り（短縮記法対応）
 tools/internal/report/                   # 切替前レビュー用 Markdown の組み立て
 artifacts/rds-instance-inventory.json            # 収集結果（一時・レビュー用）
-config/blue-green/<environment>.deployment.yml   # 生成結果（CI が読む正のデータ）
+config/blue-green/<environment>.yml   # 生成結果（CI が読む正のデータ）
 artifacts/blue-green-<environment>-review.md     # 生成結果（人が読むレビュー資料）
 ```
 
@@ -127,7 +127,7 @@ mysql_verification:
   port: 3306
 ```
 
-**生成単位は RDS DB インスタンスである。** 同じ `rds_instance` を指す接続は 1 つの Blue/Green deployment にまとめられ、生成先 `config/blue-green/<environment>.deployment.yml` の `services` キーには **RDS インスタンス識別子**が入る。
+**生成単位は RDS DB インスタンスである。** 同じ `rds_instance` を指す接続は 1 つの Blue/Green deployment にまとめられ、生成先 `config/blue-green/<environment>.yml` の `services` キーには **RDS インスタンス識別子**が入る。
 
 `--environment development` / `staging` / `production` の指定時は、各接続配下の同名環境を取り出して生成する。環境名は `database_environments` に列挙したものだけを受け付ける。
 
@@ -146,7 +146,7 @@ mysql_verification:
 
 ## 5. 生成処理
 
-`generate_blue_green_config`（Go）は、移行カタログと RDS インベントリ JSON を読み込み、指定環境の `config/blue-green/<environment>.deployment.yml` を生成する。**AWS を一切呼ばない。**
+`generate_blue_green_config`（Go）は、移行カタログと RDS インベントリ JSON を読み込み、指定環境の `config/blue-green/<environment>.yml` を生成する。**AWS を一切呼ばない。**
 
 カタログの未知キーは黙って無視せず、誤字として落とす（`yaml:",inline"` で拾って報告する）。
 
@@ -219,7 +219,7 @@ go run ./tools/generate_blue_green_config \
   --catalog "$PWD/config/migration-catalog.yml" \
   --inventory "$PWD/artifacts/rds-instance-inventory.json" \
   --environment production \
-  --output "$PWD/config/blue-green/production.deployment.yml"
+  --output "$PWD/config/blue-green/production.yml"
 
 # 4. レビュー用の Markdown を出す（設定ファイルは書き換えない）。
 go run ./tools/generate_blue_green_config_report \
@@ -229,7 +229,7 @@ go run ./tools/generate_blue_green_config_report \
   --output "$PWD/artifacts/blue-green-production-review.md"
 
 # 5. 生成結果とレポートを人がレビューし、必要な移行承認時だけ actions を pending から変更する。
-git diff -- config/blue-green/production.deployment.yml
+git diff -- config/blue-green/production.yml
 ```
 
 ## 7. コーディング中のテスト

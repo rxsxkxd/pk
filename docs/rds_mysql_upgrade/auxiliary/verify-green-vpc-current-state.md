@@ -207,7 +207,7 @@ aws cloudformation deploy --stack-name rds-bg-staging-vpc-b \
 
 ### この構成の注意点
 
-同一環境で 2 スタックにしても、**設定ファイル `config/blue-green/staging.deployment.yml` は 1 本を共有する。**どちらのパイプラインからも全サービスが見えるため、起動時の `ServiceName` 指定を誤ると「VPC-A のパイプラインで VPC-B の DB を対象にする」ことが起こりうる。
+同一環境で 2 スタックにしても、**設定ファイル `config/blue-green/staging.yml` は 1 本を共有する。**どちらのパイプラインからも全サービスが見えるため、起動時の `ServiceName` 指定を誤ると「VPC-A のパイプラインで VPC-B の DB を対象にする」ことが起こりうる。
 
 その場合、AWS API による検証までは通り、**MySQL 実効値の収集だけがネットワーク到達性で失敗する**（判定は AWS API の値で行うため、検証自体は成立してしまう）。運用で気をつける点である。
 

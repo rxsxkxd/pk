@@ -118,7 +118,7 @@ go run ./tools/generate_blue_green_config \
   --catalog config/migration-catalog.yml \
   --inventory <dir>/rds-instance-inventory.json \
   --environment staging \
-  --output config/blue-green/staging.deployment.yml
+  --output config/blue-green/staging.yml
 
 # ゲート②のレポート（別コマンド。設定ファイルは書き換えない）
 go run ./tools/generate_blue_green_config_report \
@@ -130,7 +130,7 @@ go run ./tools/generate_blue_green_config_report \
 
 **レポートを見て設定内容をレビューする。**アプリと接続先の対応、目標インスタンスクラス、パラメータグループの内容が並ぶ。このレポートは**可否を判定しない**——判断するのは人である。
 
-手で書く場合も、`config/blue-green/<environment>.deployment.yml` の形が満たせていればよい。
+手で書く場合も、`config/blue-green/<environment>.yml` の形が満たせていればよい。
 
 > カタログの構造は [migration-catalog-er.md](docs/migration-catalog-er.md)、生成の設計は [config-blue-green-generation-design.md](docs/config-blue-green-generation-design.md)。
 
@@ -243,7 +243,7 @@ flowchart LR
 切替後は観測期間を置く。**逆方向レプリケーションが残っていないことをローカルから確認**してから `cleanup: approved` にし、ツールを実行する。
 
 ```bash
-go run ./tools/cleanup --config config/blue-green/staging.deployment.yml --service example-service
+go run ./tools/cleanup --config config/blue-green/staging.yml --service example-service
 ```
 
 **実行には破壊的な権限が要る**（`rds:DeleteBlueGreenDeployment` / `DeleteDBInstance` / `ModifyDBInstance` / `CreateDBSnapshot` / `AddTagsToResource`）。パイプラインの実行ロールはこれを持たないので、作業者がこの権限を持つロールを引き受けて実行する。ツールも `actions.cleanup: approved` の宣言が無ければ何もせず終了する。
@@ -272,9 +272,9 @@ Deployment ID は設定ファイルに持たず、**毎回 AWS から引き当�
 同じスクリプトをローカルから直接実行することもできる。**MySQL 接続を伴う確認をローカルで行いたい場合**（VPC 構成を用意しない運用）はこちらになる。
 
 ```bash
-ruby scripts/build_green.rb  --config config/blue-green/staging.deployment.yml --service example-service
-ruby scripts/verify_green.rb --config config/blue-green/staging.deployment.yml --service example-service
-ruby scripts/switchover.rb   --config config/blue-green/staging.deployment.yml --service example-service --approve
+ruby scripts/build_green.rb  --config config/blue-green/staging.yml --service example-service
+ruby scripts/verify_green.rb --config config/blue-green/staging.yml --service example-service
+ruby scripts/switchover.rb   --config config/blue-green/staging.yml --service example-service --approve
 ```
 
 **承認の宣言（`actions`）は同じように効く。**設定が `pending` なら何もせず正常終了する。

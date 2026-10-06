@@ -22,7 +22,7 @@ C=$PWD/examples/cfn-shorthand/collected
 # 設定: staging を元に、テンプレートを fixture（C の収集結果と一致するもの）へ差し替える。
 config="$work/config.yml"
 sed 's#target_parameter_group_template_path: .*#target_parameter_group_template_path: examples/cfn-shorthand/mysql84-parameter-group-shorthand.yaml#' \
-  config/blue-green/staging.deployment.yml > "$config"
+  config/blue-green/staging.yml > "$config"
 vars=$(ruby scripts/lib/deployment_config.rb vars "$config" example-service \
   sid=required:service.source_db_instance_identifier sv=required:service.source_engine_version \
   spg=required:service.source_db_parameter_group_name tv=required:service.target_engine_version \

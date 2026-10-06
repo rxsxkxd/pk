@@ -45,7 +45,7 @@ Parameters:
     Type: String
     AllowedValues: [development, staging, production]
     Description: >-
-      対象環境。config/blue-green/<環境>.deployment.yml を CONFIG_FILE として使う
+      対象環境。config/blue-green/<環境>.yml を CONFIG_FILE として使う
       （リポジトリにそのファイルが無いと、パイプラインの最初の CodeBuild で失敗する）。
 
   DefaultServiceName:
@@ -193,7 +193,7 @@ Parameters:
       VerifyGreen へ ssm:GetParameter を許可する SSM パラメータ（SecureString）の**階層**。
       例: /rds-bg/staging → /rds-bg/staging/ 配下のパラメータをすべて読める。
       **これは IAM の許可範囲であり、読むパラメータ名を決めるものではない。**
-      どのパラメータを読むかは config/blue-green/<env>.deployment.yml の
+      どのパラメータを読むかは config/blue-green/<env>.yml の
       services.<name>.mysql_verification（parameter_name / user_parameter_name）が決める。
       パイプラインは環境ごとに 1 本でサービスは実行時に切り替えるため、
       **その環境の全サービスのパラメータをこの階層の下に置く。**
@@ -711,7 +711,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:8.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   PrecheckProject:
@@ -729,7 +729,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:8.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   BuildGreenProject:
@@ -749,7 +749,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:8.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
   # Go レポート生成器をビルドするだけのプロジェクト。
@@ -802,7 +802,7 @@ Resources:
         # カスタムイメージも ECR からの pull も要らない。
         Image: aws/codebuild/standard:8.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
           - { Name: COLLECT_MYSQL_RUNTIME_VALUES, Type: PLAINTEXT, Value: !Ref CollectMySqlRuntimeValues }
       # BuildReportTool と同一 VPC の、**レポート実行専用**の private subnet で実行する。
@@ -832,7 +832,7 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/standard:8.0
         EnvironmentVariables:
-          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml' }
+          - { Name: CONFIG_FILE, Type: PLAINTEXT, Value: !Sub 'config/blue-green/${EnvironmentName}.yml' }
           - { Name: SERVICE_NAME, Type: PLAINTEXT, Value: !Ref DefaultServiceName }
 
 

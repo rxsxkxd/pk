@@ -106,7 +106,7 @@ CodeConnections による GitHub 接続は CodePipeline の Source ステージ�
 
 1. CodePipeline artifact 用の S3 bucket、CodePipeline 実行ロール、CodeBuild サービスロールを組織の方針に従って用意する。カスタマー管理キーを使う場合は、両ロールに対象キーの利用権限を付与する。
 2. GitHub repository と CodeConnections 接続を作成し、GitHub 側の認可を完了して接続を `AVAILABLE` にする。
-3. Step 2 で、対象サービスの MySQL 8.4 DB パラメータグループを CloudFormation で作成し、`config/blue-green/<environment>.deployment.yml` の `target_db_parameter_group_name` と一致させる。
+3. Step 2 で、対象サービスの MySQL 8.4 DB パラメータグループを CloudFormation で作成し、`config/blue-green/<environment>.yml` の `target_db_parameter_group_name` と一致させる。
 4. [codepipeline.yml](../examples/rds-blue-green-deployment/codepipeline.yml) を CloudFormation で deploy する。このテンプレートは BuildGreen、VerifyGreen、Switchover の三つの CodeBuild project と、それらを順に呼び出す CodePipeline を作成する。
 5. テンプレートの `CodeBuildServiceRoleArn` に Step 3〜5 用のサービスロールを渡す。trust policy は `codebuild.amazonaws.com` に `sts:AssumeRole` を許可し、RDS／CloudWatch と必要時の Secrets Manager、artifact／log 出力に必要な最小権限を設定する。
 6. MySQL 実効値を収集する場合だけ、secret ID、CodeBuild の VPC 設定、RDS security group を追加する。既定の `CollectMySqlRuntimeValues=false` ではこの DB 接続設定は不要である。

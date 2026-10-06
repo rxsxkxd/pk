@@ -160,7 +160,7 @@ private subnet では apt リポジトリへ到達できないため、**buildsp
 | S3 artifact bucket | **`codepipeline-all-in-one.yml` は省略可**（空なら新規作成する）。`codepipeline.yml` は同一リージョンの既存バケットが必須 | ソースと各 Step の成果物を保存する |
 | CodePipeline 実行ロール | 既存 IAM role ARN | Pipeline が CodeConnections、S3、CodeBuild を利用する |
 | CodeBuild 実行ロール | 既存 IAM role ARN | RDS・CloudWatch API と成果物を扱う |
-| 環境設定 | `config/blue-green/<environment>.deployment.yml` の対象サービス定義 | Blue DB、8.4 PG、DB クラス、承認状態を決める |
+| 環境設定 | `config/blue-green/<environment>.yml` の対象サービス定義 | Blue DB、8.4 PG、DB クラス、承認状態を決める |
 | Step 2 完了 | MySQL 8.4 パラメータグループが CloudFormation で作成済み | Step 3 が `target_db_parameter_group_name` を RDS API へ渡す |
 
 #### ソースの取得元を選ぶ
@@ -287,7 +287,7 @@ aws rds describe-db-instances --db-instance-identifier <blue-id> \
 
 | | 決めるもの | 場所 | 粒度 |
 |---|---|---|---|
-| 設定 YAML | **読むパラメータ名** | `config/blue-green/<env>.deployment.yml` の `services.<name>.mysql_verification` | **サービス（= 移行対象 DB）ごと** |
+| 設定 YAML | **読むパラメータ名** | `config/blue-green/<env>.yml` の `services.<name>.mysql_verification` | **サービス（= 移行対象 DB）ごと** |
 | CloudFormation | `ssm:GetParameter` を許す**階層** | `MySqlCredentialsParameterPath` | スタック（= 環境）単位 |
 
 実際の取得は `scripts/collect_green_runtime_values.rb` が行う。config から解決した名前をそのまま使い、**CloudFormation から名前を受け取ることはしない。**
@@ -306,7 +306,7 @@ aws ssm get-parameter --name "<user_parameter_name>" --with-decryption   # ユ�
 設定例。`staging` に 2 サービスある場合を示す。
 
 ```yaml
-# config/blue-green/staging.deployment.yml
+# config/blue-green/staging.yml
 services:
   example-service:
     mysql_verification:
@@ -470,7 +470,7 @@ BranchName=main
 ### 5-1. 実行前の確認
 
 1. Step 1 の成立条件チェックと Step 2 のパラメータグループ作成・レビューを完了する。
-2. 対象サービスの `config/blue-green/<environment>.deployment.yml` を確認する。
+2. 対象サービスの `config/blue-green/<environment>.yml` を確認する。
 3. `source_db_instance_identifier`、`target_engine_version`、`target_db_instance_class`、`target_db_parameter_group_name`、`target_parameter_group_template_path` が正しいことを確認する。
 4. Step 3 を許可する場合だけ `actions.build: approved` に変更し、通常の構成変更レビューを完了する。
 

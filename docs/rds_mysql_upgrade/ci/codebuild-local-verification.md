@@ -107,7 +107,7 @@ chmod +x ci/codebuild_build.sh
 `codebuild_build.sh -e` に渡すローカル専用ファイルを作る。以下は例であり、Git 管理しない。
 
 ```dotenv
-CONFIG_FILE=config/blue-green/staging.deployment.yml
+CONFIG_FILE=config/blue-green/staging.yml
 SERVICE_NAME=example-service
 
 # VerifyGreen の通常確認では false。Green DB への接続は行わない。
@@ -190,7 +190,7 @@ mkdir -p .local
 
 ### 変更を行わない検証
 
-`config/blue-green/staging.deployment.yml` の対象サービスで `actions.build: pending` を確認してから、次を実行する。
+`config/blue-green/staging.yml` の対象サービスで `actions.build: pending` を確認してから、次を実行する。
 
 ```bash
 ./ci/codebuild_build.sh \
@@ -259,7 +259,7 @@ CodeBuild Local Agent の不具合とスクリプト本体の不具合を分け�
 
 ```bash
 scripts/verify_green.rb \
-  --config config/blue-green/staging.deployment.yml \
+  --config config/blue-green/staging.yml \
   --service example-service \
   --profile your-readonly-profile \
   --output-dir artifacts/verify-green-direct

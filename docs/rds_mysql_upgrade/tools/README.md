@@ -243,7 +243,7 @@ go run ./tools/generate_blue_green_config \
   --catalog config/migration-catalog.yml \
   --inventory <dir>/rds-instance-inventory.json \
   --environment staging \
-  --output config/blue-green/staging.deployment.yml
+  --output config/blue-green/staging.yml
 ```
 
 | オプション | 必須 | 内容 |
@@ -253,7 +253,7 @@ go run ./tools/generate_blue_green_config \
 | `--environment ENV` | ○ | 生成対象の環境名 |
 | `--output FILE` | ○ | 生成先 YAML |
 
-- **出力**: `config/blue-green/<environment>.deployment.yml` の形の YAML。`mysql_verification.auth_method` は `parameter_store` 固定で出る
+- **出力**: `config/blue-green/<environment>.yml` の形の YAML。`mysql_verification.auth_method` は `parameter_store` 固定で出る
 - **終了コード**: `0` 成功 / `1` 失敗（入力の読み取り、カタログの検証・解決、書き込み。理由を stderr へ出す） / `2` 使い方の誤り
 
 ### `generate_blue_green_config_report`
@@ -282,7 +282,7 @@ go run ./tools/generate_blue_green_config_report \
 切替後に、Blue/Green Deployment と旧 Blue（`<source>-old1`）を削除する。**不可逆な変更操作で、パイプラインからは外してある。**
 
 ```bash
-go run ./tools/cleanup --config config/blue-green/staging.deployment.yml --service example-service
+go run ./tools/cleanup --config config/blue-green/staging.yml --service example-service
 ```
 
 | オプション | 必須 | 既定値 | 内容 |

@@ -39,7 +39,7 @@ CodePipeline は BuildGreen の前に準備ステージ（ReadApprovals・BuildR
 リポジトリのルートで実行する。直接実行には AWS CLI v2 と Ruby が必要である。`verify_green.rb` はビルド済みバイナリを渡さない場合に Go でビルドするので、そのときは Go も要る。jq と GNU `date` は使わない（macOS でもそのまま動く）。
 
 ```bash
-export CONFIG_FILE=config/blue-green/staging.deployment.yml
+export CONFIG_FILE=config/blue-green/staging.yml
 export SERVICE_NAME=example-service
 export AWS_PROFILE=your-aws-profile
 export ARTIFACT_ROOT="artifacts/direct/${SERVICE_NAME}-$(date -u +%Y%m%dT%H%M%SZ)"

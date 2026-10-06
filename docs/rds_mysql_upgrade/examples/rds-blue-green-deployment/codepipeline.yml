@@ -13,7 +13,7 @@ Parameters:
     Description: config/blue-green 配下で参照する対象環境名。
   ServiceName:
     Type: String
-    Description: config/blue-green/{EnvironmentName}.deployment.yml の services キー。
+    Description: config/blue-green/{EnvironmentName}.yml の services キー。
   SourceProvider:
     Type: String
     Default: CodeConnections
@@ -115,7 +115,7 @@ Resources:
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT
-            Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml'
+            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
           - Name: SERVICE_NAME
             Type: PLAINTEXT
             Value: !Ref ServiceName
@@ -173,7 +173,7 @@ Resources:
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT
-            Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml'
+            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
           - Name: SERVICE_NAME
             Type: PLAINTEXT
             Value: !Ref ServiceName
@@ -211,7 +211,7 @@ Resources:
         EnvironmentVariables:
           - Name: CONFIG_FILE
             Type: PLAINTEXT
-            Value: !Sub 'config/blue-green/${EnvironmentName}.deployment.yml'
+            Value: !Sub 'config/blue-green/${EnvironmentName}.yml'
           - Name: SERVICE_NAME
             Type: PLAINTEXT
             Value: !Ref ServiceName

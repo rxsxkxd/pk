@@ -265,7 +265,7 @@ func TestWriteProducesTwoSpaceIndentedYAML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	path := filepath.Join(t.TempDir(), "staging.deployment.yml")
+	path := filepath.Join(t.TempDir(), "staging.yml")
 	if err := Write(path, document); err != nil {
 		t.Fatalf("Write: %v", err)
 	}

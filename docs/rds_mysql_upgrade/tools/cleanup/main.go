@@ -7,7 +7,7 @@
 //
 // 手順と安全弁は internal/cleanup にある。ここは CLI の配線だけを持つ。
 //
-//	実行: go run ./tools/cleanup --config config/blue-green/staging.deployment.yml --service example-service
+//	実行: go run ./tools/cleanup --config config/blue-green/staging.yml --service example-service
 //
 // 逆方向レプリケーションの確認（任意）は --mysql-user を指定したときだけ行う。
 // TLS は --ssl-mode で選ぶ（既定 VERIFY_CA で --ssl-ca が必須。DISABLED / PREFERRED /

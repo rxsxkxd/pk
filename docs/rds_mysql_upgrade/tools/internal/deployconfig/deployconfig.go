@@ -1,4 +1,4 @@
-// Package deployconfig は実行設定 YAML（config/blue-green/<環境>.deployment.yml）を読む。
+// Package deployconfig は実行設定 YAML（config/blue-green/<環境>.yml）を読む。
 //
 // scripts/lib/deployment_config.rb（CI から到達する側）と**同じ意味づけとメッセージ**にしてある。
 // scripts/ と tools/ はコードを共有しない方針のため、tools/ 側の読み取りはここで持つ。

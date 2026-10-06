@@ -4,7 +4,7 @@ Blue/Green Deployment は CloudFormation カスタムリソースを使わず、
 
 ## 設定
 
-環境ごとに 1 ファイルを用意する。例: [`staging.yml`](../../config/blue-green/staging.deployment.yml)、[`production.yml`](../../config/blue-green/production.deployment.yml)。各ファイルには、その環境に含まれる全サービスについて以下を指定する。
+環境ごとに 1 ファイルを用意する。例: [`staging.yml`](../../config/blue-green/staging.yml)、[`production.yml`](../../config/blue-green/production.yml)。各ファイルには、その環境に含まれる全サービスについて以下を指定する。
 
 - 移行元 Blue DB の DB インスタンス識別子
 - Green DB の MySQL 8.4 バージョンとインスタンスタイプ
@@ -16,7 +16,7 @@ Blue/Green Deployment は CloudFormation カスタムリソースを使わず、
 
 ```bash
 scripts/build_green.rb \
-  --config config/blue-green/staging.deployment.yml \
+  --config config/blue-green/staging.yml \
   --service example-service
 ```
 
@@ -28,7 +28,7 @@ scripts/build_green.rb \
 
 ```bash
 scripts/switchover.rb \
-  --config config/blue-green/staging.deployment.yml \
+  --config config/blue-green/staging.yml \
   --service example-service \
   --approve
 ```

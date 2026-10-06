@@ -131,7 +131,7 @@ Source ✓ → Prepare ✓ → BuildGreen ✓(no-op) → VerifyGreen ✓(対象�
 
 | 変数 | 与え方 |
 |---|---|
-| `CONFIG_FILE` | プロジェクト定義で固定（`config/blue-green/<env>.deployment.yml`） |
+| `CONFIG_FILE` | プロジェクト定義で固定（`config/blue-green/<env>.yml`） |
 | `SERVICE_NAME` | **アクション側で上書き**（`#{variables.ServiceName}`）。プロジェクト定義には既定値を置くため `start-build` 単体でも動く |
 | `COLLECT_MYSQL_RUNTIME_VALUES` | `VerifyGreenProject` のみ。スタックパラメータから |
 

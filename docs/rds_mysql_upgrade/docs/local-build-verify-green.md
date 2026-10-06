@@ -8,7 +8,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 完了していること | Step 1（成立条件チェック）と Step 2（8.4 パラメータグループを CloudFormation で作成）。設定ファイル `config/blue-green/<環境>.deployment.yml` に対象サービスが定義されていること |
+| 完了していること | Step 1（成立条件チェック）と Step 2（8.4 パラメータグループを CloudFormation で作成）。設定ファイル `config/blue-green/<環境>.yml` に対象サービスが定義されていること |
 | 必要なもの | AWS CLI v2、Ruby 3.4。VerifyGreen でビルド済みバイナリを渡さない場合は Go 1.25 も要る。jq・MySQL クライアント・Docker は要らない |
 | AWS の権限 | **BuildGreen**: RDS の読み取り（`rds:Describe*`）に加えて `rds:CreateDBSnapshot`・`rds:CreateBlueGreenDeployment`・`rds:CreateDBInstanceReadReplica`・`rds:AddTagsToResource`。移行元が拡張モニタリングを使っていれば、そのロールへの `iam:PassRole` も要る<br>**VerifyGreen**: 読み取りだけ（`rds:Describe*`、`cloudwatch:GetMetricStatistics`）。MySQL 実効値を `parameter_store` で取るなら `ssm:GetParameter` も要る |
 | 実行場所 | リポジトリのルート |
@@ -18,7 +18,7 @@
 ## 1. 共通準備
 
 ```bash
-export CONFIG_FILE=config/blue-green/staging.deployment.yml
+export CONFIG_FILE=config/blue-green/staging.yml
 export SERVICE_NAME=example-service
 export AWS_PROFILE=your-aws-profile        # AWS CLI はこの環境変数のプロファイルを使う
 export ARTIFACT_ROOT="artifacts/local/${SERVICE_NAME}-$(date -u +%Y%m%dT%H%M%SZ)"

@@ -1,5 +1,5 @@
 // Package generate は移行カタログと RDS インベントリから Blue/Green 実行設定
-// （config/blue-green/<環境>.deployment.yml）を組み立てる。
+// （config/blue-green/<環境>.yml）を組み立てる。
 //
 // AWS を一切呼ばない。「収集と判定を分離する」というリポジトリの方針の、判定側にあたる。
 // 生成単位は RDS DB インスタンスであり、同じ rds_instance を指す接続は

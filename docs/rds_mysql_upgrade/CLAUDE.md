@@ -11,7 +11,7 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 1. 移行は 7 ステップ（`docs/upgrade-flow-steps.md`。**レビュー中につき内容と Step 番号は変えない**）で、Step 1・2・7 は人がローカルで `tools/` を実行し、Step 3〜5 は CodePipeline（CodeBuild）が `scripts/` を実行する。
 2. 実運用の手順は 2 本だけ——環境構築 `operations-environment-setup.md` と移行の実行 `operations-migration-run.md`。手順を書き足すときはまずどちらに属するかを考え、背景は補足ドキュメントへ置いてリンクする。
 3. 判断は 3 回のゲート（①成立条件チェック ②設定レビュー ③切替前検証）で、それぞれのレポートの生成元は `report-generation-flows.md`。チェックの呼び分け（成立条件チェック／構築前チェック／切替前検証）は `operations-migration-run.md`。
-4. 入力は環境ごとの `config/blue-green/<env>.deployment.yml` 1 本で、全エントリポイントが `--config FILE --service NAME` を取る。生成方法は `docs/config-blue-green-generation-design.md`。
+4. 入力は環境ごとの `config/blue-green/<env>.yml` 1 本で、全エントリポイントが `--config FILE --service NAME` を取る。生成方法は `docs/config-blue-green-generation-design.md`。
 5. パイプラインの構成・パラメータ・権限は `ci/README.md`・`ci/codepipeline-structure.md`・`ci/codepipeline-all-in-one-parameters.md`、ツールの使い方の索引は `tools/README.md` にある。
 
 ## 実装のルール（逸脱する変更を入れない）
@@ -54,12 +54,12 @@ go run ./tools/collect_mysql84_parameter_inputs --source-parameter-group <8.0-pg
 go run ./tools/generate_mysql84_parameter_group --input-dir <dir> --output-dir <out> --system <name> --environment <env>
 
 # Step 3〜5（CodeBuild と同じエントリポイント。pending なら何もせず正常終了）
-ruby scripts/build_green.rb  --config config/blue-green/staging.deployment.yml --service example-service
-ruby scripts/verify_green.rb --config config/blue-green/staging.deployment.yml --service example-service
-ruby scripts/switchover.rb   --config config/blue-green/staging.deployment.yml --service example-service --approve
+ruby scripts/build_green.rb  --config config/blue-green/staging.yml --service example-service
+ruby scripts/verify_green.rb --config config/blue-green/staging.yml --service example-service
+ruby scripts/switchover.rb   --config config/blue-green/staging.yml --service example-service --approve
 
 # Step 7（ローカル。破壊的権限を持つロールで実行）
-go run ./tools/cleanup --config config/blue-green/staging.deployment.yml --service example-service
+go run ./tools/cleanup --config config/blue-green/staging.yml --service example-service
 ```
 
 コンテナでの実行（`compose.yaml`）は `docs/local-execution.md`、buildspec のローカル実行は `ci/codebuild-local-verification.md`。

@@ -56,7 +56,7 @@
 | 認証情報 | PASS。`user` / `password` はカタログにも生成結果にも現れない。記録は SSM パラメータ名だけ |
 | `source_db_parameters` | PASS。Blue のパラメータグループの実値を、パラメータ名をキーに `value` / `source` で出力（確認用。実行スクリプトは読まない） |
 | 承認状態 | PASS。`build`、`switchover`、`cleanup` はすべて `pending` |
-| 出力先 | PASS。テストは `mktemp` の一時ディレクトリへ出力し、`config/blue-green/{staging,production}.deployment.yml` を変更しない |
+| 出力先 | PASS。テストは `mktemp` の一時ディレクトリへ出力し、`config/blue-green/{staging,production}.yml` を変更しない |
 
 ## ③ レポート生成: `generate_blue_green_config_report`
 

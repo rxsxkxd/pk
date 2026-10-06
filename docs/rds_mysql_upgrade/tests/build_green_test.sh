@@ -17,7 +17,7 @@ fail() { printf 'FAIL  %-50s %s\n' "$1" "$2"; failed=$((failed + 1)); }
 
 # 設定は staging のものを承認済みにして使う。
 config="$work/config.yml"
-sed 's/build: pending/build: approved/' config/blue-green/staging.deployment.yml > "$config"
+sed 's/build: pending/build: approved/' config/blue-green/staging.yml > "$config"
 service=example-service
 eval "$(ruby scripts/lib/deployment_config.rb vars "$config" "$service" \
   sid=required:service.source_db_instance_identifier \
@@ -91,7 +91,7 @@ expect() {  # $1=説明 $2=実際の終了コード $3=期待 $4=作成を呼ぶ
 
 # --- 第 1 層（承認とフェーズガード）------------------------------------------
 make_fake pending
-run_build config/blue-green/staging.deployment.yml
+run_build config/blue-green/staging.yml
 st=$?; [[ -f "$fake/calls.log" ]] && fail 'pending: AWS を呼ばない' "$(cat "$fake/calls.log")" || expect 'pending: 何もせず成功' $st 0 no no 'no changes made'
 
 make_fake post

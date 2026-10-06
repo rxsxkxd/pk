@@ -16,7 +16,7 @@ ok()   { printf 'ok    %s\n' "$1"; }
 fail() { printf 'FAIL  %-50s %s\n' "$1" "$2"; failed=$((failed + 1)); }
 
 config="$work/config.yml"
-sed 's/switchover: pending/switchover: approved/' config/blue-green/staging.deployment.yml > "$config"
+sed 's/switchover: pending/switchover: approved/' config/blue-green/staging.yml > "$config"
 service=example-service
 vars=$(ruby scripts/lib/deployment_config.rb vars "$config" "$service" \
   sid=required:service.source_db_instance_identifier \
@@ -68,7 +68,7 @@ expect() {  # $1=説明 $2=終了コード $3=期待 $4=切替を呼ぶか(yes/n
 }
 
 make_fake pending
-run_switchover config/blue-green/staging.deployment.yml; st=$?
+run_switchover config/blue-green/staging.yml; st=$?
 [[ -f "$fake/calls.log" ]] && fail 'pending: AWS を呼ばない' "$(cat "$fake/calls.log")" || expect 'pending: 何もせず成功' $st 0 no 'no changes made'
 
 make_fake post; set_source "$tv" "$tpg"

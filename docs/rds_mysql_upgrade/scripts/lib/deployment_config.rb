@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 #
-# 実行設定 YAML（config/blue-green/<環境>.deployment.yml）の読み取り。
+# 実行設定 YAML（config/blue-green/<環境>.yml）の読み取り。
 #
 # **設定の読み取りはこのファイルだけが行う。**Ruby からは require して使い、
 # buildspec（シェル）からはコマンドとして呼んで `NAME='値'` の代入行を受け取る（read-approvals.yml）。

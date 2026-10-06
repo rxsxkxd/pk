@@ -4,8 +4,8 @@
 
 ```
 API Gateway HTTP API ticketqr-go（$default ステージ、自動デプロイ、スロットリング）
- ├─ POST /v1/tickets/qr-inline        ┐  QR 同梱発行 API
- ├─ POST /v1/tickets                  ├→ Lambda ticketqr-go-tickets  チケット発行 API
+ ├─ POST /v1/tickets/qr-inline        ┐  QR 同梱付与 API
+ ├─ POST /v1/tickets                  ├→ Lambda ticketqr-go-tickets  チケット付与 API
  ├─ GET  /v1/tickets/{ticketCode}/view ┘                                   チケット表示ページ
  └─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-go-get-qr   QR 画像 API
 API Gateway HTTP API ticketqr-go-example（7章。チケット API とは無関係）
@@ -83,7 +83,7 @@ rm -f "$SALT_FILE"
 | `TicketSuffixLength` | `8` | suffix の桁数 |
 | `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。空なら execute-api の URL を自動で使う |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `50` / `100` | 全ルートに共通のスロットリング |
-| `IssueReservedConcurrency` | `-1`（設定しない） | `tickets` 関数に予約する同時実行数（画像解析サーバーの保護用） |
+| `GrantReservedConcurrency` | `-1`（設定しない） | `tickets` 関数に予約する同時実行数（画像解析サーバーの保護用） |
 | `LogRetentionDays` | `30` | Lambda と API のアクセスログの保持日数 |
 
 ### 4.2 zip のアップロード
@@ -171,7 +171,7 @@ echo $API_URL   # https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com
 
 | 関数 | 担当ルート | タイムアウト |
 |---|---|---|
-| `ticketqr-$IMPL-tickets` | QR 同梱発行 API、チケット発行 API、チケット表示ページ（画像解析・採番・HTML） | 15秒 |
+| `ticketqr-$IMPL-tickets` | QR 同梱付与 API、チケット付与 API、チケット表示ページ（画像解析・採番・HTML） | 15秒 |
 | `ticketqr-$IMPL-get-qr` | QR 画像 API（QR 画像の生成） | 5秒 |
 
 ```sh
@@ -329,7 +329,7 @@ aws logs tail /aws/lambda/ticketqr-analyzer-stub-$STUB_IMPL --since 5m | grep '"
 aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 5m | grep 'image analysis failed'
 ```
 
-API を `http` のままスタブを削除すると、発行（QR 同梱発行 API・チケット発行 API）がすべて 502 になる。スタブを削除する前に `mock` に戻す。
+API を `http` のままスタブを削除すると、発行（QR 同梱付与 API・チケット付与 API）がすべて 502 になる。スタブを削除する前に `mock` に戻す。
 
 ## 7. example.com の QR エンドポイント（別スタック・別 API）
 
@@ -414,16 +414,16 @@ aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
 
 ## 8. 動作確認
 
-動作確認には `testdata/images/` の小さな画像（JPEG / PNG / HEIC / HEIF / AVIF / WebP。各32×32）を使う。画像の形式は API がファイルの中身で判定するので（先頭数バイトだけの偽の画像は 415 になる）、手元の写真を使ってもよい。
+動作確認には `testdata/images/` の小さな画像（JPEG / PNG / HEIC / HEIF / AVIF / WebP。各32×32）を使う。画像の形式は API がファイルの中身で判定するので（先頭数バイトだけの偽の画像は 415 になる）、手元の証明書の画像（スマートフォンで撮ったもの）を使ってもよい。
 
 ```sh
-# QR 同梱発行 API → 201 JSON
+# QR 同梱付与 API → 201 JSON
 curl -s -F image=@testdata/images/photo.jpg $API_URL/v1/tickets/qr-inline | head -c 200; echo
 
-# チケット発行 API（フォーム送信） → 303 とチケット表示ページの URL
+# チケット付与 API（フォーム送信） → 303 とチケット表示ページの URL
 LOC=$(curl -s -o /dev/null -w '%{redirect_url}' -F image=@testdata/images/photo.jpg $API_URL/v1/tickets); echo $LOC
 
-# チケット発行 API（Accept: application/json） → 201 JSON
+# チケット付与 API（Accept: application/json） → 201 JSON
 curl -s -H 'Accept: application/json' -F image=@testdata/images/photo.jpg $API_URL/v1/tickets; echo
 
 # チケット表示ページ → 200 HTML、QR 画像 API → 200 image/png
@@ -447,7 +447,7 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --follow
 aws logs tail /aws/apigateway/ticketqr-$IMPL --since 10m   # CloudFormation の場合だけ（アクセスログ）
 ```
 
-写真を受け取る2つの API のログには、ブラウザと OS の情報（`client`。User-Agent などを加工せずに記録）が付く。OS・ブラウザごとに集計するには、後処理のサンプルのスクリプトを使う（../DESIGN.md 10章「ブラウザと OS の記録」）:
+証明書の画像を受け取る2つの API のログには、ブラウザと OS の情報（`client`。User-Agent などを加工せずに記録）が付く。OS・ブラウザごとに集計するには、後処理のサンプルのスクリプトを使う（../DESIGN.md 10章「ブラウザと OS の記録」）:
 
 ```sh
 aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 1d --filter-pattern '"request completed"' \

@@ -1,11 +1,11 @@
 // Implementations that talk to the outside world: environment variables, Parameter Store, the image
 // analysis server (HTTP client or in-process mock) and log output. The business
-// logic in domain.ts only sees the Analyzer / Log ports.
+// logic in domain.ts only sees the Verifier / Log ports.
 
-import { AnalyzerError, type Analyzer, type AnalyzerResult, type Log } from './domain.ts';
+import { VerifierError, type Verifier, type Verdict, type Log } from './domain.ts';
 
 // =================================================================================================
-// Config and salts  (↔ go/internal/config, go/internal/secret)
+// Config and salts  (↔ go/internal/config)
 // =================================================================================================
 
 export type Config = {
@@ -72,7 +72,7 @@ async function readParameter(name: string): Promise<string> {
 const DEFAULT_ANALYZER_TIMEOUT_MS = 5000;
 
 // ANALYZER_MODE に応じた画像解析クライアントを返す（mock: その場で valid / http: 解析サーバーに POST）。
-export async function newAnalyzer(env: NodeJS.ProcessEnv): Promise<Analyzer> {
+export async function newAnalyzer(env: NodeJS.ProcessEnv): Promise<Verifier> {
   switch (env.ANALYZER_MODE) {
     case 'mock':
       return alwaysValid;
@@ -89,7 +89,7 @@ export async function newAnalyzer(env: NodeJS.ProcessEnv): Promise<Analyzer> {
 }
 
 // 常に valid を返す画像解析のモック（通信しない）。
-export const alwaysValid: Analyzer = async () => ({ valid: true, reason: 'mock' });
+export const alwaysValid: Verifier = async () => ({ valid: true, reason: 'mock' });
 
 // Parameter Store から解析サーバーの API キーを取得する（APP_ENV=local のときだけ環境変数 ANALYZER_API_KEY の平文を使う）。
 async function loadAnalyzerApiKey(env: NodeJS.ProcessEnv): Promise<string> {
@@ -98,10 +98,10 @@ async function loadAnalyzerApiKey(env: NodeJS.ProcessEnv): Promise<string> {
   throw new Error('ANALYZER_API_KEY_PARAMETER_NAME is not set');
 }
 
-type Attempt = { result: AnalyzerResult } | { error: AnalyzerError; retry: boolean };
+type Attempt = { result: Verdict } | { error: VerifierError; retry: boolean };
 
 // 画像を octet-stream でそのまま POST する HTTP クライアントを作る（5xx・タイムアウト・通信エラーのときだけ1回リトライ）。
-export function httpAnalyzer({ url, apiKey, timeoutMs }: { url: string; apiKey: string; timeoutMs: number }): Analyzer {
+export function httpAnalyzer({ url, apiKey, timeoutMs }: { url: string; apiKey: string; timeoutMs: number }): Verifier {
   const attempt = async (data: Uint8Array): Promise<Attempt> => {
     let res: Response;
     try {
@@ -114,19 +114,19 @@ export function httpAnalyzer({ url, apiKey, timeoutMs }: { url: string; apiKey: 
     } catch (err) {
       const timedOut = err instanceof DOMException && err.name === 'TimeoutError';
       return {
-        error: new AnalyzerError(timedOut ? 'timeout' : 'upstream', `analyzer request failed: ${err}`),
+        error: new VerifierError(timedOut ? 'timeout' : 'upstream', `analyzer request failed: ${err}`),
         retry: true,
       };
     }
     if (!res.ok) {
-      return { error: new AnalyzerError('upstream', `analyzer returned ${res.status}`), retry: res.status >= 500 };
+      return { error: new VerifierError('upstream', `analyzer returned ${res.status}`), retry: res.status >= 500 };
     }
     try {
       return { result: parseAnalyzerResponse(await res.json()) };
     } catch (err) {
       const timedOut = err instanceof DOMException && err.name === 'TimeoutError';
       return {
-        error: new AnalyzerError(timedOut ? 'timeout' : 'upstream', `bad analyzer response: ${err}`),
+        error: new VerifierError(timedOut ? 'timeout' : 'upstream', `bad analyzer response: ${err}`),
         retry: timedOut,
       };
     }
@@ -140,15 +140,15 @@ export function httpAnalyzer({ url, apiKey, timeoutMs }: { url: string; apiKey: 
   };
 }
 
-// 解析サーバーのレスポンス本文を AnalyzerResult にする（仮の形式 {valid, reason}。本物の仕様が決まったらここだけ差し替える）。
-function parseAnalyzerResponse(body: unknown): AnalyzerResult {
+// 解析サーバーのレスポンス本文を Verdict にする（仮の形式 {valid, reason}。本物の仕様が決まったらここだけ差し替える）。
+function parseAnalyzerResponse(body: unknown): Verdict {
   const { valid, reason } = (body ?? {}) as { valid?: unknown; reason?: unknown };
   if (typeof valid !== 'boolean') throw new Error('"valid" must be a boolean');
   return { valid, reason: typeof reason === 'string' ? reason : '' };
 }
 
 // =================================================================================================
-// Logging  (↔ slog JSON in go/internal/app)
+// Logging  (↔ slog JSON in go/cmd/ticketqr/wire.go)
 // =================================================================================================
 
 // Go の slog（JSON）と同じキーで1行の JSON ログを出す。

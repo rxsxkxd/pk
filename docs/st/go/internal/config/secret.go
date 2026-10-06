@@ -1,5 +1,6 @@
-// Package secret loads secrets from Parameter Store: the signing salts and the analyzer API key.
-package secret
+package config
+
+// Secrets from Parameter Store: the signing salts and the analyzer API key.
 
 import (
 	"context"

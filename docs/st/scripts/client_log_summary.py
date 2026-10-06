@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ブラウザと OS ごとの件数を、API のログから集計するサンプル（後処理用。標準ライブラリだけで動く）。
 
-API は、QR 同梱発行 API・チケット発行 API の完了ログ（"msg":"request completed"）に、ブラウザが送った
+API は、QR 同梱付与 API・チケット付与 API の完了ログ（"msg":"request completed"）に、ブラウザが送った
 User-Agent と Client Hints を "client" として加工せずに記録している（DESIGN.md 10章「ブラウザと OS の記録」）。
 このスクリプトは、そのログを読んで User-Agent を解釈し、ブラウザ・OS ごとの件数とエラー数を表にする。
 
@@ -23,7 +23,9 @@ import re
 import sys
 from collections import Counter
 
-UPLOAD_ENDPOINTS = {"issue-inline", "issue"}
+# grant-inline / grant: the QR inline grant API and the ticket grant API. issue-inline / issue are their
+# names before the rename, kept so older logs are counted too.
+UPLOAD_ENDPOINTS = {"grant-inline", "grant", "issue-inline", "issue"}
 
 # Android の Chrome（110 以降）は User-Agent の OS を "Android 10; K" に固定している（本当の版は Client Hints だけ）。
 REDUCED_ANDROID = re.compile(r"Android 10; K\)")

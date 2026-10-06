@@ -4,7 +4,7 @@
 import type { InjectionKey } from 'vue';
 import { z } from 'zod';
 
-// Issue modes: page = 画面遷移方式 (main), inline = その場表示方式, form = フォーム送信方式 (options).
+// Grant modes: page = 画面遷移方式 (main), inline = その場表示方式, form = フォーム送信方式 (options).
 export const ModeSchema = z.enum(['page', 'inline', 'form']);
 export type Mode = z.infer<typeof ModeSchema>;
 

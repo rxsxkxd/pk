@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"ticketqr/internal/ticket"
 )
 
 // reply scripts one response of the test server.
@@ -61,8 +63,8 @@ var jpeg = []byte{0xFF, 0xD8, 0xFF, 0xE0, 'p', 'h', 'o', 't', 'o'}
 
 func TestHTTPPostsImageUnchanged(t *testing.T) {
 	a, got := server(t, status(200, `{"valid":true,"reason":"ok"}`))
-	res, err := a.Analyze(context.Background(), Image{Data: jpeg, MimeType: "image/jpeg"})
-	if err != nil || res != (Result{Valid: true, Reason: "ok"}) {
+	res, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg, MimeType: "image/jpeg"})
+	if err != nil || res != (ticket.Verdict{Valid: true, Reason: "ok"}) {
 		t.Fatalf("Analyze = %+v, %v", res, err)
 	}
 	if len(*got) != 1 {
@@ -79,7 +81,7 @@ func TestHTTPPostsImageUnchanged(t *testing.T) {
 
 func TestHTTPValidFalseIsAResult(t *testing.T) {
 	a, _ := server(t, status(200, `{"valid":false}`))
-	res, err := a.Analyze(context.Background(), Image{Data: jpeg})
+	res, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg})
 	if err != nil || res.Valid {
 		t.Fatalf("Analyze = %+v, %v", res, err)
 	}
@@ -95,16 +97,16 @@ func TestHTTPRetries(t *testing.T) {
 	}{
 		{"5xx is retried once and succeeds", []reply{status(500, `{}`), ok}, 2, nil},
 		{"no answer is retried once and succeeds", []reply{hang, ok}, 2, nil},
-		{"5xx twice is an upstream error", []reply{status(500, `{}`), status(502, `{}`)}, 2, ErrUpstream},
-		{"no answer twice is a timeout", []reply{hang, hang}, 2, ErrTimeout},
-		{"4xx is not retried", []reply{status(401, `{}`)}, 1, ErrUpstream},
-		{"malformed body is not retried", []reply{status(200, `{"valid":"yes"}`)}, 1, ErrUpstream},
-		{"missing valid is not retried", []reply{status(200, `{"reason":"x"}`)}, 1, ErrUpstream},
+		{"5xx twice is an upstream error", []reply{status(500, `{}`), status(502, `{}`)}, 2, ticket.ErrVerifierUpstream},
+		{"no answer twice is a timeout", []reply{hang, hang}, 2, ticket.ErrVerifierTimeout},
+		{"4xx is not retried", []reply{status(401, `{}`)}, 1, ticket.ErrVerifierUpstream},
+		{"malformed body is not retried", []reply{status(200, `{"valid":"yes"}`)}, 1, ticket.ErrVerifierUpstream},
+		{"missing valid is not retried", []reply{status(200, `{"reason":"x"}`)}, 1, ticket.ErrVerifierUpstream},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a, got := server(t, tt.script...)
-			res, err := a.Analyze(context.Background(), Image{Data: jpeg})
+			res, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg})
 			if tt.wantErr == nil {
 				if err != nil || !res.Valid {
 					t.Errorf("Analyze = %+v, %v; want valid", res, err)
@@ -124,8 +126,8 @@ func TestHTTPConnectionRefusedIsUpstream(t *testing.T) {
 	url := srv.URL
 	srv.Close() // nothing listens there any more
 	a := NewHTTP(HTTPConfig{URL: url, APIKey: "k", Timeout: time.Second})
-	if _, err := a.Analyze(context.Background(), Image{Data: jpeg}); !errors.Is(err, ErrUpstream) {
-		t.Errorf("err = %v, want ErrUpstream", err)
+	if _, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg}); !errors.Is(err, ticket.ErrVerifierUpstream) {
+		t.Errorf("err = %v, want ticket.ErrVerifierUpstream", err)
 	}
 }
 

@@ -220,7 +220,7 @@ curl -s -o /dev/null -D - -H "Origin: $WEB_URL" -H 'Accept: application/json' \
   -F image=@testdata/images/photo.jpg $API_URL/v1/tickets | grep -iE '^(HTTP|access-control-allow-origin)'
 ```
 
-ブラウザで `$WEB_URL` を開き、写真を選んで「発行する」を押す。SPA のチケット画面（`#/tickets/{code}?sig=…`）に移り、QR が表示されれば成功。その画面をリロードしても、同じチケットが表示される（再発行されない）。
+ブラウザで `$WEB_URL` を開き、証明書の画像を選んで「発行する」を押す。SPA のチケット画面（`#/tickets/{code}?sig=…`）に移り、QR が表示されれば成功。その画面をリロードしても、同じチケットが表示される（再発行されない）。
 
 うまくいかないとき:
 

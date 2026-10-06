@@ -1,4 +1,5 @@
-// Package qr renders ticket codes as QR PNG images.
+// Package qr renders ticket codes as QR PNG images. Clean architecture: a driver (wraps the QR library),
+// shared by the ticket API (httpapi) and the example.com QR endpoint (cmd/exampleqr).
 package qr
 
 import qrcode "github.com/skip2/go-qrcode"

@@ -23,12 +23,12 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 
-	"ticketqr/internal/handler"
+	"ticketqr/internal/httpapi"
 	"ticketqr/internal/localhttp"
 )
 
 // Same routes as infra/cloudformation/api.yaml (one function serves them all, as the zip does).
-var routes = []string{handler.RouteIssueInline, handler.RouteIssue, handler.RouteGetView, handler.RouteGetQR}
+var routes = []string{httpapi.RouteGrantInline, httpapi.RouteGrant, httpapi.RouteGetView, httpapi.RouteGetQR}
 
 func main() {
 	addr := env("LISTEN_ADDR", ":3000")

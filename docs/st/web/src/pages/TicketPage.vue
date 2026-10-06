@@ -31,6 +31,8 @@ const qrFailed = ref(false); // QR 画像 API の 403（署名の不一致）や
       @qr-error="qrFailed = true"
     />
 
-    <RouterLink to="/" class="inline-block text-sm underline" @click="store.reset()">別の写真で発行する</RouterLink>
+    <RouterLink to="/" class="inline-block text-sm underline" @click="store.reset()"
+      >別の証明書の画像で発行する</RouterLink
+    >
   </main>
 </template>

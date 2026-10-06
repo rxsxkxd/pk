@@ -1,4 +1,5 @@
-// Package signer signs ticket codes so the view / QR endpoints only serve URLs this API issued.
+// Package signer signs ticket codes so the view / QR endpoints only serve URLs this API created.
+// Clean architecture: an application rule used by the HTTP layer (separate from the issuing flow).
 package signer
 
 import (

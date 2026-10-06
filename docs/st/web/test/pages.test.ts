@@ -5,22 +5,22 @@ import { API, CODE, config, json, mountAt, photo, SIG, stubFetch } from './helpe
 afterEach(() => vi.unstubAllGlobals());
 
 async function choosePhoto(wrapper: Awaited<ReturnType<typeof mountAt>>['wrapper'], file = photo()) {
-  const input = wrapper.get('[data-testid="photo-input"]');
+  const input = wrapper.get('[data-testid="image-input"]');
   Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
   await input.trigger('change');
 }
 
-describe('SPA issue screen', () => {
+describe('SPA grant screen', () => {
   test('only the main page mode is shown by default', async () => {
     const { wrapper } = await mountAt('/');
-    expect(wrapper.find('[data-testid="issue-page"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="issue-inline"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="grant-page"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="grant-inline"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="post-form"]').exists()).toBe(false);
   });
 
   test('optional modes appear when enabled in config.json', async () => {
     const { wrapper } = await mountAt('/', config(['page', 'inline', 'form']));
-    expect(wrapper.find('[data-testid="issue-inline"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="grant-inline"]').exists()).toBe(true);
     const form = wrapper.get('[data-testid="post-form"]');
     expect(form.attributes('action')).toBe(`${API}/v1/tickets`);
     expect(form.attributes('method')).toBe('post');
@@ -30,21 +30,21 @@ describe('SPA issue screen', () => {
 
   test('the button is disabled until a usable photo is chosen', async () => {
     const { wrapper } = await mountAt('/');
-    const button = wrapper.get('[data-testid="issue-page"]');
+    const button = wrapper.get('[data-testid="grant-page"]');
     expect(button.attributes('disabled')).toBeDefined();
     await choosePhoto(wrapper, photo('a.pdf', 'application/pdf'));
-    expect(wrapper.get('[data-testid="photo-problem"]').text()).toContain('対応していません');
+    expect(wrapper.get('[data-testid="image-problem"]').text()).toContain('対応していません');
     expect(button.attributes('disabled')).toBeDefined();
     await choosePhoto(wrapper);
     expect(button.attributes('disabled')).toBeUndefined();
   });
 
-  test('page mode: issues and moves to the ticket screen (replace)', async () => {
+  test('page mode: grants and moves to the ticket screen (replace)', async () => {
     stubFetch(json(201, { ticketCode: CODE, issuedAt: '2026-10-05T13:50:54+09:00', sig: SIG, qrUrl: `${API}/x` }));
     const { wrapper, router } = await mountAt('/');
     const replace = vi.spyOn(router, 'replace');
     await choosePhoto(wrapper);
-    await wrapper.get('[data-testid="issue-page"]').trigger('click');
+    await wrapper.get('[data-testid="grant-page"]').trigger('click');
     await flushPromises();
     expect(replace).toHaveBeenCalledWith({ path: `/tickets/${CODE}`, query: { sig: SIG } });
     expect(router.currentRoute.value.fullPath).toBe(`/tickets/${CODE}?sig=${SIG}`);
@@ -60,7 +60,7 @@ describe('SPA issue screen', () => {
     );
     const { wrapper } = await mountAt('/', config(['page', 'inline']));
     await choosePhoto(wrapper);
-    await wrapper.get('[data-testid="issue-inline"]').trigger('click');
+    await wrapper.get('[data-testid="grant-inline"]').trigger('click');
     await flushPromises();
     const result = wrapper.get('[data-testid="inline-result"]');
     expect(result.get('img').attributes('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
@@ -72,20 +72,20 @@ describe('SPA issue screen', () => {
     stubFetch(json(422, { error: { code: 'IMAGE_INVALID', message: 'image was rejected' } }));
     const { wrapper } = await mountAt('/');
     await choosePhoto(wrapper);
-    await wrapper.get('[data-testid="issue-page"]').trigger('click');
+    await wrapper.get('[data-testid="grant-page"]').trigger('click');
     await flushPromises();
-    expect(wrapper.get('[data-testid="error"]').text()).toBe('この写真ではチケットを発行できません');
+    expect(wrapper.get('[data-testid="error"]').text()).toBe('この証明書の画像ではチケットを発行できません');
   });
 });
 
 describe('SPA ticket screen (drawn from the URL only)', () => {
-  test('shows the QR from the QR image API, the code and the issue time from the code', async () => {
+  test('shows the QR from the QR image API, the code and the granted time (issuedAt) from the code', async () => {
     const fetch = stubFetch();
     const { wrapper } = await mountAt(`/tickets/${CODE}?sig=${SIG}`);
     expect(wrapper.get('img').attributes('src')).toBe(`${API}/v1/tickets/${CODE}/qr?sig=${SIG}`);
     expect(wrapper.get('[data-testid="ticket-code"]').text()).toBe(CODE);
     expect(wrapper.get('[data-testid="issued-at"]').text()).toBe('発行: 2026-10-05 13:50:54');
-    expect(fetch).not.toHaveBeenCalled(); // no re-issue on reload
+    expect(fetch).not.toHaveBeenCalled(); // no re-grant on reload
   });
 
   test.each([

@@ -1,4 +1,4 @@
-package handler
+package httpapi
 
 import (
 	"bytes"
@@ -21,8 +21,7 @@ import (
 	"ticketqr/internal/analyzer"
 	"ticketqr/internal/imageinput"
 	"ticketqr/internal/signer"
-	"ticketqr/internal/ticketcode"
-	"ticketqr/internal/usecase"
+	"ticketqr/internal/ticket"
 	"ticketqr/internal/view"
 )
 
@@ -43,20 +42,20 @@ func mustRead(name string) []byte {
 	return b
 }
 
-type stubAnalyzer struct {
-	res analyzer.Result
+type stubVerifier struct {
+	res ticket.Verdict
 	err error
-	got *analyzer.Image // when set, records what the analyzer was given
+	got *ticket.CertificateImage // when set, records what the analyzer was given
 }
 
-func (s stubAnalyzer) Analyze(_ context.Context, img analyzer.Image) (analyzer.Result, error) {
+func (s stubVerifier) Verify(_ context.Context, img ticket.CertificateImage) (ticket.Verdict, error) {
 	if s.got != nil {
 		*s.got = img
 	}
 	return s.res, s.err
 }
 
-func newHandlers(t *testing.T, an analyzer.Analyzer) *Handlers {
+func newHandlers(t *testing.T, an ticket.Verifier) *Handlers {
 	t.Helper()
 	sg, err := signer.New("test-salt", "")
 	if err != nil {
@@ -70,7 +69,7 @@ func newHandlers(t *testing.T, an analyzer.Analyzer) *Handlers {
 	return &Handlers{
 		PublicBaseURL: "https://api.example.com",
 		PublicOrigin:  "https://api.example.com",
-		Issuer:        &usecase.Issuer{Analyzer: an, Generator: ticketcode.NewGenerator(10), Logger: logger},
+		Ports:         ticket.Ports{Verifier: an, Generator: ticket.NewGenerator(10), Logger: logger},
 		Signer:        sg,
 		View:          vw,
 		Logger:        logger,
@@ -148,10 +147,10 @@ func assertCommonHeaders(t *testing.T, res Response) {
 	}
 }
 
-func TestIssueInline(t *testing.T) {
-	var sent analyzer.Image
-	h := newHandlers(t, stubAnalyzer{res: analyzer.Result{Valid: true}, got: &sent})
-	res, _ := h.IssueInline(context.Background(), formRequest(t, "image", jpeg))
+func TestGrantInline(t *testing.T) {
+	var sent ticket.CertificateImage
+	h := newHandlers(t, stubVerifier{res: ticket.Verdict{Valid: true}, got: &sent})
+	res, _ := h.GrantInline(context.Background(), formRequest(t, "image", jpeg))
 
 	if res.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d, body = %s", res.StatusCode, res.Body)
@@ -183,11 +182,11 @@ func TestIssueInline(t *testing.T) {
 	}
 }
 
-func TestIssueInlineErrors(t *testing.T) {
+func TestGrantInlineErrors(t *testing.T) {
 	big := append(append([]byte{}, jpeg...), make([]byte, imageinput.MaxBytes)...)
 	tests := []struct {
 		name     string
-		analyzer analyzer.Analyzer
+		analyzer ticket.Verifier
 		req      Request
 		status   int
 		code     string
@@ -204,13 +203,13 @@ func TestIssueInlineErrors(t *testing.T) {
 		{"empty image", analyzer.AlwaysValid{}, formRequest(t, "image", nil), 400, "BAD_REQUEST"},
 		{"not an image", analyzer.AlwaysValid{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
 		{"too large", analyzer.AlwaysValid{}, formRequest(t, "image", big), 413, "PAYLOAD_TOO_LARGE"},
-		{"rejected", stubAnalyzer{res: analyzer.Result{Valid: false, Reason: "blurry"}}, formRequest(t, "image", jpeg), 422, "IMAGE_INVALID"},
-		{"upstream error", stubAnalyzer{err: analyzer.ErrUpstream}, formRequest(t, "image", jpeg), 502, "ANALYSIS_UPSTREAM_ERROR"},
-		{"timeout", stubAnalyzer{err: analyzer.ErrTimeout}, formRequest(t, "image", jpeg), 504, "ANALYSIS_TIMEOUT"},
+		{"rejected", stubVerifier{res: ticket.Verdict{Valid: false, Reason: "blurry"}}, formRequest(t, "image", jpeg), 422, "IMAGE_INVALID"},
+		{"upstream error", stubVerifier{err: ticket.ErrVerifierUpstream}, formRequest(t, "image", jpeg), 502, "ANALYSIS_UPSTREAM_ERROR"},
+		{"timeout", stubVerifier{err: ticket.ErrVerifierTimeout}, formRequest(t, "image", jpeg), 504, "ANALYSIS_TIMEOUT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, err := newHandlers(t, tt.analyzer).IssueInline(context.Background(), tt.req)
+			res, err := newHandlers(t, tt.analyzer).GrantInline(context.Background(), tt.req)
 			if err != nil {
 				t.Fatalf("handler returned Go error: %v", err)
 			}
@@ -233,7 +232,7 @@ func TestContentTypeVariants(t *testing.T) {
 	} {
 		t.Run(format, func(t *testing.T) {
 			req := withContentType(t, formRequest(t, "image", jpeg), format)
-			res, _ := newHandlers(t, analyzer.AlwaysValid{}).IssueInline(context.Background(), req)
+			res, _ := newHandlers(t, analyzer.AlwaysValid{}).GrantInline(context.Background(), req)
 			if res.StatusCode != http.StatusCreated {
 				t.Errorf("status = %d, body = %s", res.StatusCode, res.Body)
 			}
@@ -246,9 +245,9 @@ func TestPatternBFlow(t *testing.T) {
 	h := newHandlers(t, analyzer.AlwaysValid{})
 	ctx := context.Background()
 
-	res, _ := h.Issue(ctx, formRequest(t, "image", png))
+	res, _ := h.Grant(ctx, formRequest(t, "image", png))
 	if res.StatusCode != http.StatusSeeOther {
-		t.Fatalf("issue status = %d, body = %s", res.StatusCode, res.Body)
+		t.Fatalf("grant status = %d, body = %s", res.StatusCode, res.Body)
 	}
 	assertCommonHeaders(t, res)
 	loc, err := url.Parse(res.Headers["Location"])
@@ -283,10 +282,10 @@ func TestPatternBFlow(t *testing.T) {
 	}
 }
 
-func TestIssueErrorsAreHTML(t *testing.T) {
+func TestGrantErrorsAreHTML(t *testing.T) {
 	tests := []struct {
 		name     string
-		analyzer analyzer.Analyzer
+		analyzer ticket.Verifier
 		req      Request
 		status   int
 		code     string
@@ -295,11 +294,11 @@ func TestIssueErrorsAreHTML(t *testing.T) {
 		{"missing image field", analyzer.AlwaysValid{}, formRequest(t, "file", jpeg), 400, "BAD_REQUEST"},
 		{"not an image", analyzer.AlwaysValid{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
 		{"too large", analyzer.AlwaysValid{}, formRequest(t, "image", append(append([]byte{}, jpeg...), make([]byte, imageinput.MaxBytes)...)), 413, "PAYLOAD_TOO_LARGE"},
-		{"rejected", stubAnalyzer{res: analyzer.Result{Valid: false}}, formRequest(t, "image", jpeg), 422, "IMAGE_INVALID"},
+		{"rejected", stubVerifier{res: ticket.Verdict{Valid: false}}, formRequest(t, "image", jpeg), 422, "IMAGE_INVALID"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res, _ := newHandlers(t, tt.analyzer).Issue(context.Background(), tt.req)
+			res, _ := newHandlers(t, tt.analyzer).Grant(context.Background(), tt.req)
 			if res.StatusCode != tt.status {
 				t.Errorf("status = %d, want %d", res.StatusCode, tt.status)
 			}
@@ -350,9 +349,9 @@ func TestViewEscapesTicketCode(t *testing.T) {
 	}
 }
 
-// TestIssueInlineWithHTTPAnalyzer checks the real HTTP client end to end: the analysis server's answer or
+// TestGrantInlineWithHTTPAnalyzer checks the real HTTP client end to end: the analysis server's answer or
 // failure becomes 201 / 422 / 502 / 504.
-func TestIssueInlineWithHTTPAnalyzer(t *testing.T) {
+func TestGrantInlineWithHTTPAnalyzer(t *testing.T) {
 	tests := []struct {
 		name   string
 		handle http.HandlerFunc
@@ -370,7 +369,7 @@ func TestIssueInlineWithHTTPAnalyzer(t *testing.T) {
 			defer srv.Close()
 			an := analyzer.NewHTTP(analyzer.HTTPConfig{URL: srv.URL, APIKey: "k", Timeout: 100 * time.Millisecond})
 
-			res, _ := newHandlers(t, an).IssueInline(context.Background(), formRequest(t, "image", jpeg))
+			res, _ := newHandlers(t, an).GrantInline(context.Background(), formRequest(t, "image", jpeg))
 
 			if res.StatusCode != tt.status {
 				t.Fatalf("status = %d, body = %s", res.StatusCode, res.Body)
@@ -392,7 +391,7 @@ func hang(_ http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// TestUploadFormats checks the split of responsibilities: the handler detects the format, the use case
+// TestUploadFormats checks the split of responsibilities: the handler detects the format, VerifyAndGrant
 // accepts only the formats phones upload, and the bytes reach the analyzer unchanged.
 func TestUploadFormats(t *testing.T) {
 	for file, want := range map[string]string{
@@ -400,10 +399,10 @@ func TestUploadFormats(t *testing.T) {
 		"photo-mif1.heif": "image/heif", "photo.avif": "image/avif", "photo.webp": "image/webp",
 	} {
 		t.Run(file, func(t *testing.T) {
-			var sent analyzer.Image
-			h := newHandlers(t, stubAnalyzer{res: analyzer.Result{Valid: true}, got: &sent})
+			var sent ticket.CertificateImage
+			h := newHandlers(t, stubVerifier{res: ticket.Verdict{Valid: true}, got: &sent})
 			data := mustRead(file)
-			res, _ := h.IssueInline(context.Background(), formRequest(t, "image", data))
+			res, _ := h.GrantInline(context.Background(), formRequest(t, "image", data))
 			if res.StatusCode != http.StatusCreated || sent.MimeType != want || !bytes.Equal(sent.Data, data) {
 				t.Errorf("status %d, mime %q, unchanged %v", res.StatusCode, sent.MimeType, bytes.Equal(sent.Data, data))
 			}
@@ -414,7 +413,7 @@ func TestUploadFormats(t *testing.T) {
 		"JPEG magic bytes only": {0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'},
 	} {
 		t.Run(name, func(t *testing.T) {
-			res, _ := newHandlers(t, analyzer.AlwaysValid{}).IssueInline(context.Background(), formRequest(t, "image", data))
+			res, _ := newHandlers(t, analyzer.AlwaysValid{}).GrantInline(context.Background(), formRequest(t, "image", data))
 			if res.StatusCode != http.StatusUnsupportedMediaType {
 				t.Errorf("status = %d, want 415", res.StatusCode)
 			}
@@ -422,14 +421,14 @@ func TestUploadFormats(t *testing.T) {
 	}
 }
 
-// TestIssueAcceptJSON checks the SPA path of B-1: Accept: application/json gets the signed QR URL as JSON
+// TestGrantAcceptJSON checks the SPA path of B-1: Accept: application/json gets the signed QR URL as JSON
 // (and JSON errors) instead of a redirect.
-func TestIssueAcceptJSON(t *testing.T) {
+func TestGrantAcceptJSON(t *testing.T) {
 	h := newHandlers(t, analyzer.AlwaysValid{})
 	req := formRequest(t, "image", jpeg)
 	req.Headers["accept"] = "application/json"
 
-	res, _ := h.Issue(context.Background(), req)
+	res, _ := h.Grant(context.Background(), req)
 	if res.StatusCode != http.StatusCreated || !strings.HasPrefix(res.Headers["Content-Type"], "application/json") {
 		t.Fatalf("status = %d, content-type = %q, body = %s", res.StatusCode, res.Headers["Content-Type"], res.Body)
 	}
@@ -456,7 +455,7 @@ func TestIssueAcceptJSON(t *testing.T) {
 	// Errors are JSON too.
 	bad := formRequest(t, "image", []byte("hello"))
 	bad.Headers["accept"] = "application/json"
-	res, _ = h.Issue(context.Background(), bad)
+	res, _ = h.Grant(context.Background(), bad)
 	if res.StatusCode != http.StatusUnsupportedMediaType || errorCode(t, res) != "UNSUPPORTED_MEDIA_TYPE" {
 		t.Errorf("error: status = %d, body = %s", res.StatusCode, res.Body)
 	}
@@ -464,7 +463,7 @@ func TestIssueAcceptJSON(t *testing.T) {
 	// A browser form (Accept: text/html,...) still gets the redirect.
 	form := formRequest(t, "image", jpeg)
 	form.Headers["accept"] = "text/html,application/xhtml+xml,*/*;q=0.8"
-	if res, _ = h.Issue(context.Background(), form); res.StatusCode != http.StatusSeeOther {
+	if res, _ = h.Grant(context.Background(), form); res.StatusCode != http.StatusSeeOther {
 		t.Errorf("form: status = %d, want 303", res.StatusCode)
 	}
 }
@@ -503,8 +502,8 @@ func TestClientLog(t *testing.T) {
 		return req
 	}
 	logs := completedLogs(t, h, func() {
-		h.IssueInline(ctx, withClient(formRequest(t, "image", jpeg)))
-		h.Issue(ctx, withClient(formRequest(t, "image", []byte("not an image")))) // errors are logged too
+		h.GrantInline(ctx, withClient(formRequest(t, "image", jpeg)))
+		h.Grant(ctx, withClient(formRequest(t, "image", []byte("not an image")))) // errors are logged too
 		h.GetQR(ctx, Request{Headers: map[string]string{"user-agent": iOS13}})
 	})
 	if len(logs) != 3 {
@@ -531,7 +530,7 @@ func TestClientLog(t *testing.T) {
 		}
 	}
 	if logs[1]["status"] != float64(415) {
-		t.Errorf("issue status = %v, want 415", logs[1]["status"])
+		t.Errorf("grant status = %v, want 415", logs[1]["status"])
 	}
 	if _, ok := logs[2]["client"]; ok {
 		t.Error("get-qr must not log the client")
@@ -544,8 +543,8 @@ func TestClientLogLimits(t *testing.T) {
 	logs := completedLogs(t, h, func() {
 		req := formRequest(t, "image", jpeg)
 		req.Headers["user-agent"] = long
-		h.IssueInline(context.Background(), req)
-		h.IssueInline(context.Background(), formRequest(t, "image", jpeg)) // no client headers
+		h.GrantInline(context.Background(), req)
+		h.GrantInline(context.Background(), formRequest(t, "image", jpeg)) // no client headers
 	})
 	if ua := logs[0]["client"].(map[string]any)["userAgent"].(string); len(ua) != 512 {
 		t.Errorf("userAgent length = %d, want 512", len(ua))

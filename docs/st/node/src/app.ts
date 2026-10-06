@@ -13,16 +13,16 @@ import {
   forbidden,
   generateTicket,
   internal,
-  issueTicket,
+  verifyAndGrant,
   newSigner,
   notFound,
   payloadTooLarge,
   unsupportedMediaType,
-  type Analyzer,
+  type Verifier,
   type Log,
   type Signer,
   type Ticket,
-  type Upload,
+  type CertificateImage,
 } from './domain.ts';
 import { consoleLog, loadConfig, loadSalts, newAnalyzer, type Config } from './infra.ts';
 import { detectImageType, MAX_IMAGE_BYTES } from './image.ts';
@@ -38,14 +38,14 @@ type Ctx = Context<Env>;
 
 export type Deps = {
   config: Config;
-  analyzer: Analyzer;
+  verifier: Verifier;
   signer: Signer;
   newTicket: () => Ticket;
   log: Log;
 };
 
 // =================================================================================================
-// Route table and wiring  (↔ go/internal/app/app.go, go/internal/handler/route.go)
+// Route table and wiring  (↔ go/cmd/ticketqr/wire.go, go/internal/httpapi/route.go)
 // =================================================================================================
 
 type Endpoint = (c: Ctx, deps: Deps) => Promise<Response>;
@@ -53,10 +53,10 @@ type Endpoint = (c: Ctx, deps: Deps) => Promise<Response>;
 // 設定と salt を読み込み依存部品を組み立てる（Lambda 実行環境ごとに初期化時に1回だけ呼ぶ）。
 export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<Deps> {
   const config = loadConfig(env);
-  const analyzer = await newAnalyzer(env);
+  const verifier = await newAnalyzer(env);
   const salts = await loadSalts(env);
   const signer = newSigner(salts.current, salts.previous);
-  return { config, analyzer, signer, newTicket: () => generateTicket(config.suffixLength), log: consoleLog };
+  return { config, verifier, signer, newTicket: () => generateTicket(config.suffixLength), log: consoleLog };
 }
 
 // チケット系エンドポイントの Hono アプリを組み立てる（ログ・共通ヘッダー・エラー変換を含む）。
@@ -66,8 +66,8 @@ export function createApp(deps: Deps): Hono<Env> {
 
   // Same routes as API Gateway HTTP API ({ticketCode} is written :ticketCode in Hono).
   routes(app, deps)
-    .post('/v1/tickets/qr-inline', { name: 'issue-inline', errors: 'json' }, issueInline) // A
-    .post('/v1/tickets', { name: 'issue', errors: 'accept' }, issue) // B-1
+    .post('/v1/tickets/qr-inline', { name: 'grant-inline', errors: 'json' }, grantInline) // A
+    .post('/v1/tickets', { name: 'grant', errors: 'accept' }, grant) // B-1
     .get('/v1/tickets/:ticketCode/view', { name: 'get-view', errors: 'html' }, getView) // B-3
     .get('/v1/tickets/:ticketCode/qr', { name: 'get-qr', errors: 'json' }, getQr); // B-2
 
@@ -124,7 +124,7 @@ const requestLog =
 
 // Endpoints that receive images from browsers. Their completion log also records what the browser says
 // about itself, so browser and OS versions can be counted in CloudWatch Logs (DESIGN.md 10).
-const CLIENT_ENDPOINTS = new Set(['issue-inline', 'issue']);
+const CLIENT_ENDPOINTS = new Set(['grant-inline', 'grant']);
 
 // Log keys → request headers logged as-is: the User-Agent and the User-Agent Client Hints (same keys as Go).
 const CLIENT_HEADERS = {
@@ -157,12 +157,12 @@ function errorBody(e: AppError) {
 }
 
 // =================================================================================================
-// Endpoints  (↔ go/internal/handler/handler.go)
+// Endpoints  (↔ go/internal/httpapi/handler.go)
 // =================================================================================================
 
 // A: 画像を受け取って発行し、QR を base64 で埋め込んだ JSON を返す（DESIGN.md 5.1）。
-async function issueInline(c: Ctx, deps: Deps): Promise<Response> {
-  const t = await issueTicket(deps, await readUpload(c));
+async function grantInline(c: Ctx, deps: Deps): Promise<Response> {
+  const t = await verifyAndGrant(deps, await readUpload(c));
   const png = qrPng(t.code);
   return c.json(
     { ticketCode: t.code, issuedAt: t.issuedAt, qr: { mimeType: 'image/png', data: png.toString('base64') } },
@@ -172,8 +172,8 @@ async function issueInline(c: Ctx, deps: Deps): Promise<Response> {
 
 // B-1: 画像で発行する。フォーム送信には署名付きビュー URL への 303、Accept: application/json（SPA）には
 // 署名付き QR URL の JSON を返す（DESIGN.md 5.2）。
-async function issue(c: Ctx, deps: Deps): Promise<Response> {
-  const t = await issueTicket(deps, await readUpload(c));
+async function grant(c: Ctx, deps: Deps): Promise<Response> {
+  const t = await verifyAndGrant(deps, await readUpload(c));
   c.header('Vary', 'Accept');
   if (!acceptsJson(c)) return c.redirect(ticketUrl(deps, t.code, 'view'), 303);
   const sig = deps.signer.sign(t.code);
@@ -210,14 +210,14 @@ function ticketUrl(deps: Deps, code: string, resource: 'view' | 'qr'): string {
 }
 
 // =================================================================================================
-// Request → usecase input  (↔ go/internal/handler readUpload / readFormImage)
+// Request → usecase input  (↔ go/internal/httpapi readUpload / readFormImage)
 // =================================================================================================
 
-// リクエストを usecase の入力（Upload）に変換する。バイト列は加工せず、サイズ上限の確認と形式の判定だけ行う。
-async function readUpload(c: Ctx): Promise<Upload> {
+// リクエストを ユースケースの入力（CertificateImage。証明書の画像）に変換する。バイト列は加工せず、サイズ上限の確認と形式の判定だけ行う。
+async function readUpload(c: Ctx): Promise<CertificateImage> {
   const data = await readFormImage(c);
   if (data.length > MAX_IMAGE_BYTES) throw payloadTooLarge(`image must be ${MAX_IMAGE_BYTES} bytes or less`);
-  return { data, detectedType: detectImageType(data) } satisfies Upload;
+  return { data, mimeType: detectImageType(data) } satisfies CertificateImage;
 }
 
 // multipart/form-data から image ファイルのバイト列を取り出す（HTTP の都合だけを扱う）。

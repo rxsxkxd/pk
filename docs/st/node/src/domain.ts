@@ -1,15 +1,16 @@
-// Business logic of the ticket QR API: the rules shared with the ticket consumer and the issue flow.
+// Business logic of the ticket QR API: the rules shared with the ticket consumer and verifyAndGrant
+// (verify a certificate image, then grant a ticket).
 // (Format detection and the runtime size limit live in app.ts; which formats are accepted is decided here.)
-// No I/O here — external systems are reached through the Analyzer and Log ports, implemented in
+// No I/O here — external systems are reached through the Verifier and Log ports, implemented in
 // infra.ts. Rules are checked against ../testdata, shared with the Go version.
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 // =================================================================================================
-// Issue flow  (↔ go/internal/usecase/issue.go)
+// Verify and grant  (↔ go/internal/ticket/grant.go)
 // =================================================================================================
 
-export type IssuePorts = { analyzer: Analyzer; newTicket: () => Ticket; log: Log };
+export type Ports = { verifier: Verifier; newTicket: () => Ticket; log: Log };
 
 // Formats iPhone and major Android phones upload as-is (business rule).
 const ACCEPTED_IMAGE_TYPES = new Set([
@@ -21,39 +22,39 @@ const ACCEPTED_IMAGE_TYPES = new Set([
   'image/webp',
 ]);
 
-// 受け付けてよい画像か判断し、解析サーバーに問い合わせて、valid のときだけチケットコードを採番する。
-export async function issueTicket(ports: IssuePorts, upload: Upload): Promise<Ticket> {
-  if (upload.data.length === 0) throw badRequest('image is empty');
-  if (!upload.detectedType || !ACCEPTED_IMAGE_TYPES.has(upload.detectedType)) {
+// 証明書の画像を検証し（受け付ける形式か → 検証サーバーの判定）、通ったときだけ新しいチケットを与える。
+export async function verifyAndGrant(ports: Ports, img: CertificateImage): Promise<Ticket> {
+  if (img.data.length === 0) throw badRequest('image is empty');
+  if (!img.mimeType || !ACCEPTED_IMAGE_TYPES.has(img.mimeType)) {
     throw unsupportedMediaType('image must be JPEG, PNG, HEIC/HEIF, AVIF or WebP');
   }
 
-  let res: AnalyzerResult;
+  let verdict: Verdict;
   try {
-    res = await ports.analyzer({ data: upload.data, mimeType: upload.detectedType });
+    verdict = await ports.verifier({ data: img.data, mimeType: img.mimeType });
   } catch (err) {
-    if (err instanceof AnalyzerError && err.kind === 'timeout') throw analysisTimeout();
+    if (err instanceof VerifierError && err.kind === 'timeout') throw analysisTimeout();
     ports.log('ERROR', 'image analysis failed', { error: String(err) });
     throw analysisUpstream();
   }
-  if (!res.valid) {
-    ports.log('INFO', 'image rejected', { reason: res.reason });
-    throw imageInvalid('image was rejected');
+  if (!verdict.valid) {
+    ports.log('INFO', 'image rejected', { reason: verdict.reason });
+    throw certificateRejected('image was rejected');
   }
 
   const t = ports.newTicket();
-  ports.log('INFO', 'ticket issued', { ticketCode: t.code, issuedAt: t.issuedAt, analysisReason: res.reason });
+  ports.log('INFO', 'ticket issued', { ticketCode: t.code, issuedAt: t.issuedAt, analysisReason: verdict.reason });
   return t;
 }
 
 // =================================================================================================
-// Ticket code: {YYYYMMDDHHmmss}-{suffix}  (↔ go/internal/ticketcode, DESIGN.md 4)
+// Ticket code: {YYYYMMDDHHmmss}-{suffix}  (↔ go/internal/ticket/code.go, DESIGN.md 4)
 // =================================================================================================
 
 const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford Base32 (no I, L, O, U)
 
-// Formats the issue time in JST. hourCycle h23 gives "00" (not "24") at midnight. Pure, so bundles that
-// never issue tickets (exampleqr) drop it.
+// Formats the time a ticket is granted (issuedAt) in JST. hourCycle h23 gives "00" (not "24") at midnight. Pure, so bundles that
+// never grant tickets (exampleqr) drop it.
 const JST = /* @__PURE__ */ new Intl.DateTimeFormat('en-US', {
   timeZone: 'Asia/Tokyo',
   year: 'numeric',
@@ -109,18 +110,19 @@ export function newSigner(current: string, previous?: string): Signer {
 }
 
 // =================================================================================================
-// Ports implemented in infra.ts  (↔ go/internal/analyzer, slog)
+// Ports implemented in infra.ts  (↔ go/internal/ticket/verifier.go; implemented by go/internal/analyzer)
 // =================================================================================================
 
-// An image exactly as received, with the format detected by the HTTP layer (undefined if unknown).
-export type Upload = { data: Uint8Array; detectedType: string | undefined };
+// The uploaded image of a certificate, exactly as received, with the format detected by the HTTP layer
+// (undefined if unknown).
+export type CertificateImage = { data: Uint8Array; mimeType: string | undefined };
 
-// Image analysis: POST application/octet-stream with the uploaded bytes as-is (DESIGN.md 7).
-export type AnalyzerResult = { valid: boolean; reason: string };
-export type Analyzer = (image: { data: Uint8Array; mimeType: string }) => Promise<AnalyzerResult>;
+// Verification by the image analysis server: POST application/octet-stream with the bytes as-is (DESIGN.md 7).
+export type Verdict = { valid: boolean; reason: string };
+export type Verifier = (img: { data: Uint8Array; mimeType: string }) => Promise<Verdict>;
 
-// 解析サーバーの通信失敗（502）/ タイムアウト（504）を表すエラー（解析クライアントが投げる）。
-export class AnalyzerError extends Error {
+// 検証サーバーの通信失敗（502）/ タイムアウト（504）を表すエラー（検証のクライアントが投げる）。
+export class VerifierError extends Error {
   kind: 'upstream' | 'timeout';
   constructor(kind: 'upstream' | 'timeout', message: string) {
     super(message);
@@ -131,7 +133,7 @@ export class AnalyzerError extends Error {
 export type Log = (level: 'INFO' | 'ERROR', msg: string, fields?: Record<string, unknown>) => void;
 
 // =================================================================================================
-// Errors  (↔ go/internal/apperr)
+// Errors  (↔ go/internal/ticket/errors.go and go/internal/httpapi/errors.go)
 // =================================================================================================
 
 // HTTP ステータス・エラーコード・メッセージを持つ、API のエラーレスポンスに対応する例外。
@@ -151,7 +153,7 @@ export const forbidden = () => new AppError(403, 'FORBIDDEN', 'invalid signature
 export const notFound = () => new AppError(404, 'NOT_FOUND', 'route not found');
 export const payloadTooLarge = (msg: string) => new AppError(413, 'PAYLOAD_TOO_LARGE', msg);
 export const unsupportedMediaType = (msg: string) => new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', msg);
-export const imageInvalid = (msg: string) => new AppError(422, 'IMAGE_INVALID', msg);
+export const certificateRejected = (msg: string) => new AppError(422, 'IMAGE_INVALID', msg);
 export const analysisUpstream = () => new AppError(502, 'ANALYSIS_UPSTREAM_ERROR', 'image analysis failed');
 export const analysisTimeout = () => new AppError(504, 'ANALYSIS_TIMEOUT', 'image analysis timed out');
 export const internal = () => new AppError(500, 'INTERNAL_ERROR', 'internal error');

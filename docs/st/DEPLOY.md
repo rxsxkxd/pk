@@ -17,8 +17,8 @@
 Web フロントエンド: CloudFront（OAC）+ 非公開の S3（web.yaml・ticketqr-web-{impl}）                web/DEPLOY.md
   └─ SPA の JS が fetch / <img> で呼ぶ（CORS で SPA のオリジンを許可）
 チケット API: API Gateway HTTP API ticketqr-{impl}（api.yaml）                                   go/DEPLOY.md・node/DEPLOY.md
- ├─ POST /v1/tickets/qr-inline        ┐  QR 同梱発行 API
- ├─ POST /v1/tickets                  ├→ Lambda ticketqr-{impl}-tickets  チケット発行 API
+ ├─ POST /v1/tickets/qr-inline        ┐  QR 同梱付与 API
+ ├─ POST /v1/tickets                  ├→ Lambda ticketqr-{impl}-tickets  チケット付与 API
  ├─ GET  /v1/tickets/{ticketCode}/view ┘                                   チケット表示ページ
  └─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-{impl}-get-qr   QR 画像 API
 example: API Gateway HTTP API ticketqr-{impl}-example（example.yaml。チケット API とは無関係）

@@ -1,5 +1,6 @@
 // Package imageinput detects the format of an uploaded image. This is a technical concern of the HTTP
-// layer; which formats are accepted is a business rule decided in usecase.
+// layer (clean architecture: part of the inbound adapter, used by package httpapi); which formats are
+// accepted is a business rule decided in package ticket. Its heavy dependencies stay in this package.
 package imageinput
 
 import (

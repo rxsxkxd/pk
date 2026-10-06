@@ -10,7 +10,7 @@ import { createApp, type Deps } from '../src/app.ts';
 import { MAX_IMAGE_BYTES } from '../src/image.ts';
 import { createExampleApp } from '../src/example.ts';
 import { qrPng } from '../src/shared.ts';
-import { AnalyzerError, generateTicket, newSigner, type Analyzer, type Log } from '../src/domain.ts';
+import { VerifierError, generateTicket, newSigner, type Verifier, type Log } from '../src/domain.ts';
 import { alwaysValid, httpAnalyzer, loadConfig, newAnalyzer } from '../src/infra.ts';
 
 const root = new URL('../../', import.meta.url);
@@ -24,18 +24,18 @@ const PNG_MAGIC = PNG.subarray(0, 8);
 const CODE_RE = /^\d{14}-[0-9A-HJKMNP-TV-Z]{8}$/;
 const BASE = 'https://api.example.com';
 
-const ISSUE_INLINE = '/v1/tickets/qr-inline';
-const ISSUE = '/v1/tickets';
+const GRANT_INLINE = '/v1/tickets/qr-inline';
+const GRANT = '/v1/tickets';
 
 // ---------------------------------------------------------------- helpers
 // Requests go through @hono/aws-lambda, so the tests also cover the Lambda event conversion.
 
 type LambdaHandler = (event: Event) => Promise<Result>;
 
-function newRoute(analyzer: Analyzer = alwaysValid, log: Log = () => {}) {
+function newRoute(verifier: Verifier = alwaysValid, log: Log = () => {}) {
   const deps: Deps = {
     config: { publicBaseUrl: BASE, publicOrigin: BASE, suffixLength: 8 },
-    analyzer,
+    verifier,
     signer: newSigner('test-salt'),
     newTicket: () => generateTicket(8),
     log,
@@ -109,7 +109,7 @@ const header = (res: Result, name: string) =>
   String(Object.entries(res.headers ?? {}).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1] ?? '');
 const errorCode = (res: Result) => JSON.parse(res.body ?? '').error.code as string;
 const stub =
-  (result: Partial<{ valid: boolean; reason: string }>, err?: Error): Analyzer =>
+  (result: Partial<{ valid: boolean; reason: string }>, err?: Error): Verifier =>
   async () => {
     if (err) throw err;
     return { valid: true, reason: '', ...result };
@@ -212,10 +212,10 @@ describe('qr', () => {
 // ---------------------------------------------------------------- handlers (same cases as Go handler_test.go)
 
 describe('A: POST /v1/tickets/qr-inline', () => {
-  test('issues a ticket and returns the QR as base64 JSON', async () => {
+  test('grants a ticket and returns the QR as base64 JSON', async () => {
     let sent: Uint8Array | undefined;
     const { handle } = newRoute(async (img) => ((sent = img.data), { valid: true, reason: '' }));
-    const res = await handle(await formEvent(ISSUE_INLINE, 'image', JPEG));
+    const res = await handle(await formEvent(GRANT_INLINE, 'image', JPEG));
 
     assert.equal(res.statusCode, 201, String(res.body));
     assertCommonHeaders(res);
@@ -229,25 +229,25 @@ describe('A: POST /v1/tickets/qr-inline', () => {
 
   const big = new Uint8Array(MAX_IMAGE_BYTES + JPEG.length);
   big.set(JPEG);
-  const cases: Array<[string, Analyzer, () => Promise<Event>, number, string]> = [
+  const cases: Array<[string, Verifier, () => Promise<Event>, number, string]> = [
     [
       'json instead of form',
       alwaysValid,
-      async () => rawEvent(ISSUE_INLINE, 'application/json', '{}'),
+      async () => rawEvent(GRANT_INLINE, 'application/json', '{}'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'urlencoded instead of multipart',
       alwaysValid,
-      async () => rawEvent(ISSUE_INLINE, 'application/x-www-form-urlencoded', 'image=x'),
+      async () => rawEvent(GRANT_INLINE, 'application/x-www-form-urlencoded', 'image=x'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'no boundary',
       alwaysValid,
-      async () => rawEvent(ISSUE_INLINE, 'multipart/form-data', 'x'),
+      async () => rawEvent(GRANT_INLINE, 'multipart/form-data', 'x'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
@@ -256,7 +256,7 @@ describe('A: POST /v1/tickets/qr-inline', () => {
       alwaysValid,
       async () =>
         rawEvent(
-          ISSUE_INLINE,
+          GRANT_INLINE,
           'multipart/form-data; boundary=xyz',
           '--xyz\r\nContent-Disposition: form-data; name="image"\r\n\r\nhello\r\n--xyz--\r\n',
         ),
@@ -266,60 +266,60 @@ describe('A: POST /v1/tickets/qr-inline', () => {
     [
       'broken multipart',
       alwaysValid,
-      async () => rawEvent(ISSUE_INLINE, 'multipart/form-data; boundary=xyz', 'garbage'),
+      async () => rawEvent(GRANT_INLINE, 'multipart/form-data; boundary=xyz', 'garbage'),
       400,
       'BAD_REQUEST',
     ],
     [
       'empty boundary',
       alwaysValid,
-      () => withContentType(formEvent(ISSUE_INLINE, 'image', JPEG), 'multipart/form-data; boundary=""'),
+      () => withContentType(formEvent(GRANT_INLINE, 'image', JPEG), 'multipart/form-data; boundary=""'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'boundary without value',
       alwaysValid,
-      () => withContentType(formEvent(ISSUE_INLINE, 'image', JPEG), 'multipart/form-data; boundary'),
+      () => withContentType(formEvent(GRANT_INLINE, 'image', JPEG), 'multipart/form-data; boundary'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    ['broken after the image part', alwaysValid, () => brokenAfterImage(ISSUE_INLINE), 400, 'BAD_REQUEST'],
-    ['missing image field', alwaysValid, () => formEvent(ISSUE_INLINE, 'file', JPEG), 400, 'BAD_REQUEST'],
-    ['empty image', alwaysValid, () => formEvent(ISSUE_INLINE, 'image', new Uint8Array()), 400, 'BAD_REQUEST'],
+    ['broken after the image part', alwaysValid, () => brokenAfterImage(GRANT_INLINE), 400, 'BAD_REQUEST'],
+    ['missing image field', alwaysValid, () => formEvent(GRANT_INLINE, 'file', JPEG), 400, 'BAD_REQUEST'],
+    ['empty image', alwaysValid, () => formEvent(GRANT_INLINE, 'image', new Uint8Array()), 400, 'BAD_REQUEST'],
     [
       'not an image',
       alwaysValid,
-      () => formEvent(ISSUE_INLINE, 'image', Buffer.from('hello')),
+      () => formEvent(GRANT_INLINE, 'image', Buffer.from('hello')),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    ['too large', alwaysValid, () => formEvent(ISSUE_INLINE, 'image', big), 413, 'PAYLOAD_TOO_LARGE'],
+    ['too large', alwaysValid, () => formEvent(GRANT_INLINE, 'image', big), 413, 'PAYLOAD_TOO_LARGE'],
     [
       'rejected',
       stub({ valid: false, reason: 'blurry' }),
-      () => formEvent(ISSUE_INLINE, 'image', JPEG),
+      () => formEvent(GRANT_INLINE, 'image', JPEG),
       422,
       'IMAGE_INVALID',
     ],
     [
       'upstream error',
-      stub({}, new AnalyzerError('upstream', 'boom')),
-      () => formEvent(ISSUE_INLINE, 'image', JPEG),
+      stub({}, new VerifierError('upstream', 'boom')),
+      () => formEvent(GRANT_INLINE, 'image', JPEG),
       502,
       'ANALYSIS_UPSTREAM_ERROR',
     ],
     [
       'timeout',
-      stub({}, new AnalyzerError('timeout', 'slow')),
-      () => formEvent(ISSUE_INLINE, 'image', JPEG),
+      stub({}, new VerifierError('timeout', 'slow')),
+      () => formEvent(GRANT_INLINE, 'image', JPEG),
       504,
       'ANALYSIS_TIMEOUT',
     ],
     [
       'unexpected analyzer error',
       stub({}, new Error('bug')),
-      () => formEvent(ISSUE_INLINE, 'image', JPEG),
+      () => formEvent(GRANT_INLINE, 'image', JPEG),
       502,
       'ANALYSIS_UPSTREAM_ERROR',
     ],
@@ -337,7 +337,7 @@ describe('A: POST /v1/tickets/qr-inline', () => {
 test('B: PRG flow', async () => {
   const { handle } = newRoute();
 
-  let res = await handle(await formEvent(ISSUE, 'image', PNG));
+  let res = await handle(await formEvent(GRANT, 'image', PNG));
   assert.equal(res.statusCode, 303, String(res.body));
   assertCommonHeaders(res);
   const loc = new URL(header(res, 'Location'));
@@ -371,7 +371,7 @@ describe('valid spellings of a multipart Content-Type (same as the Go tests, min
   ]) {
     test(format, async () => {
       const { handle } = newRoute();
-      const res = await handle(await withContentType(formEvent(ISSUE_INLINE, 'image', JPEG), format));
+      const res = await handle(await withContentType(formEvent(GRANT_INLINE, 'image', JPEG), format));
       assert.equal(res.statusCode, 201, String(res.body));
     });
   }
@@ -387,24 +387,24 @@ describe('Content-Type spellings that differ from Go (known differences)', () =>
   ];
   for (const [format, status] of cases) {
     test(format, async () => {
-      const res = await newRoute().handle(await withContentType(formEvent(ISSUE_INLINE, 'image', JPEG), format));
+      const res = await newRoute().handle(await withContentType(formEvent(GRANT_INLINE, 'image', JPEG), format));
       assert.equal(res.statusCode, status, String(res.body));
     });
   }
 });
 
 describe('B-1 errors are HTML views', () => {
-  const cases: Array<[string, Analyzer, () => Promise<Event>, number, string]> = [
+  const cases: Array<[string, Verifier, () => Promise<Event>, number, string]> = [
     [
       'json instead of form',
       alwaysValid,
-      async () => rawEvent(ISSUE, 'application/json', '{}'),
+      async () => rawEvent(GRANT, 'application/json', '{}'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    ['missing image field', alwaysValid, () => formEvent(ISSUE, 'file', JPEG), 400, 'BAD_REQUEST'],
-    ['not an image', alwaysValid, () => formEvent(ISSUE, 'image', Buffer.from('hello')), 415, 'UNSUPPORTED_MEDIA_TYPE'],
-    ['rejected', stub({ valid: false }), () => formEvent(ISSUE, 'image', JPEG), 422, 'IMAGE_INVALID'],
+    ['missing image field', alwaysValid, () => formEvent(GRANT, 'file', JPEG), 400, 'BAD_REQUEST'],
+    ['not an image', alwaysValid, () => formEvent(GRANT, 'image', Buffer.from('hello')), 415, 'UNSUPPORTED_MEDIA_TYPE'],
+    ['rejected', stub({ valid: false }), () => formEvent(GRANT, 'image', JPEG), 422, 'IMAGE_INVALID'],
   ];
   for (const [name, analyzer, makeEvent, status, code] of cases) {
     test(name, async () => {
@@ -532,7 +532,7 @@ describe('http analyzer client', () => {
       if (outcome === 'valid') {
         assert.equal((await analyze(a)).valid, true);
       } else {
-        await assert.rejects(analyze(a), (err: unknown) => err instanceof AnalyzerError && err.kind === outcome);
+        await assert.rejects(analyze(a), (err: unknown) => err instanceof VerifierError && err.kind === outcome);
       }
       assert.equal(received.length, calls);
     });
@@ -546,7 +546,7 @@ describe('http analyzer client', () => {
     ];
     for (const [script, status, code] of cases) {
       const { handle } = newRoute(await client(...script));
-      const res = await handle(await formEvent(ISSUE_INLINE, 'image', JPEG));
+      const res = await handle(await formEvent(GRANT_INLINE, 'image', JPEG));
       assert.equal(res.statusCode, status);
       assert.equal(errorCode(res), code);
     }
@@ -585,7 +585,7 @@ describe('upload formats (iPhone / Android photos as-is)', () => {
     test(`${file} is accepted as ${mimeType} and forwarded unchanged`, async () => {
       let sent: { data: Uint8Array; mimeType: string } | undefined;
       const { handle } = newRoute(async (img) => ((sent = img), { valid: true, reason: '' }));
-      const res = await handle(await formEvent(ISSUE_INLINE, 'image', image(file)));
+      const res = await handle(await formEvent(GRANT_INLINE, 'image', image(file)));
       assert.equal(res.statusCode, 201, String(res.body));
       assert.equal(sent?.mimeType, mimeType);
       assert.deepEqual(sent?.data, image(file));
@@ -605,7 +605,7 @@ describe('upload formats (iPhone / Android photos as-is)', () => {
   ];
   for (const [name, data] of rejected) {
     test(`${name} is 415`, async () => {
-      const res = await newRoute().handle(await formEvent(ISSUE_INLINE, 'image', data));
+      const res = await newRoute().handle(await formEvent(GRANT_INLINE, 'image', data));
       assert.equal(res.statusCode, 415);
       assert.equal(errorCode(res), 'UNSUPPORTED_MEDIA_TYPE');
     });
@@ -619,7 +619,7 @@ describe('B-1 with Accept: application/json', () => {
 
   test('returns the signed QR URL as JSON instead of a redirect', async () => {
     const { deps, handle } = newRoute();
-    const res = await handle(asJson(await formEvent(ISSUE, 'image', JPEG)));
+    const res = await handle(asJson(await formEvent(GRANT, 'image', JPEG)));
     assert.equal(res.statusCode, 201, String(res.body));
     assert.match(header(res, 'Content-Type'), /^application\/json/);
     assert.equal(header(res, 'Location'), '');
@@ -637,13 +637,13 @@ describe('B-1 with Accept: application/json', () => {
   });
 
   test('errors are JSON', async () => {
-    const res = await newRoute().handle(asJson(await formEvent(ISSUE, 'image', Buffer.from('hello'))));
+    const res = await newRoute().handle(asJson(await formEvent(GRANT, 'image', Buffer.from('hello'))));
     assert.equal(res.statusCode, 415);
     assert.equal(errorCode(res), 'UNSUPPORTED_MEDIA_TYPE');
   });
 
   test('a browser form (Accept: text/html, ...) still gets the redirect', async () => {
-    const e = await formEvent(ISSUE, 'image', JPEG);
+    const e = await formEvent(GRANT, 'image', JPEG);
     e.headers.accept = 'text/html,application/xhtml+xml,*/*;q=0.8';
     assert.equal((await newRoute().handle(e)).statusCode, 303);
   });
@@ -677,7 +677,7 @@ describe('client log (browser and OS of image uploads)', () => {
 
   test('upload endpoints log the User-Agent and Client Hints (same keys as Go); other endpoints do not', async () => {
     const logs = await completedLogs(
-      withHeaders(await formEvent(ISSUE_INLINE, 'image', JPEG), CLIENT),
+      withHeaders(await formEvent(GRANT_INLINE, 'image', JPEG), CLIENT),
       withHeaders(await formEvent('/v1/tickets', 'image', Buffer.from('not an image')), CLIENT), // errors too
       withHeaders(signedGet('qr', 'X', 'Y'), { 'user-agent': IOS13 }),
     );
@@ -697,8 +697,8 @@ describe('client log (browser and OS of image uploads)', () => {
 
   test('values are cut to 512 characters and an empty client is omitted', async () => {
     const logs = await completedLogs(
-      withHeaders(await formEvent(ISSUE_INLINE, 'image', JPEG), { 'user-agent': 'a'.repeat(2000) }),
-      await formEvent(ISSUE_INLINE, 'image', JPEG),
+      withHeaders(await formEvent(GRANT_INLINE, 'image', JPEG), { 'user-agent': 'a'.repeat(2000) }),
+      await formEvent(GRANT_INLINE, 'image', JPEG),
     );
     assert.equal((logs[0]!.client as { userAgent: string }).userAgent.length, 512);
     assert.equal('client' in logs[1]!, false);

@@ -1,4 +1,4 @@
-// Client of the ticket QR API (../../PAGES.md 1): the ticket issue API (JSON), the QR inline issue API and
+// Client of the ticket QR API (../../PAGES.md 1): the ticket grant API (JSON), the QR inline grant API and
 // URLs of the QR image API. Responses are validated with zod; failures are thrown as ApiError.
 
 import { z } from 'zod';
@@ -40,12 +40,12 @@ export class ApiError extends Error {
 }
 
 // 画面遷移方式（メイン）: チケット発行 API に画像をそのまま送り、署名付きの QR の URL を受け取る。
-export function issueForPage(apiBaseUrl: string, file: File): Promise<PageTicket> {
+export function grantForPage(apiBaseUrl: string, file: File): Promise<PageTicket> {
   return post(`${apiBaseUrl}/v1/tickets`, file, PageTicketSchema, { Accept: 'application/json' });
 }
 
 // その場表示方式（オプション）: QR 同梱発行 API に画像をそのまま送り、QR（base64）付きの結果を受け取る。
-export function issueInline(apiBaseUrl: string, file: File): Promise<InlineTicket> {
+export function grantInline(apiBaseUrl: string, file: File): Promise<InlineTicket> {
   return post(`${apiBaseUrl}/v1/tickets/qr-inline`, file, InlineTicketSchema);
 }
 
@@ -55,7 +55,7 @@ export function qrUrl(apiBaseUrl: string, code: string, sig: string): string {
 }
 
 // フォーム送信方式（オプション）の送信先。fetch は使わず、フォームの action に入れる。
-export function issueFormAction(apiBaseUrl: string): string {
+export function grantFormAction(apiBaseUrl: string): string {
   return `${apiBaseUrl}/v1/tickets`;
 }
 

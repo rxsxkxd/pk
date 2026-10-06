@@ -1,6 +1,6 @@
 // GET /v1/example/qr — a fixed QR for https://example.com, deployed as its own package (exampleqr.zip)
 // and stack (infra/cloudformation/example.yaml). Unrelated to the ticket API; needs no configuration.
-//  (↔ go/internal/exampleqr)
+//  (↔ go/cmd/exampleqr/handler.go)
 
 import { Hono } from 'hono';
 import { commonHeaders, pngResponse, qrPng } from './shared.ts';

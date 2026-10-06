@@ -46,7 +46,7 @@
 ### 4.2 受信（ダウンロード）: 差は出るが、今回は影響しない
 
 - fetch は `response.body` をストリームとして少しずつ処理できる。XMLHttpRequest は応答全体を受け取ってから扱い、既定の `responseType`（テキスト）では受信中も `responseText` が伸び続ける
-- 今回の応答は小さな JSON（チケット発行 API は数百バイト、QR 同梱発行 API でも数KB）なので、影響しない
+- 今回の応答は小さな JSON（チケット付与 API は数百バイト、QR 同梱付与 API でも数KB）なので、影響しない
 - XMLHttpRequest を使うときは `responseType = 'json'` を指定する（応答をテキストとして持たずに済む）
 
 ### 4.3 OS・ブラウザごとの違い

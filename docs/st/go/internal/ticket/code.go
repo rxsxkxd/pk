@@ -1,5 +1,6 @@
-// Package ticketcode generates ticket codes ({YYYYMMDDHHmmss}-{suffix}) without shared state.
-package ticketcode
+package ticket
+
+// Ticket codes: {YYYYMMDDHHmmss}-{suffix}, generated without shared state (DESIGN.md 4).
 
 import (
 	"crypto/rand"

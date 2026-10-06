@@ -69,7 +69,7 @@ API が変えるのは**送り方（multipart → octet-stream）だけ**。画�
 
 1. **入力検証**（置き場所を性質で分ける）
    - HTTP 層: Content-Type が boundary 付きの `multipart/form-data` か（なければ 415）、ボディ全体が正しい multipart か（壊れていれば 400）、`image` フィールドがあるか、サイズ上限（4MB。実行環境の制約）、画像形式の判定（技術的な処理）
-   - ユースケース: 受け付ける形式か（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone・主要 Android の写真をそのまま送った場合の形式）、空でないか（業務上のルール）
+   - ユースケース: 受け付ける形式か（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone・主要 Android で撮った画像をそのまま送った場合の形式）、空でないか（業務上のルール）
 2. **画像解析連携**: 検証済みの画像バイト列を `application/octet-stream` でそのまま送る（7章）。タイムアウト付きHTTP呼び出し。5xx/タイムアウトのみ限定リトライ（例: 最大1回）
 3. **採番**: valid 時のみ実施。外部ストアを参照せずに生成する（4章）
 4. 発行の記録は構造化ログにのみ残す
@@ -456,24 +456,23 @@ st/
 ├── go/                       # Go モジュールルート（go.mod）
 │   ├── go.mod
 │   ├── Makefile               # run / run-example / test / build（ticketqr.zip と exampleqr.zip）
-│   ├── cmd/ticketqr/          # 唯一のエントリポイント。Lambda 上ならハンドラとして、それ以外ならローカル HTTP サーバーとして起動
-│   │   ├── main.go            # AWS_LAMBDA_RUNTIME_API の有無で起動方法を切り替える
-│   │   └── local.go           # ローカルモードの起動（アップロードフォーム付き）
-│   ├── cmd/exampleqr/main.go  # example.com の QR エンドポイント（別パッケージ。Lambda / ローカル両対応）
-│   └── internal/
-│       ├── app/               # 依存関係の組み立て（ticketqr 用）
-│       ├── exampleqr/         # example.com の QR を返すハンドラ
-│       ├── localhttp/         # ローカル実行用 net/http → Lambda イベント変換（routeKey を付与。両パッケージで共有）
-│       ├── handler/           # API Gateway イベント ⇔ ユースケース（JSON / multipart / HTML / PNG）、routeKey による振り分け
-│       ├── usecase/           # 発行フロー（受け付ける形式か・空でないかの判断 → 解析 → 採番）
-│       ├── ticketcode/        # 採番ルール（生成）
-│       ├── qr/                # QR生成
-│       ├── analyzer/          # 画像解析クライアント（現状は常に valid のモックのみ）
-│       ├── imageinput/        # 画像形式の判定とサイズ上限（HTTP 層で使う。受け付けるかは usecase が判断）
-│       ├── signer/            # 署名（salt + HMAC）
-│       ├── secret/            # salt 取得（Parameter Store）
-│       ├── config/            # 環境変数
-│       └── view/              # HTMLレンダリング（templates/ticket.html・error.html を embed。Node は hono/html で同じ内容を持つ）
+│   ├── cmd/                   # 実行ファイル（依存の組み立ては main で行う）
+│   │   ├── ticketqr/          # チケット系の唯一のエントリポイント。Lambda 上ならハンドラとして、それ以外ならローカル HTTP サーバーとして起動
+│   │   │   ├── main.go        # AWS_LAMBDA_RUNTIME_API の有無で起動方法を切り替える
+│   │   │   ├── local.go       # ローカルモードの起動（アップロードフォーム付き）
+│   │   │   └── wire.go        # 依存の組み立て（設定・secret の読み込み、analyzer の選択、handler の組み立て）
+│   │   ├── exampleqr/         # example.com の QR エンドポイント（main.go と handler.go。別パッケージ。Lambda / ローカル両対応）
+│   │   └── apigw-local/       # E2E 用の API Gateway 役のゲートウェイ（デプロイしない）
+│   └── internal/              # 責務ごとのパッケージ。依存は外側から内側への一方向（ticket は internal のどこにも依存しない）
+│       ├── ticket/            # 中心: チケットコードの採番、VerifyAndGrant（証明書の画像を検証してチケットを与える）、業務のエラー、Verifier のインターフェース
+│       ├── signer/            # 署名付き URL の署名と照合（salt + HMAC）
+│       ├── analyzer/          # 画像解析サーバー（証明書の画像の検証）のクライアント（ticket.Verifier を実装。mock と HTTP）
+│       ├── httpapi/           # HTTP 層: API Gateway イベント ⇔ ticket、routeKey による振り分け、業務のエラー → HTTP の応答
+│       ├── view/              # HTML レンダリング（templates/ticket.html・error.html を embed。Node は hono/html で同じ内容を持つ）
+│       ├── imageinput/        # 画像形式の判定とサイズ上限（HTTP 層で使う。受け付けるかは ticket が判断。重い依存をここに閉じ込める）
+│       ├── config/            # 環境変数と Parameter Store（salt、解析サーバーの API キー）
+│       ├── qr/                # QR の PNG（チケット系と example で共有）
+│       └── localhttp/         # ローカル実行用 net/http → Lambda イベント変換（routeKey を付与。cmd で共有）
 ├── node/                      # 詳細は NODE.md（domain.ts / infra.ts / app.ts / image.ts / shared.ts / example.ts + 入口の ticketqr.ts / exampleqr.ts / local.ts）
 ├── infra/cloudformation/      # IaC（impl=go|node でパラメータ化）: api.yaml（チケット API）、example.yaml（EX。別スタック）
 └── tests/
@@ -510,13 +509,13 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 - **salt の扱い**: salt が漏れると誰でも有効な `sig` を作れるため、ログ・環境変数への平文出力は禁止。Lambda の実行ロールのみ読み取り可とする
 - **ビューURLの扱い**: `sig` 付きURLを知っていれば誰でもチケットを表示できる（有効期限なし）。共有されて困る場合は `exp` 付き署名の導入を検討
 - **偽造耐性**: 利用側がルール適合のみで受け入れる場合、ルールを知る者はAPIを通さずに有効なコードを作れる。偽造耐性が必要ならルール側に秘密鍵ベースの署名・チェックディジットを含めることを検討（利用側との合意事項）
-- **ログ**: JSON 構造化ログ（requestId, ticketCode, 解析結果, レイテンシ）。画像データ・`sig` はログに出さない。写真を受け取る2つの API では、ブラウザと OS の情報も記録する（下の「ブラウザと OS の記録」）
+- **ログ**: JSON 構造化ログ（requestId, ticketCode, 解析結果, レイテンシ）。画像データ・`sig` はログに出さない。証明書の画像を受け取る2つの API では、ブラウザと OS の情報も記録する（下の「ブラウザと OS の記録」）
 - **トレース / メトリクス**: X-Ray、CloudWatch カスタムメトリクス（発行数、invalid率、解析サーバーレイテンシ）
 - **スロットリング**: API Gateway のレート制限、Lambda 予約同時実行数（解析サーバー保護）
 
-### ブラウザと OS の記録（QR 同梱発行 API・チケット発行 API）
+### ブラウザと OS の記録（QR 同梱付与 API・チケット付与 API）
 
-写真を受け取る2つの API（`issue-inline`、`issue`）では、完了ログ（`"msg":"request completed"`）に、ブラウザが送ってきた情報を `client` グループとして**そのまま**記録する。成功もエラーも記録する。ほかの API（チケット表示ページ、QR 画像 API）では記録しない。Go 版・Node 版で同じキーにそろえる。
+証明書の画像を受け取る2つの API（`grant-inline`、`grant`）では、完了ログ（`"msg":"request completed"`）に、ブラウザが送ってきた情報を `client` グループとして**そのまま**記録する。成功もエラーも記録する。ほかの API（チケット表示ページ、QR 画像 API）では記録しない。Go 版・Node 版で同じキーにそろえる。
 
 | キー | リクエストヘッダー | 内容 |
 |---|---|---|
@@ -527,7 +526,7 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 | `client.secChUaPlatformVersion` | `Sec-CH-UA-Platform-Version` | OS の正確なバージョン。ブラウザに求めたときだけ届く（下の「Android の OS バージョン」） |
 
 ```json
-{"time":"…","level":"INFO","msg":"request completed","requestId":"…","endpoint":"issue","status":201,"durationMs":312,
+{"time":"…","level":"INFO","msg":"request completed","requestId":"…","endpoint":"grant","status":201,"durationMs":312,
  "client":{"userAgent":"Mozilla/5.0 (iPhone; CPU iPhone OS 13_3 like Mac OS X) … Version/13.0.4 Mobile/15E148 Safari/604.1"}}
 ```
 
@@ -569,7 +568,7 @@ Android  13                                Chrome          138           1     0
 ```
 
 - 入力は1行に1つのログで、JSON の前に付いた文字（Node のログに Lambda が付ける時刻やリクエスト ID、`aws logs tail` の時刻とストリーム名）は読み飛ばす
-- 対象は QR 同梱発行 API・チケット発行 API の完了ログだけ。ほかのログや JSON でない行は無視する
+- 対象は QR 同梱付与 API・チケット付与 API の完了ログだけ。ほかのログや JSON でない行は無視する
 - あくまでサンプル。User-Agent の解釈の規則は、ブラウザの変化に合わせて直していく
 
 ## 11. Go / Node 比較評価の観点

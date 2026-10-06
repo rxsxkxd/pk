@@ -1,5 +1,7 @@
-// Package app wires configuration and dependencies into handlers.
-package app
+package main
+
+// Wiring (clean architecture: the composition root): reads the configuration and secrets, picks the
+// verifier (package analyzer), and assembles the HTTP handlers around package ticket.
 
 import (
 	"context"
@@ -8,15 +10,14 @@ import (
 
 	"ticketqr/internal/analyzer"
 	"ticketqr/internal/config"
-	"ticketqr/internal/handler"
-	"ticketqr/internal/secret"
+	"ticketqr/internal/httpapi"
 	"ticketqr/internal/signer"
-	"ticketqr/internal/ticketcode"
-	"ticketqr/internal/usecase"
+	"ticketqr/internal/ticket"
 	"ticketqr/internal/view"
 )
 
-func New(ctx context.Context) (*handler.Handlers, error) {
+// newHandlers builds the handlers from the environment (and Parameter Store on Lambda).
+func newHandlers(ctx context.Context) (*httpapi.Handlers, error) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 	cfg, err := config.Load()
@@ -25,7 +26,7 @@ func New(ctx context.Context) (*handler.Handlers, error) {
 	}
 	var httpCfg analyzer.HTTPConfig
 	if cfg.AnalyzerMode == "http" {
-		key, err := secret.LoadAnalyzerAPIKey(ctx)
+		key, err := config.LoadAnalyzerAPIKey(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -35,7 +36,7 @@ func New(ctx context.Context) (*handler.Handlers, error) {
 	if err != nil {
 		return nil, err
 	}
-	salts, err := secret.LoadSalts(ctx)
+	salts, err := config.LoadSalts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -48,12 +49,12 @@ func New(ctx context.Context) (*handler.Handlers, error) {
 		return nil, err
 	}
 
-	return &handler.Handlers{
+	return &httpapi.Handlers{
 		PublicBaseURL: cfg.PublicBaseURL,
 		PublicOrigin:  cfg.PublicOrigin,
-		Issuer: &usecase.Issuer{
-			Analyzer:  an,
-			Generator: ticketcode.NewGenerator(cfg.SuffixLength),
+		Ports: ticket.Ports{
+			Verifier:  an,
+			Generator: ticket.NewGenerator(cfg.SuffixLength),
 			Logger:    logger,
 		},
 		Signer: sg,
@@ -62,9 +63,9 @@ func New(ctx context.Context) (*handler.Handlers, error) {
 	}, nil
 }
 
-// MustNew is for main packages: a Lambda that cannot initialize should fail its init phase.
-func MustNew() *handler.Handlers {
-	h, err := New(context.Background())
+// mustNewHandlers exits when initialization fails: a Lambda that cannot initialize should fail its init phase.
+func mustNewHandlers() *httpapi.Handlers {
+	h, err := newHandlers(context.Background())
 	if err != nil {
 		slog.Error("initialization failed", "error", err)
 		os.Exit(1)

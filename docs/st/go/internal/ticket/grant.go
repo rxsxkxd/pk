@@ -1,62 +1,65 @@
-// Package usecase holds the ticket issuing flow shared by patterns A and B.
-package usecase
+package ticket
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
-
-	"ticketqr/internal/analyzer"
-	"ticketqr/internal/apperr"
-	"ticketqr/internal/ticketcode"
 )
 
-type Issuer struct {
-	Analyzer  analyzer.Analyzer
-	Generator *ticketcode.Generator
+// CertificateImage is the uploaded image of a certificate, exactly as received, with the format the
+// HTTP layer detected from its content ("" if unknown). It is sent to the verifier unchanged.
+type CertificateImage struct {
+	Data     []byte
+	MimeType string
+}
+
+// Ports are what VerifyAndGrant needs from outside: the verifier, the ticket code generator and a logger.
+type Ports struct {
+	Verifier  Verifier
+	Generator *Generator
 	Logger    *slog.Logger
 }
 
-// Upload is an image exactly as received, with the format detected by the HTTP layer ("" if unknown).
-type Upload struct {
-	Data         []byte
-	DetectedType string
-}
-
-// acceptedTypes are the formats iPhone and major Android phones upload as-is (business rule).
+// acceptedTypes are the formats iPhone and major Android phones produce as-is (business rule).
 var acceptedTypes = map[string]bool{
 	"image/jpeg": true, "image/png": true, "image/heic": true, "image/heif": true,
 	"image/avif": true, "image/webp": true,
 }
 
-// Issue accepts the upload by the business rules, asks the analyzer, and generates a ticket code only
-// when the image is valid.
-func (i *Issuer) Issue(ctx context.Context, up Upload) (ticketcode.Ticket, error) {
-	if len(up.Data) == 0 {
-		return ticketcode.Ticket{}, apperr.BadRequest("image is empty")
+// VerifyAndGrant verifies a certificate image and grants a new ticket only when it passes: the image
+// must be non-empty and in an accepted format, then the verifier must judge it valid. Otherwise it
+// returns a business error (ErrEmptyImage, ErrUnsupportedImage, ErrCertificateRejected, or a wrapped
+// ErrVerifierTimeout / ErrVerifierUpstream). Shared by the QR inline grant API and the ticket grant API.
+func VerifyAndGrant(ctx context.Context, p Ports, img CertificateImage) (Ticket, error) {
+	if len(img.Data) == 0 {
+		return Ticket{}, ErrEmptyImage
 	}
-	if !acceptedTypes[up.DetectedType] {
-		return ticketcode.Ticket{}, apperr.UnsupportedMediaType("image must be JPEG, PNG, HEIC/HEIF, AVIF or WebP")
+	if !acceptedTypes[img.MimeType] {
+		return Ticket{}, ErrUnsupportedImage
 	}
 
-	res, err := i.Analyzer.Analyze(ctx, analyzer.Image{Data: up.Data, MimeType: up.DetectedType})
+	v, err := p.Verifier.Verify(ctx, img)
 	switch {
-	case errors.Is(err, analyzer.ErrTimeout):
-		return ticketcode.Ticket{}, apperr.AnalysisTimeout()
+	case errors.Is(err, ErrVerifierTimeout):
+		return Ticket{}, err
 	case err != nil:
-		i.Logger.ErrorContext(ctx, "image analysis failed", "error", err)
-		return ticketcode.Ticket{}, apperr.AnalysisUpstream()
-	case !res.Valid:
-		i.Logger.InfoContext(ctx, "image rejected", "reason", res.Reason)
-		return ticketcode.Ticket{}, apperr.ImageInvalid("image was rejected")
+		p.Logger.ErrorContext(ctx, "image analysis failed", "error", err)
+		if !errors.Is(err, ErrVerifierUpstream) {
+			err = fmt.Errorf("%w: %v", ErrVerifierUpstream, err)
+		}
+		return Ticket{}, err
+	case !v.Valid:
+		p.Logger.InfoContext(ctx, "image rejected", "reason", v.Reason)
+		return Ticket{}, ErrCertificateRejected
 	}
 
-	t, err := i.Generator.Generate()
+	t, err := p.Generator.Generate()
 	if err != nil {
-		return ticketcode.Ticket{}, err
+		return Ticket{}, err
 	}
-	i.Logger.InfoContext(ctx, "ticket issued",
-		"ticketCode", t.Code, "issuedAt", t.IssuedAt.Format(time.RFC3339), "analysisReason", res.Reason)
+	p.Logger.InfoContext(ctx, "ticket issued",
+		"ticketCode", t.Code, "issuedAt", t.IssuedAt.Format(time.RFC3339), "analysisReason", v.Reason)
 	return t, nil
 }

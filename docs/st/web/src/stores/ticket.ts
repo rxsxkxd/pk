@@ -1,12 +1,12 @@
-// Issue state of the SPA (DESIGN.md 5): the chosen photo, sending / failed, the inline result and the
+// Grant state of the SPA (DESIGN.md 5): the chosen photo, sending / failed, the inline result and the
 // message to show. The page-mode result is not stored: the ticket screen is drawn from its URL only.
 
 import { defineStore } from 'pinia';
 import { computed, inject, ref } from 'vue';
 import {
   ApiError,
-  issueForPage as postForPage,
-  issueInline as postInline,
+  grantForPage as postForPage,
+  grantInline as postInline,
   type InlineTicket,
   type TicketRoute,
 } from '../api/tickets.ts';
@@ -19,10 +19,10 @@ const EXTENSIONS = /\.(jpe?g|png|heic|heif|avif|webp)$/i;
 
 // 送信前に分かる問題を返す（なければ undefined）。形式は MIME タイプか拡張子で目安として確かめる。
 export function checkFile(file: File | null): string | undefined {
-  if (!file) return '写真を選んでください';
-  if (file.size > MAX_IMAGE_BYTES) return '写真のサイズが大きすぎます（4MB まで）';
+  if (!file) return '証明書の画像を選んでください';
+  if (file.size > MAX_IMAGE_BYTES) return '画像のサイズが大きすぎます（4MB まで）';
   if (!ACCEPT.split(',').includes(file.type) && !EXTENSIONS.test(file.name)) {
-    return 'この形式の写真には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）';
+    return 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）';
   }
   return undefined;
 }
@@ -31,11 +31,11 @@ export function checkFile(file: File | null): string | undefined {
 export function messageFor(err: unknown): string {
   switch (err instanceof ApiError ? err.code : '') {
     case 'PAYLOAD_TOO_LARGE':
-      return '写真のサイズが大きすぎます（4MB まで）';
+      return '画像のサイズが大きすぎます（4MB まで）';
     case 'UNSUPPORTED_MEDIA_TYPE':
-      return 'この形式の写真には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）';
+      return 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）';
     case 'IMAGE_INVALID':
-      return 'この写真ではチケットを発行できません';
+      return 'この証明書の画像ではチケットを発行できません';
     case 'ANALYSIS_UPSTREAM_ERROR':
     case 'ANALYSIS_TIMEOUT':
       return 'ただいま混み合っています。時間をおいてお試しください';
@@ -48,7 +48,7 @@ export const useTicketStore = defineStore('ticket', () => {
   const config = inject(configKey)!;
 
   const file = ref<File | null>(null);
-  const status = ref<'idle' | 'sending' | 'issued' | 'failed'>('idle');
+  const status = ref<'idle' | 'sending' | 'granted' | 'failed'>('idle');
   const inlineTicket = ref<InlineTicket | null>(null);
   const error = ref<string | null>(null);
 
@@ -63,7 +63,7 @@ export const useTicketStore = defineStore('ticket', () => {
     inlineTicket.value = null;
     try {
       const result = await send(file.value);
-      status.value = 'issued';
+      status.value = 'granted';
       return result;
     } catch (err) {
       status.value = 'failed';
@@ -73,13 +73,13 @@ export const useTicketStore = defineStore('ticket', () => {
   }
 
   // 画面遷移方式（メイン）: 発行して、SPA のチケット画面に移るための { code, sig } を返す。
-  async function issueForPage(): Promise<TicketRoute | undefined> {
+  async function grantForPage(): Promise<TicketRoute | undefined> {
     const t = await run((f) => postForPage(config.apiBaseUrl, f));
     return t && { code: t.ticketCode, sig: t.sig };
   }
 
   // その場表示方式（オプション）: 発行して、結果を inlineTicket に入れる。
-  async function issueInline(): Promise<void> {
+  async function grantInline(): Promise<void> {
     const t = await run((f) => postInline(config.apiBaseUrl, f));
     if (t) inlineTicket.value = t;
   }
@@ -91,5 +91,5 @@ export const useTicketStore = defineStore('ticket', () => {
     error.value = null;
   }
 
-  return { file, status, inlineTicket, error, fileProblem, canSend, issueForPage, issueInline, reset };
+  return { file, status, inlineTicket, error, fileProblem, canSend, grantForPage, grantInline, reset };
 });

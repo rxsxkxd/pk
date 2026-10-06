@@ -8,12 +8,12 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('checkFile (before sending)', () => {
   test.each([
-    ['nothing chosen', null, '写真を選んでください'],
-    ['over 4MB', photo('a.jpg', 'image/jpeg', MAX_IMAGE_BYTES + 1), '写真のサイズが大きすぎます（4MB まで）'],
+    ['nothing chosen', null, '証明書の画像を選んでください'],
+    ['over 4MB', photo('a.jpg', 'image/jpeg', MAX_IMAGE_BYTES + 1), '画像のサイズが大きすぎます（4MB まで）'],
     [
       'a PDF',
       photo('a.pdf', 'application/pdf'),
-      'この形式の写真には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）',
+      'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）',
     ],
   ])('%s', (_name, file, message) => {
     expect(checkFile(file)).toBe(message);
@@ -30,9 +30,9 @@ describe('checkFile (before sending)', () => {
 });
 
 test.each([
-  ['PAYLOAD_TOO_LARGE', '写真のサイズが大きすぎます（4MB まで）'],
-  ['UNSUPPORTED_MEDIA_TYPE', 'この形式の写真には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）'],
-  ['IMAGE_INVALID', 'この写真ではチケットを発行できません'],
+  ['PAYLOAD_TOO_LARGE', '画像のサイズが大きすぎます（4MB まで）'],
+  ['UNSUPPORTED_MEDIA_TYPE', 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）'],
+  ['IMAGE_INVALID', 'この証明書の画像ではチケットを発行できません'],
   ['ANALYSIS_UPSTREAM_ERROR', 'ただいま混み合っています。時間をおいてお試しください'],
   ['ANALYSIS_TIMEOUT', 'ただいま混み合っています。時間をおいてお試しください'],
   ['BAD_REQUEST', '発行できませんでした。もう一度お試しください'],
@@ -46,8 +46,8 @@ describe('issuing', () => {
     stubFetch(json(201, { ticketCode: CODE, issuedAt: '2026-10-05T13:50:54+09:00', sig: SIG, qrUrl: `${API}/x` }));
     const store = useTicketStore();
     store.file = photo();
-    expect(await store.issueForPage()).toEqual({ code: CODE, sig: SIG });
-    expect(store.status).toBe('issued');
+    expect(await store.grantForPage()).toEqual({ code: CODE, sig: SIG });
+    expect(store.status).toBe('granted');
     expect(store.inlineTicket).toBeNull();
   });
 
@@ -55,22 +55,22 @@ describe('issuing', () => {
     stubFetch(json(504, { error: { code: 'ANALYSIS_TIMEOUT', message: 'image analysis timed out' } }));
     const store = useTicketStore();
     store.file = photo();
-    expect(await store.issueForPage()).toBeUndefined();
+    expect(await store.grantForPage()).toBeUndefined();
     expect(store.status).toBe('failed');
     expect(store.error).toBe('ただいま混み合っています。時間をおいてお試しください');
     expect(store.canSend).toBe(true);
   });
 
-  test('a second click while sending does not issue twice', async () => {
+  test('a second click while sending does not grant twice', async () => {
     let resolve!: (r: Response) => void;
     const fetch = vi.fn(() => new Promise<Response>((r) => (resolve = r)));
     vi.stubGlobal('fetch', fetch);
     const store = useTicketStore();
     store.file = photo();
 
-    const first = store.issueForPage();
+    const first = store.grantForPage();
     expect(store.canSend).toBe(false);
-    expect(await store.issueInline()).toBeUndefined();
+    expect(await store.grantInline()).toBeUndefined();
     resolve(json(201, { ticketCode: CODE, issuedAt: '2026-10-05T13:50:54+09:00', sig: SIG, qrUrl: `${API}/x` }));
     await first;
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -80,7 +80,7 @@ describe('issuing', () => {
     const fetch = stubFetch();
     const store = useTicketStore();
     store.file = photo('a.pdf', 'application/pdf');
-    expect(await store.issueForPage()).toBeUndefined();
+    expect(await store.grantForPage()).toBeUndefined();
     expect(fetch).not.toHaveBeenCalled();
   });
 });

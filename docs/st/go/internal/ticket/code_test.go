@@ -1,4 +1,4 @@
-package ticketcode
+package ticket
 
 import (
 	"bytes"

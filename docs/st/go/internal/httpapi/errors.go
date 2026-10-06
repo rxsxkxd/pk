@@ -1,60 +1,63 @@
-// Package apperr defines errors that map directly to API error responses.
-package apperr
+package httpapi
 
 import (
 	"errors"
 	"net/http"
+
+	"ticketqr/internal/ticket"
 )
 
-type Error struct {
+// apiError is an error response of the API: the HTTP status, the error code and the message.
+type apiError struct {
 	Status  int
 	Code    string
 	Message string
 }
 
-func (e *Error) Error() string { return e.Code + ": " + e.Message }
+func (e *apiError) Error() string { return e.Code + ": " + e.Message }
 
-func BadRequest(msg string) *Error {
-	return &Error{http.StatusBadRequest, "BAD_REQUEST", msg}
+func badRequest(msg string) *apiError {
+	return &apiError{http.StatusBadRequest, "BAD_REQUEST", msg}
 }
 
-func Forbidden() *Error {
-	return &Error{http.StatusForbidden, "FORBIDDEN", "invalid signature"}
+func forbidden() *apiError {
+	return &apiError{http.StatusForbidden, "FORBIDDEN", "invalid signature"}
 }
 
-func PayloadTooLarge(msg string) *Error {
-	return &Error{http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", msg}
+func payloadTooLarge(msg string) *apiError {
+	return &apiError{http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", msg}
 }
 
-func UnsupportedMediaType(msg string) *Error {
-	return &Error{http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE", msg}
+func unsupportedMediaType(msg string) *apiError {
+	return &apiError{http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE", msg}
 }
 
-func ImageInvalid(reason string) *Error {
-	return &Error{http.StatusUnprocessableEntity, "IMAGE_INVALID", reason}
+func notFound() *apiError {
+	return &apiError{http.StatusNotFound, "NOT_FOUND", "route not found"}
 }
 
-func AnalysisUpstream() *Error {
-	return &Error{http.StatusBadGateway, "ANALYSIS_UPSTREAM_ERROR", "image analysis failed"}
+func internalError() *apiError {
+	return &apiError{http.StatusInternalServerError, "INTERNAL_ERROR", "internal error"}
 }
 
-func AnalysisTimeout() *Error {
-	return &Error{http.StatusGatewayTimeout, "ANALYSIS_TIMEOUT", "image analysis timed out"}
-}
-
-func NotFound() *Error {
-	return &Error{http.StatusNotFound, "NOT_FOUND", "route not found"}
-}
-
-func Internal() *Error {
-	return &Error{http.StatusInternalServerError, "INTERNAL_ERROR", "internal error"}
-}
-
-// From returns err as *Error, or INTERNAL_ERROR when it is not an application error.
-func From(err error) *Error {
-	var e *Error
-	if errors.As(err, &e) {
+// toAPIError turns any error into an error response: errors of this package as they are, the business
+// errors of package ticket by the table below, and anything else as INTERNAL_ERROR.
+func toAPIError(err error) *apiError {
+	var e *apiError
+	switch {
+	case errors.As(err, &e):
 		return e
+	case errors.Is(err, ticket.ErrEmptyImage):
+		return badRequest(ticket.ErrEmptyImage.Error())
+	case errors.Is(err, ticket.ErrUnsupportedImage):
+		return unsupportedMediaType(ticket.ErrUnsupportedImage.Error())
+	case errors.Is(err, ticket.ErrCertificateRejected):
+		return &apiError{http.StatusUnprocessableEntity, "IMAGE_INVALID", ticket.ErrCertificateRejected.Error()}
+	case errors.Is(err, ticket.ErrVerifierTimeout):
+		return &apiError{http.StatusGatewayTimeout, "ANALYSIS_TIMEOUT", "image analysis timed out"}
+	case errors.Is(err, ticket.ErrVerifierUpstream):
+		return &apiError{http.StatusBadGateway, "ANALYSIS_UPSTREAM_ERROR", "image analysis failed"}
+	default:
+		return internalError()
 	}
-	return Internal()
 }

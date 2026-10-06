@@ -1,6 +1,7 @@
-// Package exampleqr serves a fixed QR code for https://example.com.
-// It is deployed separately from the ticket endpoints and needs no configuration or secrets.
-package exampleqr
+package main
+
+// The handler: a fixed QR code for https://example.com. It is deployed separately from the ticket
+// endpoints and needs no configuration or secrets.
 
 import (
 	"context"
@@ -14,13 +15,13 @@ import (
 )
 
 const (
-	RouteKey = "GET /v1/example/qr"
+	routeKey = "GET /v1/example/qr"
 	// Includes the scheme so QR readers open it as a link instead of plain text.
-	Content = "https://example.com"
+	content = "https://example.com"
 )
 
-func Handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	png, err := qr.PNG(Content)
+func handle(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	png, err := qr.PNG(content)
 	if err != nil {
 		slog.ErrorContext(ctx, "render qr failed", "requestId", req.RequestContext.RequestID, "error", err)
 		return events.APIGatewayV2HTTPResponse{

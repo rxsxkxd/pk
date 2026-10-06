@@ -11,21 +11,20 @@ import (
 
 	"github.com/aws/aws-lambda-go/lambda"
 
-	"ticketqr/internal/exampleqr"
 	"ticketqr/internal/localhttp"
 )
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 	if os.Getenv("AWS_LAMBDA_RUNTIME_API") != "" {
-		lambda.Start(exampleqr.Handle)
+		lambda.Start(handle)
 		return
 	}
 
 	addr := flag.String("addr", ":8081", "listen address")
 	flag.Parse()
 	mux := http.NewServeMux()
-	mux.Handle(exampleqr.RouteKey, localhttp.Adapt(exampleqr.RouteKey, exampleqr.Handle))
+	mux.Handle(routeKey, localhttp.Adapt(routeKey, handle))
 	log.Printf("listening on %s (open http://localhost%s/v1/example/qr)", *addr, *addr)
 	log.Fatal(http.ListenAndServe(*addr, mux))
 }

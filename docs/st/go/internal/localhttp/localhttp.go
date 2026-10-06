@@ -1,5 +1,6 @@
 // Package localhttp runs Lambda handlers behind net/http for local development.
-// Each request becomes an API Gateway HTTP API (v2) event carrying the matching routeKey.
+// Each request becomes an API Gateway HTTP API (v2) event carrying the matching routeKey. Clean
+// architecture: a driver used by the local servers and the E2E gateway (cmd/*), never deployed.
 package localhttp
 
 import (

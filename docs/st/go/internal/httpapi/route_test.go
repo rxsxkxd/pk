@@ -1,4 +1,4 @@
-package handler
+package httpapi
 
 import (
 	"context"
@@ -21,8 +21,8 @@ func TestRoute(t *testing.T) {
 		status      int
 		contentType string
 	}{
-		{"A", withKey(formRequest(t, "image", jpeg), RouteIssueInline), http.StatusCreated, "application/json"},
-		{"B-1", withKey(formRequest(t, "image", jpeg), RouteIssue), http.StatusSeeOther, ""},
+		{"A", withKey(formRequest(t, "image", jpeg), RouteGrantInline), http.StatusCreated, "application/json"},
+		{"B-1", withKey(formRequest(t, "image", jpeg), RouteGrant), http.StatusSeeOther, ""},
 		{"B-3", withKey(signed, RouteGetView), http.StatusOK, "text/html"},
 		{"B-2", withKey(signed, RouteGetQR), http.StatusOK, "image/png"},
 		{"unknown", withKey(signed, "GET /v1/unknown"), http.StatusNotFound, "application/json"},

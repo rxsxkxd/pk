@@ -8,13 +8,11 @@ import (
 	"os"
 
 	"github.com/aws/aws-lambda-go/lambda"
-
-	"ticketqr/internal/app"
 )
 
 func main() {
 	if os.Getenv("AWS_LAMBDA_RUNTIME_API") != "" {
-		lambda.Start(app.MustNew().Route)
+		lambda.Start(mustNewHandlers().Route)
 		return
 	}
 	runLocal()

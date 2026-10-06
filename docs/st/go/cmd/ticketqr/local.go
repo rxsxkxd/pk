@@ -7,8 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"ticketqr/internal/app"
-	"ticketqr/internal/handler"
+	"ticketqr/internal/httpapi"
 	"ticketqr/internal/localhttp"
 )
 
@@ -22,10 +21,10 @@ func runLocal() {
 	setDefault("SIGNING_SALT", "local-dev-salt")
 	setDefault("ANALYZER_MODE", "mock")
 
-	h := app.MustNew()
+	h := mustNewHandlers()
 	mux := http.NewServeMux()
 	// API Gateway route keys are valid ServeMux patterns, so both route identically.
-	for _, key := range handler.RouteKeys {
+	for _, key := range httpapi.RouteKeys {
 		mux.Handle(key, localhttp.Adapt(key, h.Route))
 	}
 	mux.HandleFunc("GET /{$}", uploadForm)

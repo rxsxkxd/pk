@@ -1,5 +1,7 @@
-// Package handler converts API Gateway HTTP API (payload v2) events to use case calls and back.
-package handler
+// Package httpapi is the HTTP layer of the ticket QR API (clean architecture: an inbound adapter). It
+// converts API Gateway HTTP API (payload v2) events to calls of package ticket and back: routing, upload
+// reading, signed URLs, error responses (errors.go maps the business errors of ticket) and the HTML views.
+package httpapi
 
 import (
 	"bytes"
@@ -19,11 +21,10 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 
-	"ticketqr/internal/apperr"
 	"ticketqr/internal/imageinput"
 	"ticketqr/internal/qr"
 	"ticketqr/internal/signer"
-	"ticketqr/internal/usecase"
+	"ticketqr/internal/ticket"
 	"ticketqr/internal/view"
 )
 
@@ -35,20 +36,20 @@ type (
 type Handlers struct {
 	PublicBaseURL string
 	PublicOrigin  string
-	Issuer        *usecase.Issuer
+	Ports         ticket.Ports
 	Signer        *signer.Signer
 	View          *view.Renderer
 	Logger        *slog.Logger
 }
 
-// IssueInline is pattern A: POST /v1/tickets/qr-inline (multipart image in, JSON with base64 QR out).
-func (h *Handlers) IssueInline(ctx context.Context, req Request) (Response, error) {
-	return h.run(ctx, req, "issue-inline", h.jsonError, func() (Response, error) {
-		upload, err := readUpload(req)
+// GrantInline is pattern A (the QR inline grant API): POST /v1/tickets/qr-inline (multipart image in, JSON with base64 QR out).
+func (h *Handlers) GrantInline(ctx context.Context, req Request) (Response, error) {
+	return h.run(ctx, req, "grant-inline", h.jsonError, func() (Response, error) {
+		img, err := readUpload(req)
 		if err != nil {
 			return Response{}, err
 		}
-		t, err := h.Issuer.Issue(ctx, upload)
+		t, err := ticket.VerifyAndGrant(ctx, h.Ports, img)
 		if err != nil {
 			return Response{}, err
 		}
@@ -73,21 +74,21 @@ func (h *Handlers) IssueInline(ctx context.Context, req Request) (Response, erro
 	})
 }
 
-// Issue is pattern B-1: POST /v1/tickets (multipart image). The reply depends on Accept:
+// Grant is pattern B-1 (the ticket grant API): POST /v1/tickets (multipart image). The reply depends on Accept:
 //   - a browser form (no application/json) gets 303 to the view (B-3), errors as HTML;
 //   - a client asking for application/json (the SPA) gets 201 JSON with the signed QR URL, errors as JSON.
-func (h *Handlers) Issue(ctx context.Context, req Request) (Response, error) {
+func (h *Handlers) Grant(ctx context.Context, req Request) (Response, error) {
 	asJSON := acceptsJSON(req)
 	onError := h.htmlError
 	if asJSON {
 		onError = h.jsonError
 	}
-	return h.run(ctx, req, "issue", onError, func() (Response, error) {
-		upload, err := readUpload(req)
+	return h.run(ctx, req, "grant", onError, func() (Response, error) {
+		img, err := readUpload(req)
 		if err != nil {
 			return Response{}, err
 		}
-		t, err := h.Issuer.Issue(ctx, upload)
+		t, err := ticket.VerifyAndGrant(ctx, h.Ports, img)
 		if err != nil {
 			return Response{}, err
 		}
@@ -150,13 +151,13 @@ func (h *Handlers) GetQR(ctx context.Context, req Request) (Response, error) {
 // run logs the request and turns any error into the endpoint's error format.
 // It never returns a Go error, so API Gateway always receives our response.
 func (h *Handlers) run(ctx context.Context, req Request, endpoint string,
-	onError func(*apperr.Error) Response, fn func() (Response, error)) (Response, error) {
+	onError func(*apiError) Response, fn func() (Response, error)) (Response, error) {
 	start := time.Now()
 	log := h.Logger.With("requestId", req.RequestContext.RequestID, "endpoint", endpoint)
 
 	res, err := fn()
 	if err != nil {
-		appErr := apperr.From(err)
+		appErr := toAPIError(err)
 		if appErr.Status >= 500 {
 			log.ErrorContext(ctx, "request failed", "error", err)
 		}
@@ -172,7 +173,7 @@ func (h *Handlers) run(ctx context.Context, req Request, endpoint string,
 
 // clientEndpoints receive images from browsers. Their completion log also records what the browser says
 // about itself, so browser and OS versions can be counted in CloudWatch Logs (DESIGN.md 10).
-var clientEndpoints = map[string]bool{"issue-inline": true, "issue": true}
+var clientEndpoints = map[string]bool{"grant-inline": true, "grant": true}
 
 // clientHeaders maps log keys to the request headers logged as-is: the User-Agent and the User-Agent
 // Client Hints (low-entropy ones are sent by Chromium by default; the platform version only when asked).
@@ -206,7 +207,7 @@ func clientAttr(req Request) slog.Attr {
 func (h *Handlers) verified(req Request) (string, error) {
 	code := req.PathParameters["ticketCode"]
 	if code == "" || !h.Signer.Verify(code, req.QueryStringParameters["sig"]) {
-		return "", apperr.Forbidden()
+		return "", forbidden()
 	}
 	return code, nil
 }
@@ -216,7 +217,7 @@ func (h *Handlers) ticketURL(code, resource string) string {
 		"?sig=" + url.QueryEscape(h.Signer.Sign(code))
 }
 
-func (h *Handlers) jsonError(e *apperr.Error) Response {
+func (h *Handlers) jsonError(e *apiError) Response {
 	type errBody struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
@@ -227,7 +228,7 @@ func (h *Handlers) jsonError(e *apperr.Error) Response {
 	return jsonResponse(e.Status, body)
 }
 
-func (h *Handlers) htmlError(e *apperr.Error) Response {
+func (h *Handlers) htmlError(e *apiError) Response {
 	body, err := h.View.Error(e.Code, e.Message)
 	if err != nil {
 		return Response{StatusCode: e.Status, Headers: withCommon(map[string]string{"Content-Type": "text/plain; charset=utf-8"}), Body: e.Code}
@@ -267,7 +268,7 @@ func requestBody(req Request) ([]byte, error) {
 	}
 	b, err := base64.StdEncoding.DecodeString(req.Body)
 	if err != nil {
-		return nil, apperr.BadRequest("invalid request body encoding")
+		return nil, badRequest("invalid request body encoding")
 	}
 	return b, nil
 }
@@ -287,17 +288,18 @@ func header(req Request, name string) string {
 	return ""
 }
 
-// readUpload reads the multipart "image" field, enforces the runtime size limit and detects the format.
-// Whether the format is accepted is decided by the use case.
-func readUpload(req Request) (usecase.Upload, error) {
+// readUpload reads the certificate image from the multipart "image" field, enforces the runtime size
+// limit and detects the format.
+// Whether the format is accepted is decided by ticket.VerifyAndGrant.
+func readUpload(req Request) (ticket.CertificateImage, error) {
 	data, err := readFormImage(req)
 	if err != nil {
-		return usecase.Upload{}, err
+		return ticket.CertificateImage{}, err
 	}
 	if len(data) > imageinput.MaxBytes {
-		return usecase.Upload{}, apperr.PayloadTooLarge(fmt.Sprintf("image must be %d bytes or less", imageinput.MaxBytes))
+		return ticket.CertificateImage{}, payloadTooLarge(fmt.Sprintf("image must be %d bytes or less", imageinput.MaxBytes))
 	}
-	return usecase.Upload{Data: data, DetectedType: imageinput.Detect(data)}, nil
+	return ticket.CertificateImage{Data: data, MimeType: imageinput.Detect(data)}, nil
 }
 
 // readFormImage returns the raw bytes of the multipart "image" field (the first one). The part's own
@@ -307,7 +309,7 @@ func readUpload(req Request) (usecase.Upload, error) {
 func readFormImage(req Request) ([]byte, error) {
 	mt, params, err := mime.ParseMediaType(header(req, "Content-Type"))
 	if err != nil || mt != "multipart/form-data" || params["boundary"] == "" {
-		return nil, apperr.UnsupportedMediaType("Content-Type must be multipart/form-data")
+		return nil, unsupportedMediaType("Content-Type must be multipart/form-data")
 	}
 	body, err := requestBody(req)
 	if err != nil {
@@ -322,18 +324,18 @@ func readFormImage(req Request) ([]byte, error) {
 			break
 		}
 		if err != nil {
-			return nil, apperr.BadRequest("invalid multipart body")
+			return nil, badRequest("invalid multipart body")
 		}
 		if found || part.FormName() != "image" {
 			continue
 		}
 		if data, err = io.ReadAll(io.LimitReader(part, imageinput.MaxBytes+1)); err != nil {
-			return nil, apperr.BadRequest("invalid multipart body")
+			return nil, badRequest("invalid multipart body")
 		}
 		found = true
 	}
 	if !found {
-		return nil, apperr.BadRequest("image is required")
+		return nil, badRequest("image is required")
 	}
 	return data, nil
 }

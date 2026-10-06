@@ -1,4 +1,4 @@
-package exampleqr
+package main
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 )
 
 func TestHandle(t *testing.T) {
-	res, err := Handle(context.Background(), events.APIGatewayV2HTTPRequest{RouteKey: RouteKey})
+	res, err := handle(context.Background(), events.APIGatewayV2HTTPRequest{RouteKey: routeKey})
 	if err != nil {
 		t.Fatal(err)
 	}

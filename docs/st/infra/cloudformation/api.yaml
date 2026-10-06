@@ -47,10 +47,10 @@ Parameters:
   ThrottlingBurstLimit:
     Type: Number
     Default: 100
-  IssueReservedConcurrency:
+  GrantReservedConcurrency:
     Type: Number
     Default: -1
-    Description: Reserved concurrency for the tickets function (issue + view; protects the analysis server). -1 = not set.
+    Description: Reserved concurrency for the tickets function (grant + view; protects the analysis server). -1 = not set.
   LogRetentionDays:
     Type: Number
     Default: 30
@@ -67,7 +67,7 @@ Mappings:
 
 Conditions:
   UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]
-  HasIssueReservedConcurrency: !Not [!Equals [!Ref IssueReservedConcurrency, -1]]
+  HasGrantReservedConcurrency: !Not [!Equals [!Ref GrantReservedConcurrency, -1]]
   HasAnalyzerApiKey: !Not [!Equals [!Ref AnalyzerApiKeyParameterName, ""]]
 
 Resources:
@@ -129,7 +129,7 @@ Resources:
         DestinationArn: !GetAtt ApiAccessLogGroup.Arn
         Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","routeKey":"$context.routeKey","status":"$context.status","latency":"$context.responseLatency","integrationError":"$context.integrationErrorMessage"}'
 
-  # ---------- A / B-1 / B-3: issue (analysis + code generation) and view, one function ----------
+  # ---------- A / B-1 / B-3: grant (verification + code generation) and view, one function ----------
   # handler.Route dispatches on routeKey, so all three routes share one integration.
   TicketsLogGroup:
     Type: AWS::Logs::LogGroup
@@ -147,7 +147,7 @@ Resources:
       MemorySize: 256
       Timeout: 15
       Role: !GetAtt FunctionRole.Arn
-      ReservedConcurrentExecutions: !If [HasIssueReservedConcurrency, !Ref IssueReservedConcurrency, !Ref AWS::NoValue]
+      ReservedConcurrentExecutions: !If [HasGrantReservedConcurrency, !Ref GrantReservedConcurrency, !Ref AWS::NoValue]
       Code:
         S3Bucket: !Ref ArtifactBucket
         S3Key: !Sub ${ArtifactPrefix}/ticketqr.zip
@@ -167,13 +167,13 @@ Resources:
       IntegrationUri: !GetAtt TicketsFunction.Arn
       PayloadFormatVersion: "2.0"
       TimeoutInMillis: 20000
-  IssueInlineRoute:
+  GrantInlineRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi
       RouteKey: POST /v1/tickets/qr-inline
       Target: !Sub integrations/${TicketsIntegration}
-  IssueRoute:
+  GrantRoute:
     Type: AWS::ApiGatewayV2::Route
     Properties:
       ApiId: !Ref HttpApi

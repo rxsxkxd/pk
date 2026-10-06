@@ -1,4 +1,5 @@
-// Package config reads runtime settings from environment variables.
+// Package config reads runtime settings: environment variables (config.go) and secrets from Parameter
+// Store (secret.go). Clean architecture: a framework / driver used only by the wiring in cmd/ticketqr.
 package config
 
 import (

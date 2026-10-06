@@ -131,14 +131,14 @@ app.ts ──▶ domain.ts ◀── infra.ts
 
 | ファイル | 層 | 主な関数・型 | 対応する Go |
 |---|---|---|---|
-| `domain.ts` | ビジネスロジック | `issueTicket`（受け付けるかの判断 → 解析 → 採番。`ACCEPTED_IMAGE_TYPES`）、`generateTicket`、`newSigner`、外部とのインターフェース（`Analyzer`、`Log`、`AnalyzerError`）、`AppError` と各エラー | `usecase`、`ticketcode`、`signer`、`imageinput`、`analyzer`（型）、`apperr` |
-| `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Parameter Store）、`newAnalyzer` / `alwaysValid` / `httpAnalyzer`（画像解析クライアント。モックと HTTP）、`consoleLog` | `config`、`secret`、`analyzer`（実装）、slog |
+| `domain.ts` | ビジネスロジック | `verifyAndGrant`（証明書の画像の検証 → チケットの付与。`ACCEPTED_IMAGE_TYPES`）、`generateTicket`、`newSigner`、外部とのインターフェース（`Ports`、`Verifier`、`Verdict`、`Log`、`VerifierError`）、`AppError` と各エラー | `ticket`（`VerifyAndGrant`・採番・業務のエラー・`Verifier` のインターフェース）、`signer` |
+| `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Parameter Store）、`newAnalyzer` / `alwaysValid` / `httpAnalyzer`（画像解析クライアント。モックと HTTP）、`consoleLog` | `config`（環境変数と Parameter Store）、`analyzer`、slog |
 | `image.ts` | HTTP 層（入力の技術的な検査） | `MAX_IMAGE_BYTES`、`detectImageType`（image-size） | `imageinput` |
-| `app.ts` | HTTP 層と組み立て | `createApp`（ルートの宣言・ミドルウェア・`onError`・`notFound`）、`routes`（ルート登録のラッパー）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`issueInline` / `issue` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readUpload` / `readFormImage` / `isMultipart`、`ticketView` / `errorView`、`loadDeps` | `app`、`handler`、`view` |
+| `app.ts` | HTTP 層と組み立て | `createApp`（ルートの宣言・ミドルウェア・`onError`・`notFound`）、`routes`（ルート登録のラッパー）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`grantInline` / `grant` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readUpload` / `readFormImage` / `isMultipart`、`ticketView` / `errorView`、`loadDeps` | `cmd/ticketqr/wire.go`（組み立て）、`httpapi`（ハンドラー・ルート・エラーの応答）、`view` |
 | `shared.ts` | HTTP の共通部品 | `commonHeaders`、`pngResponse`、`qrPng`（lean-qr） | `qr` |
-| `example.ts` | example アプリ | `createExampleApp`、`EXAMPLE_CONTENT` | `exampleqr` |
+| `example.ts` | example アプリ | `createExampleApp`、`EXAMPLE_CONTENT` | `cmd/exampleqr`（handler.go） |
 
-- `domain.ts` は外部と直接やり取りしない。画像解析とログは、`issueTicket` が受け取る `IssuePorts`（`analyzer`、`newTicket`、`log`）を通して使う。テストでは、ここに差し替え用の実装（スタブ）を渡す
+- `domain.ts` は外部と直接やり取りしない。証明書の画像の検証とログは、`verifyAndGrant` が受け取る `Ports`（`verifier`、`newTicket`、`log`）を通して使う（Go の `ticket.Ports` と同じ名前）。テストでは、ここに差し替え用の実装（スタブ）を渡す
 - 関数はすべてモジュール直下に置き、依存部品は引数（`deps` と Hono の `c`）で受け取る
 - ルートは `createApp` の中で、`routes(app, deps).post(パス, { name, errors }, 処理)` の形で1行ずつ宣言する。モジュール直下のルート表やそのための型は持たない
 - `qrPng`（QR の PNG 生成）は、外部とのやり取りをしない純粋な変換で、レスポンスの表現を作る処理なので HTTP 層に置く。チケット系と example の両方で使うので `shared.ts` に置く。infra には外部とのやり取り（環境変数・Parameter Store・画像解析サーバー・ログ）だけを置き、domain はライブラリに依存させない
@@ -155,8 +155,8 @@ export function createApp(deps) {
   const app = new Hono().use(requestLog(deps.log), commonHeaders(csp));
 
   routes(app, deps)
-    .post('/v1/tickets/qr-inline', { name: 'issue-inline', errors: 'json' }, issueInline) // A
-    .post('/v1/tickets', { name: 'issue', errors: 'accept' }, issue) // B-1（Accept で 303 か JSON）
+    .post('/v1/tickets/qr-inline', { name: 'grant-inline', errors: 'json' }, grantInline) // A
+    .post('/v1/tickets', { name: 'grant', errors: 'accept' }, grant) // B-1（Accept で 303 か JSON）
     .get('/v1/tickets/:ticketCode/view', { name: 'get-view', errors: 'html' }, getView) // B-3
     .get('/v1/tickets/:ticketCode/qr', { name: 'get-qr', errors: 'json' }, getQr); // B-2
 
@@ -179,7 +179,7 @@ function routes(app, deps) {
 | 仕組み | 役割 |
 |---|---|
 | `routes` / `setRoute` | `routes` が各ルートの前に `setRoute` を挟んで登録する。`setRoute` は宣言されたログ名とエラー形式を `c.set('route', …)` で記録する |
-| `requestLog`（全体のミドルウェア） | 完了ログ（`requestId`、`endpoint`、`status`、`durationMs`）を出す。ログ名は Go と同じ（`issue-inline` など）。写真を受け取る2つの API では `client`（ブラウザの情報）も付ける |
+| `requestLog`（全体のミドルウェア） | 完了ログ（`requestId`、`endpoint`、`status`、`durationMs`）を出す。ログ名は Go と同じ（`grant-inline` など）。証明書の画像を受け取る2つの API では `client`（ブラウザの情報）も付ける |
 | `commonHeaders`（全体のミドルウェア） | すべてのレスポンス（エラー・404 を含む）に `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、CSP を付ける。`shared.ts` にあり、example アプリでも使う（example は CSP なし） |
 | `app.onError` | `AppError` をルートのエラー形式（HTML / JSON）のレスポンスにする。それ以外の例外は 500 にしてログを出す |
 | `app.notFound` | 404 JSON |
@@ -204,8 +204,8 @@ if (!(form.get('image') instanceof File)) throw badRequest('image is required');
 - `image` がファイルでない（文字列）ときだけ Go と違い、Node は 400 にする（既知の差、10章）
 - 検証は性質で置き場所を分ける（Go と同じ）
   - `app.ts` / `image.ts`（外側）: multipart の読み取り（`app.ts`）、4MB の上限（Lambda の実行環境の制約、413）と形式の判定（`image.ts` の `detectImageType`。**`image-size`**（依存なし、バンドル後 約12KB）でヘッダーを解析し、先頭数バイトだけの偽の画像は判定できない扱いにする）
-  - `domain.ts`（内側）: `issueTicket` が受け付けるかを判断する。空の画像は 400、形式が `ACCEPTED_IMAGE_TYPES`（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone と主要 Android の写真の形式）にないものは 415
-  - `issueTicket` は `Upload`（受け取ったままのバイト列と、判定した形式）を受け取る。domain は判定に使うライブラリに依存しない
+  - `domain.ts`（内側）: `verifyAndGrant` が受け付けるかを判断する。空の画像は 400、形式が `ACCEPTED_IMAGE_TYPES`（JPEG / PNG / HEIC / HEIF / AVIF / WebP。iPhone と主要 Android のカメラで撮った画像の形式）にないものは 415
+  - `verifyAndGrant` は `CertificateImage`（受け取ったままのバイト列と、判定した形式）を受け取る。domain は判定に使うライブラリに依存しない
 - パートの `Content-Type` は見ない
 
 ### 5.3 HTML ビュー
@@ -224,7 +224,7 @@ if (!(form.get('image') instanceof File)) throw badRequest('image is required');
 
 - `console.log(JSON.stringify({ time, level, msg, requestId, endpoint, status, durationMs, ... }))` で、Go の slog（JSON）と同じキーにそろえる。`requestId` は Lambda では API Gateway のリクエスト ID（Hono の `c.env.requestContext`）、ローカルでは `randomUUID()`
 - 画像データと `sig` はログに出さない
-- QR 同梱発行 API とチケット発行 API の完了ログには、ブラウザが送った `User-Agent` と Client Hints を `client` グループとして生のまま付ける（`requestLog` の `clientInfo`。キーと制約は Go と同じ。DESIGN.md 10章「ブラウザと OS の記録」）
+- QR 同梱付与 API とチケット付与 API の完了ログには、ブラウザが送った `User-Agent` と Client Hints を `client` グループとして生のまま付ける（`requestLog` の `clientInfo`。キーと制約は Go と同じ。DESIGN.md 10章「ブラウザと OS の記録」）
 
 ## 6. ビルド・実行・テスト
 
@@ -321,7 +321,7 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 | zip サイズ | ticketqr 22KB / exampleqr 13.5KB（Go: 4.9MB / 2.9MB）。example.ts / shared.ts に分けたので、exampleqr には image-size もチケット系のコードも含まれない |
 | HTML の差 | 空白・インデント、`<meta ... />` の書き方、エスケープの書き方（Go は `&#34;`、Node は `&quot;` など）。いずれも表示と意味は同じ |
 
-既知の差（いずれもスマートフォン（iPhone / Android）の写真やブラウザの `FormData` では起きない、要件外の細部のため許容する）:
+既知の差（いずれもスマートフォン（iPhone / Android）で撮った画像やブラウザの `FormData` では起きない、要件外の細部のため許容する）:
 
 | ケース | Go | Node |
 |---|---|---|

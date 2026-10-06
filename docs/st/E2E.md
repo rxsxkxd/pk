@@ -287,6 +287,7 @@ docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-c
 API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
 ```
 
+- 手で流すときの手順（結果の見方、失敗したときの調べ方を含む）は [E2E_RUN.md](E2E_RUN.md)
 - `api` の起動の完了は、`globalSetup` でゲートウェイに問い合わせて待つ（Lambda のイメージにはヘルスチェック用のコマンドがないため）
 - 開発中にテストを書くときは、`storage` と `api` だけを起動し、ホスト側の `npx playwright test --ui` で操作することもできる（ホスト名を解決するため、ホストの `/etc/hosts` かポートフォワードの設定が必要）
 

@@ -4,7 +4,7 @@ Blue/Green Deployment は CloudFormation カスタムリソースを使わず、
 
 ## 設定
 
-環境ごとに 1 ファイルを用意する。例: [`staging.yml`](../../config/blue-green/staging.yml)、[`production.yml`](../../config/blue-green/production.yml)。各ファイルには、その環境に含まれる全サービスについて以下を指定する。
+環境ごとに 1 ファイル（`config/blue-green/<環境>.yml`。`development.yml` / `staging.yml` / `production.yml`）を実際の値で用意する（実運用のファイルはこのリポジトリでは管理せず、別のリポジトリで管理する）。書き方の見本はサンプルの [`staging.example.yml`](../../config/blue-green/staging.example.yml)・[`production.example.yml`](../../config/blue-green/production.example.yml)。各ファイルには、その環境に含まれる全サービスについて以下を指定する。
 
 - 移行元 Blue DB の DB インスタンス識別子
 - Green DB の MySQL 8.4 バージョンとインスタンスタイプ

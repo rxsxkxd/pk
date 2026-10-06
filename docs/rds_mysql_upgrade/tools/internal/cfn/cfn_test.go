@@ -107,12 +107,12 @@ func TestReadDBParameterGroupRejectsBadTemplates(t *testing.T) {
 	}
 }
 
-// リポジトリの共通 fixture（examples/cfn-shorthand/）でも同じ解釈になることを確かめる。
-// Ruby 版・インライン Python 版と足並みを揃えるための入口である。
+// リポジトリの共通 fixture（tests/fixtures/cfn-shorthand/）でも同じ解釈になることを確かめる。
+// fixture はリポジトリにあるはずなので、見つからなければスキップせず失敗にする。
 func TestReadDBParameterGroupOnRepositoryFixture(t *testing.T) {
-	path := "../../examples/cfn-shorthand/mysql84-parameter-group-shorthand.yaml"
+	path := "../../../tests/fixtures/cfn-shorthand/mysql84-parameter-group-shorthand.yaml"
 	if _, err := os.Stat(path); err != nil {
-		t.Skipf("fixture が無い: %v", err)
+		t.Fatalf("fixture が無い（リポジトリにあるはずのファイル）: %v", err)
 	}
 	group, err := ReadDBParameterGroup(path)
 	if err != nil {
@@ -142,11 +142,11 @@ func TestParameterNamesOnRepositoryTemplates(t *testing.T) {
 		path string
 		want []string
 	}{
-		{"../../examples/cfn-shorthand/mysql84-parameter-group-shorthand.yaml", []string{"binlog_format", "replica_parallel_workers"}},
-		{"../../examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml", []string{"binlog_format"}},
+		{"../../../tests/fixtures/cfn-shorthand/mysql84-parameter-group-shorthand.yaml", []string{"binlog_format", "replica_parallel_workers"}},
+		{"../../../examples/mysql84-parameter-generation/output/mysql84-parameter-group.yaml", []string{"binlog_format"}},
 	} {
 		if _, err := os.Stat(tc.path); err != nil {
-			t.Skipf("fixture が無い: %v", err)
+			t.Fatalf("fixture が無い（リポジトリにあるはずのファイル）: %v", err)
 		}
 		names, err := ParameterNames(tc.path)
 		if err != nil {

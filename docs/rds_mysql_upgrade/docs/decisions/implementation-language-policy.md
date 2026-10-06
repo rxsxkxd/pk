@@ -9,9 +9,10 @@
 | 対象 | 言語 | 理由 |
 |---|---|---|
 | **プログラム**（レポート生成、RDS インベントリ収集、Blue/Green 設定生成、CloudFormation テンプレート読み取り） | **Go** | 単一の静的バイナリで配布でき、実行側にランタイムを要求しない。単体テストを書ける |
-| **設定 YAML の読み取り**（`scripts/lib/deployment_config.rb`。シェルからはコマンドとして呼ぶ） | **Ruby** | YAML（psych）が標準ライブラリで、gem の追加導入が不要。ビルド成果物も要らない |
-| AWS 応答などの JSON の取り出し・生成 | jq | CodeBuild の managed image と GitHub Actions のランナーに同梱されている |
-| 手順の実行順序・AWS CLI の呼び出し | Bash | 収集と判定を分離する構成（`CLAUDE.md`）に合わせる |
+| **設定 YAML の読み取り**（`scripts/lib/deployment_config.rb`。buildspec からはコマンドとして呼ぶ） | **Ruby** | YAML（psych）が標準ライブラリで、gem の追加導入が不要。ビルド成果物も要らない |
+| **パイプラインの手順と AWS 操作**（`scripts/*.rb`。AWS CLI を exec する） | **Ruby** | AWS 応答の JSON も標準ライブラリ（json）で読めるので、jq も要らない |
+
+> 改訂（2026-10-06）: 当初は「AWS 応答などの JSON の取り出し・生成は jq」「手順の実行順序・AWS CLI の呼び出しは Bash」としていたが、パイプラインのシェルスクリプトを Ruby へ移したため、**jq と Bash は使わなくなった**（例外は BuildReportTool のモジュールルート検査 `scripts/resolve_go_module_root.sh` だけ）。Python も使わない（下記の検証装置を除く）。
 
 **新しいプログラムは Go で書く。**既存の Ruby は、**テスト可能性が問題になったものから順に移す**。一律の移行は目的ではない。
 

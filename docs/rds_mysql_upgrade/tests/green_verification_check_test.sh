@@ -13,8 +13,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-C=examples/cfn-shorthand/collected
-T=examples/cfn-shorthand/mysql84-parameter-group-shorthand.yaml
+C=tests/fixtures/cfn-shorthand/collected
+T=tests/fixtures/cfn-shorthand/mysql84-parameter-group-shorthand.yaml
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 failed=0
 

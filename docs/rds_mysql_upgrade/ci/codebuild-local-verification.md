@@ -44,7 +44,7 @@ Local Agent と実行 image は別のコンテナである。
 | CodeBuild Local Agent | `public.ecr.aws/codebuild/local-builds:latest`（ARM では `:aarch64`） | `codebuild_build.sh` から受け取ったソース、AWS 設定、環境変数、artifact 出力先、buildspec を実行 image へ受け渡す制御役 |
 | 実行 image | `rds-codebuild-runner:local-amd64` または `rds-codebuild-runner:local-arm64` | AWS 上と同じ buildspec の `install`／`build` フェーズを、ローカル検証用の軽量 image で実行する環境 |
 
-`codebuild_build.sh` の `-i rds-codebuild-runner:local-<architecture>` は後者の実行 image を指定する。Local Agent 自体は buildspec を直接実行するための汎用制御コンテナであり、Python・AWS CLI・本リポジトリのスクリプトは実行 image 側で動く。VerifyGreen だけは、実行 image の中からさらに `golang:1.25` を一時的に起動し、Go レポート生成バイナリをビルドする。AWS 上の CodeBuild はこの image を使わず、引き続き `aws/codebuild/standard:7.0` を使う。
+`codebuild_build.sh` の `-i rds-codebuild-runner:local-<architecture>` は後者の実行 image を指定する。Local Agent 自体は buildspec を直接実行するための汎用制御コンテナであり、Ruby・AWS CLI・本リポジトリのスクリプトは実行 image 側で動く。Go のバイナリのビルドは BuildReportTool の buildspec が担い、そのローカル検証は `golang:1.25` を実行 image にして行う（[build-report-tool-local-verification.md](build-report-tool-local-verification.md)）。AWS 上の CodeBuild はこの image を使わず、引き続き `aws/codebuild/standard:7.0` を使う。
 
 Local Agent と実行 image は同じ CPU アーキテクチャでそろえる。ネイティブ実行を基本とし、`x86_64`（Docker の platform 表記では `linux/amd64`）と `arm64` で混在させない。
 
@@ -154,7 +154,7 @@ mkdir -p .local
 
 ### 1-6. Echo buildspec による成功確認
 
-共通準備の完了確認には、`ci/codebuild/echo.yml` を実行する。この buildspec は AWS API を呼ばず、`install` と `build` でメッセージ・Python・AWS CLI のバージョン・環境変数を出力する。BuildGreen・VerifyGreen・Switchover より先に、Local Agent、実行 image、buildspec の指定、artifact 出力の疎通を確認できる。
+共通準備の完了確認には、`ci/codebuild/echo.yml` を実行する。この buildspec は AWS API を呼ばず、`install` と `build` でメッセージ・Ruby・AWS CLI のバージョン・環境変数を出力する。BuildGreen・VerifyGreen・Switchover より先に、Local Agent、実行 image、buildspec の指定、artifact 出力の疎通を確認できる。
 
 ### x86_64（Intel Mac / AMD64 Linux）
 
@@ -203,7 +203,7 @@ mkdir -p .local
   -c -p your-readonly-profile -m
 ```
 
-この状態では `build_green.rb` が `pending` を検出して終了するため、RDS API の変更操作は行わない。確認対象は Ruby と jq の存在、環境変数の受け渡し、buildspec の構文、成果物出力先である。
+この状態では `build_green.rb` が `pending` を検出して終了するため、RDS API の変更操作は行わない。確認対象は Ruby の存在、環境変数の受け渡し、buildspec の構文、成果物出力先である。
 
 ### 実 AWS 操作を含む検証
 
@@ -267,7 +267,7 @@ ruby scripts/verify_green.rb \
 
 ただしこの直接実行は CodeBuild の `runtime-versions` 解決と buildspec artifacts を検証しない。CodeBuild 導入前の最終確認には、各節の Local Agent コマンドを使う。
 
-直接実行では Ruby と jq があれば追加作業は要らない。ただし VerifyGreen のレポート生成器は Go 版だけなので、`GREEN_REPORT_GENERATOR` を指定しない場合は `verify_green.rb` がその場でビルドする（Go が必要）。
+直接実行では Ruby と AWS CLI があれば追加作業は要らない。ただし VerifyGreen のレポート生成器は Go 版だけなので、`GREEN_REPORT_GENERATOR` を指定しない場合は `verify_green.rb` がその場でビルドする（Go が必要）。
 
 ## 6. 実行しない確認項目
 
@@ -281,4 +281,4 @@ ruby -e 'require "yaml"; Dir["ci/codebuild/*.yml"].each { |f| YAML.load_file(f) 
 for f in scripts/*.rb scripts/lib/*.rb; do ruby -c "$f" >/dev/null || echo "NG $f"; done
 ```
 
-これらは CodeBuild managed image・Python package・Docker・AWS API・IAM・ネットワークを検証しない。実行環境の互換性確認には Local Agent を用いる。
+これらは CodeBuild managed image（Ruby・Go の版の解決を含む）・Docker・AWS API・IAM・ネットワークを検証しない。実行環境の互換性確認には Local Agent を用いる。

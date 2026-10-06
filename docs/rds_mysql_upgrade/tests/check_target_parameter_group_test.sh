@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 failed=0
-config=config/blue-green/staging.yml
+config=config/blue-green/staging.example.yml
 vars=$(ruby scripts/lib/deployment_config.rb vars "$config" example-service tpg=required:service.target_db_parameter_group_name)
 eval "$vars"
 mkdir -p "$work/bin"

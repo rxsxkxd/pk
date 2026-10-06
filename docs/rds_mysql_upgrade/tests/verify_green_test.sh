@@ -17,12 +17,12 @@ failed=0
 ok()   { printf 'ok    %s\n' "$1"; }
 fail() { printf 'FAIL  %-44s %s\n' "$1" "$2"; failed=$((failed + 1)); }
 export GREEN_TOOLS_BUILD_DIR="$work/built"   # 判定器のビルド先（リポジトリの .tools を汚さない）
-C=$PWD/examples/cfn-shorthand/collected
+C=$PWD/tests/fixtures/cfn-shorthand/collected
 
 # 設定: staging を元に、テンプレートを fixture（C の収集結果と一致するもの）へ差し替える。
 config="$work/config.yml"
-sed 's#target_parameter_group_template_path: .*#target_parameter_group_template_path: examples/cfn-shorthand/mysql84-parameter-group-shorthand.yaml#' \
-  config/blue-green/staging.yml > "$config"
+sed 's#target_parameter_group_template_path: .*#target_parameter_group_template_path: tests/fixtures/cfn-shorthand/mysql84-parameter-group-shorthand.yaml#' \
+  config/blue-green/staging.example.yml > "$config"
 vars=$(ruby scripts/lib/deployment_config.rb vars "$config" example-service \
   sid=required:service.source_db_instance_identifier sv=required:service.source_engine_version \
   spg=required:service.source_db_parameter_group_name tv=required:service.target_engine_version \

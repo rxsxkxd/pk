@@ -25,7 +25,7 @@ aws_region: ap-northeast-1
 services:
   svc:
     source_db_instance_identifier: x
-    target_parameter_group_template_path: examples/cfn-shorthand/mysql84-parameter-group-shorthand.yaml
+    target_parameter_group_template_path: tests/fixtures/cfn-shorthand/mysql84-parameter-group-shorthand.yaml
     mysql_verification:
 ${body}
 YAML

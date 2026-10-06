@@ -1,5 +1,12 @@
 # CloudFormation 短縮記法の検証用 fixture
 
+> **テスト専用のデータである。**次のテストが読む。内容を変えると、これらのテストの期待値も合わせて直す必要がある。
+>
+> - Go: `scripts/internal/cfn/cfn_test.go`・`tools/internal/cfn/cfn_test.go`（同一内容の複製）
+> - シェル: `tests/cfn_shorthand_test.sh`・`tests/green_verification_check_test.sh`・`tests/verify_green_test.sh`・`tests/mysql_credentials_test.sh`
+>
+> `mysql84-parameter-group-shorthand.yaml` が短縮記法のテンプレート、`collected/` が Step 4 で AWS から収集した JSON を模したもの（`green-runtime-values.json` は MySQL 実効値）である。
+
 Step 2 が生成する DB パラメータグループのテンプレートは**長形式**（`Ref: Xxx`）で出力されるが、Step 2 のレビューで人が CFn 慣用の**短縮記法**（`!Ref` / `!Sub`）へ書き換えることがある。
 
 テンプレートの読み取りは `internal/cfn` が担う。レポート生成器（`scripts/generate_green_verification_report/`）と実効値の収集器（`scripts/collect_green_runtime_values/`。問い合わせるパラメータ名を `ParameterNames` で得る）が `scripts/internal/cfn` を、レビューレポート生成（`tools/generate_blue_green_config_report`）が `tools/internal/cfn` を使う。**この 2 本は同一内容の複製で、`tests/cfn_shorthand_test.sh` が一致を検査する。**

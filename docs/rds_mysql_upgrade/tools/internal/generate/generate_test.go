@@ -274,7 +274,7 @@ func TestWriteProducesTwoSpaceIndentedYAML(t *testing.T) {
 		t.Fatalf("ReadFile: %v", err)
 	}
 	text := string(content)
-	// 出力のキー順は構造体のフィールド順で決まる。既存の deployment.yml に揃える。
+	// 出力のキー順は構造体のフィールド順で決まる。既存の設定ファイル（config/blue-green/<環境>.yml）に揃える。
 	for _, want := range []string{
 		"environment: staging\n",
 		"aws_region: ap-northeast-1\n",

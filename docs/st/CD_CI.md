@@ -120,10 +120,10 @@ E2 のために必要な変更:
 |---|---|
 | テストの宛先 | `e2e/env.ts` は `WEB_URL`・`API_URL` を環境変数で変えられる。CodeBuild から、Dev の CloudFront と API Gateway の URL を渡す |
 | SPA の配置 | 本物の環境ではパイプラインが SPA を置くので、`global-setup.ts` の S3（Garage）への配置を飛ばす設定を足す（例: `SKIP_DEPLOY=1`） |
-| CSRF のテスト（ケース9） | 攻撃者を想定した2つ目のオリジンを AWS に置く（E2E 専用の小さな S3 + CloudFront）。用意するまでは、E2 ではこのケースを飛ばす |
+| CSRF のテスト（ケース9） | 攻撃者を想定した2つ目のオリジンを AWS に置く。CloudFront を分ける提案（[notes/cloudfront-split.md](notes/cloudfront-split.md)）の構成 T なら、もう1つの S3 のウェブサイトで安く作れる。用意するまでは、E2 ではこのケースを飛ばす |
 | CodeBuild の環境 | Playwright と Chromium が入ったイメージ（Playwright の公式イメージを ECR に写したもの）か、標準のイメージに `npx playwright install --with-deps chromium` |
 | 失敗したときの記録 | Playwright のレポートとトレースを、CodeBuild の成果物（S3）に残す |
-| 環境 | まずは Dev に対して流す。テストのデータを本番に近い環境に残したくなければ、E2E 専用の環境（スタック）を分ける |
+| 環境 | まずは Dev に対して流す。テストのデータを本番に近い環境に残したくなければ、E2E 専用の環境（スタック）を分ける。CloudFront なしの構成（notes/cloudfront-split.md の構成 T）なら、作って消すのも早い |
 
 ## 1. 方針と役割分担（P1 の詳細。ここから 9章まで）
 

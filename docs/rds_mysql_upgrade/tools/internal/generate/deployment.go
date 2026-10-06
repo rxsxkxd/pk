@@ -137,7 +137,7 @@ func Generate(catalog *Catalog, inventory *common.Inventory, environmentName str
 }
 
 // ConnectionRef は、ある環境で 1 つの RDS インスタンスを指している接続である。
-// 生成結果（deployment.yml）にはアプリ名が残らないため、レポート側が
+// 生成結果（config/blue-green/<環境>.yml）にはアプリ名が残らないため、レポート側が
 // 「この切替で影響を受けるのは誰か」を辿るために使う。
 type ConnectionRef struct {
 	Application string
@@ -314,7 +314,7 @@ func requireSameDeployment(existing, candidate *Service, context string) error {
 	return nil
 }
 
-// Write は生成した設定を原子的に書く。既存の deployment.yml と同じ 2 スペース字下げにする。
+// Write は生成した設定を原子的に書く。既存の設定ファイルと同じ 2 スペース字下げにする。
 func Write(path string, document *Deployment) error {
 	return common.WriteAtomic(path, func(file *os.File) error {
 		encoder := yaml.NewEncoder(file)

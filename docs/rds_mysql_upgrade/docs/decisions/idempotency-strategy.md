@@ -47,10 +47,13 @@ PROVISIONING → AVAILABLE → SWITCHOVER_IN_PROGRESS → SWITCHOVER_COMPLETED �
 
 ### 既存の暗黙のガードを明示化することでもある
 
-`create_blue_green_deployment.sh` には既に同種のチェックがハードコードされている。
+`scripts/build_green.rb` には既に同種のチェックがハードコードされている（この判断をした当時は、シェル版の `create_blue_green_deployment.sh` にインライン Python で書かれていた）。
 
-```python
-i["EngineVersion"].startswith("8.0.") or throw(SystemExit(f"Source DB engine must be MySQL 8.0: ..."))
+```ruby
+unless instance['EngineVersion'].to_s.start_with?('8.0.')
+  warn "Source DB engine must be MySQL 8.0: #{instance['EngineVersion']}"
+  exit 1
+end
 ```
 
 これを設定ファイル駆動にするのは、**既にある考え方の一般化**であり、新しい概念の持ち込みではない。

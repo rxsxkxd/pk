@@ -89,7 +89,7 @@ CodeConnections による GitHub 接続は CodePipeline の Source ステージ�
 - **MySQL クライアントを使わないため、apt repository への到達は不要である。**実効値の収集は `collect_green_runtime_values`（`BuildReportTool` がビルドする静的リンクの Go バイナリ。RDS のトラストストアを内蔵）が行う。buildspec は `apt-get` を呼ばない。
 - `VerifyGreenProject` は同じ VPC の**レポート実行専用 subnet**（外部へ出ない）へ置く。その場合は、`s3`（Gateway）と `logs` / `rds` / `monitoring` / `ssm`（Interface）の VPC endpoint を用意する。カスタマー管理キーを使うなら `kms` も要る。設定手順は [CodeBuild / CodePipeline セットアップ手順](codebuild-codepipeline-setup.md) にある。
 - CodeBuild を VPC 内に置く場合、RDS MySQL への private 接続に加え、上記の AWS service endpoint と公開配布元への egress を NAT gateway、HTTPS proxy、VPC endpoint、組織ミラーの方針に沿って設計する。
-- Docker Hub／PyPI／apt／Go module への通信を許可しない方針なら、依存物を含むカスタム CodeBuild image と、組織内 registry・package mirror を用意して buildspec の取得元を置き換える。
+- Go module などの公開配布元への通信を許可しない方針なら、依存物を含むカスタム CodeBuild image と、組織内 registry・package mirror を用意して buildspec の取得元を置き換える。
 
 ## 6. 対象外
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Blue/Green 設定生成支援ツールのテスト。
 # 実 AWS には接続せず、examples/ の describe-db-instances ダミー応答を使う。
-# 出力はすべて一時ディレクトリに限定し、config/blue-green/{staging,production}.yml を変更しない。
+# 出力はすべて一時ディレクトリに限定し、config/blue-green/ 配下（実運用の設定とサンプル）を変更しない。
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "$0")/.." && pwd)

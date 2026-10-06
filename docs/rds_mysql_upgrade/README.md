@@ -76,7 +76,7 @@ BuildGreen（Step 3）、VerifyGreen（Step 4）、Switchover（Step 5）は、�
 | CodeBuild Local Agent | buildspec・環境変数・artifact・Docker を含む CodeBuild 互換性確認 | `ci/codebuild/{build-green,verify-green,switchover}.yml` | Local Agent 経由で buildspec を起動 |
 | AWS CodeBuild / GitHub Actions | CI 上の継続的な検証 | CodeBuild buildspec / GitHub Actions workflow | リモート CI から起動 |
 
-VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT_GENERATOR` を指定しなければ Ruby を使う。一方、CodeBuild Local Agent、AWS CodeBuild、GitHub Actions は Docker Buildx で Go バイナリを作成して指定する。この違いはレポート生成器の実装・実行環境上の補足であり、検証対象・判定内容を変えるものではない。
+VerifyGreen の判定とレポートは Go のバイナリが行う。直接実行時に `GREEN_REPORT_GENERATOR` / `GREEN_RUNTIME_COLLECTOR` を指定しなければ、その場で `.tools/green-report/` へビルドする（Go が必要）。AWS CodeBuild では BuildReportTool がビルドしたものを artifact で受け取り、GitHub Actions は workflow の中で `go build` する（どちらも Docker は使わない）。どの経路でも同じプログラムなので、検証対象・判定内容は変わらない。
 
 直接実行の一連手順は [direct-blue-green-execution.md](docs/direct-blue-green-execution.md)、CodeBuild Local Agent の手順は [ci/codebuild-local-verification.md](ci/codebuild-local-verification.md) を参照する。
 
@@ -104,7 +104,7 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 - [mysql-timezone.md](docs/references/mysql-timezone.md) — タイムゾーン関連パラメータ(`time_zone`、`system_time_zone`、`explicit_defaults_for_timestamp`)の整理
 - [mysql-timezone-replication-verification.md](docs/references/mysql-timezone-replication-verification.md) — ソースとレプリカで `time_zone` が異なる場合の挙動を AWS 上で実証する検証手順(使い捨て構成の作成・検証・後始末)。AWS を使わない場合は [examples/mysql-timezone-replication/](examples/mysql-timezone-replication) のローカル擬似環境を使う
 - [shared-instance-upgrade-verification.md](docs/references/shared-instance-upgrade-verification.md) — **ステージと本番が同一インスタンスに同居している場合**の移行手順。使い捨て検証機の構築・検証・後始末と、同居構成での既存スクリプトの誤動作
-- [step-script-language-matrix.md](docs/references/step-script-language-matrix.md) — Step 別のスクリプト対応表と、実行に必要な言語環境(Bash/Python/Ruby/Go/MySQL クライアント)の一覧
+- [step-script-language-matrix.md](docs/references/step-script-language-matrix.md) — Step 別のスクリプト対応表と、実行に必要な言語環境(Ruby/Go/AWS CLI/MySQL クライアント。Python と jq は使わない)の一覧
 - [source-article-notes.md](docs/references/source-article-notes.md) — 出典記事の要約メモ(参考。正典ではない)
 
 ### `docs/decisions/`
@@ -112,8 +112,9 @@ VerifyGreen のレポート生成器だけは、直接実行時に `GREEN_REPORT
 - [cdk-adoption-considerations.md](docs/decisions/cdk-adoption-considerations.md) — CDK 導入の判断資料(結論: 現状は CloudFormation のみで運用)
 - [binlog-format-bluegreen-compatibility.md](docs/decisions/binlog-format-bluegreen-compatibility.md) — Blue `MIXED` → Green `ROW` の Blue/Green レプリケーション互換性
 - [structure-review-proposal.md](docs/decisions/structure-review-proposal.md) — リポジトリ構成・フロー全体の見直し対案(**未採択**。着手順を含む)
+- [improvement-proposals.md](docs/decisions/improvement-proposals.md) — 2026-10 時点の改善提案を重要な順に並べたもの(**未採択**。見送った案の記録を含む)
 - [idempotency-strategy.md](docs/decisions/idempotency-strategy.md) — 各フェーズの冪等性の現状評価とあるべき姿(**未採択**)。switchover が 2 回目に必ず失敗する点、cleanup が部分完了で成功を返す点など
-- [implementation-language-policy.md](docs/decisions/implementation-language-policy.md) — 実装言語の役割分担(**採択済み**)。プログラムは Go、シェルからの YAML 読み取りは Ruby、JSON は jq。Step 4 をローカル実行前提に寄せる判断を含む
+- [implementation-language-policy.md](docs/decisions/implementation-language-policy.md) — 実装言語の役割分担(**採択済み**)。人が実行するツールは Go、パイプラインの AWS 操作と設定 YAML の読み取りは Ruby、パイプラインの MySQL クエリと判定は Go（Python と jq は使わない）。Step 4 をローカル実行前提に寄せる判断を含む
 
 ### `auxiliary/`
 

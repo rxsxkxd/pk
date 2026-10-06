@@ -154,7 +154,7 @@ services:
       context: ./probe
       # PyMySQL は純 Python 実装のためビルドツールは不要だが、
       # 実行のたびの取得を避けるためイメージへ焼き込む。
-      # Python のバージョンは ci/Dockerfile.codebuild-runner に揃えてある。
+      # Python はこの検証装置でだけ使う（移行の実行経路・ツールには Python は無い）。
       dockerfile_inline: |
         FROM python:3.14.7-slim-bookworm
         RUN python3 -m pip install --no-cache-dir --disable-pip-version-check 'PyMySQL==1.1.1'

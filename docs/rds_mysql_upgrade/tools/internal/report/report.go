@@ -202,7 +202,7 @@ func (report *Report) writeDeployments(out *strings.Builder) {
 }
 
 // writeConnections は「この切替で影響を受けるのは誰か」を示す。
-// 生成結果（deployment.yml）にはアプリ名が残らないため、ここで補う。
+// 生成結果（config/blue-green/<環境>.yml）にはアプリ名が残らないため、ここで補う。
 func (report *Report) writeConnections(out *strings.Builder) {
 	out.WriteString("## 影響範囲（スキーマと接続元）\n\n")
 	out.WriteString("| RDS インスタンス | スキーマ | 接続元（アプリ.接続名） |\n|---|---|---|\n")

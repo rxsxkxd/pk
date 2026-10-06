@@ -4,6 +4,8 @@ SPA（`web/`。[DESIGN.md](DESIGN.md)）を、非公開の S3 バケットに置
 
 全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、API のデプロイは [../go/DEPLOY.md](../go/DEPLOY.md) / [../node/DEPLOY.md](../node/DEPLOY.md)。GitHub Actions からのデプロイは [../CI.md](../CI.md) 4章。
 
+> **提案中**: `web.yaml` を S3 のバケット（`web-bucket.yaml`）と CloudFront（`edge.yaml`）に分け、テスト環境は CloudFront なし、本番は SPA と API を1つの CloudFront にまとめる案がある（[../notes/cloudfront-split.md](../notes/cloudfront-split.md)）。採用したら、この手順書を構成ごとに書き直す。
+
 ```
 利用者のブラウザ ──HTTPS──▶ CloudFront（既定のルートオブジェクト index.html、セキュリティヘッダー）
                               └─ OAC ──▶ S3 バケット（非公開。index.html、assets/*、config.json）

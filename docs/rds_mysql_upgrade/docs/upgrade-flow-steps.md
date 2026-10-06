@@ -38,7 +38,7 @@
 作成後は Deployment が `AVAILABLE` になるまで待機して終了し、切替は行わない。
 
 - 実装: [`scripts/build_green.rb`](../scripts/build_green.rb)
-- 設定: [config/blue-green/production.yml](../config/blue-green/production.yml) ／ [config/blue-green/staging.yml](../config/blue-green/staging.yml)
+- 設定: [config/blue-green/production.example.yml](../config/blue-green/production.example.yml) ／ [config/blue-green/staging.example.yml](../config/blue-green/staging.example.yml)
 - 補足: 現行スクリプトは `--target-engine-version 8.4.x` を作成時に一括指定するワンショット方式。作成に失敗すると Deployment ごと作り直しになるため、同一 8.0 で作成 → Green のみ手動昇格する二段方式を選ぶ場合はスクリプトを分割する。
 
 ## Step 4. Blue/Green 構成の設定チェックとレプリカ同期チェック

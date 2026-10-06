@@ -7,7 +7,7 @@
 //
 // 値が組み込み関数の項目は、CloudFormation のパラメータ解決なしには実値が決まらない。
 // 比較すると誤ったドリフトになるため Declared には入れず、Unresolved で示す。
-// fixture とテストは examples/cfn-shorthand/ にある。
+// fixture は tests/fixtures/cfn-shorthand/ にある。
 package cfn
 
 import (

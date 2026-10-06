@@ -77,15 +77,15 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Pro
 }
 ```
 
-### 2.3 Fetch Upload Streams（対応ブラウザだけで使い、非対応なら機能を削る）
+### 2.3 Fetch Upload Streams（検討中・優先度低）
 
-> **検討中**: iOS の Safari は最新版でも Fetch Upload Streams に対応していないため、XMLHttpRequest の `xhr.upload.onprogress` に置き換える案を検討している（[notes/upload-progress.md](notes/upload-progress.md)。一時メモ）。決まったら、この節を書き換える。
+> **検討中（優先度は低い）**: アップロードの進み具合は、**Android だけ** Fetch Upload Streams で出す案で考えている。iOS の Safari は、最新の正式版（26.x）でも対応していない（開発者向けの Safari Technology Preview 250 で初期の対応をした段階）ので、iOS では進み具合を出さない。将来の Safari の正式版が対応すれば、下の判定で自動的に進み具合が出る。全端末で進み具合を出せる XMLHttpRequest（`xhr.upload.onprogress`）案は、今は採らない。検討の経緯は [notes/upload-progress.md](notes/upload-progress.md)（一時メモ）。この節は、採用が決まったときの仕様の案。
 
 写真のアップロードの進み具合（％）を出すために、対応ブラウザでは、リクエストのボディを `ReadableStream` で送る（Fetch Upload Streams。`duplex: 'half'`）。対応しないブラウザでは、進み具合の表示を削り、今までどおり `FormData` で送る。
 
 | | 対応ブラウザ | 非対応ブラウザ（フォールバック） |
 |---|---|---|
-| 対象 | Chrome / Edge 105 以降（Android 9 の Chrome 138 を含む） | Safari（iOS 13 を含むすべての版）、Firefox、Chrome 104 以前 |
+| 対象 | Chrome / Edge 105 以降（Android 9 の Chrome 138 を含む）。将来、正式版が対応した Safari | Safari（iOS 13〜最新の 26.x のすべての版）、Firefox、Chrome 104 以前 |
 | 送り方 | `multipart/form-data` のボディを自分で組み立て（boundary、パートのヘッダー、`file.stream()` の中身）、`ReadableStream` で送る。送ったバイト数を数える | `FormData` をそのまま `fetch` に渡す（今の実装） |
 | 画面 | 「送信中… 45%」のように進み具合を出す | 「送信中…」だけを出す |
 | サーバーが受け取るもの | 同じ（`multipart/form-data` の `image`。写真は加工しない） | 同じ |
@@ -131,7 +131,7 @@ const supportsRequestStreams = (() => {
 | 3 | `AbortSignal.timeout()` を、`AbortController` と `setTimeout` に置き換える（2.2） | Safari 16 から |
 | 4 | **Tailwind CSS 4 をやめる**（Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書く。11章で決める） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。iOS 13 では見た目が大きく崩れる |
 | 5 | 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
-| 6 | Fetch Upload Streams の送信（2.3）と、送信中の進み具合の表示 | 新しい機能 |
+| 6 | （検討中・優先度低）Fetch Upload Streams の送信（2.3）と、Android での送信中の進み具合の表示 | 新しい機能。採用が決まってから行う |
 | 7 | 実機での確認: iOS 13 の端末（またはクラウドの実機サービス）と、Android 9 + Chrome 138 以下 | E2E の Playwright の WebKit は最新の WebKit で、Safari 13 の動きは再現しない |
 
 ## 3. 画面と操作
@@ -255,7 +255,7 @@ export async function issueInline(apiBaseUrl: string, file: File): Promise<Inlin
 - `issueForPage` と `issueInline` は、どちらも `FormData` で送る。Content-Type はブラウザが boundary 付きで付ける
 - `fetch` の `FormData` 送信は CORS の「単純リクエスト」で、`Accept` ヘッダーを付けても変わらない。そのためプリフライトは発生しない。ただし、レスポンスを読むには API が `Access-Control-Allow-Origin` を返す必要がある（7章）
 - タイムアウト: 30秒（API Gateway の上限 29 秒より少し長く）。`AbortController` と `setTimeout` で作る（2.2。今の実装の `AbortSignal.timeout()` は iOS 13 で使えないので置き換える）。タイムアウトや通信エラーは「通信できませんでした」として扱う
-- 対応ブラウザでは、写真を Fetch Upload Streams で送り、進み具合を出す。非対応や失敗のときは `FormData` で送る（2.3）
+- （検討中・優先度低）Android（Fetch Upload Streams に対応するブラウザ）だけ、写真をストリームで送って進み具合を出す案がある。非対応や失敗のときは `FormData` で送る（2.3）
 - チケット画面の QR は、`issueForPage` の結果の `qrUrl` ではなく、URL のパラメータから `qrUrl()` で組み立てる（リロード後も同じ方法で描画するため）
 
 ### 4.3 検証（zod）
@@ -428,7 +428,7 @@ Strict-Transport-Security: max-age=31536000
 | SPA の発行方式 | **画面遷移方式（チケット発行 API ＋ QR 画像 API）をメインにする**。その場表示方式とフォーム送信方式はオプション（`config.json` の `modes` で有効にする。既定は無効） |
 | API 側の機能 | 3パターンすべてに対応したまま残す（QR 同梱発行 API、チケット発行 API の JSON とリダイレクト、チケット表示ページ、QR 画像 API） |
 | チケット発行 API の返し方 | `Accept: application/json` で JSON に切り替える（API 側は実装済み） |
-| 対応ブラウザ | iOS 13 / Android 9 以上（2.1）。`fetch`・`Promise`・`async`/`await`・`AbortController`/`AbortSignal` を使う（2.2）。Fetch Upload Streams は対応ブラウザだけで使い、非対応なら進み具合の表示を削る（2.3） |
+| 対応ブラウザ | iOS 13 / Android 9 以上（2.1）。`fetch`・`Promise`・`async`/`await`・`AbortController`/`AbortSignal` を使う（2.2） |
 
 未確定:
 
@@ -438,4 +438,5 @@ Strict-Transport-Security: max-age=31536000
 4. 画面の文言・デザインの指定（今はシンプルな2画面を想定）
 5. スタイルの方式: Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書くか（Tailwind CSS 4 は iOS 13 に対応しない。2.4）
 6. Android 9 で対応する Chrome の下限の版（Android 9 の Chrome は 138 で更新が止まっている。2.1）
-7. API Gateway（execute-api）が HTTP/2 に対応しているか（Fetch Upload Streams が使えるかどうかが決まる。2.3）
+7. （優先度低）アップロードの進み具合を Android だけ Fetch Upload Streams で出すか（2.3）。出す場合は、API Gateway（execute-api）が HTTP/2 に対応しているかを確かめる（対応していなければ使えない）
+8. 写真をブラウザで圧縮してから送るか（今は「写真は加工せずに送る」方針）。圧縮するなら、ライブラリ（第一候補: Compressor.js）、長辺・画質、HEIC の扱い。比較は [notes/image-compression.md](notes/image-compression.md)（一時メモ）。圧縮する場合、7 の進み具合は要らなくなる可能性がある

@@ -9,6 +9,7 @@
 | [web/DEPLOY.md](web/DEPLOY.md) | Web フロントエンド（SPA。S3 + CloudFront）と、API の CORS 設定 | `ticketqr-web-{impl}` |
 | この文書 | 共通の準備（1・2章）、画像解析サーバーのスタブ（3章） | `ticketqr-analyzer-stub-{stub}` |
 | [CI.md](CI.md) | GitHub Actions からのデプロイ（上の手順を自動で実行する） | - |
+| [CD_CI.md](CD_CI.md) | 構成案: CI は GitHub Actions、CD（デプロイ）は CodePipeline / CodeBuild | `ticketqr-st-pipeline` |
 
 ## 0. 全体の構成と順番
 

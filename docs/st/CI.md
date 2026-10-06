@@ -82,6 +82,8 @@ pull request / master への push（docs/st/** が変わったとき）
 
 ## 4. デプロイ（`st-deploy.yml`）
 
+> **見直し中**: デプロイを CodePipeline / CodeBuild に移す案がある（[CD_CI.md](CD_CI.md)）。採用したら、この章と `st-deploy.yml` は廃止する。
+
 > 未検証。4.2 の準備をしてから、`dev` で試す。
 
 ### 4.1 流れ

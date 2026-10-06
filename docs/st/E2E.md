@@ -322,6 +322,8 @@ E2E は `.github/workflows/st-ci.yml` のジョブ `e2e` で動く。構成は [
 
 これらは、検証用の AWS アカウントにデプロイし、同じ Playwright テストを `baseURL` と `config.json` だけ差し替えて流すことで確認する（`sam local start-api` も候補だが、中で Docker を起動するので、compose や CI では使いにくい）。
 
+この模擬環境の E2E と、AWS 上の本物に近い環境での E2E（パイプラインの中で CodeBuild から流す）をどう使い分けるかの評価は、[CD_CI.md](CD_CI.md) 0.5（推奨: 両方。PR は模擬環境、本番の承認の前は AWS）。
+
 ## 9. 決めておきたいこと
 
 1. Origin が無い POST を拒否してよいか（推奨: 拒否。curl などで動作確認するときは `-H 'Origin: ...'` が必要になる）

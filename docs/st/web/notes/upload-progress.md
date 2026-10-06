@@ -1,19 +1,23 @@
 # 【一時メモ】アップロードの進み具合: Fetch Upload Streams と XMLHttpRequest の評価
 
-> 一時的な検討メモ（2026-10-06）。結論が決まったら [../DESIGN.md](../DESIGN.md) 2.2・2.3 に反映し、このファイルは削除する。
+> 一時的な検討メモ（2026-10-06）。検討中の案は [../DESIGN.md](../DESIGN.md) 2.3 に書いてある。方針が確定したら、このファイルは削除する。
 
-## 1. 結論（案）
+## 1. 結論
 
-- iOS の Safari は、最新版でも Fetch Upload Streams に対応していない（2章）
-- アップロードの進み具合は、すべての対象ブラウザ（iOS 13 / Android 9 以上）で使える **XMLHttpRequest の `xhr.upload.onprogress`** で出す（3章）
-- メモリの面でも、写真（`<input type="file">` の `File`）を送る用途では、XMLHttpRequest は fetch に劣らない（4章）
-- それ以外の通信（`config.json` の取得など）は `fetch` のまま。DESIGN.md 2.2 には「アップロードだけは進み具合のために XMLHttpRequest を使う」という例外を書く
+**検討中（優先度は低い。2026-10-06）**: アップロードの進み具合は、**Android だけ** fetch のストリーム（Fetch Upload Streams）で出す案で考えている（DESIGN.md 2.3、11章の未確定事項7）。
+
+- iOS の Safari は、最新の正式版（26.x）でも Fetch Upload Streams に対応していない（2章）。iOS では進み具合を出さない
+- Android の Chrome 105 以降（Android 9 の Chrome 138 を含む）で進み具合を出す。ただし API Gateway が HTTP/2 で応答しない場合は使えない（未確認）
+- 将来、Safari の正式版が対応すれば、機能の有無で判定するので、自動的に進み具合が出る
 - 実装は保留
+
+検討した別案（今回は採らない）: すべての対象ブラウザ（iOS 13 / Android 9 以上）で使える **XMLHttpRequest の `xhr.upload.onprogress`** で進み具合を出す案（3章）。メモリの面でも、写真を送る用途では fetch に劣らない（4章）。方針を見直すときのために、評価を残しておく
 
 ## 2. iOS の Fetch Upload Streams の対応状況
 
-- WebKit は、開発者向けのプレビュー版 Safari Technology Preview 250 で、`ReadableStream` をボディにした `fetch`（`duplex: 'half'`）に初めて対応した
-- iOS の正式版の Safari に入ったという情報は見つからなかった。当面、iOS では使えない（将来の Safari で使えるようになる可能性はある）
+- WebKit は、開発者向けのプレビュー版 Safari Technology Preview 250（2026-08-13）で、`ReadableStream` をボディにした `fetch`（`duplex: 'half'`）に初めて対応した
+- iOS の正式版の Safari（26.x）に入ったという情報は見つからなかった。当面、iOS では使えない（将来の Safari で使えるようになる可能性はある）
+- 最近の iOS で増えた近い機能も、代替にならない: WebTransport（Safari 26.4 から）はサーバー側に WebTransport の実装が必要で、API Gateway + Lambda では受けられない。fetch のアップロードの進み具合のイベントは、どのブラウザにもない
 - Chrome は 105 から対応（Android 9 の Chrome 138 も対応）。ただし HTTP/2 以上が必要で、API Gateway（execute-api）が HTTP/2 で応答するかは未確認
 
 ## 3. Fetch Upload Streams と XMLHttpRequest の比較
@@ -70,6 +74,8 @@
 
 - [Streaming requests with the fetch API - Chrome for Developers](https://developer.chrome.com/docs/capabilities/web-apis/fetch-streaming-requests)
 - [Announcing Interop 2026 - WebKit](https://webkit.org/blog/17818/announcing-interop-2026/)
+- [Release Notes for Safari Technology Preview 250 - WebKit](https://webkit.org/blog/18191/release-notes-for-safari-technology-preview-250/)
+- [WebKit Features for Safari 26.4](https://webkit.org/blog/17862/webkit-features-for-safari-26-4/)
 - [fetch-with-streams/streaming-upload.md](https://github.com/yutakahirano/fetch-with-streams/blob/master/streaming-upload.md)
 - [Fetch streams are great, but not for measuring upload/download progress - JakeArchibald.com](https://jakearchibald.com/2025/fetch-streams-not-for-progress/)
 - [Has fetch() caught up with XMLHttpRequest in JavaScript?](https://waspdev.com/articles/2025-10-10/has-fetch-caught-up-with-xhr)

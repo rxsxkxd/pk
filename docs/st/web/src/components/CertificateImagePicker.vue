@@ -1,9 +1,14 @@
 <script setup lang="ts">
 // 証明書の画像の選択。ファイル名とサイズだけを出す（HEIC は多くのブラウザで表示できないので、プレビューは出さない）。
+// Android では、画像の選択がフォトピッカーになりカメラを選べない（Android 14 以降）ので、「画像を選ぶ」と
+// 「カメラを起動」（capture 付き）の2つのボタンに分ける。ほかの端末（iOS は選択肢にカメラが出る）は1つの選択欄。
+import { isAndroid } from '../platform.ts';
 import { ACCEPT } from '../stores/ticket.ts';
 
 const file = defineModel<File | null>({ required: true });
 defineProps<{ problem?: string; disabled?: boolean }>();
+
+const android = isAndroid();
 
 function onChange(e: Event): void {
   file.value = (e.target as HTMLInputElement).files?.[0] ?? null;
@@ -16,7 +21,37 @@ function formatSize(bytes: number): string {
 
 <template>
   <div class="space-y-2">
-    <label class="block">
+    <div v-if="android" class="grid grid-cols-2 gap-3" data-testid="image-buttons">
+      <label
+        class="cursor-pointer rounded-md border border-slate-800 px-4 py-3 text-center has-disabled:cursor-default has-disabled:opacity-40"
+      >
+        画像を選ぶ
+        <input
+          type="file"
+          :accept="ACCEPT"
+          :disabled="disabled"
+          data-testid="image-input"
+          class="sr-only"
+          @change="onChange"
+        />
+      </label>
+      <label
+        class="cursor-pointer rounded-md border border-slate-800 px-4 py-3 text-center has-disabled:cursor-default has-disabled:opacity-40"
+      >
+        カメラを起動
+        <!-- capture は accept が画像のときだけ効く。カメラの撮影結果は JPEG なので image/* で足りる -->
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          :disabled="disabled"
+          data-testid="camera-input"
+          class="sr-only"
+          @change="onChange"
+        />
+      </label>
+    </div>
+    <label v-else class="block">
       <span class="sr-only">証明書の画像を選ぶ</span>
       <input
         type="file"

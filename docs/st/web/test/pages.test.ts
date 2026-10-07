@@ -28,6 +28,31 @@ describe('SPA grant screen', () => {
     expect(form.get('input[type="file"]').attributes('name')).toBe('image');
   });
 
+  test('non-Android: one file input, no camera button', async () => {
+    const { wrapper } = await mountAt('/');
+    expect(wrapper.find('[data-testid="image-input"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="camera-input"]').exists()).toBe(false);
+  });
+
+  test('Android: "画像を選ぶ" and "カメラを起動" buttons; either one sets the image', async () => {
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      userAgent: 'Mozilla/5.0 (Linux; Android 10; K) Chrome/140.0.0.0 Mobile',
+    });
+    const { wrapper } = await mountAt('/');
+    const buttons = wrapper.get('[data-testid="image-buttons"]');
+    expect(buttons.text()).toContain('画像を選ぶ');
+    expect(buttons.text()).toContain('カメラを起動');
+    const camera = wrapper.get('[data-testid="camera-input"]');
+    expect(camera.attributes('capture')).toBe('environment');
+    expect(wrapper.get('[data-testid="image-input"]').attributes('capture')).toBeUndefined();
+
+    Object.defineProperty(camera.element, 'files', { value: [photo('camera.jpg', 'image/jpeg')], configurable: true });
+    await camera.trigger('change');
+    expect(wrapper.get('[data-testid="image-info"]').text()).toContain('camera.jpg');
+    expect(wrapper.get('[data-testid="grant-page"]').attributes('disabled')).toBeUndefined();
+  });
+
   test('the button is disabled until a usable photo is chosen', async () => {
     const { wrapper } = await mountAt('/');
     const button = wrapper.get('[data-testid="grant-page"]');

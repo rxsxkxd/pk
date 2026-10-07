@@ -2,7 +2,7 @@
 
 チケット QR API（[../DESIGN.md](../DESIGN.md)）を使う Web フロントエンド。静的ファイルとしてビルドし、S3 に直接、または CloudFront 経由で配信する SPA。
 
-> **状態**: 実装済み（単体テスト 43件。E2E はケース1（画面遷移方式）を Go 版・Node 版の API で通過。../E2E.md）。ただし 2.1 の対応ブラウザ（iOS 13 / Android 9）の要件にはまだ対応しておらず、その実装は保留（2.4）。API 側の前提（チケット付与 API の `Accept: application/json` 対応）は Go 版・Node 版とも実装済み。CORS と Origin の照合（7章）は未実装。
+> **状態**: 実装済み（単体テスト 49件。E2E はケース1（画面遷移方式）を Go 版・Node 版の API で通過。../E2E.md）。ただし 2.1 の対応ブラウザ（iOS 13 / Android 9）の要件にはまだ対応しておらず、その実装は保留（2.4）。API 側の前提（チケット付与 API の `Accept: application/json` 対応）は Go 版・Node 版とも実装済み。CORS と Origin の照合（7章）は未実装。
 > エンドポイントと画面の名前、API の使い方の3パターンとその評価は [../PAGES.md](../PAGES.md) にまとめてある。
 > [../E2E.md](../E2E.md) 3章の「素の HTML / JS の静的サイト」案は、本設計で置き換える。
 
@@ -145,7 +145,8 @@ const supportsRequestStreams = (() => {
 SPA の発行画面 #/                         SPA のチケット画面 #/tickets/20261005135054-4BV81K5V?sig=…
 ┌──────────────────────────────┐       ┌──────────────────────────────┐
 │ チケット発行                    │       │ チケット                        │
-│ [ 証明書の画像を選ぶ ]          │       │  ┌────────┐                  │
+│ [ 証明書の画像を選ぶ ] ※Android は │       │  ┌────────┐                  │
+│ [ 画像を選ぶ ][ カメラを起動 ]   │       │                              │
 │  IMG_0001.HEIC  2.1MB          │       │  │  QR    │ ← <img>           │
 │ [ 発行する ]  ← 画面遷移方式      │       │  └────────┘  （QR 画像 API）   │
 │ ┄ オプション ┄                  │       │  20261005135054-4BV81K5V      │
@@ -162,6 +163,13 @@ SPA の発行画面 #/                         SPA のチケット画面 #/ticke
 - 4MB を超えるファイルは、送る前に知らせる（API の上限と同じ）。形式は拡張子で目安として確かめる。最終的な判定は API に任せる
 - プレビューは出さない（HEIC は多くのブラウザで表示できないため）。ファイル名とサイズだけを出す
 - 証明書の画像は加工せず、そのまま `FormData` に入れて送る
+- **Android だけ、ボタンを2つに分ける**（`src/platform.ts` の `isAndroid`）
+  - 理由: Android 14 以降の Chrome では、画像の `<input type="file">` を開くとフォトピッカー（写真の選択）だけが出て、カメラを選べない（Android 13 以前は、選択画面にカメラも出ていた）。iOS の Safari は、選択肢に「写真を撮る」が常に出るので分けない
+  - 「画像を選ぶ」: 上と同じ `accept` の選択欄（`capture` なし。フォトピッカーが開く）
+  - 「カメラを起動」: `accept="image/*" capture="environment"`（背面のカメラが直接起動する）。`accept` の中に `capture=camera` を書く方法（`accept="image/*;capture=camera"`）は HTML の仕様にない書き方なので使わない
+  - 判定: User-Agent Client Hints の `navigator.userAgentData.platform === 'Android'`、または User-Agent に `Android` を含む（どちらかで Android）。`userAgentData.brands` はブラウザの名前（Chromium など）で OS は入っていないので、判定に使わない
+  - 2つの選択欄は見た目を隠し（`sr-only`）、`<label>` をボタンの見た目にする。どちらで選んでも、同じ証明書の画像として扱う
+  - 参考: <https://qiita.com/caslinden/items/dd6a920b1b9932f3fdcc>
 
 ### 画面遷移方式（メイン）: チケット付与 API と QR 画像 API
 
@@ -335,11 +343,12 @@ st/web/
 │   ├── env.d.ts            # vite/client の型
 │   ├── api/tickets.ts      # API クライアント、スキーマ（zod）、ApiError
 │   ├── stores/ticket.ts    # 発行の状態（Pinia）
+│   ├── platform.ts         # 端末の判定（isAndroid）
 │   ├── pages/
 │   │   ├── GrantPage.vue       # SPA の発行画面（証明書の画像の選択、画面遷移方式のボタン。modes に応じてオプションの方式も出す）
 │   │   └── TicketPage.vue      # SPA のチケット画面（URL から描画。QR の読み込みエラーの表示）
 │   └── components/
-│       ├── CertificateImagePicker.vue  # 証明書の画像のファイル選択と送信前の確認
+│       ├── CertificateImagePicker.vue  # 証明書の画像のファイル選択と送信前の確認（Android は「画像を選ぶ」「カメラを起動」の2つ）
 │       ├── TicketCard.vue      # QR・コード・発行日時の表示（画面遷移方式・その場表示方式で共用）
 │       ├── PostForm.vue        # フォーム送信方式（オプション）の普通のフォーム
 │       └── ErrorMessage.vue
@@ -441,3 +450,4 @@ Strict-Transport-Security: max-age=31536000
 6. Android 9 で対応する Chrome の下限の版（Android 9 の Chrome は 138 で更新が止まっている。2.1）
 7. （優先度低）アップロードの進み具合を Android だけ Fetch Upload Streams で出すか（2.3）。出す場合は、API Gateway（execute-api）が HTTP/2 に対応しているかを確かめる（対応していなければ使えない）
 8. 証明書の画像をブラウザで圧縮してから送るか（今は「証明書の画像は加工せずに送る」方針）。圧縮するなら、ライブラリ（第一候補: Compressor.js）、長辺・画質、HEIC の扱い。比較は [notes/image-compression.md](notes/image-compression.md)（一時メモ）。圧縮する場合、7 の進み具合は要らなくなる可能性がある
+9. （保留）Android の「PC 版サイトを表示」（Chrome・Samsung Internet・Firefox。大画面のタブレットの Chrome は既定でこの表示）では User-Agent から `Android` が消え、「カメラを起動」のボタンが出ない（1つの選択欄になる。3章「証明書の画像の選択」）。対策の案は、判定に `matchMedia('(pointer: coarse)')`（指で操作する端末）を足すこと。ただし iPhone・iPad にもボタンが2つ出る（iPad は Mac を名乗るので、iOS だけ除く判定は外れやすい）ため、影響が大きく保留。PC 版表示で `navigator.userAgentData.platform` と `navigator.platform` が何を返すかは、実機で確かめていない

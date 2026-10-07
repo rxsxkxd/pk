@@ -6,6 +6,6 @@
   "scripts": {
     "dev": "node local.mjs",
     "test": "node --test 'test/*.test.mjs'",
-    "build": "rm -rf dist && mkdir -p dist && zip -q dist/analyzer-stub.zip index.mjs"
+    "build": "rm -rf dist && mkdir -p dist && zip -q dist/analyzer-stub.zip index.mjs analyzer.mjs"
   }
 }

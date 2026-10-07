@@ -1,19 +1,96 @@
 //! Image analysis server stub (Rust) for checking the ticket API on AWS Lambda. Runs behind a Lambda
-//! Function URL. It does no analysis: every accepted image is valid. Same behavior as the Node stub
-//! (../node/index.mjs); both are checked against ../testdata/cases.json.
+//! Function URL. This crate parses and checks the request (route, Content-Type, body; see ../DESIGN.md 3)
+//! and logs it; the API key rule and judging the image are the `analyzer` module. Same structure as
+//! ../python/index.py and ../node/index.mjs; all are checked against ../testdata/cases.json.
 
+pub mod analyzer;
+
+use analyzer::{ApiKey, analyze};
 use lambda_http::http::{Method, StatusCode, header::CONTENT_TYPE};
 use lambda_http::request::RequestContext;
 use lambda_http::{Body, Request, RequestExt, Response};
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use subtle::ConstantTimeEq;
+use serde_json::{Map, Value, json};
 
 /// Receives one log line (as JSON fields) per request.
-pub type Logger = Box<dyn Fn(Value) + Send + Sync>;
+pub type Logger = Box<dyn Fn(Map<String, Value>) + Send + Sync>;
 
+/// スタブが見るリクエストの項目（Function URL のイベントから取り出したもの）。
+#[derive(Debug)]
+pub struct StubRequest<'a> {
+    pub method: &'a Method,
+    pub path: &'a str,
+    pub api_key: &'a [u8],
+    /// パラメーター（; 以降）を外し、小文字にしたもの
+    pub content_type: String,
+    /// octet-stream のボディは、Function URL が base64 で渡し、lambda_http が Body::Binary に戻す
+    pub body: &'a [u8],
+    pub request_id: Option<String>,
+}
+
+impl<'a> From<&'a Request> for StubRequest<'a> {
+    fn from(req: &'a Request) -> Self {
+        let header = |name| req.headers().get(name).map(|v| v.as_bytes()).unwrap_or_default();
+        let content_type = String::from_utf8_lossy(header(CONTENT_TYPE.as_str()));
+        Self {
+            method: req.method(),
+            path: req.uri().path(),
+            api_key: header("x-api-key"),
+            content_type: content_type
+                .split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase(),
+            body: match req.body() {
+                Body::Text(text) => text.as_bytes(),
+                Body::Binary(bytes) => bytes,
+                _ => &[],
+            },
+            request_id: match req.request_context_ref() {
+                Some(RequestContext::ApiGatewayV2(ctx)) => ctx.request_id.clone(),
+                _ => None,
+            },
+        }
+    }
+}
+
+/// 応答（ステータスと本文）と、ログに足す項目。
+#[derive(Debug)]
+pub struct Outcome {
+    pub status: StatusCode,
+    pub body: Value,
+    pub log_fields: Map<String, Value>,
+}
+
+impl Outcome {
+    fn new(status: StatusCode, body: Value) -> Self {
+        Self {
+            status,
+            body,
+            log_fields: Map::new(),
+        }
+    }
+
+    fn with_log(mut self, fields: Value) -> Self {
+        if let Value::Object(fields) = fields {
+            self.log_fields = fields;
+        }
+        self
+    }
+}
+
+/// Lambda（Function URL）の応答にする。
+fn json_response(status: StatusCode, body: &Value) -> Response<Body> {
+    Response::builder()
+        .status(status)
+        .header(CONTENT_TYPE, "application/json")
+        .body(Body::Text(body.to_string()))
+        .expect("static response parts are valid")
+}
+
+/// Function URL のリクエストを確かめて応答を返す（ログの出力先はテスト用に差し替えられる）。
 pub struct Stub {
-    key_digest: [u8; 32],
+    api_key: ApiKey,
     log: Logger,
 }
 
@@ -23,73 +100,58 @@ impl Stub {
         Self::with_logger(api_key, Box::new(print_log))
     }
 
-    /// API キーとログの出力先からスタブを作る（テスト用にログを差し替えられる）。
+    /// API キーとログの出力先からスタブを作る。
     pub fn with_logger(api_key: &str, log: Logger) -> Self {
         Self {
-            key_digest: digest(api_key.as_bytes()),
+            api_key: ApiKey::new(api_key),
             log,
         }
     }
 
-    /// リクエストを検証し、受け付けた画像には解析せずに valid を返す。
+    /// リクエストを確かめ、1行のログを出して応答に変える。
     pub fn handle(&self, req: &Request) -> Response<Body> {
-        let request_id = match req.request_context_ref() {
-            Some(RequestContext::ApiGatewayV2(ctx)) => ctx.request_id.clone(),
-            _ => None,
-        };
-        let reply = |status: StatusCode, body: Value, fields: Value| {
-            let mut line =
-                json!({ "level": "INFO", "msg": "analyzed", "requestId": request_id, "status": status.as_u16() });
-            if let (Some(line), Value::Object(fields)) = (line.as_object_mut(), fields) {
-                line.extend(fields);
-            }
-            (self.log)(line);
-            Response::builder()
-                .status(status)
-                .header(CONTENT_TYPE, "application/json")
-                .body(Body::Text(body.to_string()))
-                .expect("static response parts are valid")
-        };
+        let request = StubRequest::from(req);
+        let Outcome {
+            status,
+            body,
+            log_fields,
+        } = self.check(&request);
+        let mut line = Map::new();
+        line.insert("level".into(), json!("INFO"));
+        line.insert("msg".into(), json!("analyzed"));
+        if let Some(id) = request.request_id {
+            line.insert("requestId".into(), json!(id));
+        }
+        line.insert("status".into(), json!(status.as_u16()));
+        line.extend(log_fields);
+        (self.log)(line);
+        json_response(status, &body)
+    }
 
-        if req.method() != Method::POST || req.uri().path() != "/v1/analyze" {
-            return reply(StatusCode::NOT_FOUND, json!({ "error": "not found" }), json!({}));
+    /// 仕様（../DESIGN.md 3.2）の順にリクエストを確かめ、通ったものだけ画像の判定（analyzer）に渡す。
+    /// API キーの照合も analyzer。
+    pub fn check(&self, request: &StubRequest) -> Outcome {
+        if request.method != Method::POST || request.path != "/v1/analyze" {
+            return Outcome::new(StatusCode::NOT_FOUND, json!({ "error": "not found" }));
         }
-        let given_key = req.headers().get("x-api-key").map(|v| v.as_bytes()).unwrap_or_default();
-        if !bool::from(digest(given_key).ct_eq(&self.key_digest)) {
-            return reply(
-                StatusCode::UNAUTHORIZED,
-                json!({ "error": "invalid api key" }),
-                json!({}),
-            );
+        if !self.api_key.matches(request.api_key) {
+            return Outcome::new(StatusCode::UNAUTHORIZED, json!({ "error": "invalid api key" }));
         }
-
-        let content_type = req
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .split(';')
-            .next()
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase();
-        if content_type != "application/octet-stream" {
-            let body = json!({ "error": "Content-Type must be application/octet-stream" });
-            return reply(StatusCode::BAD_REQUEST, body, json!({ "contentType": content_type }));
+        if request.content_type != "application/octet-stream" {
+            let error = json!({ "error": "Content-Type must be application/octet-stream" });
+            return Outcome::new(StatusCode::BAD_REQUEST, error)
+                .with_log(json!({ "contentType": request.content_type }));
         }
-        let image: &[u8] = match req.body() {
-            Body::Empty => &[],
-            Body::Text(text) => text.as_bytes(),
-            Body::Binary(bytes) => bytes,
-            _ => &[],
-        };
-        if image.is_empty() {
-            return reply(StatusCode::BAD_REQUEST, json!({ "error": "empty body" }), json!({}));
+        if request.body.is_empty() {
+            return Outcome::new(StatusCode::BAD_REQUEST, json!({ "error": "empty body" }));
         }
 
-        // No analysis. bytes and sha256 let us check that the API forwarded the upload unchanged.
-        let fields = json!({ "bytes": image.len(), "sha256": hex::encode(digest(image)), "valid": true });
-        reply(StatusCode::OK, json!({ "valid": true, "reason": "stub" }), fields)
+        let result = analyze(request.body);
+        Outcome::new(
+            StatusCode::OK,
+            json!({ "valid": result.valid, "reason": result.reason }),
+        )
+        .with_log(json!({ "bytes": result.size, "sha256": result.sha256, "valid": result.valid }))
     }
 }
 
@@ -101,18 +163,11 @@ pub fn local_api_key(env: impl Fn(&str) -> Option<String>) -> Option<String> {
         .filter(|k| !k.is_empty())
 }
 
-/// 値を比較用の固定長の値（SHA-256）にする（長さの違いで比較時間が変わらないように）。
-fn digest(bytes: &[u8]) -> [u8; 32] {
-    Sha256::digest(bytes).into()
-}
-
 /// 1行の JSON ログを出す（画像の中身は出さない）。
-fn print_log(mut fields: Value) {
-    if let Some(obj) = fields.as_object_mut() {
-        obj.insert(
-            "time".into(),
-            json!(humantime::format_rfc3339_millis(std::time::SystemTime::now()).to_string()),
-        );
-    }
-    println!("{fields}");
+fn print_log(fields: Map<String, Value>) {
+    let mut line = Map::new();
+    let time = humantime::format_rfc3339_millis(std::time::SystemTime::now()).to_string();
+    line.insert("time".into(), json!(time));
+    line.extend(fields);
+    println!("{}", Value::Object(line));
 }

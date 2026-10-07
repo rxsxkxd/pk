@@ -18,7 +18,10 @@ dependencies = [
  "aws-config",
  "aws-sdk-ssm",
  "hex",
+ "http-body-util",
  "humantime",
+ "hyper 1.11.1",
+ "hyper-util",
  "lambda_http",
  "serde_json",
  "sha2",
@@ -1111,6 +1114,7 @@ dependencies = [
  "http 1.5.0",
  "http-body 1.1.0",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -1804,6 +1808,7 @@ version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
+ "indexmap",
  "itoa",
  "memchr",
  "serde",

@@ -3,12 +3,15 @@
 use analyzer_stub::{Stub, local_api_key};
 use lambda_http::http::Request as HttpRequest;
 use lambda_http::{Body, Request};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
 /// テスト用にログを溜めるスタブを作る。
-fn stub() -> (Stub, Arc<Mutex<Vec<Value>>>) {
+/// The log lines a test stub wrote.
+type Logs = Arc<Mutex<Vec<Map<String, Value>>>>;
+
+fn stub() -> (Stub, Logs) {
     let logs = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&logs);
     (
@@ -90,6 +93,23 @@ fn function_url_event_with_base64_body() {
     let logs = logs.lock().unwrap();
     assert_eq!(logs[0]["requestId"], "req-1");
     assert_eq!(logs[0]["sha256"], json!(hex::encode(Sha256::digest(image))));
+}
+
+#[test]
+fn same_response_body_and_log_keys_as_node_and_python() {
+    let case = json!({});
+    let (stub, logs) = stub();
+
+    let res = stub.handle(&request(&case, vec![0xff, 0xd8, 0xff]));
+
+    let Body::Text(text) = res.body() else {
+        panic!("body is not text")
+    };
+    assert_eq!(text, r#"{"valid":true,"reason":"stub"}"#);
+    let logs = logs.lock().unwrap();
+    let keys: Vec<&str> = logs[0].keys().map(String::as_str).collect();
+    // No request context here, so requestId is omitted (as Node's JSON.stringify drops undefined).
+    assert_eq!(keys, ["level", "msg", "status", "bytes", "sha256", "valid"]);
 }
 
 #[test]

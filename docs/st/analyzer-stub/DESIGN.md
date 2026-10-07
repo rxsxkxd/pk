@@ -37,7 +37,7 @@ flowchart LR
 | 項目 | 採用 | 理由 |
 |---|---|---|
 | 実行環境 | Lambda（arm64、128MB、タイムアウト10秒） | API と同じ AWS アカウント・リージョンに置ける。使わないときの費用はほぼゼロ |
-| 実装 | **Node 版**（`nodejs24.x`、依存なしの `index.mjs` 1ファイル）と **Rust 版**（`provided.al2023`、`bootstrap`） | 同じ仕様で2つ実装し、API と同様に比較できるようにする |
+| 実装 | **Node 版**（`nodejs24.x`、依存なしの `index.mjs` と `analyzer.mjs`）と **Rust 版**（`provided.al2023`、`bootstrap`） | 同じ仕様で2つ実装し、API と同様に比較できるようにする |
 | 公開方法 | **Lambda Function URL**（`AuthType: NONE`） | API Gateway を作らずに HTTPS のエンドポイントが手に入る。アクセス制限は API キーで行う（3.3） |
 | デプロイ | 共通の CloudFormation テンプレート `template.yaml`。`Impl=node|rust` で切り替え、実装ごとに別スタックにする | API のスタックとは別に作成・削除できる。zip は API と同じ成果物バケットに置く |
 
@@ -113,19 +113,20 @@ API 側の失敗時の挙動（422 / 502 / 504、リトライ）も AWS 上で�
 analyzer-stub/
 ├── DESIGN.md            # 本書
 ├── template.yaml        # CloudFormation（Impl=node|rust）
-├── testdata/cases.json  # Node / Rust 共通のテストケース（リクエストと期待するステータス）
+├── testdata/cases.json  # Node / Rust / Python 共通のテストケース（リクエストと期待するステータス）
 └── node/
     ├── package.json     # scripts: dev / test / build（依存なし）
-    ├── index.mjs        # スタブ本体（Lambda の handler）
+    ├── index.mjs        # Lambda の入口（handler）。リクエストのパースと確認（ルート・Content-Type・ボディ）、ログ、応答
+    ├── analyzer.mjs     # ビジネスロジック（3章の決まりごと）: API キーの照合（ApiKey）と画像の判定（analyze）。Lambda・HTTP を知らない
     ├── local.mjs        # ローカル用の HTTP サーバー（デプロイしない）
-    └── test/index.test.mjs
+    └── test/{index,analyzer}.test.mjs
 ```
 
 ```sh
 cd docs/st/analyzer-stub/node
-npm test          # testdata/cases.json の全ケース + ヘッダー名の大文字小文字 + API キーの読み込み
+npm test          # testdata/cases.json の全ケース + ヘッダー名の大文字小文字 + 応答とログの形 + API キーの読み込み + ビジネスロジック単体
 npm run dev       # http://localhost:8090/v1/analyze（x-api-key: local-stub-key）
-npm run build     # dist/analyzer-stub.zip（index.mjs のみ）
+npm run build     # dist/analyzer-stub.zip（index.mjs と analyzer.mjs）
 ```
 
 | 環境変数 | 内容 |
@@ -134,46 +135,63 @@ npm run build     # dist/analyzer-stub.zip（index.mjs のみ）
 | `APP_ENV=local` + `STUB_API_KEY` | ローカル実行・テスト用。平文の API キー（`APP_ENV=local` のときだけ使える） |
 | `PORT` | `npm run dev` の待ち受けポート（既定 8090） |
 
+組み立ては Python 版（付録）と同じ分け方で、書き方は Node の流儀（クラスではなく、モジュールの関数と、依存をオプションのオブジェクトで渡す形）: `parseRequest(event)`（イベントからスタブが見る項目を取り出す）→ `checkRequest(request, apiKey)`（仕様 3.2 の順に確かめ、通ったものだけ `analyze` に渡す）→ `respond(event, { apiKey, log })`（ログを1行出して応答に変える）。`handler` は、初回に API キーを読み込んで `respond` を呼ぶだけ。
+
 確認済み:
-- `node --test`: 12件すべて成功
+- `node --test`: 15件すべて成功（2026-10-07 の組み直しの後）
 - ローカル（`npm run dev`）: 200 / 401。ログの `sha256` が、送ったファイルの `shasum -a 256` と一致する
 - Lambda エミュレーター（`public.ecr.aws/lambda/nodejs:24`）に Function URL 形式のイベントを送り、200 / 401 / 400 とログ出力を確認
 - `template.yaml`: cfn-lint でエラー・警告なし
 
 ## 6. Rust 版（実装済み）
 
-Node 版と同じ仕様（3章）で、`testdata/cases.json` を同じテストケースとして使う。
+Node 版・Python 版と同じ仕様（3章）・同じ分け方で、`testdata/cases.json` を同じテストケースとして使う。書き方は Rust の流儀に合わせる。
 
 ```
 analyzer-stub/rust/
 ├── Cargo.toml / Cargo.lock
 ├── rustfmt.toml
-├── src/lib.rs           # Stub（リクエストの検証と応答。テストから直接呼べる）
+├── src/lib.rs           # リクエストのパースと確認（ルート・Content-Type・ボディ）、ログ、応答（StubRequest / Outcome / Stub）
+├── src/analyzer.rs      # ビジネスロジック（3章の決まりごと）: API キーの照合（ApiKey）と画像の判定（analyze）。Lambda・HTTP を知らない。単体テストも同じファイル
 ├── src/main.rs          # Lambda の入口（bootstrap）。起動時に API キーを読み込む
-├── tests/cases.rs       # 共通ケース全件 + Function URL イベント（base64 ボディ）の解析 + API キーの読み込み
+├── examples/local.rs    # ローカル用の HTTP サーバー（hyper。デプロイしない。依存は dev-dependencies だけ）
+├── tests/cases.rs       # 共通ケース全件 + Function URL イベント（base64 ボディ）の解析 + 応答とログの形 + API キーの読み込み
 ├── Dockerfile.build     # ビルド環境（Amazon Linux 2023 + rustup + rustfmt / clippy）
-└── build.sh             # コンテナ内で test / lint / build を実行する
+└── build.sh             # コンテナ内で test / lint / fmt / dev / build を実行する
 ```
+
+組み立て（Node 版・Python 版との対応）:
+
+| Rust | 役割 | Node | Python |
+|---|---|---|---|
+| `impl From<&Request> for StubRequest` | Function URL のリクエストから、スタブが見る項目を取り出す（ボディはコピーせずに借用する） | `parseRequest` | `Request.from_event` |
+| `Stub::check` | 仕様（3.2）の順に確かめ、通ったものだけ `analyze` に渡して `Outcome` を返す | `checkRequest` | `Stub.handle` |
+| `Stub::handle` | `check` の結果を分解して（所有権を移し、複製しない）ログを1行出し、応答に変える | `respond` | `Stub.__call__` |
+| `analyzer::ApiKey` / `analyzer::analyze` | API キーの照合（SHA-256 にして `subtle` で定数時間比較）と画像の判定 | `ApiKey` / `analyze` | `ApiKey` / `analyze` |
 
 | 項目 | 内容 |
 |---|---|
 | ランタイム | `provided.al2023`（arm64）。バイナリ名は `bootstrap` |
-| 主な crate | `lambda_http` 1.3（Function URL のイベント。base64 のボディは `Body::Binary` に戻される）、`aws-sdk-ssm` 1.128 + `aws-config`、`sha2`、`subtle`（定数時間比較）、`serde_json`、`humantime`（ログの時刻） |
-| API キー | 起動時に1回だけ読み込む（Node 版は初回の呼び出し時）。`API_KEY_PARAMETER_NAME`、ローカルでは `APP_ENV=local` + `STUB_API_KEY` |
+| 主な crate | `lambda_http` 1.3（Function URL のイベント。base64 のボディは `Body::Binary` に戻される）、`aws-sdk-ssm` 1.128 + `aws-config`、`sha2`、`subtle`（定数時間比較）、`serde_json`（`preserve_order`: ログと応答のキーを Node・Python 版と同じ順にする）、`humantime`（ログの時刻） |
+| ローカル用サーバー | `examples/local.rs`。`hyper` などは dev-dependencies なので、Lambda のバイナリには入らない |
+| API キー | 起動時に1回だけ読み込む（Node 版・Python 版は初回の呼び出し時）。`API_KEY_PARAMETER_NAME`、ローカルでは `APP_ENV=local` + `STUB_API_KEY` |
 | ビルド | ホストには何もインストールしない。`build.sh` が Amazon Linux 2023（arm64）のコンテナでビルドする。Lambda と同じ OS なので glibc が一致する。cargo のレジストリと `target/` は Docker ボリュームに保持する |
-| サイズ | `analyzer-stub.zip` 4.5MB（`bootstrap` 9.4MB。ほとんどが AWS SDK。Node 版の zip は 1KB 程度） |
+| サイズ | `analyzer-stub.zip` 4.4MB（ほとんどが AWS SDK。Node 版の zip は数 KB） |
 
 ```sh
 cd docs/st/analyzer-stub/rust
-./build.sh test     # cargo test（3件。共通ケースは1件のテストの中で全件確認する）
-./build.sh lint     # cargo fmt --check と cargo clippy（警告はエラー扱い）
+./build.sh test     # cargo test（analyzer の単体テスト 2件 + tests/cases.rs 4件。共通ケースは1件のテストの中で全件確認する）
+./build.sh lint     # cargo fmt --check と cargo clippy --all-targets（警告はエラー扱い）
+./build.sh fmt      # cargo fmt（ソースを書き換える）
+./build.sh dev      # http://localhost:8090/v1/analyze（x-api-key: local-stub-key。Ctrl-C で止める）
 ./build.sh          # cargo build --release → dist/analyzer-stub.zip
 ```
 
-確認済み:
+確認済み（2026-10-07 の組み直しの後）:
 - `./build.sh test` / `./build.sh lint`: すべて成功、警告なし
-- Lambda エミュレーター（`public.ecr.aws/lambda/provided:al2023`）に Function URL 形式のイベントを送り、Node 版と同じ結果（200 / 401 / 401 / 400 / 404 / 400）とログ（`bytes`、`sha256`、`requestId`）を確認
-- Node 版との違いは、レスポンスの JSON のキーの順序（Rust は `{"reason":…,"valid":…}`）と、ログのキーの順序だけ
+- ローカル（`examples/local.rs`）: 200 / 401 / 400 / 400 / 404。応答の本文とログ（キーの順序、`requestId`、`bytes`、`sha256`）は Node 版・Python 版と同じ。ログの `sha256` は、送ったファイルの `shasum -a 256` と一致
+- Lambda エミュレーター（`public.ecr.aws/lambda/provided:al2023`）に、リリースビルドの `bootstrap` で Function URL 形式のイベントを送り、200 とログを確認
+- 以前あった Node 版との違い（JSON のキーの順序、`requestId` がないときに `null` を出す）は、なくなった
 
 ## 7. デプロイと削除
 
@@ -242,3 +260,54 @@ Node 版の実装（`node/src/infra.ts`）:
 
 1. 仮のレスポンス形式（3.2）と認証（3.3）を、この内容で進めてよいか
 2. Go 版の HTTP クライアントに着手する時期（Node 版は実装済み）
+
+## 付録: Python 版（試作）
+
+Node 版との比較のための試作（2026-10-07）。仕様（3章）と共通のテストケース（`testdata/cases.json`）は同じ。テンプレート（`template.yaml` の `Impl`）とデプロイ手順には、まだ入れていない。
+
+```
+analyzer-stub/python/
+├── index.py          # Lambda の入口（handler: index.handler）。リクエストのパースと確認（ルート・Content-Type・ボディ）、ログ、応答
+├── analyzer.py       # ビジネスロジック（仕様 3章の決まりごと）: API キーの照合と、画像の判定（スタブは解析せず valid）。Lambda・HTTP を知らない
+├── local.py          # ローカル用の HTTP サーバー（標準の http.server。デプロイしない）
+├── test_index.py     # 共通ケース全件 + ヘッダー名の大文字小文字 + 応答の本文とログが Node 版と同じ形 + API キーの読み込み（unittest）
+└── test_analyzer.py  # ビジネスロジックだけのテスト（API キーの照合、画像の判定）
+```
+
+```sh
+cd docs/st/analyzer-stub/python
+python3 -m unittest -v                             # 6件（共通ケースは1件のテストの中で全件確認する）
+python3 local.py                                   # http://localhost:8090/v1/analyze（x-api-key: local-stub-key）
+uvx mypy --strict *.py                            # 任意: 型チェック（プロジェクトの依存には入れない）
+mkdir -p dist && rm -f dist/analyzer-stub.zip && zip -q dist/analyzer-stub.zip index.py analyzer.py   # ランタイムは python3.13 以降
+```
+
+組み立て（関数の中に関数を入れ子にせず、役割ごとに分ける。リクエストの扱いとビジネスロジックはファイルを分ける）:
+
+| ファイル | 部品 | 役割 |
+|---|---|---|
+| `index.py` | `Request.from_event` | Function URL のイベントから、スタブが見る項目（メソッド、パス、API キー、Content-Type、ボディ、requestId）を取り出す。ヘッダー名の小文字化と base64 の復元もここ |
+| `index.py` | `Stub.handle` | 仕様（3.2）の順にリクエストを確かめ（API キーは `ApiKey.matches` で照合）、通ったものだけ `analyze` に渡して、`Outcome`（ステータス、本文、ログに足す項目）を返す。各確認は1つの `if` で早めに返す |
+| `index.py` | `Stub.__call__` | `Request` を作って `handle` を呼び、1行のログを出して応答に変える |
+| `index.py` | `Outcome` / `NOT_FOUND` などの定数 | 応答の形を1か所にまとめる |
+| `analyzer.py` | `ApiKey` | 共有の API キー（3.3）。キーの SHA-256 だけを持ち、定数時間で比べる |
+| `analyzer.py` | `analyze` / `Analysis` | 画像1枚の判定（valid / reason）と、届いた画像の大きさ・SHA-256。本物の解析サーバーの判定に当たる部分で、Lambda・HTTP には依存しない |
+
+依存を増やさずに読みやすくするために使っている書き方（Python 3.12 以降。Lambda の `python3.13` で動く）:
+
+| 書き方 | 使っているところ | 効果 |
+|---|---|---|
+| `dataclass(frozen=True)`、`Self` | `Request`・`Outcome` | 項目の一覧が型付きで読め、作ったあとに変わらない |
+| 型ヒントと `type` 文（型の別名）、`TypedDict` | `Event`・`Response`・`Logger` | 関数が何を受け取り何を返すかが、読むだけで分かる。`mypy --strict` で確かめられる |
+| `functools.cache` | `_stub_from_env`（初回の呼び出し時に API キーを読み込み、以降は使い回す） | `global` の変数を使わずに済む |
+| `http.HTTPStatus` | 応答のステータス | `404` などの数字ではなく `NOT_FOUND` と読める |
+| 代入式（`:=`） | API キーの読み込み | 「取り出して、あれば使う」が1か所で書ける |
+| 辞書の結合（`|`） | ログの1行（`Stub.__call__`） | 項目の順序（Node 版と同じ）がそのまま読める |
+| `str.partition` | `Content-Type` のパラメーターを外す | `split(";")[0]` より意図が明確 |
+| `datetime.UTC` | ログの時刻 | `timezone.utc` より短い |
+| `with ThreadingHTTPServer(...)` と `KeyboardInterrupt` の処理 | `local.py` | Ctrl-C で、エラー表示なしに止まる |
+| テストを `index.py` と同じ場所に置く | `test_index.py` | `sys.path` の書き換えなしに、`python3 -m unittest` だけで動く |
+
+確認済み:
+- 単体テスト 6件すべて成功（Python 3.14 と 3.13）。`mypy --strict` でエラーなし
+- ローカル（`python3 local.py`）: 200 / 401 / 400 / 404。応答の本文とログ（キーの順序、`requestId`、`bytes`、`sha256`）は Node 版と同じ形。ログの `sha256` は、送ったファイルの `shasum -a 256` と一致

@@ -204,12 +204,12 @@ aws ec2 describe-vpc-endpoints --filters Name=vpc-id,Values=$VPC_ID --query 'Vpc
 
 | 対象 | 変更 |
 |---|---|
-| API キー | **任意にする**。VPC 内のタスクでは設定せず、確認もしない（本番の想定に合わせる）。Function URL で公開する今の環境では、今までどおり必須 |
+| API キー | **任意にした（実装済み）**。VPC 内のタスクでは `STUB_AUTH=none` を指定し、確認しない（本番の想定に合わせる）。Function URL で公開する環境では、今までどおり必須 |
 | 待ち受け | ローカル用サーバー（`local.mjs` / Rust 版）を、`0.0.0.0:8090` で待ち受けられるようにする（今の `local.mjs` はそのままで可） |
 | ログ | 標準出力の1行 JSON のまま。awslogs で CloudWatch Logs に送る（`bytes`・`sha256` で、API が画像を加工せずに送ったことを確かめる手順は同じ） |
 | ヘルスチェック | 使わない（ECS のサービスも ALB も使わないため） |
 
-API キーを任意にする実装: 環境変数で「キーなし」を明示したときだけ確認を省く（例: `STUB_AUTH=none`）。キーの設定漏れで、公開の Function URL のスタブが誰でも呼べる状態にならないようにするため、未設定を「確認なし」とはみなさない。
+API キーを任意にする実装（2026-10-07 に Node・Python・Rust とも実装済み。analyzer-stub/DESIGN.md 3.3）: 環境変数 `STUB_AUTH=none` を明示したときだけ確認を省く。キーの設定漏れで、公開の Function URL のスタブが誰でも呼べる状態にならないようにするため、未設定を「確認なし」とはみなさない。`none` で起動すると WARN のログを1行出す。
 
 ### 5.2 タスクの起動に必要な経路（P2 の場合）
 
@@ -247,6 +247,39 @@ aws ecs run-task --cluster ticketqr-analyzer-stub --task-definition ticketqr-ana
 aws ecs stop-task --cluster ticketqr-analyzer-stub --task $TASK_ARN
 ```
 
+### 5.5 プライベートサブネット + VPC エンドポイントで動かす条件
+
+セキュリティの観点で推奨する置き方（[analyzer-stub-cost.md](analyzer-stub-cost.md) 5.4 の 2-b）。タスクはインターネットに出られず、ECR・CloudWatch Logs・S3 にだけエンドポイント経由で届く。そのため、**イメージがビルド済みで、動いている間に要るものがすべて入っていること**が条件になる。
+
+イメージの置き場所と作り方:
+
+| 条件 | 理由 |
+|---|---|
+| **自分のアカウントの ECR（同じリージョン）に置く** | タスクが取得できるのは、エンドポイント経由の自分の ECR だけ。Docker Hub や ECR Public から直接は取れない |
+| **ビルドは別の場所で済ませる** | 手元か CI でビルドして ECR に push する。依存の取得（`npm ci` やパッケージの導入）はビルドのときだけで、起動時には行わない |
+| **arm64 で作る** | タスク定義の CPU アーキテクチャ（`runtimePlatform`）と合わせる |
+| （任意）ベースイメージを ECR に取り込む | ECR の pull through cache を使うと、Docker Hub などのイメージを自分の ECR 経由で取れる。上流からの取得は ECR が行うので、タスクにインターネットは要らない |
+
+動いている間にインターネットや AWS の API を呼ばないこと（エンドポイントのないサービスには届かない）:
+
+| 実装 | 動いている間の外部への通信 | 注意 |
+|---|---|---|
+| Node（`local.mjs`） | なし | そのまま動く |
+| Python（`local.py`） | なし | そのまま動く。Parameter Store を読む場合は `boto3` が要るが、Python の公式イメージには入っていない |
+| Rust（`examples/local.rs`） | なし | glibc を使うので、ベースイメージはビルド環境と同じ系統（Amazon Linux 2023 など）にする |
+
+- VPC 内のスタブは、タスク定義の環境変数に `STUB_AUTH=none` を指定する（5.1。3つの実装とも対応済み）。API キーを読み込まないので、`ssm` のエンドポイント（Parameter Store への経路）は要らない。`STUB_AUTH` を指定しないと API キーが必須になり、Parameter Store から読むための `ssm` のエンドポイント（時間課金）が追加で要る
+
+機能を足すと要るエンドポイント:
+
+| 使う機能 | 追加で要るエンドポイント |
+|---|---|
+| タスク定義で Parameter Store / Secrets Manager の値を環境変数に入れる | `ssm` / `secretsmanager` |
+| ECS Exec（動いているコンテナに入って調べる） | `ssmmessages` |
+| ECR のイメージを独自の KMS キーで暗号化する | `kms`（既定の暗号化なら不要） |
+
+運用: ビルド済みのイメージは自動では更新されない。OS やライブラリの修正を取り込むには、定期的にビルドし直して push する。ECR のイメージスキャンを有効にすると、古くなったことに気づける。
+
 ## 6. A1（内部向け ALB + Lambda）の詳細
 
 | 要素 | 内容 |
@@ -262,5 +295,5 @@ aws ecs stop-task --cluster ticketqr-analyzer-stub --task $TASK_ARN
 1. 本番の構成の確認（2章の表）: VPC 間のつなぎ方、アカウント、解析側の SG の許可の書き方、接続先の名前と HTTP / HTTPS。分かる範囲で、解析側の担当に確認する
 2. テスト環境のパターン（4.2 のおすすめの進め方でよいか）。P1 の場合、既存のテスト用 VPC のルートテーブルに、スタブ専用の VPC へのルートを足してよいか（だめなら P1b）
 3. スタブの受け口（4.5・4.6）: A2（Fargate のタスク。おすすめ）か、A4（EC2。IP を固定したい場合）か、相乗りできる既存の資源があればそれか
-4. VPC 内のスタブで API キーの確認を省くか（おすすめ: 省く。`STUB_AUTH=none` のように明示したときだけ）
+4. VPC 内のスタブで API キーの確認を省くか（おすすめ: 省く。スタブ側は `STUB_AUTH=none` で対応済み。analyzer-stub/DESIGN.md 3.3）
 5. A2 の場合、どちらの実装をコンテナにするか（Node 版はすぐ使える。Rust 版はローカル用サーバーを実装してから）

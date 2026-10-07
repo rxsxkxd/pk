@@ -2,7 +2,8 @@
 //! serves them with analyzer_stub::Stub. Same role as ../node/local.mjs and ../python/local.py.
 //! Run: ./build.sh dev  ->  POST http://localhost:8090/v1/analyze  (x-api-key: local-stub-key)
 
-use analyzer_stub::{Stub, local_api_key};
+use analyzer_stub::analyzer::{ApiKey, Auth};
+use analyzer_stub::{AuthSetting, Stub, local_api_key, warn_auth_disabled};
 use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::server::conn::http1;
@@ -23,14 +24,23 @@ async fn main() -> Result<(), Error> {
     // Same defaults as local.mjs / local.py: a plain-text key, allowed only with APP_ENV=local.
     let var = |name: &str, default: &str| env::var(name).unwrap_or_else(|_| default.into());
     let port: u16 = var("PORT", "8090").parse()?;
-    let key = local_api_key(|name| match name {
-        "APP_ENV" => Some(var("APP_ENV", "local")),
-        "STUB_API_KEY" => Some(var("STUB_API_KEY", "local-stub-key")),
-        _ => env::var(name).ok(),
-    })
-    .ok_or("STUB_API_KEY must be set with APP_ENV=local")?;
+    let auth = match AuthSetting::from_env_value(env::var("STUB_AUTH").ok().as_deref())? {
+        AuthSetting::None => {
+            warn_auth_disabled();
+            Auth::None
+        }
+        AuthSetting::ApiKey => {
+            let key = local_api_key(|name| match name {
+                "APP_ENV" => Some(var("APP_ENV", "local")),
+                "STUB_API_KEY" => Some(var("STUB_API_KEY", "local-stub-key")),
+                _ => env::var(name).ok(),
+            })
+            .ok_or("STUB_API_KEY must be set with APP_ENV=local")?;
+            Auth::ApiKey(ApiKey::new(&key))
+        }
+    };
 
-    let stub = Arc::new(Stub::new(&key));
+    let stub = Arc::new(Stub::new(auth));
     let next_id = Arc::new(AtomicU64::new(1));
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
     println!("analyzer stub listening on :{port}");

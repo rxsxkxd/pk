@@ -3,7 +3,7 @@
 import hashlib
 import unittest
 
-from analyzer import Analysis, ApiKey, analyze
+from analyzer import Analysis, ApiKey, NoApiKey, analyze
 
 
 class Analyze(unittest.TestCase):
@@ -22,6 +22,9 @@ class ApiKeyRule(unittest.TestCase):
         for given in ("", "nope", "test-key-longer", "TEST-KEY"):
             with self.subTest(given=given):
                 self.assertFalse(key.matches(given))
+
+    def test_no_api_key_lets_everything_through(self) -> None:
+        self.assertTrue(NoApiKey().matches(""))
 
 
 if __name__ == "__main__":

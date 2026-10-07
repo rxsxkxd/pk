@@ -74,6 +74,12 @@ x-api-key: {API キー}
 - `x-api-key` ヘッダーで、共有の API キーを照合する。どちらも SHA-256 にしてから定数時間で比較し、長さの違いでも時間が変わらないようにする
 - API キーは Parameter Store の SecureString `/ticketqr/analyzer-stub/{impl}/api-key` に置く。CloudFormation は SecureString を作れないので、デプロイ前に CLI で作る（7章）。値はテンプレートやパラメータに書かない
 - スタブと API の両方の Lambda に、このパラメータの読み取り権限（`ssm:GetParameter`）を与える。スタブは初回の呼び出し時にキーを読み込み、メモリに保持する
+- **`STUB_AUTH=none`（2026-10-07 追加）**: これを明示したときだけ、API キーを読み込まず、照合もしない。VPC 内で、SG で許可した送信元からだけ届く環境（../notes/analyzer-stub-vpc.md）で、本番の想定（API キーなし）に合わせるため
+  - 未設定と `STUB_AUTH=api-key` は、今までどおり API キーが必須（キーがなければ起動に失敗する）。設定漏れで、公開した Function URL のスタブが誰でも呼べる状態にならないように、「未設定 = 確認なし」にはしない
+  - それ以外の値は、起動に失敗する（打ち間違いで確認なしにならないように）
+  - `none` で起動したときは、`{"level":"WARN","msg":"api key check is disabled (STUB_AUTH=none)"}` を1行ログに出す
+  - Function URL で公開するテンプレート（`template.yaml`）には `STUB_AUTH` を入れない（公開のスタブは必ず API キーを使う）
+  - 3つの実装とも、決まりは analyzer（Node: `NoApiKey`、Python: `NoApiKey`、Rust: `Auth::None`）に置き、選ぶのは入口（`loadAuth` / `load_auth` / `AuthSetting`）
 
 ### 3.4 ログ
 
@@ -131,14 +137,15 @@ npm run build     # dist/analyzer-stub.zip（index.mjs と analyzer.mjs）
 
 | 環境変数 | 内容 |
 |---|---|
-| `API_KEY_PARAMETER_NAME` | API キーのパラメータ名（Lambda 上では必須） |
+| `API_KEY_PARAMETER_NAME` | API キーのパラメータ名（Lambda 上では、`STUB_AUTH=none` でない限り必須） |
+| `STUB_AUTH` | `api-key`（既定）/ `none`（API キーを確かめない。VPC 内で SG だけで許可する場合。3.3） |
 | `APP_ENV=local` + `STUB_API_KEY` | ローカル実行・テスト用。平文の API キー（`APP_ENV=local` のときだけ使える） |
 | `PORT` | `npm run dev` の待ち受けポート（既定 8090） |
 
 組み立ては Python 版（付録）と同じ分け方で、書き方は Node の流儀（クラスではなく、モジュールの関数と、依存をオプションのオブジェクトで渡す形）: `parseRequest(event)`（イベントからスタブが見る項目を取り出す）→ `checkRequest(request, apiKey)`（仕様 3.2 の順に確かめ、通ったものだけ `analyze` に渡す）→ `respond(event, { apiKey, log })`（ログを1行出して応答に変える）。`handler` は、初回に API キーを読み込んで `respond` を呼ぶだけ。
 
 確認済み:
-- `node --test`: 15件すべて成功（2026-10-07 の組み直しの後）
+- `node --test`: 18件すべて成功（2026-10-07。`STUB_AUTH` の追加の後）
 - ローカル（`npm run dev`）: 200 / 401。ログの `sha256` が、送ったファイルの `shasum -a 256` と一致する
 - Lambda エミュレーター（`public.ecr.aws/lambda/nodejs:24`）に Function URL 形式のイベントを送り、200 / 401 / 400 とログ出力を確認
 - `template.yaml`: cfn-lint でエラー・警告なし
@@ -174,13 +181,13 @@ analyzer-stub/rust/
 | ランタイム | `provided.al2023`（arm64）。バイナリ名は `bootstrap` |
 | 主な crate | `lambda_http` 1.3（Function URL のイベント。base64 のボディは `Body::Binary` に戻される）、`aws-sdk-ssm` 1.128 + `aws-config`、`sha2`、`subtle`（定数時間比較）、`serde_json`（`preserve_order`: ログと応答のキーを Node・Python 版と同じ順にする）、`humantime`（ログの時刻） |
 | ローカル用サーバー | `examples/local.rs`。`hyper` などは dev-dependencies なので、Lambda のバイナリには入らない |
-| API キー | 起動時に1回だけ読み込む（Node 版・Python 版は初回の呼び出し時）。`API_KEY_PARAMETER_NAME`、ローカルでは `APP_ENV=local` + `STUB_API_KEY` |
+| API キー | 起動時に1回だけ読み込む（Node 版・Python 版は初回の呼び出し時）。`API_KEY_PARAMETER_NAME`、ローカルでは `APP_ENV=local` + `STUB_API_KEY`。`STUB_AUTH=none` なら読み込まない（`Auth::None`。3.3） |
 | ビルド | ホストには何もインストールしない。`build.sh` が Amazon Linux 2023（arm64）のコンテナでビルドする。Lambda と同じ OS なので glibc が一致する。cargo のレジストリと `target/` は Docker ボリュームに保持する |
 | サイズ | `analyzer-stub.zip` 4.4MB（ほとんどが AWS SDK。Node 版の zip は数 KB） |
 
 ```sh
 cd docs/st/analyzer-stub/rust
-./build.sh test     # cargo test（analyzer の単体テスト 2件 + tests/cases.rs 4件。共通ケースは1件のテストの中で全件確認する）
+./build.sh test     # cargo test（analyzer の単体テスト 3件 + tests/cases.rs 6件。共通ケースは1件のテストの中で全件確認する）
 ./build.sh lint     # cargo fmt --check と cargo clippy --all-targets（警告はエラー扱い）
 ./build.sh fmt      # cargo fmt（ソースを書き換える）
 ./build.sh dev      # http://localhost:8090/v1/analyze（x-api-key: local-stub-key。Ctrl-C で止める）
@@ -276,7 +283,7 @@ analyzer-stub/python/
 
 ```sh
 cd docs/st/analyzer-stub/python
-python3 -m unittest -v                             # 6件（共通ケースは1件のテストの中で全件確認する）
+python3 -m unittest -v                             # 9件（共通ケースは1件のテストの中で全件確認する）
 python3 local.py                                   # http://localhost:8090/v1/analyze（x-api-key: local-stub-key）
 uvx mypy --strict *.py                            # 任意: 型チェック（プロジェクトの依存には入れない）
 mkdir -p dist && rm -f dist/analyzer-stub.zip && zip -q dist/analyzer-stub.zip index.py analyzer.py   # ランタイムは python3.13 以降
@@ -309,5 +316,5 @@ mkdir -p dist && rm -f dist/analyzer-stub.zip && zip -q dist/analyzer-stub.zip i
 | テストを `index.py` と同じ場所に置く | `test_index.py` | `sys.path` の書き換えなしに、`python3 -m unittest` だけで動く |
 
 確認済み:
-- 単体テスト 6件すべて成功（Python 3.14 と 3.13）。`mypy --strict` でエラーなし
+- 単体テスト 9件すべて成功（Python 3.14 と 3.13）。`mypy --strict` でエラーなし
 - ローカル（`python3 local.py`）: 200 / 401 / 400 / 404。応答の本文とログ（キーの順序、`requestId`、`bytes`、`sha256`）は Node 版と同じ形。ログの `sha256` は、送ったファイルの `shasum -a 256` と一致

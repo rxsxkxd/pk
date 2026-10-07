@@ -22,6 +22,22 @@ impl ApiKey {
     }
 }
 
+/// 認証の決まり。API キーを確かめるか、確かめないか（STUB_AUTH=none。VPC 内で、SG で許可した送信元からだけ
+/// 届く場合に使う）。
+pub enum Auth {
+    ApiKey(ApiKey),
+    None,
+}
+
+impl Auth {
+    pub fn allows(&self, given: &[u8]) -> bool {
+        match self {
+            Auth::ApiKey(key) => key.matches(given),
+            Auth::None => true,
+        }
+    }
+}
+
 /// 1枚の画像の判定結果。size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Analysis {
@@ -70,5 +86,11 @@ mod tests {
         for given in ["", "nope", "test-key-longer", "TEST-KEY"] {
             assert!(!key.matches(given.as_bytes()), "{given}");
         }
+    }
+
+    #[test]
+    fn auth_none_lets_everything_through() {
+        assert!(Auth::None.allows(b""));
+        assert!(!Auth::ApiKey(ApiKey::new("test-key")).allows(b""));
     }
 }

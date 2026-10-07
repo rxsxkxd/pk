@@ -7,7 +7,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from index import Stub, load_api_key
+from index import Stub, load_auth
 
 
 class FunctionUrlAdapter(BaseHTTPRequestHandler):
@@ -42,7 +42,7 @@ def main() -> None:
     os.environ.setdefault("APP_ENV", "local")
     os.environ.setdefault("STUB_API_KEY", "local-stub-key")
     port = int(os.environ.get("PORT", "8090"))
-    FunctionUrlAdapter.stub = Stub(load_api_key(os.environ))
+    FunctionUrlAdapter.stub = Stub(load_auth(os.environ))
     with ThreadingHTTPServer(("", port), FunctionUrlAdapter) as server:
         print(f"analyzer stub listening on :{port}", flush=True)
         try:

@@ -1,6 +1,7 @@
 //! Same cases as the Node stub: ../testdata/cases.json.
 
-use analyzer_stub::{Stub, local_api_key};
+use analyzer_stub::analyzer::{ApiKey, Auth};
+use analyzer_stub::{AuthSetting, Stub, local_api_key};
 use lambda_http::http::Request as HttpRequest;
 use lambda_http::{Body, Request};
 use serde_json::{Map, Value, json};
@@ -15,7 +16,10 @@ fn stub() -> (Stub, Logs) {
     let logs = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&logs);
     (
-        Stub::with_logger("test-key", Box::new(move |line| sink.lock().unwrap().push(line))),
+        Stub::with_logger(
+            Auth::ApiKey(ApiKey::new("test-key")),
+            Box::new(move |line| sink.lock().unwrap().push(line)),
+        ),
         logs,
     )
 }
@@ -141,4 +145,23 @@ fn base64_encode(bytes: &[u8]) -> String {
             })
         })
         .collect()
+}
+
+#[test]
+fn stub_auth_none_skips_the_api_key() {
+    let stub = Stub::with_logger(Auth::None, Box::new(|_| {}));
+    let res = stub.handle(&request(&json!({ "apiKey": null }), vec![0xff, 0xd8, 0xff]));
+    assert_eq!(res.status(), 200);
+}
+
+#[test]
+fn the_api_key_is_required_unless_none_is_explicit() {
+    assert_eq!(AuthSetting::from_env_value(None), Ok(AuthSetting::ApiKey));
+    assert_eq!(AuthSetting::from_env_value(Some("api-key")), Ok(AuthSetting::ApiKey));
+    assert_eq!(AuthSetting::from_env_value(Some("none")), Ok(AuthSetting::None));
+    assert!(
+        AuthSetting::from_env_value(Some("off"))
+            .unwrap_err()
+            .contains("STUB_AUTH")
+    );
 }

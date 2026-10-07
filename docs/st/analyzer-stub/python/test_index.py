@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from index import Event, Stub, load_api_key
+from analyzer import ApiKey, NoApiKey
+from index import Event, Stub, load_api_key, load_auth
 
 CASES: list[dict[str, Any]] = json.loads((Path(__file__).parent.parent / "testdata/cases.json").read_text())["cases"]
 
@@ -43,7 +44,7 @@ class SharedCases(unittest.TestCase):
         for case in CASES:
             with self.subTest(case["name"]):
                 logs: list[dict[str, Any]] = []
-                stub = Stub("test-key", logs.append)
+                stub = Stub(ApiKey("test-key"), logs.append)
                 body = bytes.fromhex(case["bodyHex"])
 
                 res = stub(case_event(case))
@@ -59,14 +60,14 @@ class SharedCases(unittest.TestCase):
 
 class Behavior(unittest.TestCase):
     def test_header_names_are_case_insensitive(self) -> None:
-        stub = Stub("test-key", lambda _: None)
+        stub = Stub(ApiKey("test-key"), lambda _: None)
         ev = dict(event(bytes.fromhex("ffd8ff")))
         ev["headers"] = {"Content-Type": "application/octet-stream", "X-Api-Key": "test-key"}
         self.assertEqual(stub(ev)["statusCode"], 200)
 
     def test_same_response_body_and_log_as_node(self) -> None:
         logs: list[dict[str, Any]] = []
-        res = Stub("test-key", logs.append)(event(bytes.fromhex("ffd8ff")))
+        res = Stub(ApiKey("test-key"), logs.append)(event(bytes.fromhex("ffd8ff")))
         self.assertEqual(res["body"], '{"valid":true,"reason":"stub"}')
         self.assertEqual(list(logs[0]), ["level", "msg", "requestId", "status", "bytes", "sha256", "valid"])
         self.assertIs(type(logs[0]["status"]), int)
@@ -76,6 +77,24 @@ class Behavior(unittest.TestCase):
         for env in ({}, {"STUB_API_KEY": "k"}, {"APP_ENV": "local", "STUB_API_KEY": ""}):
             with self.subTest(env=env), self.assertRaisesRegex(RuntimeError, "API_KEY_PARAMETER_NAME"):
                 load_api_key(env)
+
+
+class AuthSetting(unittest.TestCase):
+    def test_stub_auth_none_skips_the_api_key(self) -> None:
+        logs: list[dict[str, Any]] = []
+        auth = load_auth({"STUB_AUTH": "none"}, logs.append)  # no API key anywhere
+        self.assertIsInstance(auth, NoApiKey)
+        self.assertEqual(logs[0]["level"], "WARN")  # visible at startup
+        res = Stub(auth, lambda _: None)(event(bytes.fromhex("ffd8ff"), api_key=None))
+        self.assertEqual(res["statusCode"], 200)
+
+    def test_the_api_key_is_required_unless_none_is_explicit(self) -> None:
+        self.assertIsInstance(load_auth({"APP_ENV": "local", "STUB_API_KEY": "k"}), ApiKey)
+        self.assertIsInstance(load_auth({"STUB_AUTH": "api-key", "APP_ENV": "local", "STUB_API_KEY": "k"}), ApiKey)
+        with self.assertRaisesRegex(RuntimeError, "API_KEY_PARAMETER_NAME"):
+            load_auth({})
+        with self.assertRaisesRegex(RuntimeError, "STUB_AUTH"):
+            load_auth({"STUB_AUTH": "off"})
 
 
 if __name__ == "__main__":

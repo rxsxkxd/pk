@@ -24,7 +24,7 @@ case "${1:-build}" in
   test) run 'cargo test' ;;
   lint) run 'cargo fmt --check && cargo clippy --all-targets -- -D warnings' ;;
   fmt) run 'cargo fmt' ;;
-  dev) DOCKER_RUN_OPTS="-it --init -p ${PORT:-8090}:8090" run 'cargo run --example local' ;;
+  dev) DOCKER_RUN_OPTS="-it --init -p ${PORT:-8090}:8090 -e STUB_AUTH" run 'cargo run --example local' ;;
   build)
     run 'cargo build --release && mkdir -p dist && cp target/release/analyzer-stub dist/bootstrap \
       && cd dist && rm -f analyzer-stub.zip && zip -q analyzer-stub.zip bootstrap && rm bootstrap'

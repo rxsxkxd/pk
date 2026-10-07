@@ -3,14 +3,13 @@
 
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import { ApiKey } from './analyzer.mjs';
-import { loadApiKey, respond } from './index.mjs';
+import { loadAuth, respond } from './index.mjs';
 
 const port = Number(process.env.PORT ?? 8090);
 process.env.APP_ENV ??= 'local';
 process.env.STUB_API_KEY ??= 'local-stub-key';
 
-const apiKey = new ApiKey(await loadApiKey(process.env));
+const auth = await loadAuth(process.env);
 
 createServer(async (req, res) => {
   const chunks = [];
@@ -23,6 +22,6 @@ createServer(async (req, res) => {
     isBase64Encoded: true,
     requestContext: { requestId: randomUUID(), http: { method: req.method } },
   };
-  const out = respond(event, { apiKey });
+  const out = respond(event, { auth });
   res.writeHead(out.statusCode, out.headers).end(out.body);
 }).listen(port, () => console.log(`analyzer stub listening on :${port}`));

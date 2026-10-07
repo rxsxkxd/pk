@@ -17,6 +17,16 @@ class ApiKey:
         return hmac.compare_digest(_sha256(given.encode()), self._digest)
 
 
+class NoApiKey:
+    """API キーを確かめない決まり（STUB_AUTH=none）。VPC 内で、SG で許可した送信元からだけ届く場合に使う。"""
+
+    def matches(self, given: str) -> bool:
+        return True
+
+
+type Auth = ApiKey | NoApiKey
+
+
 @dataclass(frozen=True)
 class Analysis:
     """1枚の画像の判定結果。size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの。"""

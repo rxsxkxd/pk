@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 from typing import Any, Self, TypedDict
 
-from analyzer import ApiKey, analyze
+from analyzer import ApiKey, Auth, NoApiKey, analyze
 
 type Event = Mapping[str, Any]
 type LogFields = dict[str, Any]
@@ -34,7 +34,20 @@ def handler(event: Event, context: object) -> Response:
 
 @functools.cache
 def _stub_from_env() -> "Stub":
-    return Stub(load_api_key(os.environ))
+    return Stub(load_auth(os.environ))
+
+
+def load_auth(env: Mapping[str, str], log: Logger | None = None) -> Auth:
+    """認証の決まりを選ぶ。STUB_AUTH=none を明示したときだけ API キーを確かめない（VPC 内で SG だけで許可する場合）。
+    それ以外は API キーが必須（設定漏れで、公開した Function URL のスタブが誰でも呼べる状態にならないように）。"""
+    match env.get("STUB_AUTH", "api-key"):
+        case "none":
+            (log or print_log)({"level": "WARN", "msg": "api key check is disabled (STUB_AUTH=none)"})
+            return NoApiKey()
+        case "api-key":
+            return ApiKey(load_api_key(env))
+        case other:
+            raise RuntimeError(f"STUB_AUTH must be api-key or none, got {other!r}")
 
 
 def load_api_key(env: Mapping[str, str]) -> str:
@@ -101,8 +114,8 @@ EMPTY_BODY = Outcome(HTTPStatus.BAD_REQUEST, {"error": "empty body"})
 class Stub:
     """Function URL のイベントを受け取り、リクエストを確かめて応答を返す（ログ出力はテスト用に差し替え可能）。"""
 
-    def __init__(self, api_key: str, log: Logger | None = None) -> None:
-        self._api_key = ApiKey(api_key)
+    def __init__(self, auth: Auth, log: Logger | None = None) -> None:
+        self._auth = auth
         self._log = log or print_log
 
     def __call__(self, event: Event) -> Response:
@@ -118,7 +131,7 @@ class Stub:
         """仕様（../DESIGN.md 3.2）の順にリクエストを確かめ、通ったものだけ画像の判定（analyzer.py）に渡す。API キーの照合も analyzer.py。"""
         if request.method != "POST" or request.path != "/v1/analyze":
             return NOT_FOUND
-        if not self._api_key.matches(request.api_key):
+        if not self._auth.matches(request.api_key):
             return INVALID_API_KEY
         if request.content_type != "application/octet-stream":
             error = {"error": "Content-Type must be application/octet-stream"}

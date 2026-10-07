@@ -17,6 +17,13 @@ export class ApiKey {
   }
 }
 
+// API キーを確かめない決まり（STUB_AUTH=none）。VPC 内で、SG で許可した送信元からだけ届く場合に使う。
+export class NoApiKey {
+  matches() {
+    return true;
+  }
+}
+
 // 画像を判定する。スタブは解析せず、受け付けた画像をすべて valid とする。
 // size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの。
 export function analyze(image) {

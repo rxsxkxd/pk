@@ -1,13 +1,21 @@
-//! Lambda entry point (provided.al2023 `bootstrap`): loads the API key once, then serves Function URL
-//! requests with analyzer_stub::Stub.
+//! Lambda entry point (provided.al2023 `bootstrap`): loads the API key once (unless STUB_AUTH=none), then
+//! serves Function URL requests with analyzer_stub::Stub.
 
-use analyzer_stub::{Stub, local_api_key};
+use analyzer_stub::analyzer::{ApiKey, Auth};
+use analyzer_stub::{AuthSetting, Stub, local_api_key, warn_auth_disabled};
 use lambda_http::{Error, Request, run, service_fn};
 use std::{env, sync::Arc};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let stub = Arc::new(Stub::new(&load_api_key().await?));
+    let auth = match AuthSetting::from_env_value(env::var("STUB_AUTH").ok().as_deref())? {
+        AuthSetting::None => {
+            warn_auth_disabled();
+            Auth::None
+        }
+        AuthSetting::ApiKey => Auth::ApiKey(ApiKey::new(&load_api_key().await?)),
+    };
+    let stub = Arc::new(Stub::new(auth));
     run(service_fn(move |req: Request| {
         let stub = Arc::clone(&stub);
         async move { Ok::<_, Error>(stub.handle(&req)) }

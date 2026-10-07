@@ -5,11 +5,12 @@
 
 pub mod analyzer;
 
-use analyzer::{ApiKey, analyze};
+use analyzer::{Auth, analyze};
 use lambda_http::http::{Method, StatusCode, header::CONTENT_TYPE};
 use lambda_http::request::RequestContext;
 use lambda_http::{Body, Request, RequestExt, Response};
 use serde_json::{Map, Value, json};
+use std::str::FromStr;
 
 /// Receives one log line (as JSON fields) per request.
 pub type Logger = Box<dyn Fn(Map<String, Value>) + Send + Sync>;
@@ -90,22 +91,19 @@ fn json_response(status: StatusCode, body: &Value) -> Response<Body> {
 
 /// Function URL のリクエストを確かめて応答を返す（ログの出力先はテスト用に差し替えられる）。
 pub struct Stub {
-    api_key: ApiKey,
+    auth: Auth,
     log: Logger,
 }
 
 impl Stub {
-    /// API キーから、標準出力に JSON ログを出すスタブを作る。
-    pub fn new(api_key: &str) -> Self {
-        Self::with_logger(api_key, Box::new(print_log))
+    /// 認証の決まりから、標準出力に JSON ログを出すスタブを作る。
+    pub fn new(auth: Auth) -> Self {
+        Self::with_logger(auth, Box::new(print_log))
     }
 
-    /// API キーとログの出力先からスタブを作る。
-    pub fn with_logger(api_key: &str, log: Logger) -> Self {
-        Self {
-            api_key: ApiKey::new(api_key),
-            log,
-        }
+    /// 認証の決まりとログの出力先からスタブを作る。
+    pub fn with_logger(auth: Auth, log: Logger) -> Self {
+        Self { auth, log }
     }
 
     /// リクエストを確かめ、1行のログを出して応答に変える。
@@ -134,7 +132,7 @@ impl Stub {
         if request.method != Method::POST || request.path != "/v1/analyze" {
             return Outcome::new(StatusCode::NOT_FOUND, json!({ "error": "not found" }));
         }
-        if !self.api_key.matches(request.api_key) {
+        if !self.auth.allows(request.api_key) {
             return Outcome::new(StatusCode::UNAUTHORIZED, json!({ "error": "invalid api key" }));
         }
         if request.content_type != "application/octet-stream" {
@@ -153,6 +151,42 @@ impl Stub {
         )
         .with_log(json!({ "bytes": result.size, "sha256": result.sha256, "valid": result.valid }))
     }
+}
+
+/// STUB_AUTH の値。API キーの読み込み（非同期）の前に、どちらの決まりにするかを決める。
+#[derive(Debug, PartialEq, Eq)]
+pub enum AuthSetting {
+    /// API キーを確かめる（既定。設定漏れで、公開した Function URL のスタブが誰でも呼べる状態にならないように）
+    ApiKey,
+    /// 確かめない。STUB_AUTH=none を明示したときだけ（VPC 内で SG だけで許可する場合）
+    None,
+}
+
+impl FromStr for AuthSetting {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "api-key" => Ok(Self::ApiKey),
+            "none" => Ok(Self::None),
+            other => Err(format!("STUB_AUTH must be api-key or none, got {other:?}")),
+        }
+    }
+}
+
+impl AuthSetting {
+    /// STUB_AUTH の値（未設定なら api-key）から決める。
+    pub fn from_env_value(value: Option<&str>) -> Result<Self, String> {
+        value.unwrap_or("api-key").parse()
+    }
+}
+
+/// API キーを確かめない設定で起動したことを、ログに1行出す（気づけるように）。
+pub fn warn_auth_disabled() {
+    let mut line = Map::new();
+    line.insert("level".into(), json!("WARN"));
+    line.insert("msg".into(), json!("api key check is disabled (STUB_AUTH=none)"));
+    print_log(line);
 }
 
 /// ローカル実行用の API キーを返す（APP_ENV=local のときだけ STUB_API_KEY の平文を使う）。

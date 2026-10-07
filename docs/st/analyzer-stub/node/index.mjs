@@ -4,13 +4,27 @@
 // analyzer.mjs. Same structure as ../python/index.py; both are checked against ../testdata/cases.json.
 // No dependencies; the AWS SDK comes with the Lambda runtime.
 
-import { ApiKey, analyze } from './analyzer.mjs';
+import { ApiKey, analyze, NoApiKey } from './analyzer.mjs';
 
-// Lambda のハンドラー。初回の呼び出し時に API キーを読み込み、以降は使い回す。
-let apiKey; // Promise<ApiKey>
+// Lambda のハンドラー。初回の呼び出し時に認証の決まり（API キー）を読み込み、以降は使い回す。
+let auth; // Promise<ApiKey | NoApiKey>
 export async function handler(event) {
-  apiKey ??= loadApiKey(process.env).then((key) => new ApiKey(key));
-  return respond(event, { apiKey: await apiKey });
+  auth ??= loadAuth(process.env);
+  return respond(event, { auth: await auth });
+}
+
+// 認証の決まりを選ぶ。STUB_AUTH=none を明示したときだけ API キーを確かめない（VPC 内で SG だけで許可する場合）。
+// それ以外は API キーが必須（設定漏れで、公開した Function URL のスタブが誰でも呼べる状態にならないように）。
+export async function loadAuth(env, log = consoleLog) {
+  switch (env.STUB_AUTH ?? 'api-key') {
+    case 'none':
+      log({ level: 'WARN', msg: 'api key check is disabled (STUB_AUTH=none)' });
+      return new NoApiKey();
+    case 'api-key':
+      return new ApiKey(await loadApiKey(env));
+    default:
+      throw new Error(`STUB_AUTH must be api-key or none, got "${env.STUB_AUTH}"`);
+  }
 }
 
 // Parameter Store の SecureString から API キーを読み込む（APP_ENV=local のときだけ STUB_API_KEY の平文を使う）。
@@ -47,17 +61,17 @@ const INVALID_API_KEY = outcome(401, { error: 'invalid api key' });
 const EMPTY_BODY = outcome(400, { error: 'empty body' });
 
 // Function URL のイベントを受け取り、リクエストを確かめて応答を返す（ログ出力はテスト用に差し替え可能）。
-export function respond(event, { apiKey, log = consoleLog }) {
+export function respond(event, { auth, log = consoleLog }) {
   const request = parseRequest(event);
-  const { status, body, logFields } = checkRequest(request, apiKey);
+  const { status, body, logFields } = checkRequest(request, auth);
   log({ level: 'INFO', msg: 'analyzed', requestId: request.requestId, status, ...logFields });
   return { statusCode: status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) };
 }
 
 // 仕様（../DESIGN.md 3.2）の順にリクエストを確かめ、通ったものだけ画像の判定（analyzer.mjs）に渡す。API キーの照合も analyzer.mjs。
-export function checkRequest(request, apiKey) {
+export function checkRequest(request, auth) {
   if (request.method !== 'POST' || request.path !== '/v1/analyze') return NOT_FOUND;
-  if (!apiKey.matches(request.apiKey)) return INVALID_API_KEY;
+  if (!auth.matches(request.apiKey)) return INVALID_API_KEY;
   if (request.contentType !== 'application/octet-stream') {
     return outcome(400, { error: 'Content-Type must be application/octet-stream' }, { contentType: request.contentType });
   }

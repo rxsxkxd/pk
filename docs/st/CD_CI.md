@@ -147,7 +147,7 @@ E2 のために必要な変更:
 - **起動は GitHub Actions から AWS への一方向**: GitHub Actions の最後に、OIDC の一時的な認証情報で CodePipeline を開始する（2.1）。AWS 側に GitHub のトークンは置かない
 - **GitHub に AWS の強い権限を持たせない**: GitHub Actions のロールは「リリースを置いて、パイプラインを開始する」だけ。デプロイの権限は CodeBuild だけが持つ
 - **デプロイの記録と承認は AWS 側に集める**: パイプラインの実行履歴、承認、ロールバックは CodePipeline で行う
-- **手順書と同じコマンド**: CodeBuild の buildspec は、各手順書の CloudFormation の手順（go/node DEPLOY.md 4.2・4.3、web/DEPLOY.md 3・5・6章）を実行する
+- **手順書と同じコマンド**: CodeBuild の buildspec は、各手順書の CloudFormation の手順（go/node DEPLOY.md 4-A.1、web/DEPLOY.md 3・5・6章）を実行する
 
 ## 2. 全体の流れ
 
@@ -303,10 +303,10 @@ phases:
       - export SALT_PARAM=/ticketqr/$IMPL/signing-salt
   build:
     commands:
-      # 再パッケージ: zip をデプロイごとの接頭辞で置く（go/node DEPLOY.md 4.2）
+      # 再パッケージ: zip をデプロイごとの接頭辞で置く（go/node DEPLOY.md 4-A.1）
       - aws s3 cp artifacts/lambda-$IMPL/ticketqr.zip  s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip
       - aws s3 cp artifacts/lambda-$IMPL/exampleqr.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.zip
-      # API のスタック（go/node DEPLOY.md 4.3）
+      # API のスタック（go/node DEPLOY.md 4-A.1）
       - >-
         aws cloudformation deploy --stack-name ticketqr-$IMPL --template-file infra/cloudformation/api.yaml
         --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset
@@ -333,7 +333,7 @@ phases:
       - aws cloudfront create-invalidation --distribution-id $DIST_ID --paths /index.html /config.json
   post_build:
     commands:
-      # スモークテスト（go/node DEPLOY.md 8章、web/DEPLOY.md 7章）。build が失敗したときは飛ばす
+      # スモークテスト（go/node DEPLOY.md 7章、web/DEPLOY.md 7章）。build が失敗したときは飛ばす
       - '[ "$CODEBUILD_BUILD_SUCCEEDING" = 1 ] || exit 1'
       - curl -fsS -o /dev/null "$WEB_URL/"
       - |

@@ -166,7 +166,7 @@ echo $WEB_URL
 SPA（`$WEB_URL`）と API（`$API_URL`）はオリジンが違う。SPA が発行の応答（JSON）を読めるように、**API Gateway の CORS 設定で SPA のオリジンを許可する**（../E2E.md 4.3）。これがないと、メインの画面遷移方式が動かない。
 
 ```sh
-# 手動で作った API: $API_ID は、各実装の DEPLOY.md 5.2 で取得したもの
+# 手動で作った API: $API_ID は、各実装の DEPLOY.md 4-B.1.2 で取得したもの
 # CloudFormation で作った API: 名前から API の ID を調べる
 export API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='ticketqr-$IMPL'].ApiId | [0]" --output text)
 

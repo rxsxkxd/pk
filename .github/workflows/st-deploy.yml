@@ -59,13 +59,13 @@ jobs:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # docs/st/{go,node}/DEPLOY.md 4.2: a new key prefix on every deploy, so CloudFormation updates the Lambda code.
+      # docs/st/{go,node}/DEPLOY.md 4-A.1 (zip upload): a new key prefix on every deploy, so CloudFormation updates the Lambda code.
       - name: Upload Lambda packages
         run: |
           aws s3 cp artifacts/lambda/ticketqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip"
           aws s3 cp artifacts/lambda/exampleqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.zip"
 
-      # docs/st/{go,node}/DEPLOY.md 4.3
+      # docs/st/{go,node}/DEPLOY.md 4-A.1 (stack deploy)
       - name: Deploy ticket API stack
         run: |
           aws cloudformation deploy \
@@ -121,7 +121,7 @@ jobs:
             --cache-control no-cache --content-type application/json
           aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths /index.html /config.json
 
-      # docs/st/{go,node}/DEPLOY.md 8, docs/st/web/DEPLOY.md 7
+      # docs/st/{go,node}/DEPLOY.md 7, docs/st/web/DEPLOY.md 7
       - name: Smoke test
         run: |
           curl -fsS -o /dev/null "$WEB_URL/"

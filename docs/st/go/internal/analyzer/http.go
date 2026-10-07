@@ -16,11 +16,11 @@ import (
 // HTTPConfig configures the client for ANALYZER_MODE=http.
 type HTTPConfig struct {
 	URL     string
-	APIKey  string
+	APIKey  string        // optional: sent as x-api-key only when set
 	Timeout time.Duration // per attempt
 }
 
-// HTTP posts the image as-is (application/octet-stream, x-api-key) to the analysis server. It retries
+// HTTP posts the image as-is (application/octet-stream, x-api-key when set) to the analysis server. It retries
 // once on 5xx, timeout or a transport error; 4xx and malformed responses are not retried.
 type HTTP struct {
 	cfg    HTTPConfig
@@ -51,7 +51,9 @@ func (h *HTTP) attempt(ctx context.Context, img ticket.CertificateImage) (ticket
 		return ticket.Verdict{}, false, fmt.Errorf("%w: build request: %v", ticket.ErrVerifierUpstream, err)
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("X-Api-Key", h.cfg.APIKey)
+	if h.cfg.APIKey != "" {
+		req.Header.Set("X-Api-Key", h.cfg.APIKey)
+	}
 
 	resp, err := h.client.Do(req)
 	if err != nil {

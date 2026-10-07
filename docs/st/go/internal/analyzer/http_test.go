@@ -59,6 +59,17 @@ func server(t *testing.T, script ...reply) (*HTTP, *[]received) {
 	return NewHTTP(HTTPConfig{URL: srv.URL + "/v1/analyze", APIKey: "k", Timeout: 200 * time.Millisecond}), &got
 }
 
+func TestHTTPWithoutAPIKeySendsNoHeader(t *testing.T) {
+	a, got := server(t, status(200, `{"valid":true}`))
+	a.cfg.APIKey = ""
+	if _, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg, MimeType: "image/jpeg"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := (*got)[0].header["X-Api-Key"]; ok {
+		t.Errorf("x-api-key sent without a key: %v", (*got)[0].header)
+	}
+}
+
 var jpeg = []byte{0xFF, 0xD8, 0xFF, 0xE0, 'p', 'h', 'o', 't', 'o'}
 
 func TestHTTPPostsImageUnchanged(t *testing.T) {

@@ -35,7 +35,7 @@ pull request / master への push（docs/st/** が変わったとき）
 - **ビルドは1回だけ**: CI が作った成果物（zip と SPA の `dist`）を、E2E とデプロイでそのまま使う。デプロイの前に別のビルドはしない
 - **E2E を通ったものだけをデプロイする**: デプロイのワークフローは、最初に CI を丸ごと実行する
 - **長期の AWS の鍵を持たない**: GitHub の OIDC で、デプロイ用の IAM ロールを一時的に引き受ける
-- **手順は各手順書と同じ**: ワークフローの各ステップは、go/DEPLOY.md・node/DEPLOY.md（4.2、4.3）と web/DEPLOY.md（3・5・6章）の CloudFormation の手順をそのまま実行する。手順を変えるときは、両方を直す
+- **手順は各手順書と同じ**: ワークフローの各ステップは、go/DEPLOY.md・node/DEPLOY.md（4-A.1）と web/DEPLOY.md（3・5・6章）の CloudFormation の手順をそのまま実行する。手順を変えるときは、両方を直す
 
 ## 3. CI（`st-ci.yml`）
 
@@ -95,12 +95,12 @@ pull request / master への push（docs/st/** が変わったとき）
 | CI | `st-ci.yml` を呼ぶ。E2E まで通らなければ、ここで止まる | - |
 | 承認 | environment に承認者を設定していれば、ここで承認を待つ | - |
 | AWS の認証 | OIDC で `AWS_DEPLOY_ROLE_ARN` のロールを引き受ける | - |
-| zip のアップロード | `s3://$ARTIFACT_BUCKET/ticketqr/{impl}/{sha}-{試行回数}/` に置く（接頭辞を毎回変えるので、Lambda のコードが必ず更新される） | {impl}/DEPLOY.md 4.2 |
-| API のスタック | `api.yaml` を `ticketqr-{impl}` にデプロイし、`ApiUrl` を取り出す | {impl}/DEPLOY.md 4.3 |
+| zip のアップロード | `s3://$ARTIFACT_BUCKET/ticketqr/{impl}/{sha}-{試行回数}/` に置く（接頭辞を毎回変えるので、Lambda のコードが必ず更新される） | {impl}/DEPLOY.md 4-A.1（zip のアップロード） |
+| API のスタック | `api.yaml` を `ticketqr-{impl}` にデプロイし、`ApiUrl` を取り出す | {impl}/DEPLOY.md 4-A.1（スタックのデプロイ） |
 | Web のスタック | `web.yaml` を `ticketqr-web-{impl}` にデプロイし（`ApiBaseUrl` を渡す）、バケット・ディストリビューション・URL を取り出す | web/DEPLOY.md 3章 |
 | CORS | API Gateway の CORS に SPA のオリジンを入れる（暫定。`api.yaml` に CORS の設定が入るまで） | web/DEPLOY.md 5章 |
 | SPA のアップロード | `config.json`（`apiBaseUrl` と `modes`）を作り、`dist` と一緒に S3 に置いて、CloudFront のキャッシュを消す | web/DEPLOY.md 6章 |
-| スモークテスト | SPA と `config.json` が取れること、SPA のオリジンからの発行に CORS のヘッダーが付くこと、QR 画像 API が PNG を返すこと。URL はジョブのサマリーに出す | {impl}/DEPLOY.md 8章、web/DEPLOY.md 7章 |
+| スモークテスト | SPA と `config.json` が取れること、SPA のオリジンからの発行に CORS のヘッダーが付くこと、QR 画像 API が PNG を返すこと。URL はジョブのサマリーに出す | {impl}/DEPLOY.md 7章、web/DEPLOY.md 7章 |
 
 同じ環境・同じ実装のデプロイは、同時に1つだけ動く（`concurrency`。実行中のものは取り消さない）。
 

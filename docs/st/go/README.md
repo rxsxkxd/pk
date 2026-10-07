@@ -41,7 +41,7 @@ make build          # bin/ticketqr.zip（チケット系4エンドポイント�
 | `PUBLIC_BASE_URL` | ○ | リダイレクト先と `<img src>` に使う絶対URL。例: `https://api.example.com` |
 | `ANALYZER_MODE` | ○ | 画像解析クライアントの種類。`mock`（通信せず常に valid）/ `http`（`ANALYZER_URL` に画像をそのまま POST。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） |
 | `ANALYZER_URL` | http のとき ○ | 画像解析サーバーの POST 先（例: `http://localhost:8090/v1/analyze`） |
-| `ANALYZER_API_KEY_PARAMETER_NAME` | http のとき ○ | API キーの Parameter Store の SecureString の名前。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
+| `ANALYZER_API_KEY_PARAMETER_NAME` | | API キーの Parameter Store の SecureString の名前（任意。指定したときだけ `x-api-key` を付ける。VPC 内でセキュリティグループだけで許可する解析サーバーでは不要）。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
 | `ANALYZER_TIMEOUT_MS` | | 1回の呼び出しのタイムアウト（既定 5000） |
 | `SIGNING_SALT_PARAMETER_NAME` | ○ | 署名用 salt を保存した Parameter Store の SecureString の名前（例: `/ticketqr/go/signing-salt`）。中身は `{"current":"...","previous":"..."}` 形式 |
 | `TICKET_SUFFIX_LENGTH` | | suffix の桁数（既定値 8。根拠は DESIGN.md 4章） |
@@ -57,6 +57,6 @@ make build          # bin/ticketqr.zip（チケット系4エンドポイント�
 |---|---|
 | `tickets` | `POST /v1/tickets/qr-inline`、`POST /v1/tickets`、`GET /v1/tickets/{ticketCode}/view` |
 | `get-qr` | `GET /v1/tickets/{ticketCode}/qr` |
-| `example-qr`（exampleqr.zip。別テンプレート `example.yaml`・別 HTTP API。[DEPLOY.md](DEPLOY.md) 7章） | `GET /v1/example/qr` |
+| `example-qr`（exampleqr.zip。別テンプレート `example.yaml`・別 HTTP API。[DEPLOY.md](DEPLOY.md) 6章） | `GET /v1/example/qr` |
 
 API Gateway の設定で、`multipart/form-data` と `image/png` をバイナリとして扱わせる必要はない。HTTP API の payload v2 では、イベント側で `isBase64Encoded` が自動で付くため。

@@ -92,22 +92,33 @@ export async function newAnalyzer(env: NodeJS.ProcessEnv): Promise<Verifier> {
 export const alwaysValid: Verifier = async () => ({ valid: true, reason: 'mock' });
 
 // Parameter Store から解析サーバーの API キーを取得する（APP_ENV=local のときだけ環境変数 ANALYZER_API_KEY の平文を使う）。
-async function loadAnalyzerApiKey(env: NodeJS.ProcessEnv): Promise<string> {
+// API キーは任意。どちらも無ければ undefined で、x-api-key を付けずに送る（例: VPC 内でセキュリティグループだけで許可する解析サーバー）。
+async function loadAnalyzerApiKey(env: NodeJS.ProcessEnv): Promise<string | undefined> {
   if (env.ANALYZER_API_KEY_PARAMETER_NAME) return readParameter(env.ANALYZER_API_KEY_PARAMETER_NAME);
   if (env.APP_ENV === 'local' && env.ANALYZER_API_KEY) return env.ANALYZER_API_KEY;
-  throw new Error('ANALYZER_API_KEY_PARAMETER_NAME is not set');
+  return undefined;
 }
 
 type Attempt = { result: Verdict } | { error: VerifierError; retry: boolean };
 
 // 画像を octet-stream でそのまま POST する HTTP クライアントを作る（5xx・タイムアウト・通信エラーのときだけ1回リトライ）。
-export function httpAnalyzer({ url, apiKey, timeoutMs }: { url: string; apiKey: string; timeoutMs: number }): Verifier {
+export function httpAnalyzer({
+  url,
+  apiKey,
+  timeoutMs,
+}: {
+  url: string;
+  apiKey?: string;
+  timeoutMs: number;
+}): Verifier {
+  const headers: Record<string, string> = { 'content-type': 'application/octet-stream' };
+  if (apiKey) headers['x-api-key'] = apiKey;
   const attempt = async (data: Uint8Array): Promise<Attempt> => {
     let res: Response;
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: { 'content-type': 'application/octet-stream', 'x-api-key': apiKey },
+        headers,
         body: new Uint8Array(data),
         signal: AbortSignal.timeout(timeoutMs),
       });

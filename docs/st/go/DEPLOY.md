@@ -8,7 +8,7 @@ API Gateway HTTP API ticketqr-go（$default ステージ、自動デプロイ、
  ├─ POST /v1/tickets                  ├→ Lambda ticketqr-go-tickets  チケット付与 API
  ├─ GET  /v1/tickets/{ticketCode}/view ┘                                   チケット表示ページ
  └─ GET  /v1/tickets/{ticketCode}/qr   → Lambda ticketqr-go-get-qr   QR 画像 API
-API Gateway HTTP API ticketqr-go-example（7章。チケット API とは無関係）
+API Gateway HTTP API ticketqr-go-example（6章。チケット API とは無関係）
  └─ GET  /v1/example/qr                → Lambda ticketqr-go-example-qr
 Parameter Store（SecureString）: /ticketqr/go/signing-salt（スタックの外で管理する。3章）
 ```
@@ -18,7 +18,7 @@ Parameter Store（SecureString）: /ticketqr/go/signing-salt（スタックの�
 | ランタイム | provided.al2023 / arm64。zip の中身は Go のバイナリ `bootstrap` だけ |
 | パッケージ | `go/bin/ticketqr.zip`（チケット系の2関数で共有。どのハンドラーを呼ぶかは `routeKey` で決まる）、`go/bin/exampleqr.zip`（example.com の QR） |
 | スタック | `ticketqr-go`（`infra/cloudformation/api.yaml`）、`ticketqr-go-example`（`infra/cloudformation/example.yaml`） |
-| 方法 | CloudFormation（4章。推奨）か、手動の AWS CLI（5章）。どちらでも同じ構成になる |
+| 方法 | 4章。CloudFormation（4-A。推奨）か、手動の AWS CLI（4-B）。どちらでも同じ構成になる（末尾の番号が同じもの、例えば 4-A.4 と 4-B.4 が同じ結果） |
 
 ## 1. 前提
 
@@ -67,9 +67,26 @@ rm -f "$SALT_FILE"
 - 暗号化は既定の `aws/ssm` キーを使う。この場合、実行ロールには `ssm:GetParameter` だけを付ければよい。独自の KMS キーを使う場合は、実行ロールに `kms:Decrypt` を追加する
 - Node 版とは別のパラメータにする（スタックごとに URL が別になるため、同じ salt を使う必要はない）
 
-## 4. CloudFormation デプロイ（推奨）
+## 4. API のデプロイ
 
-### 4.1 主なパラメータ（`api.yaml`）
+方法は2つ。**4-A（CloudFormation。推奨）と 4-B（手動の AWS CLI）は、末尾の番号が同じものが同じ結果になる**（例: 4-A.4 と 4-B.4）。どちらか一方の手順だけを使う（同じ環境で混ぜない）。
+
+| やること | 4-A CloudFormation | 4-B 手動（AWS CLI） |
+|---|---|---|
+| 作成（初回）・設定の更新 | 4-A.1 | 4-B.1 |
+| コードの更新 | 4-A.2 | 4-B.2 |
+| 画像解析サーバーのスタブにつなぐ（`http` モード。API キーあり） | 4-A.3 | 4-B.3 |
+| VPC 内の画像解析サーバーにつなぐ（`tickets` だけを VPC に置く。API キーなし） | 4-A.4 | 4-B.4 |
+| ロールバック | 4-A.5 | 4-B.5 |
+| 削除 | 4-A.6 | 4-B.6 |
+
+画像解析サーバーのモードと、4-A.3・4-A.4（4-B.3・4-B.4）の前提・確認は 5章。
+
+### 4-A. CloudFormation（推奨）
+
+#### 4-A.1 作成・設定の更新
+
+##### 主なパラメータ（`api.yaml`）
 
 | パラメータ | 既定値 | 内容 |
 |---|---|---|
@@ -77,16 +94,18 @@ rm -f "$SALT_FILE"
 | `ArtifactBucket` | - | Lambda の zip を置く S3 バケット（../DEPLOY.md 2章） |
 | `ArtifactPrefix` | - | zip のキーの接頭辞。**デプロイのたびに変える**（例: `ticketqr/go/<git sha>`） |
 | `SigningSaltParameterName` | - | 3章で作った salt のパラメータ名（`/ticketqr/go/signing-salt`） |
-| `AnalyzerMode` | `mock` | 画像解析クライアントの種類。`mock`（プロセス内で常に valid）/ `http`（`AnalyzerUrl` に POST）。6章 |
+| `AnalyzerMode` | `mock` | 画像解析クライアントの種類。`mock`（プロセス内で常に valid）/ `http`（`AnalyzerUrl` に POST）。5.1 |
 | `AnalyzerUrl` | 空 | `AnalyzerMode=http` のときの POST 先 |
-| `AnalyzerApiKeyParameterName` | 空 | `AnalyzerMode=http` のときの API キーのパラメータ名。指定すると、Lambda の実行ロールに読み取り権限が付く |
+| `AnalyzerApiKeyParameterName` | 空 | `AnalyzerMode=http` のときの API キーのパラメータ名（任意）。指定すると `x-api-key` を付けて送り、Lambda の実行ロールに読み取り権限が付く（4-A.3）。空なら API キーなしで送る（4-A.4） |
 | `TicketSuffixLength` | `8` | suffix の桁数 |
 | `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。空なら execute-api の URL を自動で使う |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `50` / `100` | 全ルートに共通のスロットリング |
 | `GrantReservedConcurrency` | `-1`（設定しない） | `tickets` 関数に予約する同時実行数（画像解析サーバーの保護用） |
+| `VpcSubnetIds` | 空 | `tickets` 関数（画像解析とチケットコードの生成）を置く既存のプライベートサブネット（カンマ区切り、2 AZ 以上）。空ならすべての関数が VPC の外。4-A.4 |
+| `VpcSecurityGroupIds` | 空 | `tickets` 関数に付ける既存のセキュリティグループ（カンマ区切り）。`VpcSubnetIds` を指定したときは必須。4-A.4 |
 | `LogRetentionDays` | `30` | Lambda と API のアクセスログの保持日数 |
 
-### 4.2 zip のアップロード
+##### zip のアップロード
 
 ```sh
 export ARTIFACT_BUCKET=ticketqr-artifacts-$ACCOUNT_ID-$AWS_REGION   # ../DEPLOY.md 2章で作ったもの
@@ -98,7 +117,7 @@ aws s3 cp go/bin/exampleqr.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.
 
 CloudFormation は、`S3Key` が変わらない限り Lambda のコードを更新しない。そのため、デプロイのたびに接頭辞を変える。コミットしていない変更がある場合は、接頭辞に `-dirty-<時刻>` を付ける。
 
-### 4.3 スタックのデプロイ（作成と更新は同じコマンド）
+##### スタックのデプロイ（作成と更新は同じコマンド）
 
 ```sh
 aws cloudformation deploy \
@@ -119,25 +138,87 @@ echo $API_URL
 - 変更内容を先に確認したいときは `--no-execute-changeset` を付ける。表示された変更セットを確認し、`aws cloudformation execute-change-set` で反映する
 - 失敗したときは、`aws cloudformation describe-stack-events --stack-name ticketqr-$IMPL` で原因を確認する
 - `$API_URL` は、Web フロントエンドのデプロイ（../web/DEPLOY.md）でも使う
+- `aws cloudformation deploy` は、指定しなかったパラメータを既定値に戻す。4-A.3・4-A.4 の設定にしている環境では、ここでも 4-A.3・4-A.4 のパラメータを毎回付ける（付けないと `mock`・VPC の外に戻る）
 
-### 4.4 ロールバック
+#### 4-A.2 コードの更新
 
-以前の `ARTIFACT_PREFIX` を指定して、4.3 をもう一度実行する（S3 上の古い zip は消さずに残しておく）。
+4-A.1 の「zip のアップロード」（新しい `ARTIFACT_PREFIX`）と「スタックのデプロイ」を実行する。4-A.3・4-A.4 の設定にしている環境では、そのパラメータも付ける。
 
-### 4.5 削除
+#### 4-A.3 画像解析サーバーのスタブにつなぐ（`http` モード）
+
+前提: [../DEPLOY.md](../DEPLOY.md) 3章でスタブと API キーを用意し、`ANALYZER_URL`・`ANALYZER_KEY_PARAM`・`STUB_IMPL` を設定しておく（5.2）。4-A.1 で zip をアップロードしたうえで、スタックのデプロイにパラメータを3つ足す。
+
+```sh
+aws cloudformation deploy \
+  --stack-name ticketqr-$IMPL \
+  --template-file infra/cloudformation/api.yaml \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    Impl=$IMPL \
+    ArtifactBucket=$ARTIFACT_BUCKET \
+    ArtifactPrefix=$ARTIFACT_PREFIX \
+    SigningSaltParameterName=$SALT_PARAM \
+    AnalyzerMode=http \
+    AnalyzerUrl=$ANALYZER_URL \
+    AnalyzerApiKeyParameterName=$ANALYZER_KEY_PARAM
+```
+
+- `tickets` と `get-qr` の両方の Lambda に `ANALYZER_MODE`、`ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` が入り、実行ロールに API キーの読み取り権限（`read-analyzer-api-key`）が付く（2つの関数は同じ初期化処理を通るため、`get-qr` にも必要）
+- `mock` に戻すときは、4-A.1 のスタックのデプロイを `AnalyzerMode` などを付けずに実行する（既定値の `mock` に戻り、読み取り権限も外れる）
+- 確認は 5.2
+
+#### 4-A.4 VPC 内の画像解析サーバーにつなぐ（`tickets` だけを VPC に置く）
+
+前提: 既存のサブネット・セキュリティグループ・Parameter Store への経路を用意しておく（5.3）。4-A.1 で zip をアップロードしたうえで、スタックのデプロイに VPC と解析サーバーのパラメータを足す。
+
+```sh
+export SUBNET_A=subnet-aaaaaaaa      # 既存のプライベートサブネット（AZ a）
+export SUBNET_B=subnet-bbbbbbbb      # 既存のプライベートサブネット（AZ c）
+export LAMBDA_SG=sg-xxxxxxxx         # 解析サーバーが受信を許可しているセキュリティグループ
+export ANALYZER_URL=https://analyzer.internal.example/v1/analyze   # 解析サーバーの VPC 内の接続先
+
+aws cloudformation deploy \
+  --stack-name ticketqr-$IMPL \
+  --template-file infra/cloudformation/api.yaml \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    Impl=$IMPL \
+    ArtifactBucket=$ARTIFACT_BUCKET \
+    ArtifactPrefix=$ARTIFACT_PREFIX \
+    SigningSaltParameterName=$SALT_PARAM \
+    AnalyzerMode=http \
+    AnalyzerUrl=$ANALYZER_URL \
+    VpcSubnetIds=$SUBNET_A,$SUBNET_B \
+    VpcSecurityGroupIds=$LAMBDA_SG
+```
+
+- `tickets` だけに VPC の設定が付き、実行ロールに `AWSLambdaVPCAccessExecutionRole` が付く。`get-qr` は VPC の外のまま
+- `tickets` と `get-qr` の両方の Lambda に `ANALYZER_MODE=http`、`ANALYZER_URL` が入る。`AnalyzerApiKeyParameterName` は指定しない（空 = `x-api-key` を付けない。4-A.3 の読み取り権限も外れる）
+- VPC の設定の変更のあと、関数が `Active` になるまで数十秒〜数分かかる
+- VPC の外に戻すときは、4-A.1 のスタックのデプロイ（または 4-A.3）を `VpcSubnetIds`・`VpcSecurityGroupIds` を付けずに実行する
+- 確認は 5.3
+
+#### 4-A.5 ロールバック
+
+以前の `ARTIFACT_PREFIX` を指定して、4-A.1 のスタックのデプロイ（4-A.3・4-A.4 の設定ならそのコマンド）をもう一度実行する（S3 上の古い zip は消さずに残しておく）。
+
+#### 4-A.6 削除
 
 ```sh
 aws cloudformation delete-stack --stack-name ticketqr-$IMPL
 aws cloudformation wait stack-delete-complete --stack-name ticketqr-$IMPL
 ```
 
-スタックの外にある salt のパラメータと成果物バケットは残る。
+- スタックの外にある salt のパラメータと成果物バケットは残る
+- 4-A.4 の設定のときは、Lambda の ENI の解放に時間がかかり、削除に数十分かかることがある。スタックの外のサブネット・セキュリティグループは残る
 
-## 5. 手動デプロイ（AWS CLI）
+### 4-B. 手動（AWS CLI）
 
-CloudFormation を使わない場合。一度試すときや、構成を理解するときに使う。
+CloudFormation を使わない場合。一度試すときや、構成を理解するときに使う。4-B.n は 4-A.n と同じ結果になる。
 
-### 5.1 Lambda の実行ロール
+#### 4-B.1 作成・設定の更新
+
+##### 4-B.1.1 Lambda の実行ロール
 
 ```sh
 ROLE_NAME=ticketqr-$IMPL-lambda
@@ -155,7 +236,7 @@ export ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query Role.Arn --out
 sleep 10   # 作ったばかりの IAM ロールが反映されるまで待つ
 ```
 
-### 5.2 HTTP API の作成（先に URL を決める）
+##### 4-B.1.2 HTTP API の作成（先に URL を決める）
 
 Lambda の環境変数 `PUBLIC_BASE_URL` に API の URL が必要なので、API を先に作る。
 
@@ -167,7 +248,7 @@ export API_ID API_URL
 echo $API_URL   # https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com
 ```
 
-### 5.3 Lambda 関数（チケット系は2つ）
+##### 4-B.1.3 Lambda 関数（チケット系は2つ）
 
 | 関数 | 担当ルート | タイムアウト |
 |---|---|---|
@@ -199,9 +280,9 @@ aws lambda create-function \
 - 2関数とも同じ zip（`ticketqr.zip`）を使う。どのハンドラーを呼ぶかは、イベントの `routeKey` で決まる（コードは関数の分け方に依存しない）
 - `tickets` は、画像解析の待ち時間（最大5秒程度）を見込んで 15秒にしている。チケット表示ページも同じ関数なので 15秒になるが、実際の処理は数ミリ秒で終わる
 - `get-qr` を分けているのは、ブラウザの `<img>` から呼ばれる QR 生成を、画像解析の同時実行数の上限から切り離すため
-- 画像解析サーバーを守るために同時実行数に上限をかける場合は、次のコマンドを使う: `aws lambda put-function-concurrency --function-name ticketqr-$IMPL-tickets --reserved-concurrent-executions 10`（チケット表示ページもこの上限の対象に入る）
+- 画像解析サーバーを守るために同時実行数に上限をかける場合は、次のコマンドを使う: `aws lambda put-function-concurrency --function-name ticketqr-$IMPL-tickets --reserved-concurrent-executions 10`（チケット表示ページもこの上限の対象に入る。4-A.1 の `GrantReservedConcurrency` に相当）
 
-### 5.4 ルート・統合・呼び出し権限
+##### 4-B.1.4 ルート・統合・呼び出し権限
 
 1つの統合（integration）を複数のルートから使う。
 
@@ -233,16 +314,18 @@ aws lambda add-permission --function-name ticketqr-$IMPL-get-qr \
   --source-arn "arn:aws:execute-api:$AWS_REGION:$ACCOUNT_ID:$API_ID/*/*"
 ```
 
-### 5.5 ステージ（スロットリングを含む）
+##### 4-B.1.5 ステージ（スロットリングを含む）
 
 ```sh
 aws apigatewayv2 create-stage --api-id $API_ID --stage-name '$default' --auto-deploy \
   --default-route-settings ThrottlingRateLimit=50,ThrottlingBurstLimit=100
 ```
 
-この時点で API が公開される。動作確認は [8章](#8-動作確認)。
+この時点で API が公開される。動作確認は [7章](#7-動作確認)。
 
-### 5.6 コードの更新
+設定を変えるときは `aws lambda update-function-configuration --environment ...` を使う。指定した変数で全体が置き換わるので、既存の変数もすべて指定し直す（4-B.3・4-B.4 のコマンドはその形で書いてある）。
+
+#### 4-B.2 コードの更新
 
 ```sh
 make -C go build
@@ -252,57 +335,9 @@ aws lambda update-function-code --function-name ticketqr-$IMPL-get-qr \
   --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
 ```
 
-環境変数を変えるときは `aws lambda update-function-configuration --environment ...` を使う。指定した変数で全体が置き換わるので、既存の変数もすべて指定し直す。
+#### 4-B.3 画像解析サーバーのスタブにつなぐ（`http` モード）
 
-### 5.7 削除
-
-```sh
-aws apigatewayv2 delete-api --api-id $API_ID
-aws lambda delete-function --function-name ticketqr-$IMPL-tickets
-aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-tickets
-aws lambda delete-function --function-name ticketqr-$IMPL-get-qr
-aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-get-qr
-aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-signing-salt
-aws iam detach-role-policy --role-name ticketqr-$IMPL-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-aws iam delete-role --role-name ticketqr-$IMPL-lambda
-# salt のパラメータは、必要がなくなったときだけ削除する（aws ssm delete-parameter --name $SALT_PARAM）
-```
-
-## 6. 画像解析サーバーの切り替え（ANALYZER_MODE）
-
-| モード | 動き | 必要なパラメータ |
-|---|---|---|
-| `mock`（既定） | API の中で、通信せずに常に valid を返す | なし |
-| `http` | `AnalyzerUrl` に画像をそのまま POST する（`application/octet-stream`、`x-api-key` 付き。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） | `AnalyzerUrl`、`AnalyzerApiKeyParameterName` |
-
-本物の画像解析サーバーができるまでは、`http` の接続先に画像解析サーバーのスタブを使う。**スタブと API キーの用意は Go 版・Node 版で共通**なので、[../DEPLOY.md](../DEPLOY.md) 3章で行い、`ANALYZER_URL`・`ANALYZER_KEY_PARAM`・`STUB_IMPL` を設定しておく。
-
-### 6.1 CloudFormation の場合
-
-4.2 で zip をアップロードしたうえで、4.3 のコマンドにパラメータを3つ足す。
-
-```sh
-aws cloudformation deploy \
-  --stack-name ticketqr-$IMPL \
-  --template-file infra/cloudformation/api.yaml \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides \
-    Impl=$IMPL \
-    ArtifactBucket=$ARTIFACT_BUCKET \
-    ArtifactPrefix=$ARTIFACT_PREFIX \
-    SigningSaltParameterName=$SALT_PARAM \
-    AnalyzerMode=http \
-    AnalyzerUrl=$ANALYZER_URL \
-    AnalyzerApiKeyParameterName=$ANALYZER_KEY_PARAM
-```
-
-- `tickets` と `get-qr` の両方の Lambda に `ANALYZER_MODE`、`ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` が入り、実行ロールに API キーの読み取り権限が付く（2つの関数は同じ初期化処理を通るため、`get-qr` にも必要）
-- `aws cloudformation deploy` は、指定しなかったパラメータを既定値に戻す。`http` のまま別の変更をデプロイするときも、3つのパラメータを毎回指定する
-- `mock` に戻すときは、4.3 のコマンドを `AnalyzerMode` などを付けずに実行する（既定値の `mock` に戻る）
-
-### 6.2 手動デプロイ（5章）の場合
-
-5.1 の実行ロールに API キーの読み取り権限を足し、2つの Lambda の環境変数に `ANALYZER_MODE=http`、`ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` を加える。
+前提は 4-A.3 と同じ（5.2）。実行ロールに API キーの読み取り権限を足し、2つの Lambda の環境変数に `ANALYZER_MODE=http`、`ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` を加える。
 
 ```sh
 aws iam put-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-analyzer-api-key \
@@ -316,7 +351,108 @@ aws lambda update-function-configuration --function-name ticketqr-$IMPL-get-qr \
   --query LastUpdateStatus --output text
 ```
 
-### 6.3 動作確認
+`mock` に戻すとき（4-A.3 で `AnalyzerMode` を付けずにデプロイするのと同じ結果）:
+
+```sh
+aws lambda update-function-configuration --function-name ticketqr-$IMPL-tickets \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --query LastUpdateStatus --output text
+aws lambda update-function-configuration --function-name ticketqr-$IMPL-get-qr \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --query LastUpdateStatus --output text
+aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-analyzer-api-key
+```
+
+#### 4-B.4 VPC 内の画像解析サーバーにつなぐ（`tickets` だけを VPC に置く）
+
+前提は 4-A.4 と同じ（5.3）。実行ロールに VPC の権限を足し、`tickets` だけに VPC の設定を付け、2つの Lambda の環境変数を `http`（API キーなし）にする。
+
+```sh
+export SUBNET_A=subnet-aaaaaaaa      # 既存のプライベートサブネット（AZ a）
+export SUBNET_B=subnet-bbbbbbbb      # 既存のプライベートサブネット（AZ c）
+export LAMBDA_SG=sg-xxxxxxxx         # 解析サーバーが受信を許可しているセキュリティグループ
+export ANALYZER_URL=https://analyzer.internal.example/v1/analyze   # 解析サーバーの VPC 内の接続先
+
+aws iam attach-role-policy --role-name ticketqr-$IMPL-lambda \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+sleep 10   # ロールの変更が反映されるまで待つ
+
+aws lambda update-function-configuration --function-name ticketqr-$IMPL-tickets \
+  --vpc-config SubnetIds=$SUBNET_A,$SUBNET_B,SecurityGroupIds=$LAMBDA_SG \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --query LastUpdateStatus --output text
+aws lambda wait function-updated --function-name ticketqr-$IMPL-tickets   # ENI ができて Active になるまで（数十秒〜数分）
+
+aws lambda update-function-configuration --function-name ticketqr-$IMPL-get-qr \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --query LastUpdateStatus --output text
+```
+
+- 4-B.3 を行っていた場合は、API キーの読み取り権限も外す（4-A.4 では外れるため）: `aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-analyzer-api-key`
+- `get-qr` には VPC の設定を付けない
+
+VPC の外に戻すとき（4-A.4 で `VpcSubnetIds` などを付けずにデプロイするのと同じ結果。解析サーバーの設定は戻したい状態に合わせて 4-B.3 か `mock` にする）:
+
+```sh
+aws lambda update-function-configuration --function-name ticketqr-$IMPL-tickets \
+  --vpc-config SubnetIds=[],SecurityGroupIds=[] \
+  --query LastUpdateStatus --output text
+aws lambda wait function-updated --function-name ticketqr-$IMPL-tickets
+aws iam detach-role-policy --role-name ticketqr-$IMPL-lambda \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+```
+
+#### 4-B.5 ロールバック
+
+手動デプロイでは以前の zip が残らないので、以前のコミットでビルドし直して 4-B.2 で反映する。
+
+```sh
+git switch --detach <以前のコミット>
+make -C go build
+aws lambda update-function-code --function-name ticketqr-$IMPL-tickets \
+  --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
+aws lambda update-function-code --function-name ticketqr-$IMPL-get-qr \
+  --zip-file fileb://go/bin/ticketqr.zip --query LastUpdateStatus --output text
+git switch -
+```
+
+#### 4-B.6 削除
+
+```sh
+aws apigatewayv2 delete-api --api-id $API_ID
+aws lambda delete-function --function-name ticketqr-$IMPL-tickets
+aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-tickets
+aws lambda delete-function --function-name ticketqr-$IMPL-get-qr
+aws logs delete-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-get-qr
+aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-signing-salt
+aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-analyzer-api-key   # 4-B.3 の設定のときだけ
+aws iam detach-role-policy --role-name ticketqr-$IMPL-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole   # 4-B.4 の設定のときだけ
+aws iam detach-role-policy --role-name ticketqr-$IMPL-lambda --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+aws iam delete-role --role-name ticketqr-$IMPL-lambda
+# salt のパラメータは、必要がなくなったときだけ削除する（aws ssm delete-parameter --name $SALT_PARAM）
+```
+
+- 4-B.4 の設定のときは、関数を削除してから ENI が解放されるまで時間がかかる（数十分かかることがある）。スタックの外のサブネット・セキュリティグループは残る
+
+## 5. 画像解析サーバーの接続（4-A.3・4-A.4 / 4-B.3・4-B.4 の前提と確認）
+
+### 5.1 モード（ANALYZER_MODE）
+
+| モード | 動き | 設定（CloudFormation のパラメータ） |
+|---|---|---|
+| `mock`（既定） | API の中で、通信せずに常に valid を返す | なし |
+| `http` | `AnalyzerUrl` に画像をそのまま POST する（`application/octet-stream`。API キーを指定したときは `x-api-key` 付き。1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライ） | `AnalyzerUrl`（`AnalyzerApiKeyParameterName` は任意） |
+
+| 接続先 | API キー | VPC | 手順 |
+|---|---|---|---|
+| 画像解析サーバーのスタブ（Lambda の Function URL。インターネットに公開） | あり | なし | 4-A.3 / 4-B.3 |
+| 本番の画像解析サーバー（既存の VPC 内。特定のセキュリティグループからだけ許可） | なし | `tickets` だけ VPC 内 | 4-A.4 / 4-B.4 |
+
+### 5.2 スタブ（4-A.3 / 4-B.3）
+
+本物の画像解析サーバーができるまでは、`http` の接続先に画像解析サーバーのスタブを使う。**スタブと API キーの用意は Go 版・Node 版で共通**なので、[../DEPLOY.md](../DEPLOY.md) 3章で行い、`ANALYZER_URL`・`ANALYZER_KEY_PARAM`・`STUB_IMPL` を設定しておく。
+
+確認:
 
 ```sh
 curl -s -F image=@testdata/images/photo.jpg $API_URL/v1/tickets/qr-inline | head -c 120; echo   # 201（スタブ経由で valid）
@@ -331,13 +467,36 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 5m | grep 'image analys
 
 API を `http` のままスタブを削除すると、発行（QR 同梱付与 API・チケット付与 API）がすべて 502 になる。スタブを削除する前に `mock` に戻す。
 
-## 7. example.com の QR エンドポイント（別スタック・別 API）
+### 5.3 VPC 内の画像解析サーバー（4-A.4 / 4-B.4）
+
+本番の画像解析サーバーは、既存の VPC の中で、特定のセキュリティグループからのアクセスだけを許可する想定（API キーは使わない）。`tickets` 関数（画像解析とチケットコードの生成）だけを VPC に置き、`get-qr` は VPC の外のままにする。VPC・サブネット・セキュリティグループは既存のもので、CloudFormation のスタックでも手動でも作らない。構成と条件の詳細は [../notes/lambda-vpc.md](../notes/lambda-vpc.md)。
+
+用意するもの（3つとも既存のもの。満たすべき条件は notes/lambda-vpc.md 3章）:
+- 解析サーバーに届くプライベートサブネット（2 AZ 以上）
+- 解析サーバーが受信を許可しているセキュリティグループ
+- そのサブネットから Parameter Store に届く経路（`ssm` の VPC エンドポイントか NAT ゲートウェイ。署名の salt を読むため）
+
+確認:
+
+```sh
+aws lambda get-function-configuration --function-name ticketqr-$IMPL-tickets \
+  --query '{state:State,vpc:VpcConfig.VpcId,subnets:VpcConfig.SubnetIds,sg:VpcConfig.SecurityGroupIds}'
+aws lambda get-function-configuration --function-name ticketqr-$IMPL-get-qr --query 'VpcConfig.VpcId'   # 空（VPC の外）
+curl -s -F image=@testdata/images/photo.jpg $API_URL/v1/tickets/qr-inline | head -c 120; echo   # 201
+# 502 ANALYSIS_UPSTREAM_ERROR / 504 ANALYSIS_TIMEOUT: 解析サーバーに届かない（SG・ルート・接続先を確かめる）
+# 500 や初期化エラー: Parameter Store に届かず、salt が読めない（ssm のエンドポイント・NAT を確かめる）
+aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 5m
+```
+
+- VPC 内の Lambda からは、インターネットに公開したスタブ（Function URL）に届かない（NAT がない場合）。スタブを使う環境は VPC の外のまま（4-A.3 / 4-B.3）にする
+
+## 6. example.com の QR エンドポイント（別スタック・別 API）
 
 `GET /v1/example/qr` は、チケット API とは無関係なエンドポイント。パッケージ（`exampleqr.zip`）、テンプレート（`example.yaml`）、HTTP API、実行ロールをすべて分け、チケット API とは独立して作成・削除できるようにする。設定もシークレットも使わないので、実行ロールはログ出力だけ。
 
-### 7.1 CloudFormation
+### 6-A. CloudFormation
 
-`exampleqr.zip` は 4.2 でチケット API の zip と一緒にアップロードしてある。
+`exampleqr.zip` は 4-A.1 でチケット API の zip と一緒にアップロードしてある。
 
 ```sh
 aws cloudformation deploy \
@@ -359,11 +518,11 @@ aws cloudformation delete-stack --stack-name ticketqr-$IMPL-example
 
 | パラメータ | 既定値 | 内容 |
 |---|---|---|
-| `Impl` / `ArtifactBucket` / `ArtifactPrefix` | - | 4.1 と同じ（`Impl=go`） |
+| `Impl` / `ArtifactBucket` / `ArtifactPrefix` | - | 4-A.1 と同じ（`Impl=go`） |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `10` / `20` | example 用の HTTP API のスロットリング |
 | `LogRetentionDays` | `30` | ログの保持日数 |
 
-### 7.2 手動（AWS CLI）
+### 6-B. 手動（AWS CLI）
 
 ```sh
 # 実行ロール（ログ出力だけ）
@@ -412,7 +571,7 @@ aws iam detach-role-policy --role-name ticketqr-$IMPL-example-lambda --policy-ar
 aws iam delete-role --role-name ticketqr-$IMPL-example-lambda
 ```
 
-## 8. 動作確認
+## 7. 動作確認
 
 動作確認には `testdata/images/` の小さな画像（JPEG / PNG / HEIC / HEIF / AVIF / WebP。各32×32）を使う。画像の形式は API がファイルの中身で判定するので（先頭数バイトだけの偽の画像は 415 になる）、手元の証明書の画像（スマートフォンで撮ったもの）を使ってもよい。
 
@@ -434,7 +593,7 @@ curl -s -o /tmp/qr.png -w '%{http_code} %{content_type}\n' "$QR"
 # 署名を改ざん → 403
 curl -s -o /dev/null -w '%{http_code}\n' "${LOC%sig=*}sig=AAAAAAAAAAAAAAAAAAAAAA"
 
-# example.com の QR → 200 image/png（7章の別 API）
+# example.com の QR → 200 image/png（6章の別 API）
 curl -s -o /tmp/example.png -w '%{http_code} %{content_type}\n' $EXAMPLE_URL
 ```
 
@@ -456,14 +615,14 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 1d --filter-pattern '"r
 
 次は Web フロントエンド（SPA）のデプロイ: [../web/DEPLOY.md](../web/DEPLOY.md)（`$API_URL` を使う）。
 
-## 9. 運用
+## 8. 運用
 
 ### salt のローテーション
 
 1. パラメータを `{"current":"<新しい salt>","previous":"<今の salt>"}` に更新する（`aws ssm put-parameter --name $SALT_PARAM --type SecureString --overwrite --value file://…`）
 2. Lambda は起動したときに salt を読んでキャッシュする。そのため、実行環境を作り直させる必要がある
-   - CloudFormation の場合: 新しい `ARTIFACT_PREFIX` で再デプロイする（4.2、4.3）
-   - 手動の場合: `update-function-configuration` で環境変数を変える
+   - CloudFormation の場合: 新しい `ARTIFACT_PREFIX` で再デプロイする（4-A.2）
+   - 手動の場合: `update-function-configuration` で環境変数を変える（4-B.1.5）
 3. 古い URL が不要になったら、`previous` を消す。**sig には期限が無いので、`previous` を消した時点で古い salt で発行したチケット表示ページ / QR 画像の URL はすべて 403 になる**
 
 まだ対応していないもの（CORS のテンプレート化、Origin の照合、独自ドメインなど）は [../DEPLOY.md](../DEPLOY.md) 4章。

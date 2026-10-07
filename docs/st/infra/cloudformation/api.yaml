@@ -30,7 +30,7 @@ Parameters:
     Type: String
     Default: ""
     AllowedPattern: ^(/.+)?$
-    Description: Parameter Store SecureString holding the analysis server's x-api-key (AnalyzerMode=http), e.g. /ticketqr/analyzer-stub/node/api-key.
+    Description: Optional. Parameter Store SecureString holding the analysis server's x-api-key (AnalyzerMode=http), e.g. /ticketqr/analyzer-stub/node/api-key. Empty sends no x-api-key (e.g. an analyzer in the VPC that only admits the Lambda's security group).
   TicketSuffixLength:
     Type: Number
     Default: 8
@@ -51,6 +51,14 @@ Parameters:
     Type: Number
     Default: -1
     Description: Reserved concurrency for the tickets function (grant + view; protects the analysis server). -1 = not set.
+  VpcSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional. Existing private subnets (2+ AZs) for the tickets function, which calls the analysis server. Empty = every function outside any VPC. See docs/st/notes/lambda-vpc.md.
+  VpcSecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Existing security groups for the tickets function (admitted by the analysis server). Required with VpcSubnetIds.
   LogRetentionDays:
     Type: Number
     Default: 30
@@ -69,6 +77,8 @@ Conditions:
   UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]
   HasGrantReservedConcurrency: !Not [!Equals [!Ref GrantReservedConcurrency, -1]]
   HasAnalyzerApiKey: !Not [!Equals [!Ref AnalyzerApiKeyParameterName, ""]]
+  # The VPC, subnets and security groups are existing ones outside this stack; only tickets goes in (get-qr stays out).
+  InVpc: !Not [!Equals [!Join ["", !Ref VpcSubnetIds], ""]]
 
 Resources:
   # ---------- IAM ----------
@@ -83,6 +93,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If [InVpc, !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole", !Ref AWS::NoValue]
       Policies:
         # SecureString with the AWS managed key (aws/ssm) needs no kms:Decrypt; add it if a custom KMS key is used.
         - PolicyName: read-signing-salt
@@ -148,6 +159,11 @@ Resources:
       Timeout: 15
       Role: !GetAtt FunctionRole.Arn
       ReservedConcurrentExecutions: !If [HasGrantReservedConcurrency, !Ref GrantReservedConcurrency, !Ref AWS::NoValue]
+      VpcConfig: !If
+        - InVpc
+        - SubnetIds: !Ref VpcSubnetIds
+          SecurityGroupIds: !Ref VpcSecurityGroupIds
+        - !Ref AWS::NoValue
       Code:
         S3Bucket: !Ref ArtifactBucket
         S3Key: !Sub ${ArtifactPrefix}/ticketqr.zip

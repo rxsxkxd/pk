@@ -2,7 +2,7 @@
 
 API の設計は [../DESIGN.md](../DESIGN.md)（7章 画像解析サーバー連携）を参照。
 
-> **実装状況**: スタブは Node 版（`node/`、5章）と Rust 版（`rust/`、6章）の両方が実装済み。API 側の HTTP クライアントは Go 版・Node 版とも実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、各実装の DEPLOY.md 6章（API の切り替え）。
+> **実装状況**: スタブは Node 版（`node/`、5章）と Rust 版（`rust/`、6章）の両方が実装済み。API 側の HTTP クライアントは Go 版・Node 版とも実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、各実装の DEPLOY.md 4-A.3・4-B.3（API の切り替え）。
 
 ## 1. 目的
 
@@ -177,7 +177,7 @@ cd docs/st/analyzer-stub/rust
 
 ## 7. デプロイと削除
 
-手順の詳細は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、[../go/DEPLOY.md](../go/DEPLOY.md)・[../node/DEPLOY.md](../node/DEPLOY.md) 6章（API の切り替え）。要点は次のとおり。
+手順の詳細は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、[../go/DEPLOY.md](../go/DEPLOY.md)・[../node/DEPLOY.md](../node/DEPLOY.md) 4-A.3・4-B.3（API の切り替え）。要点は次のとおり。
 
 ```sh
 cd docs/st

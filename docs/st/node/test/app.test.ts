@@ -496,11 +496,14 @@ describe('http analyzer client', () => {
   const hang: Reply = () => {}; // never answers
 
   async function client(...script: Reply[]) {
+    return clientWithKey('k', ...script);
+  }
+  async function clientWithKey(apiKey: string | undefined, ...script: Reply[]) {
     await listening;
     replies = script;
     received.length = 0;
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/analyze`;
-    return httpAnalyzer({ url, apiKey: 'k', timeoutMs: 200 });
+    return httpAnalyzer({ url, apiKey, timeoutMs: 200 });
   }
   const analyze = (a: Awaited<ReturnType<typeof client>>) => a({ data: JPEG, mimeType: 'image/jpeg' });
 
@@ -511,6 +514,12 @@ describe('http analyzer client', () => {
     assert.equal(received[0].headers['content-type'], 'application/octet-stream');
     assert.equal(received[0].headers['x-api-key'], 'k');
     assert.deepEqual(new Uint8Array(received[0].body), JPEG);
+  });
+
+  test('without an API key, no x-api-key header is sent', async () => {
+    const a = await clientWithKey(undefined, json(200, { valid: true }));
+    assert.equal((await analyze(a)).valid, true);
+    assert.equal(received[0].headers['x-api-key'], undefined);
   });
 
   test('valid: false is a result, not an error', async () => {
@@ -554,9 +563,10 @@ describe('http analyzer client', () => {
 
   test('newAnalyzer validates http settings', async () => {
     await assert.rejects(newAnalyzer({ ANALYZER_MODE: 'http' }), /ANALYZER_URL/);
-    await assert.rejects(
-      newAnalyzer({ ANALYZER_MODE: 'http', ANALYZER_URL: 'http://x/v1/analyze' }),
-      /ANALYZER_API_KEY_PARAMETER_NAME/,
+    // The API key is optional (e.g. the analyzer only admits the Lambda's security group).
+    assert.equal(
+      typeof (await newAnalyzer({ ANALYZER_MODE: 'http', ANALYZER_URL: 'http://x/v1/analyze' })),
+      'function',
     );
     await assert.rejects(newAnalyzer({ ANALYZER_MODE: 'nope' }), /unsupported/);
     assert.equal(await newAnalyzer({ ANALYZER_MODE: 'mock' }), alwaysValid);

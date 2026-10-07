@@ -44,7 +44,8 @@ func LoadSalts(ctx context.Context) (Salts, error) {
 
 // LoadAnalyzerAPIKey reads the image analysis server's API key from the SecureString parameter named by
 // ANALYZER_API_KEY_PARAMETER_NAME. For local development only (APP_ENV=local), ANALYZER_API_KEY may hold
-// it in plain text.
+// it in plain text. The key is optional: with neither set it returns "" and requests carry no x-api-key
+// (e.g. a server that only admits the Lambda's security group in the VPC).
 func LoadAnalyzerAPIKey(ctx context.Context) (string, error) {
 	if name := os.Getenv("ANALYZER_API_KEY_PARAMETER_NAME"); name != "" {
 		key, err := getParameter(ctx, name)
@@ -58,7 +59,7 @@ func LoadAnalyzerAPIKey(ctx context.Context) (string, error) {
 			return v, nil
 		}
 	}
-	return "", errors.New("ANALYZER_API_KEY_PARAMETER_NAME is not set")
+	return "", nil
 }
 
 // getParameter reads and decrypts one Parameter Store value.

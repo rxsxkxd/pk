@@ -162,6 +162,67 @@ aws cloudformation deploy \
 - `AnalyzerApiKeyParameterName` は指定しない（既定の空 = API キーなし）
 - `aws cloudformation deploy` は、指定しなかったパラメータを既定値に戻す。`VpcSubnetIds` を付け忘れると、`tickets` が VPC の外に戻り、解析サーバーに届かなくなる（502 / 504）。毎回指定する
 
+## 6.5 Lambda・VPC・ALB の関係と、確認用の全体の構成
+
+### 6.5.1 部品ごとの動かし方（2026-10-08 時点）
+
+| 部品 | 動かし方 | VPC | 状態 |
+|---|---|---|---|
+| チケット API の `tickets` | Lambda | VPC 内（`VpcSubnetIds`・`VpcSecurityGroupIds` を指定したとき） | 実装済み（go/node DEPLOY.md 4-A.4 / 4-B.4） |
+| チケット API の `get-qr` | Lambda | VPC の外のまま | 実装済み |
+| スタブ（Function URL 版） | Lambda | VPC の外（インターネットに公開。API キーで制限） | 実装済み（../DEPLOY.md 3.1〜3.3） |
+| スタブ（VPC 版） | ECS Fargate（コンテナ） | VPC 内（プライベートサブネット。VPC エンドポイントか NAT） | 実装済み（../DEPLOY.md 3.4、`analyzer-stub/vpc-template.yaml`） |
+| スタブ（内部向け ALB + Lambda） | Lambda | ALB だけが VPC 内 | 実装しない（ALB から Lambda に渡せるボディが 1MB まで、ALB の時間課金。../notes/analyzer-stub-vpc.md） |
+
+### 6.5.2 ALB が要るかどうか
+
+ALB が要るかどうかは、**誰がどう呼ぶか**で決まる。Lambda を VPC に置くこと自体には、ALB は要らない。
+
+| | `tickets`（チケット API） | VPC 版のスタブ |
+|---|---|---|
+| 呼び出す側 | API Gateway（利用者のブラウザから） | `tickets`（VPC 内から HTTP で） |
+| 呼び出し方 | API Gateway が Lambda のサービスを通して呼ぶ。VPC のネットワークは通らない | VPC 内の IP とポート（`http://{IP}:8090`）に HTTP で送る |
+| 受ける側に要るもの | なし（Lambda のままでよい） | VPC 内の IP と SG を持つ受け口（Fargate のタスク、または ALB + Lambda） |
+| VPC に置く目的 | `tickets` から外への通信（解析サーバーへ）を VPC 経由にするため | 受信を SG で絞るため |
+
+- Lambda の VPC の設定が変えるのは、**Lambda から外への通信だけ**。呼び出される側（API Gateway から）は変わらない
+- Lambda は単体では VPC 内の受け口（IP と SG）を持てない。VPC 内から HTTP で呼ばれる側を Lambda にしたいときだけ、前に ALB（など）が要る
+- 確認用の構成では、受ける側のスタブを Fargate にしたので、**ALB はどこにも要らない**
+
+### 6.5.3 確認用の全体の構成
+
+本番の想定（`tickets` の Lambda → VPC 内の解析サーバー。2章）を、「Lambda（`tickets`、既存の VPC）→ Fargate のスタブ（スタブ用の VPC）」で再現する。
+
+```mermaid
+flowchart LR
+  B[ブラウザ] --> APIGW[API Gateway<br/>HTTP API]
+  APIGW --> LT[Lambda tickets<br/>VPC の設定あり]
+  APIGW --> LQ[Lambda get-qr<br/>VPC の外]
+  subgraph TV["tickets の VPC（既存）"]
+    ENI["tickets の ENI<br/>SG: TICKETS_SG"]
+    SSMP["Parameter Store への経路（既存）"]
+  end
+  subgraph SV["スタブ用の VPC（既存の指定、または DEPLOY.md 3.4.2 で新規）"]
+    TASK["Fargate のスタブ<br/>STUB_AUTH=none<br/>SG 受信: TICKETS_SG から 8090 だけ"]
+    EG["ECR・Logs への経路<br/>（エンドポイント or NAT）"]
+  end
+  LT -.-> ENI
+  ENI -->|salt の取得| SSMP
+  ENI -->|"HTTP :8090 POST /v1/analyze<br/>API キーなし"| PCX((VPC ピアリング))
+  PCX --> TASK
+  TASK -.->|イメージ・ログ| EG
+```
+
+| 要るもの | 置き場所 | 手順 |
+|---|---|---|
+| `tickets` を置くサブネット（Parameter Store に届く） | `tickets` の VPC（既存） | 3章・4章 |
+| スタブ（Fargate）とその外向きの経路 | スタブ用の VPC | ../DEPLOY.md 3.4.2〜3.4.5 |
+| ピアリングとルート（両方向とも、サブネットの CIDR だけ） | 両方の VPC | ../DEPLOY.md 3.4.2 の手順 4 |
+| スタブの SG の送信元に `tickets` の SG | スタブのスタック | ../DEPLOY.md 3.4.3（`AllowedSourceSecurityGroupId`） |
+| `tickets` の `AnalyzerUrl` をスタブの IP に | API のスタック | go/node DEPLOY.md 4-A.4（タスクを起動するたび） |
+
+- スタブ用の VPC（3.4.2 で新規に作るもの）には Parameter Store への経路がないので、`tickets` はそこに置かない。`tickets` は Parameter Store に届く既存の VPC に置き、ピアリングでつなぐ
+
 ## 7. 注意すること
 
 | 項目 | 内容 |

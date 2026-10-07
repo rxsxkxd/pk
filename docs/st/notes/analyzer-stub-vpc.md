@@ -1,6 +1,6 @@
 # 【検討】画像解析サーバーのスタブを VPC 内で、セキュリティグループで許可した送信元からだけ受け付ける
 
-> 一時ドキュメント（2026-10-07。未実装）。案が決まったら、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) とテンプレート・手順書に反映し、このファイルは削除する。関連: [lambda-vpc.md](lambda-vpc.md)（API の `tickets` を VPC に置く構成）、[analyzer-stub-cost.md](analyzer-stub-cost.md)（スタブを VPC から新しく作る場合の費用の試算と、パブリックサブネット / プライベートサブネットの違い）。
+> 一時ドキュメント（2026-10-07）。**A2（Fargate のタスク）をプライベートサブネットの2パターン（VPC エンドポイント / NAT）で実装済み（2026-10-08）**: テンプレート `analyzer-stub/vpc-template.yaml`（既存の VPC を指定）、手順 [../DEPLOY.md](../DEPLOY.md) 3.4（VPC から新しく作る手順を含む）、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) 付録 B。AWS 上では未検証。案が決まったら、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) とテンプレート・手順書に反映し、このファイルは削除する。関連: [lambda-vpc.md](lambda-vpc.md)（API の `tickets` を VPC に置く構成）、[analyzer-stub-cost.md](analyzer-stub-cost.md)（スタブを VPC から新しく作る場合の費用の試算と、パブリックサブネット / プライベートサブネットの違い）。
 
 ## 1. 目的と条件
 

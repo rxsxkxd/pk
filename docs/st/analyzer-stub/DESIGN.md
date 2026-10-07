@@ -37,9 +37,9 @@ flowchart LR
 | 項目 | 採用 | 理由 |
 |---|---|---|
 | 実行環境 | Lambda（arm64、128MB、タイムアウト10秒） | API と同じ AWS アカウント・リージョンに置ける。使わないときの費用はほぼゼロ |
-| 実装 | **Node 版**（`nodejs24.x`、依存なしの `index.mjs` と `analyzer.mjs`）と **Rust 版**（`provided.al2023`、`bootstrap`） | 同じ仕様で2つ実装し、API と同様に比較できるようにする |
+| 実装 | **Node 版**（`nodejs24.x`、依存なしの `index.mjs` と `analyzer.mjs`）、**Rust 版**（`provided.al2023`、`bootstrap`）、**Python 版**（`python3.13`、依存なしの `index.py` と `analyzer.py`。付録） | 同じ仕様で実装し、API と同様に比較できるようにする |
 | 公開方法 | **Lambda Function URL**（`AuthType: NONE`） | API Gateway を作らずに HTTPS のエンドポイントが手に入る。アクセス制限は API キーで行う（3.3） |
-| デプロイ | 共通の CloudFormation テンプレート `template.yaml`。`Impl=node|rust` で切り替え、実装ごとに別スタックにする | API のスタックとは別に作成・削除できる。zip は API と同じ成果物バケットに置く |
+| デプロイ | 共通の CloudFormation テンプレート `template.yaml`。`Impl=node|python|rust` で切り替え、実装ごとに別スタックにする | API のスタックとは別に作成・削除できる。zip は API と同じ成果物バケットに置く |
 
 Function URL の代わりに IAM 認証（`AuthType: AWS_IAM`）を使う案もあるが、API 側のクライアントに SigV4 の署名処理が必要になり、本物のサーバーにはない処理をクライアントに入れることになる。そのため、仮の API キーにする。
 
@@ -118,7 +118,7 @@ API 側の失敗時の挙動（422 / 502 / 504、リトライ）も AWS 上で�
 ```
 analyzer-stub/
 ├── DESIGN.md            # 本書
-├── template.yaml        # CloudFormation（Impl=node|rust）
+├── template.yaml        # CloudFormation（Impl=node|python|rust）
 ├── testdata/cases.json  # Node / Rust / Python 共通のテストケース（リクエストと期待するステータス）
 └── node/
     ├── package.json     # scripts: dev / test / build（依存なし）
@@ -268,15 +268,20 @@ Node 版の実装（`node/src/infra.ts`）:
 1. 仮のレスポンス形式（3.2）と認証（3.3）を、この内容で進めてよいか
 2. Go 版の HTTP クライアントに着手する時期（Node 版は実装済み）
 
+## CI
+
+スタブ専用のリポジトリのワークフロー（テンプレートは `github-template/workflows/ci.yml`。そのリポジトリの `.github/` にコピーして使う。`github-template/README.md`）。`stub-node`・`stub-python`・`stub-rust`（テスト・型チェック・lint・Lambda 用の zip）、`stub-image`（VPC 版のコンテナのビルドと起動の確認）、`infra`（`template.yaml`・`vpc-template.yaml` の cfn-lint）で確かめる（../CI.md 3.5）。
+
 ## 付録: Python 版（試作）
 
-Node 版との比較のための試作（2026-10-07）。仕様（3章）と共通のテストケース（`testdata/cases.json`）は同じ。テンプレート（`template.yaml` の `Impl`）とデプロイ手順には、まだ入れていない。
+Node 版との比較のための試作として作り（2026-10-07）、Function URL のテンプレート（`template.yaml` の `Impl=python`。ランタイム `python3.13`）とデプロイ手順（../DEPLOY.md 3.2）にも入れた（2026-10-08）。仕様（3章）と共通のテストケース（`testdata/cases.json`）は同じ。
 
 ```
 analyzer-stub/python/
 ├── index.py          # Lambda の入口（handler: index.handler）。リクエストのパースと確認（ルート・Content-Type・ボディ）、ログ、応答
 ├── analyzer.py       # ビジネスロジック（仕様 3章の決まりごと）: API キーの照合と、画像の判定（スタブは解析せず valid）。Lambda・HTTP を知らない
 ├── local.py          # ローカル用の HTTP サーバー（標準の http.server。デプロイしない）
+├── build.sh          # Lambda 用の zip（dist/analyzer-stub.zip）を作る
 ├── test_index.py     # 共通ケース全件 + ヘッダー名の大文字小文字 + 応答の本文とログが Node 版と同じ形 + API キーの読み込み（unittest）
 └── test_analyzer.py  # ビジネスロジックだけのテスト（API キーの照合、画像の判定）
 ```
@@ -286,7 +291,7 @@ cd docs/st/analyzer-stub/python
 python3 -m unittest -v                             # 9件（共通ケースは1件のテストの中で全件確認する）
 python3 local.py                                   # http://localhost:8090/v1/analyze（x-api-key: local-stub-key）
 uvx mypy --strict *.py                            # 任意: 型チェック（プロジェクトの依存には入れない）
-mkdir -p dist && rm -f dist/analyzer-stub.zip && zip -q dist/analyzer-stub.zip index.py analyzer.py   # ランタイムは python3.13 以降
+./build.sh                                         # dist/analyzer-stub.zip（index.py と analyzer.py。ランタイムは python3.13 以降）
 ```
 
 組み立て（関数の中に関数を入れ子にせず、役割ごとに分ける。リクエストの扱いとビジネスロジックはファイルを分ける）:
@@ -317,4 +322,22 @@ mkdir -p dist && rm -f dist/analyzer-stub.zip && zip -q dist/analyzer-stub.zip i
 
 確認済み:
 - 単体テスト 9件すべて成功（Python 3.14 と 3.13）。`mypy --strict` でエラーなし
+- Lambda エミュレーター（`public.ecr.aws/lambda/python:3.13`）に `build.sh` の zip で Function URL 形式のイベントを送り、200 / 401 とログを確認（2026-10-08）
 - ローカル（`python3 local.py`）: 200 / 401 / 400 / 404。応答の本文とログ（キーの順序、`requestId`、`bytes`、`sha256`）は Node 版と同じ形。ログの `sha256` は、送ったファイルの `shasum -a 256` と一致
+
+## 付録 B: VPC 内で動かすコンテナ（ECS Fargate）
+
+本番の想定（解析サーバーは VPC 内、特定の SG からだけ受け付け、API キーなし）に近い形で確かめるための配置（2026-10-08）。Function URL のスタブ（2章・7章）とは別のもの。検討は [../notes/analyzer-stub-vpc.md](../notes/analyzer-stub-vpc.md)、費用とパターンの違いは [../notes/analyzer-stub-cost.md](../notes/analyzer-stub-cost.md)、手順は [../DEPLOY.md](../DEPLOY.md) 3.4。
+
+| 項目 | 内容 |
+|---|---|
+| コンテナ | 各実装のローカル用サーバーをそのまま使う（`node/Dockerfile`: `local.mjs`、`python/Dockerfile`: `local.py`、`rust/Dockerfile`: `examples/local.rs`）。arm64。依存は取得しない（Node・Python は依存なし、Rust はビルド済みのバイナリ）。root 以外のユーザーで動き、ルートファイルシステムは読み取り専用でも動く |
+| 認証 | `STUB_AUTH=none`（タスク定義で指定。3.3）。届くのは、指定した SG（API の `tickets` の SG）からの TCP 8090 だけ |
+| テンプレート | `vpc-template.yaml`。**既存の VPC とプライベートサブネットを指定する**。ECR のリポジトリ、ロググループ、タスクの実行ロール、ECS のクラスターとタスク定義（0.25 vCPU / 0.5GB）、タスクの SG（受信 8090 は指定した SG から、送信は 443 だけ） |
+| 外向きの経路 | `CreateEndpoints=true`: このスタックが `ecr.api`・`ecr.dkr`・`logs` のインターフェイス型エンドポイント（1 AZ）と S3 のゲートウェイ型エンドポイントを作る。ポリシーで、このリポジトリの取得・このロググループへの書き込み・ECR の層のバケットの読み取りだけを許す。**スタブだけが使う VPC に限る**（プライベート DNS とポリシーが VPC 全体に効くため）。`false`: サブネットに既にある経路（NAT ゲートウェイか既存のエンドポイント）を使う |
+| VPC から新しく作る場合 | テンプレートにはせず、AWS CLI の手順で作る（DEPLOY.md 3.4.2。エンドポイントのパターンと NAT のパターン、`tickets` の VPC とのピアリング） |
+| タスクの起動・停止 | ECS のサービスは使わず、確認のときだけ `aws ecs run-task` で起動し、`stop-task` で止める。IP は起動のたびに変わるので、API の `AnalyzerUrl` を更新する |
+
+確認済み（2026-10-08。AWS 上へのデプロイは未検証）:
+- 3つのイメージ（Node 238MB、Python 202MB、Rust 170MB）をローカルでビルドし、`STUB_AUTH=none`・読み取り専用のルートファイルシステムで起動して、200 と起動時の WARN のログを確認
+- `vpc-template.yaml`: cfn-lint でエラー・警告なし

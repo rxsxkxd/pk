@@ -1,6 +1,6 @@
 # CI / CD 構成案（CI は GitHub Actions、CD は CodePipeline / CodeBuild）
 
-> **状態**: 構成案（未実装）。CI は今の `.github/workflows/st-ci.yml`（[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`st-deploy.yml`。CI.md 4章、未検証）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[node/DEPLOY.md](node/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
+> **状態**: 構成案（未実装）。CI は今の CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。CI.md 4章、未検証）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[node/DEPLOY.md](node/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
 >
 > どの構成パターンを採るかは未決定（0章で比較）。1〜9章は、そのうちパターン P1 の詳細。P3 を採る場合の差分は 0.4 にまとめた。
 
@@ -10,7 +10,7 @@
 
 | 目的 | 内容 |
 |---|---|
-| E2E は GitHub Actions で行う | 今の `st-ci.yml`（compose で storage + api + e2e）をそのまま使う |
+| E2E は GitHub Actions で行う | 今の `ci.yml`（compose で storage + api + e2e）をそのまま使う |
 | デプロイの認証・許可の設定は、なるべく AWS 側に一元化する | デプロイに使う権限、承認、実行の記録は AWS（CodePipeline / CodeBuild / IAM）で管理する。GitHub 側に AWS の権限や秘密情報をなるべく置かない |
 
 この2つを両立するには、「GitHub Actions の E2E が通った」ことを AWS 側に伝える方法と、デプロイするパッケージをどちらで作るかを決める必要がある。
@@ -25,7 +25,7 @@
 | P4 | パイプラインは master への push で開始し、CodeBuild が GitHub Actions の結果を問い合わせて、成功していれば先に進む | なし（AWS 側から GitHub の API に問い合わせる） | CD | なし。ただし AWS 側に GitHub のトークン（長期の秘密情報）が要る |
 | P5 | CodePipeline が起点で、GitHub Actions の E2E を呼び出して、結果を待つ | なし（AWS 側から GitHub の API で起動・待ち合わせ） | CD（または GitHub Actions から S3 に置く） | なし。AWS 側に GitHub のトークンが要る |
 | P6 | GitHub Actions のジョブを、CodeBuild が管理するランナーの上で動かし、デプロイもそのジョブで行う | なし（ランナーが CodeBuild の IAM ロールで動く） | CI | なし（CodeConnections で接続） |
-| 参考 | 今の `st-deploy.yml`（GitHub Actions が OIDC でデプロイ用のロールを引き受け、直接デプロイする） | OIDC で強い権限のロール | CI | デプロイの強い権限 |
+| 参考 | 今の `deploy.yml`（GitHub Actions が OIDC でデプロイ用のロールを引き受け、直接デプロイする） | OIDC で強い権限のロール | CI | デプロイの強い権限 |
 
 ### 0.3 評価
 
@@ -56,7 +56,7 @@
 P3 の構成（P1 の詳細との差分）:
 
 ```
-GitHub Actions（st-ci.yml）: テスト・ビルド・E2E
+GitHub Actions（ci.yml）: テスト・ビルド・E2E
   └─ release-tag（master の push で、すべて成功したとき）: タグ st-release/<run 番号> を付けて push（GITHUB_TOKEN。AWS の認証なし）
 
 AWS: CodePipeline V2 ticketqr-st（トリガー: CodeConnections で、タグ st-release/* の push）
@@ -153,7 +153,7 @@ E2 のために必要な変更:
 
 ```
 GitHub（master への push / PR）
-  └─ GitHub Actions: st-ci.yml
+  └─ GitHub Actions: ci.yml
        ├─ go / node / web / infra（テスト・ビルド）
        ├─ e2e（compose。matrix: go / node）
        └─ publish（master の push だけ。上がすべて成功したとき）
@@ -187,7 +187,7 @@ Y で用意するもの（これだけで動く）:
 
 | 場所 | 用意するもの |
 |---|---|
-| GitHub | `st-ci.yml` の `publish` ジョブ（3.1）、environment `release`、変数 `AWS_REGION`・`AWS_PUBLISH_ROLE_ARN`・`RELEASE_BUCKET` |
+| GitHub | `ci.yml` の `publish` ジョブ（3.1）、environment `release`、変数 `AWS_REGION`・`AWS_PUBLISH_ROLE_ARN`・`RELEASE_BUCKET` |
 | AWS | GitHub の OIDC プロバイダー、公開用ロール（権限は `s3:PutObject` と `codepipeline:StartPipelineExecution` の2つだけ）、リリースバケット、パイプライン（Source は S3 で、変更の検知はしない）、CodeBuild プロジェクト |
 
 さらに単純にする候補と、採らない理由:
@@ -199,7 +199,7 @@ Y で用意するもの（これだけで動く）:
 
 ## 3. GitHub Actions（CI と、リリースの受け渡し）
 
-### 3.1 追加するジョブ: `publish`（`st-ci.yml`）
+### 3.1 追加するジョブ: `publish`（`ci.yml`）
 
 | 項目 | 内容 |
 |---|---|
@@ -260,9 +260,9 @@ release.zip
 - buildspec もリリースに入れる: 手順とテンプレートとコードの組み合わせが、コミットごとに固定される
 - `st/releases/<SHA>.zip` は消さずに残す（どのコミットでも、もう一度デプロイできる）
 
-### 3.3 今の `st-deploy.yml` との関係
+### 3.3 今の `deploy.yml` との関係
 
-この案を採用したら、`st-deploy.yml`（GitHub Actions から直接デプロイする。未検証）は廃止する。CI.md 4章の「デプロイ用の IAM ロール」も、権限の小さい「公開用ロール」（5章）に置き換わる。
+この案を採用したら、`deploy.yml`（GitHub Actions から直接デプロイする。未検証）は廃止する。CI.md 4章の「デプロイ用の IAM ロール」も、権限の小さい「公開用ロール」（5章）に置き換わる。
 
 ## 4. CodePipeline / CodeBuild（CD）
 
@@ -421,7 +421,7 @@ phases:
 | OIDC の信頼ポリシーを絞る | `sub` を environment `release` に限定し、その environment は master だけ・（任意で）承認者付きにする。PR やフォークのワークフローからは引き受けられない | 必須 |
 | リリースバケットに書けるのは公開用ロールだけ | バケットポリシーで、公開用ロール以外の `PutObject` を拒否する。バージョニングで、上書きされても前の版が残る | 必須 |
 | ハッシュの照合 | CI が `SHA256SUMS` を作ってリリースに入れ、CodeBuild が `sha256sum -c` で照合してから反映する（4.2 の buildspec） | 必須（同じ zip の中にあるので、壊れや入れ違いの検知が主な目的） |
-| 来歴の証明（provenance） | GitHub のアーティファクト証明（`actions/attest-build-provenance`）で、「このリポジトリのこのワークフローが、このコミットから作った」ことを署名で残す。CodeBuild で `gh attestation verify release.zip --repo rxsxkxd/pk --signer-workflow …/st-ci.yml` を実行し、合わなければ止める | 推奨（本番を作るとき）。S3 を書き換えられても、署名が合わないので反映されない |
+| 来歴の証明（provenance） | GitHub のアーティファクト証明（`actions/attest-build-provenance`）で、「このリポジトリのこのワークフローが、このコミットから作った」ことを署名で残す。CodeBuild で `gh attestation verify release.zip --repo {チケット QR API のリポジトリ} --signer-workflow …/ci.yml` を実行し、合わなければ止める | 推奨（本番を作るとき）。S3 を書き換えられても、署名が合わないので反映されない |
 | Lambda のコード署名 | AWS Signer で zip に署名し、Lambda のコード署名の設定（Code Signing Config）で、署名のないコードを拒否する | 任意（本番で、さらに強くしたいとき）。テンプレートの変更が要る |
 | 本番の承認 | CodePipeline の手動承認。承認者は `manifest.json` のコミットを確かめる | 本番を作るとき |
 
@@ -430,8 +430,8 @@ phases:
 | フェーズ | 内容 |
 |---|---|
 | 1 | `pipeline.yaml`（リリースバケット、CodeBuild、パイプライン、ロール）と `cd/buildspec/deploy.yml` を作る。Dev のステージだけで動かす |
-| 2 | `st-ci.yml` に `publish` ジョブを足し、master への push で Dev に自動で反映されるようにする |
-| 3 | `st-deploy.yml` を廃止し、CI.md 4章をこの文書への案内に置き換える |
+| 2 | `ci.yml` に `publish` ジョブを足し、master への push で Dev に自動で反映されるようにする |
+| 3 | `deploy.yml` を廃止し、CI.md 4章をこの文書への案内に置き換える |
 | 4 | 本番の環境を作り、承認と Prod のステージを足す |
 | 5 | example.com の QR のスタックや、画像解析サーバーの `http` モードのパラメータを、必要に応じて buildspec に足す |
 

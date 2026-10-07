@@ -1,34 +1,49 @@
 # CI / CD（GitHub Actions）
 
-> **状態**: CI（ビルド・単体テスト・E2E）は定義済みで、ローカルの act（GitHub Actions のローカル実行ツール）で全ジョブ（go、node、web、infra、e2e の go / node）の成功を確認済み（成果物のアクションだけ、act の制約で v4 に置き換えて実行。5章）。GitHub 上ではまだ動かしていない（リポジトリへの push 前）。デプロイ（4章）は定義だけで、未検証（AWS 側と GitHub 側の準備が必要。4.2）。
+> **状態**: CI（ビルド・単体テスト・E2E）は定義済みで、ローカルの act（GitHub Actions のローカル実行ツール）で全ジョブ（go、node、web、infra、e2e の go / node）の成功を確認済み（成果物のアクションだけ、act の制約で v4 に置き換えて実行。5章）。GitHub 上ではまだ動かしていない（リポジトリへの push 前）。画像解析サーバーのスタブの CI（2026-10-08 にチケット API の CI から分けた）は、actionlint と、各ステップと同じコマンドの手元での実行で確認した（act では未確認）。
+>
+> **ワークフローの置き場所（2026-10-08）**: 実運用では、チケット QR API とスタブをそれぞれ専用のリポジトリに置いて CI / CD を動かす。そのため、ワークフローは `.github/` ではなくテンプレートとして置く: チケット QR API は `github-template/workflows/`（`ci.yml`・`deploy.yml`）、スタブは `analyzer-stub/github-template/workflows/ci.yml`。各リポジトリでは、それぞれの `github-template/` の中身を `.github/` にコピーして使う（各 `github-template/README.md`）。ワークフローは、リポジトリのルートを今の `docs/st`（スタブは `analyzer-stub`）として書いてある。このモノレポでは動かない。デプロイ（4章）は定義だけで、未検証（AWS 側と GitHub 側の準備が必要。4.2）。
 
 関連: デプロイの手順は [DEPLOY.md](DEPLOY.md)（全体と共通の準備）・[go/DEPLOY.md](go/DEPLOY.md)・[node/DEPLOY.md](node/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)、E2E の構成は [E2E.md](E2E.md)。
 
 ## 1. 全体像
 
 ```
-pull request / master への push（docs/st/** が変わったとき）
-  └─ st CI（.github/workflows/st-ci.yml）
+チケット QR API のリポジトリ（github-template/workflows/ → .github/workflows/）
+
+pull request / master への push
+  └─ CI（ci.yml）: チケット API と SPA
        ├─ go     Go のテスト・ビルド       → 成果物 lambda-go（ticketqr.zip、exampleqr.zip）
        ├─ node   Node の型チェック・テスト・ビルド → 成果物 lambda-node
        ├─ web    SPA のテスト・ビルド       → 成果物 web-dist
-       ├─ infra  CloudFormation テンプレートの cfn-lint
+       ├─ infra  CloudFormation テンプレート（infra/）の cfn-lint
        └─ e2e    （go・node・web の後）matrix: go / node
                   web-dist を使い、compose（storage + api + e2e）で Playwright を流す
 
 手動実行（workflow_dispatch: 実装と環境を選ぶ）
-  └─ st deploy（.github/workflows/st-deploy.yml）
-       ├─ ci      st CI をそのまま呼ぶ（同じ成果物を作る。E2E が通らなければデプロイしない）
+  └─ Deploy（deploy.yml）
+       ├─ ci      ci.yml をそのまま呼ぶ（同じ成果物を作る。E2E が通らなければデプロイしない）
        └─ deploy  GitHub の environment（承認ルール）→ OIDC で AWS のロールを引き受ける
                   zip のアップロード → API のスタック → Web のスタック → CORS → SPA のアップロード → スモークテスト
+
+スタブのリポジトリ（analyzer-stub/github-template/workflows/ → .github/workflows/）
+
+pull request / master への push
+  └─ CI（ci.yml）: 画像解析サーバーのスタブ
+       ├─ infra        スタブのテンプレート（template.yaml・vpc-template.yaml）の cfn-lint
+       ├─ stub-node / stub-python / stub-rust  テスト・型チェックや lint・Lambda 用の zip → 成果物 stub-*
+       └─ stub-image   matrix: node / python / rust  VPC 版のスタブのイメージのビルドと起動の確認
 ```
 
 | ファイル | 内容 |
 |---|---|
-| `.github/workflows/st-ci.yml` | ビルド・単体テスト・E2E。`workflow_call` で、デプロイからも呼ばれる |
-| `.github/workflows/st-deploy.yml` | AWS へのデプロイ（手動実行）。未検証 |
+| テンプレート（このモノレポでの置き場所） | 専用のリポジトリでの置き場所 | 内容 |
+|---|---|---|
+| `github-template/workflows/ci.yml` | `.github/workflows/ci.yml` | チケット API と SPA のビルド・単体テスト・E2E。`workflow_call` で、デプロイからも呼ばれる |
+| `github-template/workflows/deploy.yml` | `.github/workflows/deploy.yml` | AWS へのデプロイ（手動実行）。未検証 |
+| `analyzer-stub/github-template/workflows/ci.yml` | スタブのリポジトリの `.github/workflows/ci.yml` | 画像解析サーバーのスタブのテスト・ビルド（3.5）。デプロイのワークフローはない（スタブは手順書で手動でデプロイする。DEPLOY.md 3章） |
 
-ワークフローのファイルは、GitHub の決まりでリポジトリのルートの `.github/workflows/` に置く。各ジョブの作業ディレクトリは `docs/st`。
+ワークフローのファイルは、GitHub の決まりでリポジトリのルートの `.github/workflows/` に置く。テンプレートは、各リポジトリのルート（チケット QR API は今の `docs/st`、スタブは今の `analyzer-stub`）で動く前提で書いてあり、`working-directory` の指定はない。
 
 ## 2. 方針
 
@@ -37,16 +52,16 @@ pull request / master への push（docs/st/** が変わったとき）
 - **長期の AWS の鍵を持たない**: GitHub の OIDC で、デプロイ用の IAM ロールを一時的に引き受ける
 - **手順は各手順書と同じ**: ワークフローの各ステップは、go/DEPLOY.md・node/DEPLOY.md（4-A.1）と web/DEPLOY.md（3・5・6章）の CloudFormation の手順をそのまま実行する。手順を変えるときは、両方を直す
 
-## 3. CI（`st-ci.yml`）
+## 3. CI（チケット QR API の `ci.yml`）
 
 ### 3.1 トリガー
 
 | トリガー | 条件 |
 |---|---|
-| `pull_request` | `docs/st/**` か、このワークフローが変わったとき |
-| `push` | `master` で、同じ条件 |
+| `pull_request` | すべての pull request（専用のリポジトリなので、パスで絞らない） |
+| `push` | `master` への push |
 | `workflow_dispatch` | 手動 |
-| `workflow_call` | `st-deploy.yml` から呼ばれたとき |
+| `workflow_call` | `deploy.yml` から呼ばれたとき |
 
 同じブランチで新しい実行が始まると、古い実行は取り消す（`concurrency`）。デプロイから呼ばれた実行は別のグループになるので、push の CI に取り消されない。
 
@@ -80,9 +95,33 @@ pull request / master への push（docs/st/** が変わったとき）
   - `test-results/**/trace.zip`: `npx playwright show-trace trace.zip` で、操作・通信・画面を1手ずつ再生できる
   - `compose-logs.txt`: `storage`（Garage）と `api`（ゲートウェイと Lambda）のログ
 
-## 4. デプロイ（`st-deploy.yml`）
+### 3.5 画像解析サーバーのスタブの CI（スタブのリポジトリの `ci.yml`）
 
-> **見直し中**: デプロイを CodePipeline / CodeBuild に移す案がある（[CD_CI.md](CD_CI.md)）。採用したら、この章と `st-deploy.yml` は廃止する。
+チケット API とは別のリポジトリのワークフロー（テンプレートは `analyzer-stub/github-template/workflows/ci.yml`）。スタブは E2E とデプロイのワークフローでは使わず、手順書で手動でデプロイする（DEPLOY.md 3章）。
+
+| トリガー | 条件 |
+|---|---|
+| `pull_request` / `push`（`master`） | すべて（専用のリポジトリなので、パスで絞らない）。イメージの起動確認では、チケット API のリポジトリの `testdata/images` は使わず、その場で作ったバイト列を送る |
+| `workflow_dispatch` | 手動 |
+
+| ジョブ（スタブの `ci.yml`） | 内容 | 成果物 |
+|---|---|---|
+| `infra` | cfn-lint で `analyzer-stub/*.yaml`（スタブの Function URL 版・VPC 版）を検査する | - |
+| `stub-node` | スタブ（Node）の `npm test`（依存がないので `npm ci` はしない）と `npm run build` | `stub-node`（Lambda 用の zip） |
+| `stub-python` | スタブ（Python 3.13。Lambda のランタイムと同じ）の `python -m unittest`、`mypy --strict`（型チェックのためだけに `mypy` を入れる）、`build.sh` | `stub-python` |
+| `stub-rust` | スタブ（Rust）の `build.sh lint`（rustfmt・clippy）、`build.sh test`、`build.sh`（リリースビルド）。arm64 のランナー（`ubuntu-24.04-arm`）で、Amazon Linux 2023 の arm64 のコンテナでビルドする | `stub-rust` |
+| `stub-image` | matrix（`node` / `python` / `rust`）。VPC 版のスタブ（DEPLOY.md 3.4）のイメージを arm64 のランナーでビルドし、タスク定義と同じ `STUB_AUTH=none`・読み取り専用のルートファイルシステムで起動して、1回呼んで応答を確かめる | - |
+
+- ジョブはすべて並列に動く
+- `stub-rust`・`stub-image` は arm64 の GitHub ホストランナー（`ubuntu-24.04-arm`）を使う。リポジトリの種類やプランによっては使えない（または有料の）場合がある。使えないときは、`ubuntu-latest` に `docker/setup-qemu-action` を足して arm64 を模擬する（動くが、Rust のビルドは数倍遅くなる）
+
+| キャッシュの対象 | 方法 |
+|---|---|
+| スタブ（Rust）のビルド | まだキャッシュしていない。`build.sh` のビルド環境のイメージ（rustup の導入）と、cargo のレジストリ・`target/` を毎回作り直すので、数分かかる。必要になったら、`actions/cache` で cargo のディレクトリを保存する |
+
+## 4. デプロイ（チケット QR API の `deploy.yml`）
+
+> **見直し中**: デプロイを CodePipeline / CodeBuild に移す案がある（[CD_CI.md](CD_CI.md)）。採用したら、この章と `deploy.yml` は廃止する。
 
 > 未検証。4.2 の準備をしてから、`dev` で試す。
 
@@ -92,7 +131,7 @@ pull request / master への push（docs/st/** が変わったとき）
 
 | ステップ | 内容 | 手順書 |
 |---|---|---|
-| CI | `st-ci.yml` を呼ぶ。E2E まで通らなければ、ここで止まる | - |
+| CI | `ci.yml` を呼ぶ。E2E まで通らなければ、ここで止まる | - |
 | 承認 | environment に承認者を設定していれば、ここで承認を待つ | - |
 | AWS の認証 | OIDC で `AWS_DEPLOY_ROLE_ARN` のロールを引き受ける | - |
 | zip のアップロード | `s3://$ARTIFACT_BUCKET/ticketqr/{impl}/{sha}-{試行回数}/` に置く（接頭辞を毎回変えるので、Lambda のコードが必ず更新される） | {impl}/DEPLOY.md 4-A.1（zip のアップロード） |
@@ -167,28 +206,35 @@ pull request / master への push（docs/st/** が変わったとき）
 | API の CORS のテンプレート化 | `api.yaml` に `CorsConfiguration` を入れたら、CORS のステップを消す |
 | Origin の照合（`ALLOWED_ORIGINS`） | 未実装（E2E.md 4.2）。実装したら、API のスタックに SPA のオリジンを渡す |
 | master への push で `dev` に自動デプロイ | 今は手動だけ。安定したら `push` のトリガーを足す |
-| 解析サーバーのスタブ（Rust・Node）のビルドとデプロイ | CI に入れていない |
+| 解析サーバーのスタブのデプロイ | 入れない（スタブは別のリポジトリ。テストとビルドはそのリポジトリの CI（3.5）、デプロイは手順書で手動） |
 
 ## 5. ローカルでの確認
 
-ワークフローを GitHub に push する前に、手元で確かめる。
+ワークフローを GitHub に push する前に、手元で確かめる。テンプレートは `.github/` の外にあるので、専用のリポジトリと同じ形（ルートに `.github/workflows/`）のコピーを作って確かめる。
 
 ```sh
+# チケット QR API: docs/st の内容（analyzer-stub/ と node_modules を除く）を作業用のディレクトリにコピーし、
+# テンプレートを .github/ に置く（スタブも同じ要領で、analyzer-stub の内容と analyzer-stub/github-template/）
+WORK=$(mktemp -d)
+rsync -a --exclude analyzer-stub --exclude node_modules ./ "$WORK/"
+mkdir -p "$WORK/.github" && cp -R github-template/workflows "$WORK/.github/"
+cd "$WORK" && git init -q .
+
 # 構文と、よくある誤りの検査
 go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-actionlint .github/workflows/*.yml
+actionlint
 
 # CI を Docker の中で実行する（nektos/act）
 go install github.com/nektos/act@v0.2.89
-act workflow_dispatch -W .github/workflows/st-ci.yml --bind \
+act workflow_dispatch -W .github/workflows/ci.yml --bind \
   --artifact-server-path /tmp/act-artifacts \
   -P ubuntu-latest=catthehacker/ubuntu:act-latest
 ```
 
-- `--bind` は、作業ディレクトリをコンテナにそのままマウントする（E2E のジョブの中の `docker compose` が、ホストのパスでファイルをマウントするため）。そのため、ジョブの中の `npm ci` が、ホストの `node_modules` を Linux 用のもので上書きする。`node_modules` を含まないコピーで実行するとよい
+- `--bind` は、作業ディレクトリをコンテナにそのままマウントする（E2E のジョブの中の `docker compose` が、ホストのパスでファイルをマウントするため）。そのため、ジョブの中の `npm ci` が `node_modules` を Linux 用のもので作る。上のように `node_modules` を含まないコピーで実行する
 - **act の制約**: act に内蔵された成果物のサーバーは、`actions/upload-artifact@v7` / `download-artifact@v8` のプロトコルに対応していない（`Failed to CreateArtifact: Unexpected end of JSON input` になる）。ローカルで流すときは、コピーしたワークフローの中だけ、この2つを `@v4` に置き換える（リポジトリのワークフローは最新版のまま）
   ```sh
-  sed -i '' 's#upload-artifact@v7#upload-artifact@v4#; s#download-artifact@v8#download-artifact@v4#' .github/workflows/st-ci.yml
+  sed -i '' 's#upload-artifact@v7#upload-artifact@v4#; s#download-artifact@v8#download-artifact@v4#' .github/workflows/ci.yml
   ```
 - Apple シリコンの Mac では `--container-architecture linux/arm64` を付ける（Lambda 用の zip は arm64 用なので、どちらでも同じものができる）
 - デプロイのワークフローは、AWS の認証が必要なので act では確かめられない

@@ -1,0 +1,107 @@
+# Image analysis server stub (Node, Python, Rust): tests, type checks / lint, Lambda zips, the VPC stub's
+# container images and the CloudFormation templates (DESIGN.md "CI"). Template for the stub repository: copy
+# github-template/ to .github/ (github-template/README.md). The stub is deployed by hand (DEPLOY.md 3 of the ticket
+# repository), so there is no deploy workflow.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  infra:
+    name: CloudFormation (cfn-lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install cfn-lint==1.57.1
+      - run: cfn-lint --regions=ap-northeast-1 -- *.yaml # template.yaml (Function URL) and vpc-template.yaml (VPC, Fargate)
+
+  stub-node:
+    name: Stub Node (test, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm --prefix node test # no dependencies, so no npm ci
+      - run: npm --prefix node run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stub-node
+          path: node/dist/analyzer-stub.zip
+          retention-days: 7
+
+  stub-python:
+    name: Stub Python (test, mypy, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13" # the Lambda runtime (python3.13)
+      - run: pip install mypy==2.4.0 # type checking only; the stub itself has no dependencies
+      - run: python -m unittest -v
+      - run: mypy --strict *.py
+      - run: ./build.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stub-python
+          path: python/dist/analyzer-stub.zip
+          retention-days: 7
+
+  stub-rust:
+    name: Stub Rust (lint, test, build)
+    # build.sh builds in an Amazon Linux 2023 arm64 container (the Lambda's OS and CPU): native on an arm64 runner.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - run: rust/build.sh lint
+      - run: rust/build.sh test
+      - run: rust/build.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: stub-rust
+          path: rust/dist/analyzer-stub.zip
+          retention-days: 7
+
+  stub-image:
+    name: Stub container (${{ matrix.impl }})
+    # The images for the VPC stub (ECS Fargate, arm64; DEPLOY.md 3.4 of the ticket repository): build, start with STUB_AUTH=none and a
+    # read-only root filesystem as the task definition does, and call it once.
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        impl: [node, python, rust]
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build --platform linux/arm64 -t analyzer-stub ${{ matrix.impl }}
+      - run: docker run -d --name stub -p 8090:8090 -e STUB_AUTH=none --read-only analyzer-stub
+      - name: Call the stub
+        run: |
+          printf '\377\330\377\340stub' > "$RUNNER_TEMP/image.bin" # JPEG-like bytes; the stub does not inspect them
+          res=$(curl -sS --retry 15 --retry-all-errors --retry-delay 1 -X POST \
+            -H 'content-type: application/octet-stream' --data-binary @"$RUNNER_TEMP/image.bin" \
+            http://localhost:8090/v1/analyze)
+          echo "$res"
+          test "$res" = '{"valid":true,"reason":"stub"}'
+      - name: Container logs
+        if: always()
+        run: docker logs stub

@@ -1,13 +1,12 @@
-# docs/st: build, unit tests and E2E (docs/st/CI.md). Also called by st-deploy.yml, which deploys the
-# artifacts built here.
-name: st CI
+# Ticket QR API and SPA: build, unit tests and E2E (CI.md). Also called by deploy.yml, which deploys the
+# artifacts built here. Template for the ticket repository: copy github-template/ to .github/ (github-template/README.md).
+# The image analysis server stub lives in its own repository with its own CI.
+name: CI
 
 on:
   pull_request:
-    paths: ["docs/st/**", ".github/workflows/st-ci.yml"]
   push:
     branches: [master]
-    paths: ["docs/st/**", ".github/workflows/st-ci.yml"]
   workflow_dispatch:
   workflow_call:
 
@@ -15,13 +14,9 @@ permissions:
   contents: read
 
 concurrency:
-  # github.workflow is the caller's name when called from st-deploy.yml, so a deploy never cancels CI.
-  group: ${{ github.workflow }}-st-ci-${{ github.ref }}
+  # github.workflow is the caller's name when called from deploy.yml, so a deploy never cancels CI.
+  group: ${{ github.workflow }}-ci-${{ github.ref }}
   cancel-in-progress: true
-
-defaults:
-  run:
-    working-directory: docs/st
 
 jobs:
   go:
@@ -31,14 +26,14 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version-file: docs/st/go/go.mod
-          cache-dependency-path: docs/st/go/go.sum
+          go-version-file: go/go.mod
+          cache-dependency-path: go/go.sum
       - run: make -C go test
       - run: make -C go build
       - uses: actions/upload-artifact@v7
         with:
           name: lambda-go
-          path: docs/st/go/bin/*.zip
+          path: go/bin/*.zip
           retention-days: 7
 
   node:
@@ -50,7 +45,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: docs/st/node/package-lock.json
+          cache-dependency-path: node/package-lock.json
       - run: npm --prefix node ci
       - run: npm --prefix node run typecheck
       - run: npm --prefix node run format:check
@@ -59,7 +54,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: lambda-node
-          path: docs/st/node/dist/*.zip
+          path: node/dist/*.zip
           retention-days: 7
 
   web:
@@ -71,7 +66,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: docs/st/web/package-lock.json
+          cache-dependency-path: web/package-lock.json
       - run: npm --prefix web ci
       - run: npm --prefix web run format:check
       - run: npm --prefix web test
@@ -79,7 +74,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: web-dist
-          path: docs/st/web/dist
+          path: web/dist
           retention-days: 7
 
   infra:
@@ -107,7 +102,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: web-dist
-          path: docs/st/web/dist
+          path: web/dist
       - uses: docker/setup-buildx-action@v4
       - name: Run E2E (storage + api + e2e)
         run: docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
@@ -124,8 +119,8 @@ jobs:
         with:
           name: e2e-${{ matrix.impl }}
           path: |
-            docs/st/e2e/playwright-report
-            docs/st/e2e/test-results
-            docs/st/compose-logs.txt
+            e2e/playwright-report
+            e2e/test-results
+            compose-logs.txt
           if-no-files-found: ignore
           retention-days: 7

@@ -296,7 +296,7 @@ API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container
 
 ## 6. GitHub Actions
 
-E2E は `.github/workflows/st-ci.yml` のジョブ `e2e` で動く。構成は [CI.md](CI.md) 3章。
+E2E は CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。専用のリポジトリでは `.github/workflows/ci.yml`）のジョブ `e2e` で動く。構成は [CI.md](CI.md) 3章。
 
 - SPA は `web` ジョブで1回だけビルドし、成果物 `web-dist` として `e2e` ジョブに渡す（Go 版・Node 版で同じ SPA を使う）
 - matrix（`go` / `node`）で `API_IMPL` を切り替え、`docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` を実行する

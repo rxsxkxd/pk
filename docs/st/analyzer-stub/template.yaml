@@ -4,7 +4,7 @@ Description: Image analysis server stub for checking the ticket QR API on AWS (L
 Parameters:
   Impl:
     Type: String
-    AllowedValues: [node, rust]
+    AllowedValues: [node, python, rust]
     Default: node
     Description: Stub implementation. One stack per implementation.
   ArtifactBucket:
@@ -30,6 +30,9 @@ Mappings:
   ImplMap:
     node:
       Runtime: nodejs24.x
+      Handler: index.handler
+    python:
+      Runtime: python3.13
       Handler: index.handler
     rust:
       Runtime: provided.al2023

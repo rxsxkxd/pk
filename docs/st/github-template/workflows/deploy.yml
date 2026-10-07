@@ -1,7 +1,8 @@
-# docs/st: deploy to AWS (docs/st/CI.md 4). Runs the whole CI first, then deploys the artifacts it built:
+# Deploy to AWS (CI.md 4). Runs the whole CI first, then deploys the artifacts it built:
 # Lambda zips → ticket API stack (api.yaml) → web stack (web.yaml) → SPA files → smoke test.
 # NOT VERIFIED YET: needs the IAM role and the repository / environment settings of CI.md 4.2.
-name: st deploy
+# Template for the ticket repository: copy github-template/ to .github/ (github-template/README.md).
+name: Deploy
 
 on:
   workflow_dispatch:
@@ -20,12 +21,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: st-deploy-${{ inputs.environment }}-${{ inputs.impl }}
+  group: deploy-${{ inputs.environment }}-${{ inputs.impl }}
   cancel-in-progress: false
 
 jobs:
   ci:
-    uses: ./.github/workflows/st-ci.yml
+    uses: ./.github/workflows/ci.yml
 
   deploy:
     needs: ci
@@ -34,9 +35,6 @@ jobs:
     permissions:
       contents: read
       id-token: write # OIDC: assume the deploy role without long-lived keys
-    defaults:
-      run:
-        working-directory: docs/st
     env:
       IMPL: ${{ inputs.impl }}
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -49,23 +47,23 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: lambda-${{ inputs.impl }}
-          path: docs/st/artifacts/lambda
+          path: artifacts/lambda
       - uses: actions/download-artifact@v8
         with:
           name: web-dist
-          path: docs/st/web/dist
+          path: web/dist
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # docs/st/{go,node}/DEPLOY.md 4-A.1 (zip upload): a new key prefix on every deploy, so CloudFormation updates the Lambda code.
+      # {go,node}/DEPLOY.md 4-A.1 (zip upload): a new key prefix on every deploy, so CloudFormation updates the Lambda code.
       - name: Upload Lambda packages
         run: |
           aws s3 cp artifacts/lambda/ticketqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip"
           aws s3 cp artifacts/lambda/exampleqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.zip"
 
-      # docs/st/{go,node}/DEPLOY.md 4-A.1 (stack deploy)
+      # {go,node}/DEPLOY.md 4-A.1 (stack deploy)
       - name: Deploy ticket API stack
         run: |
           aws cloudformation deploy \
@@ -82,7 +80,7 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
           echo "API_URL=$API_URL" >> "$GITHUB_ENV"
 
-      # docs/st/web/DEPLOY.md 3
+      # web/DEPLOY.md 3
       - name: Deploy web stack
         run: |
           aws cloudformation deploy \
@@ -100,7 +98,7 @@ jobs:
             echo "WEB_URL=$(out WebUrl)"
           } >> "$GITHUB_ENV"
 
-      # docs/st/web/DEPLOY.md 5 (interim until api.yaml has a CorsConfiguration)
+      # web/DEPLOY.md 5 (interim until api.yaml has a CorsConfiguration)
       - name: Allow the SPA origin in the API's CORS
         run: |
           API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='ticketqr-$IMPL'].ApiId | [0]" --output text)
@@ -108,7 +106,7 @@ jobs:
             --cors-configuration "{\"AllowOrigins\":[\"$WEB_URL\"],\"AllowMethods\":[\"GET\",\"POST\"],\"MaxAge\":300}" \
             --query CorsConfiguration
 
-      # docs/st/web/DEPLOY.md 6
+      # web/DEPLOY.md 6
       - name: Upload the SPA and its config
         run: |
           printf '{ "apiBaseUrl": "%s", "modes": %s }\n' "$API_URL" "$WEB_MODES" > "$RUNNER_TEMP/config.json"
@@ -121,7 +119,7 @@ jobs:
             --cache-control no-cache --content-type application/json
           aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths /index.html /config.json
 
-      # docs/st/{go,node}/DEPLOY.md 7, docs/st/web/DEPLOY.md 7
+      # {go,node}/DEPLOY.md 7, web/DEPLOY.md 7
       - name: Smoke test
         run: |
           curl -fsS -o /dev/null "$WEB_URL/"

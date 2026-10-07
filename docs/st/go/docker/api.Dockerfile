@@ -23,13 +23,13 @@ RUN npx esbuild src/ticketqr.ts --bundle --platform=node --target=node24 --forma
 FROM public.ecr.aws/lambda/provided:al2023 AS api-go
 COPY --from=go-build /out/bootstrap /var/runtime/bootstrap
 COPY --from=go-build /out/apigw-local /usr/local/bin/apigw-local
-COPY docker/api-entrypoint.sh /api-entrypoint.sh
+COPY go/docker/api-entrypoint.sh /api-entrypoint.sh
 ENTRYPOINT ["/api-entrypoint.sh"]
 CMD ["bootstrap"]
 
 FROM public.ecr.aws/lambda/nodejs:24 AS api-node
 COPY --from=node-build /out/index.mjs /var/task/index.mjs
 COPY --from=go-build /out/apigw-local /usr/local/bin/apigw-local
-COPY docker/api-entrypoint.sh /api-entrypoint.sh
+COPY go/docker/api-entrypoint.sh /api-entrypoint.sh
 ENTRYPOINT ["/api-entrypoint.sh"]
 CMD ["index.handler"]

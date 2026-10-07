@@ -4,6 +4,6 @@ FROM dxflrs/garage:v2.4.1 AS garage
 
 FROM alpine:3.22
 COPY --from=garage /garage /usr/local/bin/garage
-COPY docker/storage/garage.toml /etc/garage.toml
-COPY docker/storage/init.sh /init.sh
+COPY web/docker/storage/garage.toml /etc/garage.toml
+COPY web/docker/storage/init.sh /init.sh
 ENTRYPOINT ["/init.sh"]

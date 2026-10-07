@@ -38,9 +38,9 @@ flowchart LR
 
 | コンテナ | イメージ | 役割 | 本番で対応するもの |
 |---|---|---|---|
-| `storage` | `docker/storage.Dockerfile`（Garage v2.4.1 の公式イメージのバイナリを Alpine に入れ、初期設定スクリプトを動かす。公式イメージはバイナリだけでシェルがないため） | S3 互換ストレージ。SPA の静的ファイルを置き、ウェブサイトとして配信する | S3（+ CloudFront） |
-| `api` | `docker/api.Dockerfile`（Lambda の公式イメージ + ゲートウェイ + デプロイ用の zip。`IMPL=go|node` で切り替え） | API。Lambda の実行環境の模擬と、API Gateway 役のゲートウェイ | API Gateway HTTP API + Lambda |
-| `e2e` | `docker/e2e.Dockerfile`（`mcr.microsoft.com/playwright:v1.63.0-noble`。バージョンは `@playwright/test` とそろえる） | テストの前に SPA をアップロードし（本番の `aws s3 sync` に相当）、ヘッドレス Chromium で操作する | デプロイ作業と、利用者のブラウザ |
+| `storage` | `web/docker/storage.Dockerfile`（Garage v2.4.1 の公式イメージのバイナリを Alpine に入れ、初期設定スクリプトを動かす。公式イメージはバイナリだけでシェルがないため） | S3 互換ストレージ。SPA の静的ファイルを置き、ウェブサイトとして配信する | S3（+ CloudFront） |
+| `api` | `go/docker/api.Dockerfile`（Lambda の公式イメージ + ゲートウェイ + デプロイ用の zip。`IMPL=go|node` で切り替え） | API。Lambda の実行環境の模擬と、API Gateway 役のゲートウェイ | API Gateway HTTP API + Lambda |
+| `e2e` | `e2e/docker/e2e.Dockerfile`（`mcr.microsoft.com/playwright:v1.63.0-noble`。バージョンは `@playwright/test` とそろえる） | テストの前に SPA をアップロードし（本番の `aws s3 sync` に相当）、ヘッドレス Chromium で操作する | デプロイ作業と、利用者のブラウザ |
 
 アップロードだけを行う4つ目のコンテナは作らない。`e2e` の Playwright の `globalSetup` で行う（3.2）。
 
@@ -89,7 +89,7 @@ Lambda の公式イメージ（`public.ecr.aws/lambda/provided:al2023`、`public
 |---|---|
 | ゲートウェイ（新規 `go/cmd/apigw-local`。静的な Go バイナリ） | `:3000` で HTTP を受け、既存の `internal/localhttp` で payload v2 のイベント（`routeKey` 付き）を作って RIE を呼ぶ。応答の `statusCode`・`headers`・`isBase64Encoded` を HTTP に戻す。ルート表は CloudFormation と同じ4ルートで、それ以外は 404。**CORS（API Gateway の CORS 設定と同じ動き。プリフライトの `OPTIONS` と `Access-Control-Allow-Origin` の付与）もここで行う** |
 | Lambda 部分 | RIE が、デプロイ用の zip の中身（Go: `/var/runtime/bootstrap`、Node: `/var/task/index.mjs`）を動かす |
-| 起動 | `docker/api-entrypoint.sh` がゲートウェイを起動してから、イメージ本来のエントリポイント（RIE）を起動する |
+| 起動 | `go/docker/api-entrypoint.sh` がゲートウェイを起動してから、イメージ本来のエントリポイント（RIE）を起動する |
 | イベントの形 | `internal/localhttp` が作るイベントは、API Gateway と同じく `version: "2.0"`、`requestContext.domainName`・`stage`・`routeKey` などを持つ（Node の `@hono/aws-lambda` は `version` で v1 / v2 を見分けるため。Go のローカルモードも同じイベントになる） |
 | 環境変数（Lambda 側） | `APP_ENV=local`、`SIGNING_SALT=e2e-salt`（平文の salt は `APP_ENV=local` のときだけ使える）、`ANALYZER_MODE=mock`、`PUBLIC_BASE_URL=http://api:3000`、`ALLOWED_ORIGINS=http://web:3902` |
 
@@ -131,7 +131,7 @@ SPA（`web/`）は、compose を起動する前に、ホストか CI でビル�
 
 ### 3.3 storage の初期設定
 
-`docker/storage/init.sh` が、Garage を起動したあとに次を行う。
+`web/docker/storage/init.sh` が、Garage を起動したあとに次を行う。
 
 1. クラスターのレイアウトを設定する（1台構成）
 2. テスト用のキーを固定値で取り込む
@@ -229,16 +229,19 @@ Garage のデータは tmpfs に置く。コンテナを再起動しても、毎
 
 ```
 st/
-├── compose.e2e.yaml
-├── docker/
-│   ├── api.Dockerfile            # Lambda の公式イメージ + ゲートウェイ + デプロイ用のビルド（ターゲット api-go / api-node）
-│   ├── api-entrypoint.sh         # ゲートウェイを起動してから RIE を起動する
-│   ├── storage.Dockerfile        # Garage のバイナリ + 初期設定スクリプト
-│   ├── storage/{garage.toml,init.sh}
-│   └── e2e.Dockerfile            # Playwright のイメージ + npm ci
-├── go/cmd/apigw-local/           # API Gateway 役のゲートウェイ（E2E 専用。デプロイしない）
-├── web/dist/                     # 事前にビルドした SPA（compose の前に作る）
+├── compose.e2e.yaml              # 3つのコンテナの定義（ビルドのコンテキストは st/。各 Dockerfile は下のディレクトリ）
+├── go/
+│   ├── cmd/apigw-local/          # API Gateway 役のゲートウェイ（E2E 専用。デプロイしない）
+│   └── docker/
+│       ├── api.Dockerfile        # api: Lambda の公式イメージ + ゲートウェイ + デプロイ用のビルド（ターゲット api-go / api-node）
+│       └── api-entrypoint.sh     # ゲートウェイを起動してから RIE を起動する
+├── web/
+│   ├── dist/                     # 事前にビルドした SPA（compose の前に作る）
+│   └── docker/
+│       ├── storage.Dockerfile    # storage: Garage のバイナリ + 初期設定スクリプト
+│       └── storage/{garage.toml,init.sh}
 └── e2e/
+    ├── docker/e2e.Dockerfile     # e2e: Playwright のイメージ + npm ci
     ├── package.json              # @playwright/test、@aws-sdk/client-s3 のバージョンを固定
     ├── playwright.config.ts      # baseURL=http://web:3902、workers: 1、globalSetup、trace: 'retain-on-failure'
     ├── global-setup.ts           # dist と config.json を web・evil バケットに置く
@@ -253,14 +256,14 @@ st/
 ```yaml
 services:
   storage:
-    build: { context: ., dockerfile: docker/storage.Dockerfile }
+    build: { context: ., dockerfile: web/docker/storage.Dockerfile }
     tmpfs: [ /var/lib/garage ]
     networks: { default: { aliases: [ web, evil ] } }
     healthcheck: { test: ["CMD", "test", "-f", "/tmp/ready"], interval: 1s, retries: 30 }
   api:
     build:
       context: .
-      dockerfile: docker/api.Dockerfile
+      dockerfile: go/docker/api.Dockerfile
       target: api-${API_IMPL:-go}        # ビルドのターゲットで Go / Node を切り替える
     environment:
       APP_ENV: local
@@ -270,7 +273,7 @@ services:
       ALLOWED_ORIGINS: http://web:3902
       CORS_ALLOW_ORIGINS: http://web:3902   # ゲートウェイの CORS（API Gateway の CORS 設定に相当）
   e2e:
-    build: { context: ., dockerfile: docker/e2e.Dockerfile }
+    build: { context: ., dockerfile: e2e/docker/e2e.Dockerfile }
     depends_on: { storage: { condition: service_healthy }, api: { condition: service_started } }
     volumes:
       - ./web/dist:/web-dist:ro

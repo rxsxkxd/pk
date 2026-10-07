@@ -5,7 +5,7 @@
 #   API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
 services:
   storage:
-    build: { context: ., dockerfile: docker/storage.Dockerfile }
+    build: { context: ., dockerfile: web/docker/storage.Dockerfile }
     tmpfs: [/var/lib/garage] # fresh data on every start, so the setup script always runs on an empty node
     networks:
       default:
@@ -18,7 +18,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: docker/api.Dockerfile
+      dockerfile: go/docker/api.Dockerfile
       target: api-${API_IMPL:-go}
     environment:
       # Read by the function (local settings: plain-text salt is only allowed with APP_ENV=local).
@@ -31,7 +31,7 @@ services:
       CORS_ALLOW_ORIGINS: http://web:3902
 
   e2e:
-    build: { context: ., dockerfile: docker/e2e.Dockerfile }
+    build: { context: ., dockerfile: e2e/docker/e2e.Dockerfile }
     depends_on:
       storage: { condition: service_healthy }
       api: { condition: service_started }

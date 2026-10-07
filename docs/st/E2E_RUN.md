@@ -88,7 +88,7 @@ docker compose -f compose.e2e.yaml logs e2e
 | `getByTestId('grant-page')` などが見つからずタイムアウト | `web/dist` が古い。2.1 で作り直す |
 | `API not ready (last status 0)` | `api` が起動していない。`logs api` でビルドや起動のエラーを確かめる |
 | `API not ready (last status 404)` など 403 以外 | ゲートウェイは動いているが、関数のルートや起動に問題がある。`logs api` で Lambda 側のエラーを確かめる |
-| `storage` が `unhealthy` で `e2e` が始まらない | Garage の初期設定（`docker/storage/init.sh`）の失敗。`logs storage` を確かめる |
+| `storage` が `unhealthy` で `e2e` が始まらない | Garage の初期設定（`web/docker/storage/init.sh`）の失敗。`logs storage` を確かめる |
 | 発行の応答が 201 でない、または `access-control-allow-origin` が合わない | API の変更による不一致。`logs api` の構造化ログ（`endpoint`・`status`・エラーコード）を確かめる |
 | 2回目以降の `up` がおかしい | 前回のコンテナが残っている。`down` してからやり直す |
 

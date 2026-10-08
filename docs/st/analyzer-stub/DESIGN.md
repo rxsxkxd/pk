@@ -342,21 +342,19 @@ uvx mypy --strict *.py                            # 任意: 型チェック（�
 - Lambda エミュレーター（`public.ecr.aws/lambda/python:3.13`）に `build.sh` の zip で Function URL 形式のイベントを送り、200 / 401 とログを確認（2026-10-08）
 - ローカル（`python3 local.py`）: 200 / 401 / 400 / 404。応答の本文とログ（キーの順序、`requestId`、`bytes`、`sha256`）は Node 版と同じ形。ログの `sha256` は、送ったファイルの `shasum -a 256` と一致
 
-## 付録 B: VPC 内で動かすコンテナ（ECS Fargate）
+## 付録 B: Fargate で動かすスタブ（パブリックサブネット、外部から呼べる）
 
-本番の想定（解析サーバーは VPC 内、特定の SG からだけ受け付け、API キーなし）に近い形で確かめるための配置（2026-10-08）。Function URL のスタブ（2章・7章）とは別のもの。検討は [../notes/analyzer-stub-vpc.md](../notes/analyzer-stub-vpc.md)、費用とパターンの違いは [../notes/analyzer-stub-cost.md](../notes/analyzer-stub-cost.md)、手順は [../DEPLOY.md](../DEPLOY.md) 3.4。
+本物の解析サーバーの構成は未確定（AWS の外にあり、送信元の IP（利用側の NAT ゲートウェイの固定 IP など）で許可しているだけの可能性もある）。そのため、このスタブは「**インターネットから、許可した IP からだけ呼べるサーバー**」として用意する（2026-10-08 に、`tickets` の SG からだけ受け付ける VPC 内の構成から切り替えた）。API の `tickets` からスタブまでの経路（VPC に置くか、NAT、ピアリングなど）は決めない。手順は [../DEPLOY.md](../DEPLOY.md) 3.4。
 
 | 項目 | 内容 |
 |---|---|
-| コンテナ | 各実装のローカル用サーバーをそのまま使う（`node/Dockerfile`: `local.mjs`、`python/Dockerfile`: `local.py`、`rust/Dockerfile`: `examples/local.rs`）。arm64。依存は取得しない（Node・Python は依存なし、Rust はビルド済みのバイナリ）。root 以外のユーザーで動き、ルートファイルシステムは読み取り専用でも動く |
-| 認証 | `STUB_AUTH=none`（タスク定義で指定。3.3）。届くのは、指定した SG（API の `tickets` の SG）からの TCP 8090 だけ |
-| ネットワーク（CloudFormation） | `network.yaml`（テスト用に推奨のパブリックのパターン）: スタブ用の VPC（パブリックサブネットだけ）、インターネットゲートウェイ、タスクの SG（受信 8090 は `tickets` の SG から、送信は 443 だけ）、`tickets` の VPC とのピアリングと両側のルート（サブネットの CIDR だけ）。時間課金のあるものは作らない |
-| スタブ（AWS CDK、Python） | `cdk/`（`app.py`、`stub_cdk/settings.py`・`stack.py`、`tests/`）。`cdk deploy` が `{node,python,rust}/Dockerfile` からイメージを arm64 でビルドして ECR（CDK のブートストラップのリポジトリ）に push し、ECS のクラスター（L1）とタスク定義、タスクの実行ロール、ロググループ、必要ならタスクの SG（`taskSecurityGroupId` を渡さないとき）とエンドポイントを作る。VPC とサブネットは、コンテキスト（`-c vpcId=… -c subnetId=…`）で、`network.yaml` か既存のものを指定する。スタック名は `ticketqr-analyzer-stub-vpc-{impl}`。ECS のサービスは作らない |
-| 外向きの経路 | パブリックのパターン: タスクにパブリック IP を付け（`run-task` の `assignPublicIp=ENABLED`）、インターネットゲートウェイ経由。`createEndpoints=true`: このスタックが `ecr.api`・`ecr.dkr`・`logs` のインターフェイス型エンドポイント（1 AZ）と S3 のゲートウェイ型エンドポイントを作る。ポリシーで、このリポジトリの取得・このロググループへの書き込み・ECR の層のバケットの読み取りだけを許す。**スタブだけが使う VPC に限る**（プライベート DNS とポリシーが VPC 全体に効くため）。`createEndpoints=false`: サブネットに既にある経路（NAT ゲートウェイか既存のエンドポイント）を使う |
-| VPC から新しく作る場合 | パブリックのパターンは `network.yaml`（DEPLOY.md 3.4.2）。プライベートサブネット（エンドポイント・NAT のパターン）で作る場合は、参考として AWS CLI の手順（DEPLOY.md 3.4.7） |
-| タスクの起動・停止 | ECS のサービスは使わず、確認のときだけ `aws ecs run-task` で起動し、`stop-task` で止める。IP は起動のたびに変わるので、API の `AnalyzerUrl` を更新する |
+| コンテナ | 各実装のローカル用サーバーをそのまま使う（`node/Dockerfile`: `local.mjs`、`python/Dockerfile`: `local.py`、`rust/Dockerfile`: `examples/local.rs`）。arm64。依存は取得しない。root 以外のユーザーで動き、ルートファイルシステムは読み取り専用でも動く |
+| 認証 | `STUB_AUTH=none`（API キーなし。3.3）。受信は SG で、指定した送信元の CIDR（`AllowedSourceCidr`）からの TCP 8090 だけ。HTTP（暗号化なし） |
+| ネットワーク（CloudFormation） | `network.yaml`: スタブ用の VPC、パブリックサブネット、インターネットゲートウェイ、ルート、タスクの SG（受信は `AllowedSourceCidr`（と `B`）からの 8090、送信は 443 だけ）。既存の VPC には何も変更しない。時間課金のあるものは作らない |
+| スタブ（AWS CDK、Python） | `cdk/`（`app.py`、`stub_cdk/settings.py`・`stack.py`、`tests/`）。`cdk deploy` が `{node,python,rust}/Dockerfile` からイメージを arm64 でビルドして ECR（CDK のブートストラップのリポジトリ）に push し、ECS のクラスター（L1）とタスク定義、タスクの実行ロール、ロググループを作る。VPC・サブネット・SG は `network.yaml` のものをコンテキスト（`-c`）で指定する。スタック名は `ticketqr-analyzer-stub-vpc-{impl}`。ECS のサービスは作らない。（CDK は、プライベートサブネットで使うための SG の作成と VPC エンドポイントにも対応しているが、今の手順では使わない） |
+| タスクの起動・停止 | 確認のときだけ `aws ecs run-task`（`assignPublicIp=ENABLED`）で起動し、`stop-task` で止める。パブリック IP は起動のたびに変わる（Elastic IP は付けられない）ので、接続先を更新する |
 
 確認済み（2026-10-08。AWS 上へのデプロイは未検証）:
 - 3つのイメージ（Node 238MB、Python 202MB、Rust 170MB）をローカルでビルドし、`STUB_AUTH=none`・読み取り専用のルートファイルシステムで起動して、200 と起動時の WARN のログを確認
-- `network.yaml`: cfn-lint でエラー・警告なし（2026-10-08）
-- CDK（`cdk/`）: `python -m unittest`（6件。パブリックのパターン・エンドポイントのパターン・設定の検査）、`mypy --strict`、`cdk synth`、生成したテンプレートの cfn-lint、すべて成功（2026-10-08。`cdk deploy` は未実施）
+- `network.yaml`: cfn-lint でエラー・警告なし
+- CDK（`cdk/`）: `python -m unittest`（6件）、`mypy --strict`、`cdk synth`、生成したテンプレートの cfn-lint、すべて成功（`cdk deploy` は未実施）

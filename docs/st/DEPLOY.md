@@ -36,7 +36,7 @@ S3（スタックの外で管理）: 成果物バケット ticketqr-artifacts-{a
 2. チケット API: [go/DEPLOY.md](go/DEPLOY.md) か [node/DEPLOY.md](node/DEPLOY.md)（`$API_URL` が決まる）
 3. Web フロントエンド: [web/DEPLOY.md](web/DEPLOY.md)（`$API_URL` を使い、API の CORS に SPA のオリジンを入れる）
 4. 必要なら: 画像解析サーバーのスタブ（この文書の 3章）をデプロイし、API を `http` モードに切り替える（各実装の DEPLOY.md 4-A.3。手動は 4-B.3）
-   - VPC 内の解析サーバー（SG だけで許可、API キーなし）に近い形で確かめる場合は、VPC 内のスタブ（3.4。ECS Fargate。テスト用にはスタブ用の VPC のパブリックサブネットに置くパターンを推奨）を使い、API の `tickets` を VPC に置く（各実装の DEPLOY.md 4-A.4。手動は 4-B.4）
+   - 外部の解析サーバー（送信元の IP で許可、API キーなし）に近い形で確かめる場合は、Fargate のスタブ（3.4。パブリックサブネットに置き、許可した IP からだけ呼べる）を使う。API からスタブまでの経路（`tickets` を VPC に置くか、NAT など）は未確定
 
 > 現在の実装の状態: Go 版・Node 版とも実装済み（同じテンプレートでデプロイでき、`Impl` パラメータで切り替える）。画像解析は `mock`（プロセス内で常に valid）と `http`（画像解析サーバーに POST）から選ぶ。`ALLOWED_ORIGINS`（Origin の照合）は未実装（E2E.md 4章）。
 
@@ -136,96 +136,62 @@ sam delete --stack-name ticketqr-analyzer-stub-$STUB_IMPL --no-prompts
 aws ssm delete-parameter --name $ANALYZER_KEY_PARAM   # API キーはスタックの外にあるので別に削除する
 ```
 
-### 3.4 VPC 内のスタブ（ECS Fargate。任意）
+### 3.4 Fargate のスタブ（パブリックサブネット、外部から呼べる。任意）
 
-本番の想定（解析サーバーは VPC 内にあり、特定の SG からだけ受け付け、API キーを使わない）に近い形で、`tickets` の VPC 配置と VPC 間の経路を確かめるためのスタブ。3.1〜3.3（Function URL）とは別のもので、API キーは使わない（`STUB_AUTH=none`）。構成の検討は [notes/analyzer-stub-vpc.md](notes/analyzer-stub-vpc.md)、費用とパターンの違いは [notes/analyzer-stub-cost.md](notes/analyzer-stub-cost.md)。
+スタブを ECS Fargate のタスクとして、スタブ用の VPC の**パブリックサブネット**に置き、**インターネットから**呼べるようにする。受信は、指定した送信元の IP の範囲（CIDR）だけに絞る。3.1〜3.3（Lambda + Function URL）とは別のもので、API キーは使わない（`STUB_AUTH=none`）。
 
-- スタブは、コンテナ（各実装のローカル用サーバー。`analyzer-stub/{node,python,rust}/Dockerfile`）を Fargate のタスクとして、**確認のときだけ**起動する
-- タスクに届くのは、API の `tickets` の SG からの TCP 8090 だけ。タスクから外へは 443 番だけ（ECR・S3・CloudWatch Logs）
-- `tickets` は、どのパターンでも既存の VPC の**プライベートサブネット**に置く（Lambda は VPC 内でパブリック IP を持てず、Parameter Store への経路が要るため。go/node DEPLOY.md 4-A.4）
+- 本物の解析サーバーの構成は未確定。AWS の外にあり、送信元の IP（利用側の NAT ゲートウェイの固定 IP など）で許可しているだけの可能性もある。そのため、このスタブは「外部から、許可した IP からだけ呼べるサーバー」として用意し、**API の `tickets` からスタブまでの経路（VPC に置くか、NAT、ピアリングなど）は決めない**（3.4.4）
+- スタブは、コンテナ（各実装のローカル用サーバー。`analyzer-stub/{node,python,rust}/Dockerfile`）を、**確認のときだけ**起動する（`aws ecs run-task`）。止めればタスクの課金は 0
+- 受信は TCP 8090 を `AllowedSourceCidr`（と `AllowedSourceCidrB`）からだけ。送信は 443 番だけ（ECR・S3・CloudWatch Logs）
 
-スタブの置き場所と、タスクがイメージの取得（ECR・S3）とログの送信（CloudWatch Logs）に使う経路で、3つのパターンがある。
+| 作るもの | 中身 | 時間課金（東京の目安） |
+|---|---|---|
+| `analyzer-stub/network.yaml`（CloudFormation） | スタブ用の VPC、パブリックサブネット、インターネットゲートウェイ、ルート、タスクの SG | なし |
+| `analyzer-stub/cdk/`（AWS CDK、Python） | コンテナイメージ（ビルドと push）、ECS のクラスターとタスク定義、タスクの実行ロール、ロググループ | なし（置いておくだけなら） |
+| タスク（`run-task`） | 確認のときだけ起動 | 動かす間だけ 約 $0.015/時間（タスク + パブリック IPv4） |
 
-| パターン | スタブの置き場所 | 外向きの経路 | 作るもの（CloudFormation） | 時間課金（東京の目安） |
-|---|---|---|---|---|
-| **パブリック**（テスト用に推奨） | 新しく作るスタブ用の VPC の**パブリックサブネット**。タスクにパブリック IP を付ける | インターネットゲートウェイ | `network.yaml`（VPC・パブリックサブネット・インターネットゲートウェイ・タスクの SG・`tickets` の VPC とのピアリングと両側のルート）+ スタブのスタック（CDK。`createEndpoints=false`） | タスクを動かす間だけ 約 $0.015/時間（タスク + パブリック IPv4）。ほかはなし |
-| エンドポイント | プライベートサブネット（スタブだけが使う VPC） | スタブのスタック（CDK）が作る VPC エンドポイント（`ecr.api`・`ecr.dkr`・`logs`、1 AZ）と S3 のゲートウェイ型。ポリシーで、このリポジトリの取得とこのロググループへの書き込みだけを許す | スタブのスタック（CDK。`createEndpoints=true`）。VPC は既存か 3.4.7 で作る | スタックがある間 約 $0.042/時間 + タスクを動かす間 約 $0.012/時間 |
-| NAT | プライベートサブネット | サブネットに既にある `0.0.0.0/0 → NAT ゲートウェイ` | スタブのスタック（CDK。`createEndpoints=false`）。VPC と NAT は既存か 3.4.7 で作る | NAT がある間 約 $0.062/時間（新しく作った場合）+ タスクを動かす間 約 $0.012/時間 |
-
-- 3つとも、確かめられること（`tickets` の VPC 配置、VPC 間の経路、SG での許可、API の解析クライアントの動き）は同じ。違うのは、スタブ自身の外向きの経路だけ（本番の解析サーバーとは関係のない部分）
-- パブリックのパターンでは、受信の守りは SG の1枚（受信は `tickets` の SG の参照だけ、送信は 443 番だけに固定している）。テスト用の画像だけを使い、確認が終わったらタスクを止める。組織のルールでパブリック IP が使えない場合は、エンドポイントのパターンにする（notes/analyzer-stub-cost.md 5章）
-- `createEndpoints=true` は、**スタブだけが使う VPC に限る**。エンドポイントのプライベート DNS とポリシーは VPC 全体（S3 はルートテーブル全体）に効くので、ほかのサービスがある既存の VPC で作ると、そのサービスの ECR・CloudWatch Logs・S3 の利用を止めてしまう。既存の VPC に ECR・Logs のエンドポイント（または NAT）が既にある場合は `createEndpoints=false` にし、既存のエンドポイントの SG に、タスクの SG からの 443 を足してもらう
+注意:
+- **スタブは API キーなしで、HTTP（暗号化なし）で受け付ける**。`AllowedSourceCidr` に `0.0.0.0/0` を指定すると、インターネットの誰からでも呼べる。できるだけ狭い範囲（`tickets` 側の NAT の固定 IP `/32`、確認する人の IP など）にし、テスト用の画像だけを使い、確認が終わったらタスクを止める
+- タスクのパブリック IP は起動のたびに変わる（Fargate のタスクには Elastic IP を付けられない）。起動のたびに、API の接続先（`ANALYZER_URL`）を更新する
+- 組織のルールでパブリック IP が使えない場合は、相談する（CDK はプライベートサブネットと VPC エンドポイントにも対応しているが、手順は用意していない。notes/analyzer-stub-cost.md 5章）
 
 #### 3.4.1 前提と変数
 
 ```sh
-export STUB_IMPL=node                    # node / python / rust（同じ動き）
-export TICKETS_SG=sg-xxxxxxxx            # API の tickets に付ける SG（go/node DEPLOY.md 4-A.4 の LAMBDA_SG と同じもの）
+export STUB_IMPL=node                      # node / python / rust（同じ動き）
+export STUB_ALLOWED_CIDR=203.0.113.10/32   # スタブを呼んでよい送信元（例: tickets 側の NAT の固定 IP、確認する人の IP）
+export STUB_ALLOWED_CIDR_B=                # 2つめ（任意）
 ```
 
-- `tickets` の SG の送信ルールを絞っている場合は、スタブのサブネットへの TCP 8090 を許可しておく（既定の「送信はすべて許可」なら不要）
-
-パブリックのパターン（推奨）は、3.4.2 へ進む。
-
-既存の VPC のプライベートサブネットを使う場合（エンドポイント・NAT のパターン）は、次を設定して 3.4.3 へ進む。`tickets` と別の VPC なら、ピアリングとルートは別に用意する（3.4.7 の手順 4）。
+#### 3.4.2 スタブ用のネットワークを作る（CloudFormation）
 
 ```sh
-export STUB_VPC_ID=vpc-xxxxxxxx          # 既存の VPC
-export STUB_SUBNET_ID=subnet-xxxxxxxx    # 既存のプライベートサブネット（タスクを置く）
-export STUB_RT_ID=rtb-xxxxxxxx           # そのサブネットのルートテーブル（createEndpoints=true のときに使う）
-export CREATE_ENDPOINTS=false            # 既存の VPC では、通常 false（上の注意）
-export STUB_TASK_SG=                     # 空: スタブのスタック（CDK）がタスクの SG を作る（TICKETS_SG からの 8090 を許可）
-export ASSIGN_PUBLIC_IP=DISABLED
-```
-
-#### 3.4.2 （パブリックのパターン）スタブ用のネットワークを作る
-
-`analyzer-stub/network.yaml` で、スタブ用の VPC（パブリックサブネットだけ）、インターネットゲートウェイ、タスクの SG、`tickets` の VPC とのピアリングと両側のルートを作る。時間課金のあるもの（NAT・エンドポイント）は作らないので、置いておいても費用はかからない。
-
-```sh
-export TICKETS_VPC_ID=vpc-xxxxxxxx               # tickets を置く既存の VPC（同じアカウント・同じリージョン）
-export TICKETS_SUBNET_CIDR_A=10.0.1.0/24         # tickets を置くサブネットの CIDR（go/node DEPLOY.md 4-A.4 の SUBNET_A）
-export TICKETS_SUBNET_CIDR_B=10.0.2.0/24         # 同 SUBNET_B（1つだけなら空）
-export TICKETS_RT_ID_A=rtb-yyyyyyyy              # そのサブネットのルートテーブル
-export TICKETS_RT_ID_B=                          # サブネットごとにルートテーブルが違う場合だけ、2つめ
-
 aws cloudformation deploy --stack-name ticketqr-analyzer-stub-network \
   --template-file analyzer-stub/network.yaml \
   --parameter-overrides \
     VpcCidr=10.99.0.0/24 \
     PublicSubnetCidr=10.99.0.0/26 \
-    TicketsVpcId=$TICKETS_VPC_ID \
-    TicketsSecurityGroupId=$TICKETS_SG \
-    TicketsSubnetCidrA=$TICKETS_SUBNET_CIDR_A \
-    TicketsSubnetCidrB=$TICKETS_SUBNET_CIDR_B \
-    TicketsRouteTableIdA=$TICKETS_RT_ID_A \
-    TicketsRouteTableIdB=$TICKETS_RT_ID_B
+    AllowedSourceCidr=$STUB_ALLOWED_CIDR \
+    AllowedSourceCidrB=$STUB_ALLOWED_CIDR_B
 
 export STUB_VPC_ID=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-network \
   --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" --output text)
 export STUB_SUBNET_ID=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-network \
   --query "Stacks[0].Outputs[?OutputKey=='SubnetId'].OutputValue" --output text)
-export STUB_RT_ID=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-network \
-  --query "Stacks[0].Outputs[?OutputKey=='RouteTableId'].OutputValue" --output text)
 export STUB_TASK_SG=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-network \
   --query "Stacks[0].Outputs[?OutputKey=='TaskSecurityGroupId'].OutputValue" --output text)
-export CREATE_ENDPOINTS=false
-export ASSIGN_PUBLIC_IP=ENABLED
 ```
 
-- `VpcCidr` は、`tickets` の VPC と重ならないものにする（既定 `10.99.0.0/24`）
-- **既存の VPC への変更は、`TICKETS_RT_ID_A`（と `_B`）にスタブのサブネット（`10.99.0.0/26`）へのルートを1本ずつ足すことだけ**。このルートはスタックが管理し、スタックを削除すると消える。持ち主の了承を得てから実行する
-- スタブの VPC 側のルートは、`tickets` のサブネットの CIDR だけに向ける（既存の VPC 全体には向けない）。ピアリングは双方向なので、既存の VPC にある SG（EC2・RDS など）が広い CIDR を許可していないかも確かめる（notes/analyzer-stub-cost.md 5.7）
-- タスクの SG は、このスタックが作る（スタブのスタック（CDK）を作り直しても、ID は変わらない）。受信は `TICKETS_SG` からの 8090 だけ（ピアリングが有効になってから付く）、送信は 443 番だけ
-- 別のアカウントの VPC とはつなげない（承認用の IAM ロールが要る。必要になったら足す）
+- 既存の VPC やサービスには何も変更しない（新しい VPC の中だけ）
+- 許可する送信元を変えるときは、`AllowedSourceCidr` を変えてこのコマンドをもう一度実行する（動いているタスクにもすぐ効く）
 
 #### 3.4.3 スタブをデプロイする（CDK。イメージのビルドを含む）
 
-スタブ（ECS のクラスターとタスク定義、コンテナイメージ、ロググループ、必要なら SG とエンドポイント）は **AWS CDK（Python）**で作る（`analyzer-stub/cdk/`）。`cdk deploy` が、`analyzer-stub/$STUB_IMPL/Dockerfile` からイメージを arm64 でビルドし、ECR（CDK のブートストラップのリポジトリ）に push してから、スタックを作る。VPC とサブネットは、3.4.2（または既存）のものをコンテキスト（`-c`）で指定する。
+`cdk deploy` が、`analyzer-stub/$STUB_IMPL/Dockerfile` からイメージを arm64 でビルドし、ECR（CDK のブートストラップのリポジトリ）に push してから、ECS のクラスターとタスク定義などを作る。VPC・サブネット・SG は 3.4.2 のものを `-c` で指定する。
 
 前提（初回だけ）:
 - Docker（arm64 のイメージをビルドする。Apple シリコンの Mac ならそのまま、x86 の PC では QEMU / buildx が要る）、Python 3.13 以降、Node.js（CDK の CLI を `npx` で動かす）
-- アカウントとリージョンごとに1回、CDK のブートストラップ（CDK 用の S3 バケットと ECR のリポジトリ、デプロイ用のロールを作る）
+- アカウントとリージョンごとに1回、CDK のブートストラップ
 
 ```sh
 python3 -m venv analyzer-stub/cdk/.venv
@@ -233,7 +199,7 @@ analyzer-stub/cdk/.venv/bin/pip install -r analyzer-stub/cdk/requirements.txt
 npx -y aws-cdk@2.1145.0 bootstrap aws://$ACCOUNT_ID/$AWS_REGION   # アカウント・リージョンごとに1回
 ```
 
-デプロイ（作成と更新は同じコマンド。スタブの実装やコードを変えたときも、これだけでイメージを作り直して反映する）:
+デプロイ（作成と更新は同じコマンド。スタブのコードを変えたときも、これだけでイメージを作り直して反映する）:
 
 ```sh
 cd analyzer-stub/cdk
@@ -241,166 +207,79 @@ npx -y aws-cdk@2.1145.0 deploy --require-approval never \
   -c impl=$STUB_IMPL \
   -c vpcId=$STUB_VPC_ID \
   -c subnetId=$STUB_SUBNET_ID \
-  -c taskSecurityGroupId=$STUB_TASK_SG \
-  -c allowedSourceSecurityGroupId=$TICKETS_SG \
-  -c createEndpoints=$CREATE_ENDPOINTS \
-  -c routeTableId=$STUB_RT_ID
+  -c taskSecurityGroupId=$STUB_TASK_SG
 cd ../..
-
-export STUB_TASK_SG=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-vpc-$STUB_IMPL \
-  --query "Stacks[0].Outputs[?OutputKey=='TaskSecurityGroupId'].OutputValue" --output text)
 ```
 
 - スタック名は `ticketqr-analyzer-stub-vpc-$STUB_IMPL`（実装ごとに1つ）
-- スタックが作るもの: ECS のクラスターとタスク定義（0.25 vCPU / 0.5GB、arm64、`STUB_AUTH=none`、読み取り専用のルートファイルシステム）、タスクの実行ロール、ロググループ（`/ecs/ticketqr-analyzer-stub-$STUB_IMPL`、7日）、（`taskSecurityGroupId` が空のとき）タスクの SG、（`createEndpoints=true` のとき）エンドポイント4つとその SG。クラスターとタスク定義は、置いておいても課金されない
-- パブリックのパターンでは、`taskSecurityGroupId` に 3.4.2 の SG を渡すので、このスタックは SG を作らない（`allowedSourceSecurityGroupId` は使われない）
-- 指定を誤ると、`cdk deploy` の前にエラーで止まる（必須の値がない、ID の形が違う、`createEndpoints=true` なのに `routeTableId` がない、など）
-- 変更内容を先に見たいときは `deploy` の代わりに `diff`（同じ `-c` を付ける）
-- イメージは CDK のブートストラップの ECR のリポジトリに置かれる（スタックを消しても残る。気になる場合は、ECR のライフサイクルポリシーで古いイメージを消す）
+- 作るもの: ECS のクラスターとタスク定義（0.25 vCPU / 0.5GB、arm64、`STUB_AUTH=none`、読み取り専用のルートファイルシステム）、タスクの実行ロール、ロググループ（`/ecs/ticketqr-analyzer-stub-$STUB_IMPL`、7日）。クラスターとタスク定義は、置いておいても課金されない
+- 指定を誤ると、`cdk deploy` の前にエラーで止まる（必須の値がない、ID の形が違う、など）。変更内容を先に見たいときは `deploy` の代わりに `diff`（同じ `-c` を付ける）
+- イメージは CDK のブートストラップの ECR のリポジトリに置かれる（スタックを消しても残る）
 
-#### 3.4.4 タスクを起動して、API をつなぐ（確認のたびに）
+#### 3.4.4 タスクを起動する（確認のたびに）
 
 ```sh
 export STUB_TASK_ARN=$(aws ecs run-task --cluster ticketqr-analyzer-stub-$STUB_IMPL \
   --task-definition ticketqr-analyzer-stub-$STUB_IMPL --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={subnets=[$STUB_SUBNET_ID],securityGroups=[$STUB_TASK_SG],assignPublicIp=$ASSIGN_PUBLIC_IP}" \
+  --network-configuration "awsvpcConfiguration={subnets=[$STUB_SUBNET_ID],securityGroups=[$STUB_TASK_SG],assignPublicIp=ENABLED}" \
   --query 'tasks[0].taskArn' --output text)
 aws ecs wait tasks-running --cluster ticketqr-analyzer-stub-$STUB_IMPL --tasks $STUB_TASK_ARN
 
-export STUB_IP=$(aws ecs describe-tasks --cluster ticketqr-analyzer-stub-$STUB_IMPL --tasks $STUB_TASK_ARN \
-  --query "tasks[0].attachments[0].details[?name=='privateIPv4Address'].value" --output text)
-export ANALYZER_URL=http://$STUB_IP:8090/v1/analyze
+STUB_ENI=$(aws ecs describe-tasks --cluster ticketqr-analyzer-stub-$STUB_IMPL --tasks $STUB_TASK_ARN \
+  --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value" --output text)
+export STUB_PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids $STUB_ENI \
+  --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+export ANALYZER_URL=http://$STUB_PUBLIC_IP:8090/v1/analyze
 echo $ANALYZER_URL
 ```
 
-- `ASSIGN_PUBLIC_IP` は、パブリックのパターンでは `ENABLED`（パブリック IP がないと、インターネットゲートウェイ経由でイメージを取得できない）、プライベートサブネットでは `DISABLED`
-- 起動しないとき: `aws ecs describe-tasks --cluster ticketqr-analyzer-stub-$STUB_IMPL --tasks $STUB_TASK_ARN --query 'tasks[0].[lastStatus,stoppedReason,containers[0].reason]'`。`CannotPullContainerError` や `ResourceInitializationError` は、ECR・S3・Logs への経路（パブリックのパターンでは `assignPublicIp=ENABLED` の付け忘れ、プライベートではエンドポイント・その SG・NAT のルート）か、イメージのタグの誤り
-- タスクの IP は起動のたびに変わる。続けて API をデプロイし直す: [go/DEPLOY.md](go/DEPLOY.md) / [node/DEPLOY.md](node/DEPLOY.md) の 4-A.4（手動は 4-B.4）を、`ANALYZER_URL` と、`LAMBDA_SG=$TICKETS_SG`、`tickets` のサブネットで実行する（API キーは指定しない）
+- `assignPublicIp=ENABLED` は必須（パブリック IP がないと、外部から呼べず、イメージも取得できない）
+- 起動しないとき: `aws ecs describe-tasks --cluster ticketqr-analyzer-stub-$STUB_IMPL --tasks $STUB_TASK_ARN --query 'tasks[0].[lastStatus,stoppedReason,containers[0].reason]'`
+- **API（`tickets`）からスタブまでの経路は、ここでは決めない**。参考:
+
+| `tickets` の置き方 | スタブから見える送信元 | `AllowedSourceCidr` |
+|---|---|---|
+| VPC の外（今の既定） | Lambda の共有の IP（固定できない） | 固定の IP では絞れない（`0.0.0.0/0` などの広い範囲になる） |
+| VPC のプライベートサブネット + NAT ゲートウェイ（固定の Elastic IP） | NAT の固定 IP | その IP の `/32`（本物の解析サーバーが「利用側の NAT の固定 IP で許可」している場合と同じ形） |
+
+  API を `http` モードにして、`ANALYZER_URL` をスタブに向ける手順は、go/node DEPLOY.md の 4-A.3（API キーは指定しない）。`tickets` を VPC に置く場合は 4-A.4
 
 #### 3.4.5 確認する
 
-スタブはインターネットからも手元からも呼べない（`tickets` の SG からだけ）。API 経由で確かめる。
+許可した送信元（`STUB_ALLOWED_CIDR` に入れた手元の IP など）から、スタブを直接呼べる。
 
 ```sh
-curl -s -F image=@testdata/images/photo.jpg $API_URL/v1/tickets/qr-inline | head -c 120; echo   # 201
+curl -sS -X POST -H 'content-type: application/octet-stream' --data-binary @testdata/images/photo.jpg $ANALYZER_URL; echo
+# → {"confidence":1,"detected":"stub","reason":"stub: no analysis","result":"PASS","status":200}
 
-# スタブが受け取った画像のハッシュが、送ったファイルと一致する（画像が加工されずに VPC をまたいで届いている）
+# スタブが受け取った画像のハッシュが、送ったファイルと一致する（画像が加工されずに届いている）
 shasum -a 256 testdata/images/photo.jpg
 aws logs tail /ecs/ticketqr-analyzer-stub-$STUB_IMPL --since 10m   # 起動時の WARN（STUB_AUTH=none）と "analyzed" の行
 ```
 
-- 502 / 504（`ANALYSIS_UPSTREAM_ERROR` / `ANALYSIS_TIMEOUT`）: `tickets` からスタブに届いていない。ピアリングのルート（両方向）、スタブの SG の送信元（`TICKETS_SG`）、`tickets` の SG の送信ルール、`ANALYZER_URL` の IP（パブリック IP ではなく、プライベート IP）を確かめる
+- 許可していない送信元からは、接続がタイムアウトする（SG が捨てる）
+- API 経由で確かめる場合は、API の `ANALYZER_URL` をスタブに向けたうえで、`curl -s -F image=@testdata/images/photo.jpg $API_URL/v1/tickets/qr-inline`（201）。502 / 504 なら、`tickets` からスタブに届いていない（送信元の IP が `AllowedSourceCidr` に入っているか、`ANALYZER_URL` の IP が今のタスクのものか）
 
 #### 3.4.6 止める・削除する
 
-確認が終わったら、タスクを止める（止めればタスクの課金は 0）。
+確認が終わったら、タスクを止める（止めればタスクの課金は 0。パブリック IP も消える）。
 
 ```sh
 aws ecs stop-task --cluster ticketqr-analyzer-stub-$STUB_IMPL --task $STUB_TASK_ARN --query task.lastStatus --output text
 ```
 
-使わなくなったら、API を `mock`（またはほかの接続先）に戻してから、スタックを削除する。エンドポイントのパターンは、スタックがある間エンドポイントの時間課金がかかるので、しばらく使わないなら削除しておく（作り直しは 3.4.3）。
+使わなくなったら、API の接続先をほかに戻してから、スタブのスタック、ネットワークのスタックの順に削除する（どちらも、置いておくだけなら時間課金はない）。
 
 ```sh
 cd analyzer-stub/cdk
 npx -y aws-cdk@2.1145.0 destroy --force -c impl=$STUB_IMPL -c vpcId=$STUB_VPC_ID -c subnetId=$STUB_SUBNET_ID \
-  -c taskSecurityGroupId=$STUB_TASK_SG -c allowedSourceSecurityGroupId=$TICKETS_SG
+  -c taskSecurityGroupId=$STUB_TASK_SG
 cd ../..
-```
-
-- `destroy` にも、スタック名を決めるために `deploy` と同じ `-c` が要る（`aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-vpc-$STUB_IMPL` でも消せる）
-
-パブリックのパターンで、3.4.2 のネットワークも消す場合（スタブのスタックを消した後に）:
-
-```sh
-aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-network   # 既存の VPC に足したルートも消える
+aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-network
 aws cloudformation wait stack-delete-complete --stack-name ticketqr-analyzer-stub-network
 ```
 
-- ネットワークのスタックには時間課金のあるものがないので、続けて使うなら残しておいてよい
-- 3.4.7 で作ったプライベートサブネットの VPC は、作った順の逆に `aws ec2 delete-*` で消す
-
-#### 3.4.7 （参考）プライベートサブネットの VPC を新しく作る場合（AWS CLI）
-
-エンドポイントか NAT のパターンで、スタブ用の VPC（プライベートサブネット）を新しく作る場合の手順。テスト用には 3.4.2（パブリックサブネット。`network.yaml`）を使う。VPC・サブネット・ルートテーブル・SG・インターネットゲートウェイ・ピアリングには時間課金がない。NAT ゲートウェイ（NAT のパターン）には時間課金がある。作ったあとは 3.4.1 の「既存の VPC のプライベートサブネットを使う場合」と同じ変数（`STUB_VPC_ID`・`STUB_SUBNET_ID`・`STUB_RT_ID`・`CREATE_ENDPOINTS`）で 3.4.3 へ進み、`run-task` は `assignPublicIp=DISABLED` にする。削除は、作った順の逆に `aws ec2 delete-*` で行う（NAT ゲートウェイ → Elastic IP → インターネットゲートウェイ → サブネット・ルートテーブル → ピアリング・既存の VPC に足したルート → VPC）
-
-1. VPC とプライベートサブネット（両パターン共通）
-
-```sh
-export STUB_VPC_CIDR=10.99.0.0/24              # tickets の VPC と重ならないもの
-export STUB_PRIVATE_CIDR=10.99.0.0/26
-export STUB_AZ=${AWS_REGION}a
-
-export STUB_VPC_ID=$(aws ec2 create-vpc --cidr-block $STUB_VPC_CIDR \
-  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=ticketqr-analyzer-stub}]' \
-  --query Vpc.VpcId --output text)
-aws ec2 modify-vpc-attribute --vpc-id $STUB_VPC_ID --enable-dns-support '{"Value":true}'
-aws ec2 modify-vpc-attribute --vpc-id $STUB_VPC_ID --enable-dns-hostnames '{"Value":true}'   # エンドポイントのプライベート DNS に必要
-
-export STUB_SUBNET_ID=$(aws ec2 create-subnet --vpc-id $STUB_VPC_ID --cidr-block $STUB_PRIVATE_CIDR \
-  --availability-zone $STUB_AZ \
-  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=ticketqr-analyzer-stub-private}]' \
-  --query Subnet.SubnetId --output text)
-export STUB_RT_ID=$(aws ec2 create-route-table --vpc-id $STUB_VPC_ID \
-  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=ticketqr-analyzer-stub-private}]' \
-  --query RouteTable.RouteTableId --output text)
-aws ec2 associate-route-table --route-table-id $STUB_RT_ID --subnet-id $STUB_SUBNET_ID
-```
-
-2. エンドポイントのパターン: ここでは何も足さない（エンドポイントは 3.4.3 のスタックが作る）
-
-```sh
-export CREATE_ENDPOINTS=true
-```
-
-3. NAT のパターン: パブリックサブネット・インターネットゲートウェイ・NAT ゲートウェイを作り、プライベートサブネットの外向きを NAT に向ける
-
-```sh
-export CREATE_ENDPOINTS=false
-export STUB_PUBLIC_CIDR=10.99.0.64/26
-
-export STUB_IGW_ID=$(aws ec2 create-internet-gateway --query InternetGateway.InternetGatewayId --output text)
-aws ec2 attach-internet-gateway --internet-gateway-id $STUB_IGW_ID --vpc-id $STUB_VPC_ID
-
-export STUB_PUBLIC_SUBNET_ID=$(aws ec2 create-subnet --vpc-id $STUB_VPC_ID --cidr-block $STUB_PUBLIC_CIDR \
-  --availability-zone $STUB_AZ \
-  --tag-specifications 'ResourceType=subnet,Tags=[{Key=Name,Value=ticketqr-analyzer-stub-public}]' \
-  --query Subnet.SubnetId --output text)
-export STUB_PUBLIC_RT_ID=$(aws ec2 create-route-table --vpc-id $STUB_VPC_ID \
-  --tag-specifications 'ResourceType=route-table,Tags=[{Key=Name,Value=ticketqr-analyzer-stub-public}]' \
-  --query RouteTable.RouteTableId --output text)
-aws ec2 create-route --route-table-id $STUB_PUBLIC_RT_ID --destination-cidr-block 0.0.0.0/0 --gateway-id $STUB_IGW_ID
-aws ec2 associate-route-table --route-table-id $STUB_PUBLIC_RT_ID --subnet-id $STUB_PUBLIC_SUBNET_ID
-
-export STUB_EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --query AllocationId --output text)
-export STUB_NAT_ID=$(aws ec2 create-nat-gateway --subnet-id $STUB_PUBLIC_SUBNET_ID --allocation-id $STUB_EIP_ALLOC \
-  --query NatGateway.NatGatewayId --output text)
-aws ec2 wait nat-gateway-available --nat-gateway-ids $STUB_NAT_ID          # 数分。ここから時間課金
-aws ec2 create-route --route-table-id $STUB_RT_ID --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $STUB_NAT_ID
-```
-
-4. `tickets` の VPC とピアリングでつなぐ（両パターン共通。同じアカウント・同じリージョン）
-
-```sh
-export TICKETS_VPC_ID=vpc-xxxxxxxx               # tickets を置く既存の VPC
-export TICKETS_SUBNET_CIDR_A=10.0.1.0/24         # tickets を置くサブネットの CIDR（go/node DEPLOY.md 4-A.4 の SUBNET_A）
-export TICKETS_SUBNET_CIDR_B=10.0.2.0/24         # 同 SUBNET_B
-export TICKETS_RT_ID=rtb-yyyyyyyy                # そのサブネットのルートテーブル（サブネットごとに違えば、それぞれに手順の最後の行を実行する）
-
-export STUB_PCX_ID=$(aws ec2 create-vpc-peering-connection --vpc-id $STUB_VPC_ID --peer-vpc-id $TICKETS_VPC_ID \
-  --tag-specifications 'ResourceType=vpc-peering-connection,Tags=[{Key=Name,Value=ticketqr-analyzer-stub}]' \
-  --query VpcPeeringConnection.VpcPeeringConnectionId --output text)
-aws ec2 accept-vpc-peering-connection --vpc-peering-connection-id $STUB_PCX_ID
-aws ec2 wait vpc-peering-connection-exists --vpc-peering-connection-ids $STUB_PCX_ID
-
-# スタブの VPC → tickets のサブネットだけ（既存の VPC 全体には向けない）
-aws ec2 create-route --route-table-id $STUB_RT_ID --destination-cidr-block $TICKETS_SUBNET_CIDR_A --vpc-peering-connection-id $STUB_PCX_ID
-aws ec2 create-route --route-table-id $STUB_RT_ID --destination-cidr-block $TICKETS_SUBNET_CIDR_B --vpc-peering-connection-id $STUB_PCX_ID
-# 既存の VPC → スタブのプライベートサブネットだけ（既存の VPC の変更。持ち主の了承を得てから）
-aws ec2 create-route --route-table-id $TICKETS_RT_ID --destination-cidr-block $STUB_PRIVATE_CIDR --vpc-peering-connection-id $STUB_PCX_ID
-```
-
-- ピアリングは双方向なので、既存の VPC にある SG（EC2・RDS など）が広い CIDR を許可していないか確かめる（notes/analyzer-stub-cost.md 5.7）
+- `destroy` にも、スタック名を決めるために `deploy` と同じ `-c` が要る（`aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-vpc-$STUB_IMPL` でも消せる）
 
 ## 4. まだ対応していないもの（今後、各手順書に追加する）
 

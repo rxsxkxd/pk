@@ -1,6 +1,6 @@
 # 【検討】画像解析サーバーのスタブを VPC 内で、セキュリティグループで許可した送信元からだけ受け付ける
 
-> 一時ドキュメント（2026-10-07）。**A2（Fargate のタスク）を3パターンで実装済み（2026-10-08）**: パブリックサブネット（テスト用に推奨。`analyzer-stub/network.yaml` でスタブ用の VPC を作る）、プライベートサブネット + VPC エンドポイント、プライベートサブネット + NAT。スタブは AWS CDK（Python。`analyzer-stub/cdk/`。イメージのビルドを含む）、手順 [../DEPLOY.md](../DEPLOY.md) 3.4、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) 付録 B。AWS 上では未検証。案が決まったら、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) とテンプレート・手順書に反映し、このファイルは削除する。関連: [lambda-vpc.md](lambda-vpc.md)（API の `tickets` を VPC に置く構成）、[analyzer-stub-cost.md](analyzer-stub-cost.md)（スタブを VPC から新しく作る場合の費用の試算と、パブリックサブネット / プライベートサブネットの違い）。
+> 一時ドキュメント（2026-10-07）。**2026-10-08 の方針の変更: 本物の解析サーバーは AWS の外で、送信元の IP（NAT の固定 IP）で許可しているだけの可能性もあるため、スタブは「パブリックサブネットの Fargate に、許可した IP から外部経由で届く」構成だけにし、`tickets` からの経路（ピアリング、SG の参照など）は決めないことにした（../DEPLOY.md 3.4、../analyzer-stub/DESIGN.md 付録 B）。以下の SG の参照・ピアリングを前提にした検討は、経緯として残す。** **A2（Fargate のタスク）を3パターンで実装済み（2026-10-08）**: パブリックサブネット（テスト用に推奨。`analyzer-stub/network.yaml` でスタブ用の VPC を作る）、プライベートサブネット + VPC エンドポイント、プライベートサブネット + NAT。スタブは AWS CDK（Python。`analyzer-stub/cdk/`。イメージのビルドを含む）、手順 [../DEPLOY.md](../DEPLOY.md) 3.4、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) 付録 B。AWS 上では未検証。案が決まったら、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) とテンプレート・手順書に反映し、このファイルは削除する。関連: [lambda-vpc.md](lambda-vpc.md)（API の `tickets` を VPC に置く構成）、[analyzer-stub-cost.md](analyzer-stub-cost.md)（スタブを VPC から新しく作る場合の費用の試算と、パブリックサブネット / プライベートサブネットの違い）。
 
 ## 1. 目的と条件
 

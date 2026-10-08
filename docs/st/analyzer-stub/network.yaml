@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Network for the VPC stub (test only): a new VPC with one public subnet (route to an internet gateway), the
+  task's security group (inbound TCP 8090 from the ticket API's tickets function only, outbound 443 only) and a
+  VPC peering to the tickets VPC with routes on both sides limited to the subnet CIDRs. No NAT gateway and no
+  VPC endpoints, so nothing here is billed by the hour. The stub itself (ECR, ECS) is vpc-template.yaml.
+  See docs/st/DEPLOY.md 3.4.
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.99.0.0/24
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: CIDR of the stub VPC. Must not overlap the tickets VPC.
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.99.0.0/26
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: CIDR of the public subnet (inside VpcCidr).
+  AvailabilityZone:
+    Type: String
+    Default: ""
+    Description: AZ of the public subnet. Empty = the first AZ of the region.
+  TicketsVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing VPC of the tickets function (peered with the stub VPC; same account and region).
+  TicketsSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security group of the tickets function (VpcSecurityGroupIds of api.yaml). The only source allowed to call the stub.
+  TicketsSubnetCidrA:
+    Type: String
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: CIDR of a subnet of the tickets function. The stub VPC routes only to the tickets subnets, not to the whole tickets VPC.
+  TicketsSubnetCidrB:
+    Type: String
+    Default: ""
+    AllowedPattern: ^((\d{1,3}\.){3}\d{1,3}/\d{1,2})?$
+    Description: CIDR of a second subnet of the tickets function (optional).
+  TicketsRouteTableIdA:
+    Type: String
+    AllowedPattern: ^rtb-[0-9a-f]+$
+    Description: Existing route table of the tickets subnets. This stack adds one route to it (PublicSubnetCidr via the peering) and removes it on delete.
+  TicketsRouteTableIdB:
+    Type: String
+    Default: ""
+    AllowedPattern: ^(rtb-[0-9a-f]+)?$
+    Description: A second existing route table, when the tickets subnets use different ones (optional).
+
+Conditions:
+  HasAz: !Not [!Equals [!Ref AvailabilityZone, ""]]
+  HasTicketsSubnetB: !Not [!Equals [!Ref TicketsSubnetCidrB, ""]]
+  HasTicketsRouteTableB: !Not [!Equals [!Ref TicketsRouteTableIdB, ""]]
+
+Resources:
+  # ---------- Stub VPC: one public subnet ----------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub }]
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  # The task gets its public IP from run-task (assignPublicIp=ENABLED), not from the subnet.
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !If [HasAz, !Ref AvailabilityZone, !Select [0, !GetAZs ""]]
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub-public }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub-public }]
+
+  PublicSubnetRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Outbound for the task's image pull (ECR, S3) and logs (CloudWatch Logs).
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # ---------- Peering with the tickets VPC (same account: accepted on creation) ----------
+  Peering:
+    Type: AWS::EC2::VPCPeeringConnection
+    Properties:
+      VpcId: !Ref Vpc
+      PeerVpcId: !Ref TicketsVpcId
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub }]
+
+  # Stub VPC → tickets subnets only (not the whole tickets VPC).
+  RouteToTicketsA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: !Ref TicketsSubnetCidrA
+      VpcPeeringConnectionId: !Ref Peering
+  RouteToTicketsB:
+    Type: AWS::EC2::Route
+    Condition: HasTicketsSubnetB
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: !Ref TicketsSubnetCidrB
+      VpcPeeringConnectionId: !Ref Peering
+
+  # Tickets VPC (existing route tables) → the stub's public subnet only. The only change to the tickets VPC.
+  RouteFromTicketsA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref TicketsRouteTableIdA
+      DestinationCidrBlock: !Ref PublicSubnetCidr
+      VpcPeeringConnectionId: !Ref Peering
+  RouteFromTicketsB:
+    Type: AWS::EC2::Route
+    Condition: HasTicketsRouteTableB
+    Properties:
+      RouteTableId: !Ref TicketsRouteTableIdB
+      DestinationCidrBlock: !Ref PublicSubnetCidr
+      VpcPeeringConnectionId: !Ref Peering
+
+  # ---------- The task's security group ----------
+  TaskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ticketqr analyzer stub task (public subnet)
+      VpcId: !Ref Vpc
+      # Replaces the default allow-all egress: HTTPS only (ECR, S3 and CloudWatch Logs through the internet
+      # gateway). Replies to the API need no egress rule (security groups are stateful).
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: ECR, S3 and CloudWatch Logs
+      Tags: [{ Key: Name, Value: ticketqr-analyzer-stub-task }]
+
+  # A security group in the peered VPC can be referenced only once the peering is active.
+  TaskIngressFromTickets:
+    Type: AWS::EC2::SecurityGroupIngress
+    DependsOn: Peering
+    Properties:
+      GroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8090
+      ToPort: 8090
+      SourceSecurityGroupId: !Ref TicketsSecurityGroupId
+      Description: the ticket API (tickets function), through the peering
+
+Outputs:
+  VpcId:
+    Value: !Ref Vpc
+  SubnetId:
+    Description: Public subnet for the task (SubnetId of vpc-template.yaml; run-task with assignPublicIp=ENABLED).
+    Value: !Ref PublicSubnet
+  RouteTableId:
+    Value: !Ref PublicRouteTable
+  TaskSecurityGroupId:
+    Description: Security group of the task (TaskSecurityGroupId of vpc-template.yaml).
+    Value: !Ref TaskSecurityGroup
+  PeeringConnectionId:
+    Value: !Ref Peering
+  PublicSubnetCidr:
+    Value: !Ref PublicSubnetCidr

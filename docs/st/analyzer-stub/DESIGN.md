@@ -352,11 +352,11 @@ uvx mypy --strict *.py                            # 任意: 型チェック（�
 |---|---|
 | コンテナ | 各実装のローカル用サーバーをそのまま使う（`node/Dockerfile`: `local.mjs`、`python/Dockerfile`: `local.py`、`rust/Dockerfile`: `examples/local.rs`）。arm64。依存は取得しない（Node・Python は依存なし、Rust はビルド済みのバイナリ）。root 以外のユーザーで動き、ルートファイルシステムは読み取り専用でも動く |
 | 認証 | `STUB_AUTH=none`（タスク定義で指定。3.3）。届くのは、指定した SG（API の `tickets` の SG）からの TCP 8090 だけ |
-| テンプレート | `vpc-template.yaml`。**既存の VPC とプライベートサブネットを指定する**。ECR のリポジトリ、ロググループ、タスクの実行ロール、ECS のクラスターとタスク定義（0.25 vCPU / 0.5GB）、タスクの SG（受信 8090 は指定した SG から、送信は 443 だけ） |
-| 外向きの経路 | `CreateEndpoints=true`: このスタックが `ecr.api`・`ecr.dkr`・`logs` のインターフェイス型エンドポイント（1 AZ）と S3 のゲートウェイ型エンドポイントを作る。ポリシーで、このリポジトリの取得・このロググループへの書き込み・ECR の層のバケットの読み取りだけを許す。**スタブだけが使う VPC に限る**（プライベート DNS とポリシーが VPC 全体に効くため）。`false`: サブネットに既にある経路（NAT ゲートウェイか既存のエンドポイント）を使う |
-| VPC から新しく作る場合 | テンプレートにはせず、AWS CLI の手順で作る（DEPLOY.md 3.4.2。エンドポイントのパターンと NAT のパターン、`tickets` の VPC とのピアリング） |
+| テンプレート | `network.yaml`（テスト用に推奨のパブリックのパターン）: スタブ用の VPC（パブリックサブネットだけ）、インターネットゲートウェイ、タスクの SG（受信 8090 は `tickets` の SG から、送信は 443 だけ）、`tickets` の VPC とのピアリングと両側のルート（サブネットの CIDR だけ）。時間課金のあるものは作らない。`vpc-template.yaml`: VPC とサブネットを指定する（`network.yaml` のパブリックサブネットか、既存の VPC のプライベートサブネット）。ECR のリポジトリ、ロググループ、タスクの実行ロール、ECS のクラスターとタスク定義（0.25 vCPU / 0.5GB）、タスクの SG（`TaskSecurityGroupId` を渡さないとき） |
+| 外向きの経路 | パブリックのパターン: タスクにパブリック IP を付け（`run-task` の `assignPublicIp=ENABLED`）、インターネットゲートウェイ経由。`CreateEndpoints=true`: このスタックが `ecr.api`・`ecr.dkr`・`logs` のインターフェイス型エンドポイント（1 AZ）と S3 のゲートウェイ型エンドポイントを作る。ポリシーで、このリポジトリの取得・このロググループへの書き込み・ECR の層のバケットの読み取りだけを許す。**スタブだけが使う VPC に限る**（プライベート DNS とポリシーが VPC 全体に効くため）。`false`: サブネットに既にある経路（NAT ゲートウェイか既存のエンドポイント）を使う |
+| VPC から新しく作る場合 | パブリックのパターンは `network.yaml`（DEPLOY.md 3.4.2）。プライベートサブネット（エンドポイント・NAT のパターン）で作る場合は、参考として AWS CLI の手順（DEPLOY.md 3.4.8） |
 | タスクの起動・停止 | ECS のサービスは使わず、確認のときだけ `aws ecs run-task` で起動し、`stop-task` で止める。IP は起動のたびに変わるので、API の `AnalyzerUrl` を更新する |
 
 確認済み（2026-10-08。AWS 上へのデプロイは未検証）:
 - 3つのイメージ（Node 238MB、Python 202MB、Rust 170MB）をローカルでビルドし、`STUB_AUTH=none`・読み取り専用のルートファイルシステムで起動して、200 と起動時の WARN のログを確認
-- `vpc-template.yaml`: cfn-lint でエラー・警告なし
+- `vpc-template.yaml`・`network.yaml`: cfn-lint でエラー・警告なし（2026-10-08）

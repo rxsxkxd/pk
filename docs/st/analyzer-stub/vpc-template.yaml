@@ -1,9 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Image analysis server stub in an existing VPC (ECS Fargate task, private subnet). Only the given security
-  group can reach it (TCP 8090); no API key (STUB_AUTH=none). Egress to ECR / CloudWatch Logs goes through VPC
-  endpoints created here (CreateEndpoints=true) or a route the subnet already has (NAT or existing endpoints).
-  The task is started and stopped by hand (aws ecs run-task / stop-task). See docs/st/DEPLOY.md 3.4.
+  Image analysis server stub in a given VPC and subnet (ECS Fargate task): the public subnet of network.yaml
+  (task with a public IP), or a private subnet of an existing VPC. Only the tickets function's security group
+  can reach it (TCP 8090); no API key (STUB_AUTH=none). Egress to ECR / CloudWatch Logs goes through the
+  internet gateway (public subnet), VPC endpoints created here (CreateEndpoints=true) or a route the subnet
+  already has (NAT or existing endpoints). The task is started and stopped by hand (aws ecs run-task /
+  stop-task). See docs/st/DEPLOY.md 3.4.
 
 Parameters:
   Impl:
@@ -16,7 +18,7 @@ Parameters:
     Description: Existing VPC.
   SubnetId:
     Type: AWS::EC2::Subnet::Id
-    Description: Existing private subnet for the task (and for the interface endpoints when CreateEndpoints=true).
+    Description: Subnet for the task (and for the interface endpoints when CreateEndpoints=true). The public subnet of network.yaml, or a private subnet.
   RouteTableId:
     Type: String
     Default: ""
@@ -29,10 +31,18 @@ Parameters:
       true = create interface endpoints (ecr.api, ecr.dkr, logs) and an S3 gateway endpoint for the task. Only in
       a VPC and route table used by the stub alone: private DNS and the restrictive endpoint policies apply to the
       whole VPC / route table. false = the subnet already reaches ECR and Logs (NAT gateway or existing endpoints).
+  TaskSecurityGroupId:
+    Type: String
+    Default: ""
+    AllowedPattern: ^(sg-[0-9a-f]+)?$
+    Description: >-
+      Security group for the task made elsewhere (TaskSecurityGroupId output of network.yaml). Empty = this stack
+      makes one that admits AllowedSourceSecurityGroupId.
   AllowedSourceSecurityGroupId:
     Type: String
-    AllowedPattern: ^sg-[0-9a-f]+$
-    Description: Security group allowed to call the stub (the ticket API's tickets function). Same VPC or a peered VPC in the same region.
+    Default: ""
+    AllowedPattern: ^(sg-[0-9a-f]+)?$
+    Description: Security group allowed to call the stub (the ticket API's tickets function), when TaskSecurityGroupId is empty. Same VPC or a peered VPC in the same region.
   ImageTag:
     Type: String
     Default: latest
@@ -44,6 +54,7 @@ Parameters:
 
 Conditions:
   UseEndpoints: !Equals [!Ref CreateEndpoints, "true"]
+  CreateTaskSecurityGroup: !Equals [!Ref TaskSecurityGroupId, ""]
 
 Rules:
   RouteTableForEndpoints:
@@ -51,6 +62,11 @@ Rules:
     Assertions:
       - Assert: !Not [!Equals [!Ref RouteTableId, ""]]
         AssertDescription: RouteTableId is required when CreateEndpoints=true.
+  SourceForOwnSecurityGroup:
+    RuleCondition: !Equals [!Ref TaskSecurityGroupId, ""]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AllowedSourceSecurityGroupId, ""]]
+        AssertDescription: AllowedSourceSecurityGroupId is required when TaskSecurityGroupId is empty.
 
 Resources:
   # ---------- Image, logs, roles ----------
@@ -115,8 +131,15 @@ Resources:
               awslogs-stream-prefix: stub
 
   # ---------- Network ----------
+  # Made here only when TaskSecurityGroupId is not given (a private subnet of an existing VPC).
   TaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Condition: CreateTaskSecurityGroup
+    Metadata:
+      cfn-lint:
+        config:
+          # AllowedSourceSecurityGroupId may be empty in general, but not here (rule SourceForOwnSecurityGroup).
+          ignore_checks: [W1030]
     Properties:
       GroupDescription: !Sub ticketqr analyzer stub (${Impl}) task
       VpcId: !Ref VpcId
@@ -145,7 +168,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          SourceSecurityGroupId: !Ref TaskSecurityGroup
+          SourceSecurityGroupId: !If [CreateTaskSecurityGroup, !Ref TaskSecurityGroup, !Ref TaskSecurityGroupId]
           Description: the stub task
 
   # The endpoint policies allow only what the task needs, in this account: pulling this repository and writing
@@ -238,7 +261,7 @@ Outputs:
     Value: !Ref SubnetId
   TaskSecurityGroupId:
     Description: Security group of the task (pass to aws ecs run-task).
-    Value: !Ref TaskSecurityGroup
+    Value: !If [CreateTaskSecurityGroup, !Ref TaskSecurityGroup, !Ref TaskSecurityGroupId]
   RepositoryUri:
     Description: Push the stub image here (tag ImageTag).
     Value: !GetAtt Repository.RepositoryUri

@@ -4,7 +4,7 @@
 >
 > スコープ: AMI からインスタンスを起動し、サーバー固有の設定をして、Elastic IP と Route 53 のレコードで公開するまで
 >
-> スコープ外: Let's Encrypt の証明書の発行・Apache の SSL 設定・証明書の自動更新（別途検討する。参考: [EC2 での Let's Encrypt 証明書発行・初期設定の自動化](../letsencrypt-automation.md)）
+> スコープ外: Let's Encrypt の証明書の発行・Apache の SSL 設定・証明書の自動更新（別途検討する。参考: [EC2 での Let's Encrypt 証明書発行・初期設定の自動化](../notes/ec2-operations/letsencrypt-automation.md)）
 
 ## 現状の手作業の手順
 
@@ -168,7 +168,7 @@ AMI に入れておく（すべてのサーバーで共通）
 | **A. 構築時にファイルを書く（推奨）** | CloudFormation のパラメーター（サーバー名など）を UserData に渡し、起動時に値のファイルを 1 回だけ書く | 一度書けば以降は固定。ログインのたびに AWS に問い合わせない |
 | B. インスタンスのタグから読む | ログインや起動のたびに、インスタンスメタデータでタグを読む | タグを変えれば反映されるが、インスタンスメタデータでのタグの参照を有効にする必要があり、ログインのたびに問い合わせが走る |
 
-どちらの方法の実装例も [補足: bash プロンプト等のシェル環境カスタマイズの自動化](../shell-environment-customization.md)（「CloudFormation パラメータで渡す」「インスタンスのタグから取得する」）にある。
+どちらの方法の実装例も [補足: bash プロンプト等のシェル環境カスタマイズの自動化](../notes/ec2-operations/shell-environment-customization.md)（「CloudFormation パラメータで渡す」「インスタンスのタグから取得する」）にある。
 
 ## CloudFormation で段階を踏めるか（見立て）
 
@@ -178,7 +178,7 @@ AMI に入れておく（すべてのサーバーで共通）
 |---|---|
 | 1 | `AWS::EC2::Instance`（起動テンプレートの ID は Export を参照し、バージョンはパラメーターで指定。[設計: フェーズ 2](./design.md)） |
 | 2 | UserData（または cfn-init）で、サーバーごとの値のファイルを書き、ホスト名を設定する |
-| 3 | インスタンスに `CreationPolicy` を付け、UserData の最後で serverspec などを実行し、結果を `cfn-signal` で返す（[起動処理の完了判定](../cfn-s3-userdata-provisioning.md#3-起動処理の完了判定creationpolicy--cfn-signal)） |
+| 3 | インスタンスに `CreationPolicy` を付け、UserData の最後で serverspec などを実行し、結果を `cfn-signal` で返す（[起動処理の完了判定](../notes/ec2-operations/cfn-s3-userdata-provisioning.md#3-起動処理の完了判定creationpolicy--cfn-signal)） |
 | 4 | `AWS::EC2::EIPAssociation` と `AWS::Route53::RecordSet` をインスタンスに依存させる（`DependsOn`、または値の参照による暗黙の依存） |
 
 - 失敗のシグナルが返るか、タイムアウトすると、インスタンスの作成が失敗し、スタックはロールバックされる（インスタンスは削除される）。Elastic IP の関連付けと DNS のレコードは作られない

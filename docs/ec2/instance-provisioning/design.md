@@ -4,7 +4,7 @@
 >
 > スコープ: フェーズ 1（[`ami-publish/`](../ami-publish/README.md)）が用意した起動テンプレートの、**バージョンを明示的に指定して**、インスタンスを構築する・既存インスタンスを新しいバージョンにする仕組み
 >
-> スコープ外: Auto Scaling グループ（[メモ](../launch-template-auto-scaling-readiness-memo.md)）、アプリのリリース検証（フェーズ 3）
+> スコープ外: Auto Scaling グループ（[メモ](../notes/instance-provisioning/launch-template-auto-scaling-readiness-memo.md)）、アプリのリリース検証（フェーズ 3）
 
 ## 実現したいこと
 

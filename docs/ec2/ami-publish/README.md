@@ -43,7 +43,7 @@ spec/                                  AMI 公開ツールのテスト（RSpec�
 - このリポジトリの取得元（`pipeline.source_type`）:
   - GitHub（既定）: CodeConnections の接続（コンソールで承認まで済ませる）→ `pipeline.source_connection_arn`、`pipeline.source_repository_id`
   - CodeCommit: `pipeline.source_type: codecommit` とリポジトリ名（`pipeline.source_repository_name`）。接続は不要
-- リリース用インスタンス（SSM Agent がインストール済みで自動起動が有効なこと。**インスタンスプロファイルは付けない**。パイプラインが、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルを、ヘルスチェックの区間だけ紐付ける。[リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md)）
+- リリース用インスタンス（SSM Agent がインストール済みで自動起動が有効なこと。**インスタンスプロファイルは付けない**。パイプラインが、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルを、ヘルスチェックの区間だけ紐付ける。[リリース用インスタンスの IAM ロール](../notes/ami-publish/ami-publish-release-instance-iam.md)）
 - ヘルスチェックに Basic 認証が必要な場合: 「ユーザー名:パスワード」を置いた SSM Parameter Store の SecureString（`health_check.basic_auth_parameter_name`）。CloudFormation では SecureString を作れないため、担当者が作成する:
 
   ```bash
@@ -86,7 +86,7 @@ cfn-lint generated/cloudformation/*/*.yml   # CloudFormation テンプレート�
 
 仕組みの生成ツールが出力するデプロイ用シェルスクリプト `generated/deploy/<環境>.sh` を `up` で実行する。中身は、命名規則どおりのスタック名とテンプレートのパスを入れた AWS CLI の呼び出しを、依存関係の順（ヘルスチェック → 起動テンプレート → AMI 公開パイプライン）に並べただけのもの。スタック名を手で書かないので、AMI 公開ツールが探す名前とずれない。
 
-**前提: リリース用インスタンスの IAM ロールのスタック（`<application_name>-<環境>-release-instance`）を先にデプロイしておく。** AMI 公開パイプラインのスタックがその Export（ロールとインスタンスプロファイルの ARN）を参照する。このスタックは `up` / `down` に含めない（手順は [リリース用インスタンスの IAM ロール](../ami-publish-release-instance-iam.md#2-リリース用インスタンスの-iam-ロールのスタックをデプロイする)）。
+**前提: リリース用インスタンスの IAM ロールのスタック（`<application_name>-<環境>-release-instance`）を先にデプロイしておく。** AMI 公開パイプラインのスタックがその Export（ロールとインスタンスプロファイルの ARN）を参照する。このスタックは `up` / `down` に含めない（手順は [リリース用インスタンスの IAM ロール](../notes/ami-publish/ami-publish-release-instance-iam.md#2-リリース用インスタンスの-iam-ロールのスタックをデプロイする)）。
 
 ```bash
 bash generated/deploy/staging.sh up
@@ -151,8 +151,8 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 | # | ステップ | 失敗時 |
 |---|---|---|
 | 0 | CheckInstanceState: リリース用インスタンスの状態を確認し、起動中か停止中かを記録（起動処理中・停止処理中なら落ち着くまで待つ）。あわせてインスタンスプロファイルの紐付けが「なし」か「リリース用インスタンスの IAM ロールのスタックのプロファイル」（前回の異常終了の残り）であることを確認する。SSM の管理対象かは、紐付け前は判定できないので確認しない | 別のプロファイルが付いていれば失敗（AMI を作らず、何も変更しない） |
-| 0b | CheckReleaseInstancePermissions: リリース用インスタンスの IAM ロールのスタックのロール（パイプラインのスタックの出力 `ReleaseInstanceRoleArn`）に必要な許可（[一覧](../ami-publish-release-instance-iam.md)）があるかを、IAM のポリシーシミュレーターで判定する。紐付け前・停止中でも判定できる | A・C の不足は失敗（不足している許可を一覧にする。AMI を作らず、何も変更しない）。B（CloudWatch Logs への出力）の不足は警告を出して先に進む。Basic 認証のパラメーターが既定の `aws/ssm` キーの SecureString でなければ失敗 |
-| 1a | AttachReleaseInstanceProfile: **AMI の作成の直前に**、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルを紐付ける（すでに付いていればそのまま使う）。1〜4 はこの紐付けの区間の中で動く（[設計](../ami-publish-health-check-role-association-flow.md)） | 失敗（AMI を作らない。途中までの紐付けは解除する） |
+| 0b | CheckReleaseInstancePermissions: リリース用インスタンスの IAM ロールのスタックのロール（パイプラインのスタックの出力 `ReleaseInstanceRoleArn`）に必要な許可（[一覧](../notes/ami-publish/ami-publish-release-instance-iam.md)）があるかを、IAM のポリシーシミュレーターで判定する。紐付け前・停止中でも判定できる | A・C の不足は失敗（不足している許可を一覧にする。AMI を作らず、何も変更しない）。B（CloudWatch Logs への出力）の不足は警告を出して先に進む。Basic 認証のパラメーターが既定の `aws/ssm` キーの SecureString でなければ失敗 |
+| 1a | AttachReleaseInstanceProfile: **AMI の作成の直前に**、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルを紐付ける（すでに付いていればそのまま使う）。1〜4 はこの紐付けの区間の中で動く（[設計](../notes/ami-publish/ami-publish-health-check-role-association-flow.md)） | 失敗（AMI を作らない。途中までの紐付けは解除する） |
 | 1 | CreateImage: AMI を作成（起動中ならインスタンスが再起動する。停止中なら再起動しない）。同じ実行の AMI があれば再利用。AMI 名は `<application_name>_<バージョン>_<日時>`、Name タグは `<ami.name_tag_prefix>_<バージョン>_<日時>`（どちらも環境は含めない。接頭辞の省略時は `<バージョン>_<日時>`。同じアカウントで環境ごとに AMI 名を分ける必要があれば、`application_name` に環境を含める） | 失敗 |
 | 2 | WaitImageAvailable: available まで待つ | AMI とスナップショットを削除 |
 | 2a | StartInstanceIfStopped: **開始時に停止中だった場合だけ**、確認のためにインスタンスを起動する（停止には戻さない） | AMI とスナップショットを削除 |

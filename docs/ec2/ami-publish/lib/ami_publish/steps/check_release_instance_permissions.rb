@@ -8,7 +8,7 @@ module AmiPublish
     #
     # IAM のポリシーシミュレーター（SimulatePrincipalPolicy）で、ロールのポリシー上、必要な操作を
     # 実際の対象に対して実行できるかを判定する（AWS の操作は実行しない）。インスタンスが停止中でも確認できる。
-    # 許可の一覧と設定方法は docs/ec2/ami-publish-release-instance-iam.md。
+    # 許可の一覧と設定方法は docs/ec2/notes/ami-publish/ami-publish-release-instance-iam.md。
     #
     #   A. SSM の管理対象（AmazonSSMManagedInstanceCore 相当）
     #   B. ヘルスチェックの出力を CloudWatch Logs に送る
@@ -20,7 +20,7 @@ module AmiPublish
     # Basic 認証のパラメーターは、既定の aws/ssm キーで暗号化した SecureString であることも確かめる
     # （既定のキーなら KMS の許可は不要。カスタマー管理キーには対応しない）。
     class CheckReleaseInstancePermissions < BaseStep
-      IAM_DOCUMENT = "docs/ec2/ami-publish-release-instance-iam.md"
+      IAM_DOCUMENT = "docs/ec2/notes/ami-publish/ami-publish-release-instance-iam.md"
       DEFAULT_SSM_KEY = "alias/aws/ssm"
 
       # required: false の区分は、不足していても警告にとどめる

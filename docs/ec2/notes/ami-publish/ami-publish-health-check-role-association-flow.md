@@ -2,9 +2,9 @@
 
 > 状態: **実装済み**（紐付けは `ami-publish/lib/ami_publish/steps/attach_release_instance_profile.rb`、解除は `detach_release_instance_profile.rb`。失敗時の解除は、interactor（gem）が紐付けのステップの `rollback` を呼んで行う。ステップの並びは `lib/ami_publish/commands/publish_command.rb`）。実機での確認はまだ行っていない
 >
-> スコープ: AMI 公開パイプライン（[`ami-publish/`](./ami-publish/README.md)、フェーズ 1）で、リリース用インスタンスへのインスタンスプロファイルの紐付けと解除を、パイプラインの CodeBuild のビルドの中で行うフロー。成功時・失敗時・異常終了時の扱いを含む
+> スコープ: AMI 公開パイプライン（[`ami-publish/`](../../ami-publish/README.md)、フェーズ 1）で、リリース用インスタンスへのインスタンスプロファイルの紐付けと解除を、パイプラインの CodeBuild のビルドの中で行うフロー。成功時・失敗時・異常終了時の扱いを含む
 >
-> 関連: [IAM ロールと許可ポリシーの現状](./ami-publish-iam-roles.md) / [トラブルシューティング](./ami-publish-troubleshooting.md) / [開発計画](./ami-publish-development-plan.md)
+> 関連: [IAM ロールと許可ポリシーの現状](./ami-publish-iam-roles.md) / [トラブルシューティング](../../ami-publish-troubleshooting.md) / [開発計画](../../ami-publish-development-plan.md)
 
 ## 決めたこと
 

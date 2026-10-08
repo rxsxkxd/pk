@@ -4,7 +4,7 @@
 >
 > スコープ外: 本番 DB のマイグレーション、Auto Scaling グループの設計全般、複数アカウント・複数リージョンへの配布
 >
-> 関連: [EC2 へのファイル配備](./cfn-s3-userdata-provisioning.md) / [実行権限の補足](./userdata-cfn-init-privileges.md) / [SSM Session Manager による EC2 運用](./ssm-session-manager-operations.md) / [サンプル: nginx + Passenger + Rails](./samples/nginx-passenger-rails/README.md)
+> 関連: [EC2 へのファイル配備](./notes/ec2-operations/cfn-s3-userdata-provisioning.md) / [実行権限の補足](./notes/ec2-operations/userdata-cfn-init-privileges.md) / [SSM Session Manager による EC2 運用](./notes/ec2-operations/ssm-session-manager-operations.md) / [サンプル: nginx + Passenger + Rails](./samples/nginx-passenger-rails/README.md)
 
 ## 結論
 
@@ -208,7 +208,7 @@ flowchart TD
 
 ### スクリプト一覧
 
-インスタンスの初期構築（UserData / cfn-init）で `/opt/release/` に配置しておく。SSM Run Command から root で実行され、アプリの処理は専用ユーザーに権限を下げて実行する（[実行権限の補足](./userdata-cfn-init-privileges.md)）。
+インスタンスの初期構築（UserData / cfn-init）で `/opt/release/` に配置しておく。SSM Run Command から root で実行され、アプリの処理は専用ユーザーに権限を下げて実行する（[実行権限の補足](./notes/ec2-operations/userdata-cfn-init-privileges.md)）。
 
 | スクリプト | 呼び出し元 | フェーズ | 内容 |
 |---|---|---|---|
@@ -661,7 +661,7 @@ Outputs:
       # MinSize / MaxSize / VPCZoneIdentifier / TargetGroupARNs など
 ```
 
-- `WaitOnResourceSignals: true` の場合、新しいインスタンスの UserData の最後で `cfn-signal` を送る必要がある（[完了判定](./cfn-s3-userdata-provisioning.md#3-起動処理の完了判定creationpolicy--cfn-signal)）。シグナルが来なければ更新は失敗し、元の起動テンプレートのバージョンに戻る。
+- `WaitOnResourceSignals: true` の場合、新しいインスタンスの UserData の最後で `cfn-signal` を送る必要がある（[完了判定](./notes/ec2-operations/cfn-s3-userdata-provisioning.md#3-起動処理の完了判定creationpolicy--cfn-signal)）。シグナルが来なければ更新は失敗し、元の起動テンプレートのバージョンに戻る。
 - **AMI の作成と本番への反映を分けたい**（リリース判定を人が行う）場合は、起動テンプレートのスタックと Auto Scaling グループのスタックを分ける。パイプラインは起動テンプレートのスタックだけを更新し、Auto Scaling グループのスタックは承認後に `LaunchTemplateVersion` を渡して更新する。
 
 ### 使わなかった代替: SSM パラメータ参照
@@ -692,7 +692,7 @@ CodeBuild のサービスロール:
 | `ssm:GetParameter` 等（ステージングの設定） | 検証用 DB の接続先など |
 | `logs:CreateLogStream`、`logs:PutLogEvents`（`/myapp/release`） | Run Command の出力 |
 
-`ssm:SendCommand` を持つ主体は、インスタンス上で root としてコマンドを実行できる（[実行権限の補足](./userdata-cfn-init-privileges.md#userdata-を変更できる人は-root-でコードを実行できる)）。CodeBuild には任意のコマンドを実行できる `AWS-RunShellScript` を許可せず、カスタムドキュメントだけに絞れるとより安全である（上記の例では再起動後の確認に使っているため、これもカスタムドキュメントにすればよい）。
+`ssm:SendCommand` を持つ主体は、インスタンス上で root としてコマンドを実行できる（[実行権限の補足](./notes/ec2-operations/userdata-cfn-init-privileges.md#userdata-を変更できる人は-root-でコードを実行できる)）。CodeBuild には任意のコマンドを実行できる `AWS-RunShellScript` を許可せず、カスタムドキュメントだけに絞れるとより安全である（上記の例では再起動後の確認に使っているため、これもカスタムドキュメントにすればよい）。
 
 ## DB と設定の分離
 
@@ -730,7 +730,7 @@ CodeBuild のサービスロール:
 ## 運用上の注意
 
 - **古い AMI の整理**: リリースのたびに AMI と EBS スナップショットが増える。`App=myapp` タグで古いものを探し、最新 N 世代を残して登録解除・スナップショット削除を定期実行する（起動テンプレートの過去バージョンやロールバック先で使う AMI は残す）。
-- **インスタンスの状態の蓄積**: 同じインスタンスを使い回すため、OS パッケージ、gem、手作業の変更が蓄積し、AMI の再現性が下がる。Session Manager での手作業を禁止し（[Session Manager の IAM 制御](./ssm-session-manager-operations.md#4-利用者側-iam-権限とクライアント)）、定期的に CloudFormation でリリース用インスタンスを作り直す。OS の更新も、リリース処理とは別の定期ジョブ（Patch Manager 等）で行う。
+- **インスタンスの状態の蓄積**: 同じインスタンスを使い回すため、OS パッケージ、gem、手作業の変更が蓄積し、AMI の再現性が下がる。Session Manager での手作業を禁止し（[Session Manager の IAM 制御](./notes/ec2-operations/ssm-session-manager-operations.md#4-利用者側-iam-権限とクライアント)）、定期的に CloudFormation でリリース用インスタンスを作り直す。OS の更新も、リリース処理とは別の定期ジョブ（Patch Manager 等）で行う。
 - **ロールバック**: 本番で問題が起きた場合は、起動テンプレートのスタックを前の `AmiId` / `AppVersion` で更新し（新しいバージョンとして前の AMI が設定される）、インスタンスを入れ替える。起動テンプレートを CLI で直接戻すとスタックとの差分になるため行わない。
 - **所要時間の目安**: リリース処理（`bundle install`、RSpec）に加え、AMI 作成（再起動とスナップショット作成）に数分〜十数分かかる。
 

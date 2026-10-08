@@ -65,19 +65,24 @@ docs/ec2/
 ├── ami-publish-development-plan.md    # 中段の開発計画（決定事項 D1〜D10 の正本）
 ├── ami-publish-environment-verification.md  # 中段の稼働環境での確認手順書
 ├── ami-publish-troubleshooting.md     # 中段のトラブルシューティング
-├── ami-publish-release-instance-iam.md # 中段: リリース用インスタンス（AMI の作成元）の IAM ロールの許可と設定方法
-├── ami-publish-iam-roles.md            # 中段: AMI 公開パイプラインに関わる IAM ロールと許可ポリシーの現状（全体の一覧）
-├── ami-publish-health-check-role-association-flow.md # 中段: ヘルスチェックの区間だけリリース用インスタンスにロールを紐付けるフロー
-├── ami-build-image-builder-options-memo.md       # メモ: EC2 Image Builder を使う案（未採用）
-├── e2e-testing-on-codebuild-memo.md              # メモ: CodeBuild での E2E テストの構成（未決定）
-├── launch-template-auto-scaling-readiness-memo.md # メモ: 起動テンプレートを後から Auto Scaling グループで使う余地
 │
-│  ── EC2 の運用に関する個別の設計ドキュメント ──
-├── cfn-s3-userdata-provisioning.md    # CloudFormation + S3 + UserData によるファイル配備
-├── letsencrypt-automation.md          # Let's Encrypt の証明書発行・初期設定の自動化
-├── userdata-cfn-init-privileges.md    # 補足: UserData・cfn-init の実行権限
-├── shell-environment-customization.md # 補足: bash プロンプト等のシェル環境の自動設定
-├── ssm-session-manager-operations.md  # SSM Session Manager による EC2 運用
+│  ── 調査・補足のドキュメントとメモ（主要なもの以外）──
+├── notes/
+│   ├── ami-publish/                   # 中段の補足
+│   │   ├── ami-publish-release-instance-iam.md            # リリース用インスタンス（AMI の作成元）の IAM ロールの許可と設定方法
+│   │   ├── ami-publish-iam-roles.md                       # AMI 公開パイプラインに関わる IAM ロールと許可ポリシーの現状（全体の一覧）
+│   │   ├── ami-publish-health-check-role-association-flow.md # ヘルスチェックの区間だけリリース用インスタンスにロールを紐付けるフロー
+│   │   └── ami-build-image-builder-options-memo.md        # メモ: EC2 Image Builder を使う案（未採用）
+│   ├── release-verification/          # 前段の補足
+│   │   └── e2e-testing-on-codebuild-memo.md               # メモ: CodeBuild での E2E テストの構成（未決定）
+│   ├── instance-provisioning/         # 後段の補足
+│   │   └── launch-template-auto-scaling-readiness-memo.md # メモ: 起動テンプレートを後から Auto Scaling グループで使う余地
+│   └── ec2-operations/                # EC2 の運用に関する個別の調査
+│       ├── cfn-s3-userdata-provisioning.md    # CloudFormation + S3 + UserData によるファイル配備
+│       ├── letsencrypt-automation.md          # Let's Encrypt の証明書発行・初期設定の自動化
+│       ├── userdata-cfn-init-privileges.md    # 補足: UserData・cfn-init の実行権限
+│       ├── shell-environment-customization.md # 補足: bash プロンプト等のシェル環境の自動設定
+│       └── ssm-session-manager-operations.md  # SSM Session Manager による EC2 運用
 │
 └── samples/
     └── nginx-passenger-rails/         # 学習用サンプル（nginx + Passenger + Rails の CloudFormation。リリースの仕組みとは無関係）

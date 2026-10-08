@@ -1,10 +1,10 @@
 # リリース用インスタンス（AMI の作成元）の IAM ロールの許可ポリシー
 
-> スコープ: AMI 公開パイプライン（[`ami-publish/`](./ami-publish/README.md)、フェーズ 1）の AMI の作成元になる、常時起動のリリース用 EC2 インスタンスに付ける IAM ロールの許可ポリシーと、その用意のしかた。**現時点で判明しているもの**をまとめる
+> スコープ: AMI 公開パイプライン（[`ami-publish/`](../../ami-publish/README.md)、フェーズ 1）の AMI の作成元になる、常時起動のリリース用 EC2 インスタンスに付ける IAM ロールの許可ポリシーと、その用意のしかた。**現時点で判明しているもの**をまとめる
 >
 > スコープ外: CodeBuild のサービスロール（パイプラインのスタックが作る）、AMI から起動する本番インスタンスのロール（起動テンプレートのスタックが作る）、フェーズ 3（リリース検証の自動化）で必要になる許可
 >
-> 関連: [確認手順書](./ami-publish-environment-verification.md) / [トラブルシューティング](./ami-publish-troubleshooting.md) / 全ロールの一覧は [IAM ロールと許可ポリシーの現状](./ami-publish-iam-roles.md) / 紐付けのフローは [ヘルスチェックの区間だけロールを紐付けるフロー](./ami-publish-health-check-role-association-flow.md)
+> 関連: [確認手順書](../../ami-publish-environment-verification.md) / [トラブルシューティング](../../ami-publish-troubleshooting.md) / 全ロールの一覧は [IAM ロールと許可ポリシーの現状](./ami-publish-iam-roles.md) / 紐付けのフローは [ヘルスチェックの区間だけロールを紐付けるフロー](./ami-publish-health-check-role-association-flow.md)
 
 ## 前提: どのロールの話か
 
@@ -75,7 +75,7 @@ arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 
 ## 許可以外に必要なこと（参考）
 
-IAM の許可だけでは足りないもの。詳細は [トラブルシューティング 1](./ami-publish-troubleshooting.md#1-ssm-の管理対象になっていない)。
+IAM の許可だけでは足りないもの。詳細は [トラブルシューティング 1](../../ami-publish-troubleshooting.md#1-ssm-の管理対象になっていない)。
 
 | 項目 | 内容 |
 |---|---|
@@ -141,7 +141,7 @@ aws cloudformation wait stack-create-complete --stack-name "$STACK"   # 更新�
 | 確認 | コマンド | 期待結果 |
 |---|---|---|
 | 開始時の確認と許可の判定 | 手元から `bin/ami_publish plan`（AWS に書き込まない） | ステップ 0 で `profile_association_checked`、ステップ 0b で `release_instance_permissions_checked`（`missing` が空）、`profile_association_planned` がログに出る |
-| 紐付け・ヘルスチェック・解除を含めた動作 | パイプラインを実行する（[確認手順書](./ami-publish-environment-verification.md)） | ログに `profile_associated` → `instance_online` → `health_check_passed` → `profile_disassociated` が出る。終了後、手順 1 のコマンドで紐付けが残っていない |
+| 紐付け・ヘルスチェック・解除を含めた動作 | パイプラインを実行する（[確認手順書](../../ami-publish-environment-verification.md)） | ログに `profile_associated` → `instance_online` → `health_check_passed` → `profile_disassociated` が出る。終了後、手順 1 のコマンドで紐付けが残っていない |
 
 パイプラインは、ヘルスチェックを行う実行（既定）では、開始時（AMI を作る前）に、このロールに A〜C の許可があるかを IAM のポリシーシミュレーターで判定する（ステップ 0b。A・C の不足は AMI を作らずに止まる。B の不足は警告のログ `release_instance_permissions_warning` を出して先に進む）。ポリシーシミュレーターは、ネットワークの経路、AWS CLI の有無は判定しない。
 

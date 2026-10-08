@@ -103,7 +103,7 @@ SSM に接続できない状態では Session Manager でインスタンスに�
 | `implicitDeny` | どのポリシーでも許可されていない。許可を付ける |
 | `explicitDeny` | どこかのポリシー（許可の境界や組織の SCP を含む）で明示的に拒否されている。拒否している側を確認する |
 
-**対処**: [リリース用インスタンスの IAM ロール](./ami-publish-release-instance-iam.md) の、区分（A〜C）に対応する許可を付ける。付けた後は、手元から `bin/ami_publish plan` で判定し直せる。
+**対処**: [リリース用インスタンスの IAM ロール](./notes/ami-publish/ami-publish-release-instance-iam.md) の、区分（A〜C）に対応する許可を付ける。付けた後は、手元から `bin/ami_publish plan` で判定し直せる。
 
 Basic 認証のパラメーターの前提を満たしていない場合も、このステップで止まる。
 
@@ -117,14 +117,14 @@ CodeBuild 側が判定の権限を持っていない場合は、`iam:SimulatePri
 
 ## 1b. インスタンスプロファイルの紐付けと解除の問題
 
-AMI 公開ツールは、ヘルスチェックの区間（AMI の作成の直前からヘルスチェックの完了まで）だけ、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルをリリース用インスタンスに紐付ける（[設計](./ami-publish-health-check-role-association-flow.md)）。
+AMI 公開ツールは、ヘルスチェックの区間（AMI の作成の直前からヘルスチェックの完了まで）だけ、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイルをリリース用インスタンスに紐付ける（[設計](./notes/ami-publish/ami-publish-health-check-role-association-flow.md)）。
 
 | 症状 | 意味 | 対処 |
 |---|---|---|
 | ステップ 0 で「別のインスタンスプロファイル ... が紐付いている。AMI は作成していない」 | リリース用インスタンスに、このスタック以外のインスタンスプロファイルが付いている。パイプラインは入れ替えない | 付いているプロファイルが不要なら外す（下のコマンド）。アプリのために必要なら、この方式は使えない（その許可をリリース用インスタンスの IAM ロールのスタックのロールに持たせる設計に変える） |
 | ステップ 1a で「インスタンスプロファイルを紐付けられなかった。AMI は作成していない」 | 紐付けが一定時間（300 秒）内に `associated` にならなかった | 下のコマンドで状態を確認し、途中の紐付けが残っていれば外してから再実行する |
 | ステップ 1a で終了コード 3（`UnauthorizedOperation` / `AccessDenied`） | CodeBuild のロールに `ec2:AssociateIamInstanceProfile` か `iam:PassRole` がない。パイプラインのスタックが古い | 仕組みを再デプロイする（`generated/deploy/<環境>.sh up`） |
-| `No export named ...-release-instance:RoleArn found`（`up` のとき） | リリース用インスタンスの IAM ロールのスタックがデプロイされていない | 先にそのスタックをデプロイする（[リリース用インスタンスの IAM ロール 2-1](./ami-publish-release-instance-iam.md#2-1-スタックで作る推奨)） |
+| `No export named ...-release-instance:RoleArn found`（`up` のとき） | リリース用インスタンスの IAM ロールのスタックがデプロイされていない | 先にそのスタックをデプロイする（[リリース用インスタンスの IAM ロール 2-1](./notes/ami-publish/ami-publish-release-instance-iam.md#2-1-スタックで作る推奨)） |
 | 「ヘルスチェックは成功したが、インスタンスプロファイルの紐付けを解除できなかった。AMI は残している」 | ヘルスチェックの後の解除（4a）に失敗した。AMI は削除していない | 同じ実行を再試行する（AMI を再利用し、紐付け → ヘルスチェック → 解除をやり直す）か、下のコマンドで外してから再試行する |
 | ログに `profile_disassociate_failed`（失敗の後） | 1〜4 のどこかで失敗した後の解除（4x）にも失敗した。元の失敗はそのまま報告される | 下のコマンドで外す。外さなくても次の実行はそのまま使い、最後に解除する |
 | パイプラインの外で紐付けが残っている（`describe-iam-instance-profile-associations` で `associated`） | CodeBuild のタイムアウト・強制終了で、解除の処理が動かなかった | 下のコマンドで外す。外さなくても次の実行はそのまま使い、最後に解除する |

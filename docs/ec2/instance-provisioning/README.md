@@ -31,5 +31,5 @@ Auto Scaling グループで複数台構成にする余地がある。その場�
 
 ## 関連ドキュメント
 
-- [メモ: 起動テンプレートを後から Auto Scaling グループで使うための余地](../launch-template-auto-scaling-readiness-memo.md)
+- [メモ: 起動テンプレートを後から Auto Scaling グループで使うための余地](../notes/instance-provisioning/launch-template-auto-scaling-readiness-memo.md)
 - [全体の設計の「起動テンプレート更新後の反映」](../ami-build-pipeline.md)

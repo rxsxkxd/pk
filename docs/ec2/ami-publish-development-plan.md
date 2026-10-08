@@ -2,7 +2,7 @@
 
 > スコープ: [リリース検証・AMI 化・起動テンプレート更新の自動化](./ami-build-pipeline.md) のうち、**`create-image`（インスタンス再起動）以降**の処理の開発計画。AMI 作成、`available` 待ち、再起動後の確認、起動テンプレートのスタック更新と、それを動かす CodeBuild / CodePipeline・CloudFormation 定義を対象とする
 >
-> スコープ外: `create-image` より前の処理（リリース検証、配置済みバージョンの確認、後片付け）、起動テンプレートを使った実際のインスタンスの構築・入れ替え（Auto Scaling グループを含む）、E2E（[メモ](./e2e-testing-on-codebuild-memo.md)）
+> スコープ外: `create-image` より前の処理（リリース検証、配置済みバージョンの確認、後片付け）、起動テンプレートを使った実際のインスタンスの構築・入れ替え（Auto Scaling グループを含む）、E2E（[メモ](./notes/release-verification/e2e-testing-on-codebuild-memo.md)）
 >
 > 前提: AMI 作成・起動テンプレート更新は、リリース検証とは**別の CodePipeline（以下「AMI 公開パイプライン」）**として先行して運用する
 
@@ -465,5 +465,5 @@ flowchart LR
 ## 関連
 
 - [Rails アプリのリリース検証・AMI 化・起動テンプレート更新の自動化](./ami-build-pipeline.md)（全体設計。パイプライン分割の反映は作業中）
-- [メモ: AMI 作成に EC2 Image Builder を使う案（未採用）](./ami-build-image-builder-options-memo.md)
-- [メモ: CodeBuild での E2E テストの構成](./e2e-testing-on-codebuild-memo.md)
+- [メモ: AMI 作成に EC2 Image Builder を使う案（未採用）](./notes/ami-publish/ami-build-image-builder-options-memo.md)
+- [メモ: CodeBuild での E2E テストの構成](./notes/release-verification/e2e-testing-on-codebuild-memo.md)

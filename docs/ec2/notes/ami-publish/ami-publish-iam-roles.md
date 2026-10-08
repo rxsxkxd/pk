@@ -1,10 +1,10 @@
 # AMI 公開パイプラインの IAM ロールと許可ポリシーの現状
 
-> スコープ: AMI 公開パイプライン（[`ami-publish/`](./ami-publish/README.md)、フェーズ 1）に関わる IAM ロールと許可ポリシーの**現時点の構成**。生成されるスタックのテンプレート（`ami-publish/generated/cloudformation/<環境>/`）から書き出したもの
+> スコープ: AMI 公開パイプライン（[`ami-publish/`](../../ami-publish/README.md)、フェーズ 1）に関わる IAM ロールと許可ポリシーの**現時点の構成**。生成されるスタックのテンプレート（`ami-publish/generated/cloudformation/<環境>/`）から書き出したもの
 >
 > 正本は生成ツールの定義（`ami-publish/internal/definitions/`）。定義を変えたら、このドキュメントも直す
 >
-> 関連: [リリース用インスタンスの IAM ロール（設定方法）](./ami-publish-release-instance-iam.md) / [開発計画](./ami-publish-development-plan.md) / [トラブルシューティング](./ami-publish-troubleshooting.md)
+> 関連: [リリース用インスタンスの IAM ロール（設定方法）](./ami-publish-release-instance-iam.md) / [開発計画](../../ami-publish-development-plan.md) / [トラブルシューティング](../../ami-publish-troubleshooting.md)
 
 以下の例は、`application_name` が `myapp`、環境名が `staging` の場合。
 
@@ -112,7 +112,7 @@ flowchart TD
 
 - **定義**: `internal/definitions/launch_template_stack.go`。リソースは `InstanceRole` と `InstanceProfile`。起動テンプレートの `IamInstanceProfile` に指定している
 - **許可**: AWS 管理ポリシー `AmazonSSMManagedInstanceCore` だけ
-- 本番インスタンスの構築はフェーズ 2（[インスタンスの構築](./instance-provisioning/README.md)）の範囲。アプリが必要とする許可は、フェーズ 2 で見直す
+- 本番インスタンスの構築はフェーズ 2（[インスタンスの構築](../../instance-provisioning/README.md)）の範囲。アプリが必要とする許可は、フェーズ 2 で見直す
 
 ## 5. Basic 認証のパラメーターの読み取り用の管理ポリシー
 

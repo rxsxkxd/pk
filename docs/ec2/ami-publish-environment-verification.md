@@ -4,7 +4,7 @@
 >
 > スコープ外: コードの修正、AWS を使わない確認（済み。[検証状況](./ami-publish/README.md#検証状況)）
 >
-> 関連: [開発計画: AMI 作成以降](./ami-publish-development-plan.md) / 失敗したときは [トラブルシューティング](./ami-publish-troubleshooting.md) / リリース用インスタンスのロールの許可は [リリース用インスタンスの IAM ロール](./ami-publish-release-instance-iam.md)
+> 関連: [開発計画: AMI 作成以降](./ami-publish-development-plan.md) / 失敗したときは [トラブルシューティング](./ami-publish-troubleshooting.md) / リリース用インスタンスのロールの許可は [リリース用インスタンスの IAM ロール](./notes/ami-publish/ami-publish-release-instance-iam.md)
 
 ## 残っている作業の一覧
 
@@ -81,7 +81,7 @@ cfn-lint generated/cloudformation/*/*.yml
 
 ## 3. 仕組みのデプロイ
 
-最初に、リリース用インスタンスの IAM ロールのスタック（`myapp-staging-release-instance`）をデプロイする。パイプラインのスタックがその Export を参照するため、`up` より先に必要。このスタックはデプロイ用シェルスクリプトに含めないので、[リリース用インスタンスの IAM ロール 手順 2](./ami-publish-release-instance-iam.md#2-リリース用インスタンスの-iam-ロールのスタックをデプロイする) のコマンドでデプロイする（インスタンスへの紐付けはしない）。
+最初に、リリース用インスタンスの IAM ロールのスタック（`myapp-staging-release-instance`）をデプロイする。パイプラインのスタックがその Export を参照するため、`up` より先に必要。このスタックはデプロイ用シェルスクリプトに含めないので、[リリース用インスタンスの IAM ロール 手順 2](./notes/ami-publish/ami-publish-release-instance-iam.md#2-リリース用インスタンスの-iam-ロールのスタックをデプロイする) のコマンドでデプロイする（インスタンスへの紐付けはしない）。
 
 続いて、仕組みの生成ツールが出力したデプロイ用シェルスクリプトを実行する（スタック名は命名規則どおりに入っている）。3 つのスタックとも変更セットを作るだけで反映はしないので、内容を確認してから、ヘルスチェック → 起動テンプレート → AMI 公開パイプラインの順に反映する（詳細は [README](./ami-publish/README.md#4-仕組みのデプロイaws-cli)）。
 

@@ -6,7 +6,7 @@ module AmiPublish
     # （AttachReleaseInstanceProfile と DetachReleaseInstanceProfile が使う）。
     #
     # 紐付けるのは、リリース用インスタンスの IAM ロールのスタックのインスタンスプロファイル
-    # （パイプラインのスタックの出力 ReleaseInstanceProfileArn）。設計は docs/ec2/ami-publish-health-check-role-association-flow.md。
+    # （パイプラインのスタックの出力 ReleaseInstanceProfileArn）。設計は docs/ec2/notes/ami-publish/ami-publish-health-check-role-association-flow.md。
     # 紐付けたかどうかは context.profile_attached で受け渡す。
     module ReleaseInstanceProfileAssociation
       # 紐付け・解除が完了するまでの待機時間の上限（通常は数秒で終わる）

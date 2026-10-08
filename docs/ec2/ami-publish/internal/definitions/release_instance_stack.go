@@ -5,7 +5,7 @@ import "fmt"
 // ReleaseInstanceStack は、リリース用インスタンスの IAM ロールのスタックの CloudFormation テンプレートを返す。
 //
 // リリース用インスタンス（AMI の作成元）に付ける IAM ロールとインスタンスプロファイルを作る。
-// 許可は docs/ec2/ami-publish-release-instance-iam.md の A〜C:
+// 許可は docs/ec2/notes/ami-publish/ami-publish-release-instance-iam.md の A〜C:
 //
 //	A. SSM の管理対象（AWS 管理ポリシー AmazonSSMManagedInstanceCore）
 //	B. ヘルスチェックの出力を CloudWatch Logs に送る（ロググループは命名規則から決まる）
@@ -15,7 +15,7 @@ import "fmt"
 // （up / down）には含めない。フェーズ 3（リリース検証）でインスタンスの更新の仕組みに移す可能性がある。
 // インスタンスプロファイルとリリース用インスタンスの紐付けは、このスタックでは行わない。AMI 公開ツールが、
 // ヘルスチェックのための区間（AMI の作成の直前からヘルスチェックの完了まで）だけ紐付け、終わったら解除する
-// （docs/ec2/ami-publish-health-check-role-association-flow.md）。
+// （docs/ec2/notes/ami-publish/ami-publish-health-check-role-association-flow.md）。
 // ロールとインスタンスプロファイルの ARN は Export し、AMI 公開パイプラインのスタックが参照する
 // （CodeBuild のロールの iam:PassRole・許可の判定の対象と、AMI 公開ツールが使う値）。
 // そのため、このスタックは AMI 公開パイプラインのスタックより先にデプロイしておく。

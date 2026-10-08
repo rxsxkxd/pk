@@ -1,6 +1,6 @@
 # サンプル: nginx + Passenger + Rails（EC2 単体 / CloudFormation）
 
-> 目的: [EC2 へのファイル配備 — CloudFormation + S3 + UserData](../../cfn-s3-userdata-provisioning.md) の考え方を、最小構成で動かして確認するためのサンプル
+> 目的: [EC2 へのファイル配備 — CloudFormation + S3 + UserData](../../notes/ec2-operations/cfn-s3-userdata-provisioning.md) の考え方を、最小構成で動かして確認するためのサンプル
 >
 > 本番利用は想定しない（HTTP のみ、単体インスタンス、SQLite、アプリはその場で生成）
 
@@ -29,7 +29,7 @@ Ubuntu を選んでいるのは、Passenger の nginx モジュールが公式 A
 
 ## UserData の処理内容
 
-[実行権限の補足](../../userdata-cfn-init-privileges.md)のとおり UserData は root で実行される。アプリの生成・`bundle install` は専用ユーザー `rails` に `runuser` で権限を下げて実行する。
+[実行権限の補足](../../notes/ec2-operations/userdata-cfn-init-privileges.md)のとおり UserData は root で実行される。アプリの生成・`bundle install` は専用ユーザー `rails` に `runuser` で権限を下げて実行する。
 
 1. `aws-cfn-bootstrap` を venv に導入（Ubuntu には `cfn-signal` が同梱されていないため）し、失敗時に `cfn-signal -e 1` を送る `trap` を設定
 2. Ruby、ビルドツール、Rails をインストール
@@ -78,7 +78,7 @@ aws cloudformation describe-stacks \
 aws ssm start-session --target <InstanceId>
 ```
 
-Session Manager では `sh` が起動するため、`bash -l` を実行してから作業するとよい（[シェル環境の補足](../../shell-environment-customization.md#session-manager-で接続する場合)）。
+Session Manager では `sh` が起動するため、`bash -l` を実行してから作業するとよい（[シェル環境の補足](../../notes/ec2-operations/shell-environment-customization.md#session-manager-で接続する場合)）。
 
 | 確認内容 | コマンド |
 |---|---|
@@ -101,9 +101,9 @@ aws cloudformation delete-stack --stack-name passenger-rails-sample
 
 | 項目 | サンプル | 実運用での対応 |
 |---|---|---|
-| アプリの入手 | インスタンス上で `rails new` | CI でビルドした成果物を S3 に置き、UserData で取得（[ファイル配備のドキュメント](../../cfn-s3-userdata-provisioning.md#実装例)）。インスタンスロールに `s3:GetObject` を追加し、AWS CLI を導入する（Ubuntu では `snap install aws-cli --classic`） |
-| 更新 | 更新手段なし | インスタンス置換、SSM、CodeDeploy 等（[更新戦略](../../cfn-s3-userdata-provisioning.md#更新戦略)） |
-| HTTPS | なし（`force_ssl` を無効化） | ALB + ACM、または Let's Encrypt（[Let's Encrypt のドキュメント](../../letsencrypt-automation.md)）。HTTPS 化したら `force_ssl` / `assume_ssl` を有効に戻す |
+| アプリの入手 | インスタンス上で `rails new` | CI でビルドした成果物を S3 に置き、UserData で取得（[ファイル配備のドキュメント](../../notes/ec2-operations/cfn-s3-userdata-provisioning.md#実装例)）。インスタンスロールに `s3:GetObject` を追加し、AWS CLI を導入する（Ubuntu では `snap install aws-cli --classic`） |
+| 更新 | 更新手段なし | インスタンス置換、SSM、CodeDeploy 等（[更新戦略](../../notes/ec2-operations/cfn-s3-userdata-provisioning.md#更新戦略)） |
+| HTTPS | なし（`force_ssl` を無効化） | ALB + ACM、または Let's Encrypt（[Let's Encrypt のドキュメント](../../notes/ec2-operations/letsencrypt-automation.md)）。HTTPS 化したら `force_ssl` / `assume_ssl` を有効に戻す |
 | DB | SQLite（インスタンス上） | RDS。接続情報は Secrets Manager / Parameter Store から取得 |
 | シークレット | `rails new` で生成した `master.key` がインスタンス上にある | `RAILS_MASTER_KEY` や `SECRET_KEY_BASE` を Secrets Manager から取得し、`passenger_env_var` で渡す |
 | Ruby のバージョン | Ubuntu 標準（24.04 では 3.2 系） | アプリが要求するバージョンを rbenv 等で導入し、`passenger_ruby` で指定。起動時間を短くするならカスタム AMI に焼き込む |

@@ -25,4 +25,4 @@
 ## 関連ドキュメント
 
 - [リリース検証の設計（リリーススクリプト、ディレクトリ構成、DB と設定の分離）](../ami-build-pipeline.md)
-- [メモ: CodeBuild での E2E テストの構成](../e2e-testing-on-codebuild-memo.md)
+- [メモ: CodeBuild での E2E テストの構成](../notes/release-verification/e2e-testing-on-codebuild-memo.md)

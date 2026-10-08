@@ -4,7 +4,7 @@
 >
 > スコープ外: オンプレミスサーバー（ハイブリッドアクティベーション）、Patch Manager 等 Session Manager 以外の Systems Manager 機能の詳細
 >
-> 関連: [EC2 へのファイル配備](./cfn-s3-userdata-provisioning.md) / [実行権限の補足](./userdata-cfn-init-privileges.md) / [シェル環境カスタマイズの補足](./shell-environment-customization.md) / [サンプル: nginx + Passenger + Rails](./samples/nginx-passenger-rails/README.md)
+> 関連: [EC2 へのファイル配備](./cfn-s3-userdata-provisioning.md) / [実行権限の補足](./userdata-cfn-init-privileges.md) / [シェル環境カスタマイズの補足](./shell-environment-customization.md) / [サンプル: nginx + Passenger + Rails](../../samples/nginx-passenger-rails/README.md)
 
 ## 結論
 

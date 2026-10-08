@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EC2 の運用・自動化に関する**日本語の設計ドキュメント群**と、その実装である **AMI 公開パイプライン（`ami-publish/`）** が同居している。ドキュメントの追記・修正は日本語で行い、用語はできるだけ省略しない（例: 「生成 YAML」ではなく何の生成物かまで書く）。
 
-- 中心となる設計: `ami-build-pipeline.md`（リリース検証 → AMI 化 → 起動テンプレート）→ 実装範囲を絞った `ami-publish-development-plan.md`（決定事項 D1〜D10 の正本）→ 稼働環境での確認は `ami-publish-environment-verification.md`、失敗時の対処は `ami-publish-troubleshooting.md`
+- 中心となる設計: `ami-build-pipeline.md`（リリース検証 → AMI 化 → 起動テンプレート）→ 実装範囲を絞った `ami-publish-development-plan.md`（決定事項 D1〜D10 の正本）→ 稼働環境での確認は `ami-publish-environment-verification.md`、失敗時の対処は `ami-publish-troubleshooting.md`。主要なドキュメント以外の調査・補足のドキュメントとメモは `notes/` に置く（段階ごとに `notes/ami-publish/`・`notes/release-verification/`・`notes/instance-provisioning/`、EC2 の運用に関する個別の調査は `notes/ec2-operations/`）
 - `*-memo.md` は**採用しなかった・保留中の選択肢の備忘録**。採用済みの設計として扱わない
 - 図は Mermaid。見やすさのため縦向き（`flowchart TD`）と `%%{init: ...}%%` の文字サイズ指定を使っている箇所がある
 - `samples/nginx-passenger-rails/` は独立した学習用サンプルで、`ami-publish` とは無関係
@@ -31,7 +31,7 @@ EC2 の運用・自動化に関する**日本語の設計ドキュメント群**
 AMI 公開ツールの流れは `lib/ami_publish/commands/publish_command.rb` のステップの並びがそのまま正本:
 CheckInstanceState（状態と、インスタンスプロファイルの紐付けが「なし」か自分のものかの確認）→ CheckReleaseInstancePermissions（リリース用インスタンスのロールの許可を IAM のポリシーシミュレーターで判定）→ AttachReleaseInstanceProfile（紐付け）→ CreateImage → WaitImageAvailable → StartInstanceIfStopped（開始時に停止中だった場合だけ起動。停止には戻さない）→ WaitInstanceOnline → HealthCheck → DetachReleaseInstanceProfile（解除）→ UpdateLaunchTemplateStack → PublishOutputs。
 ステップは interactor（gem）の Interactor で、並びは Commands の Organizer（`organize`）が決める。値と部品（configuration・clients・logger）は `context`（`Interactor::Context`）で受け渡す。後のステップが失敗すると、interactor が実行済みのステップの `rollback` を逆順に呼ぶ（紐付けの失敗時の解除はこれで行う）。ステップごとのログ（`step_started` など）は `BaseStep` の around フックが出す（around フックは子クラスに引き継がれないので `BaseStep.inherited` で付けている）。
-リリース用インスタンスには、ヘルスチェックの区間だけインスタンスプロファイルを紐付ける（`docs/ec2/ami-publish-health-check-role-association-flow.md`）。そのため CodeBuild のロールは、リリース用インスタンスのロールだけを EC2 に渡す `iam:PassRole` を持つ（これ以外の `iam:PassRole` は持たせない。Go のテストで確認）。
+リリース用インスタンスには、ヘルスチェックの区間だけインスタンスプロファイルを紐付ける（`docs/ec2/notes/ami-publish/ami-publish-health-check-role-association-flow.md`）。そのため CodeBuild のロールは、リリース用インスタンスのロールだけを EC2 に渡す `iam:PassRole` を持つ（これ以外の `iam:PassRole` は持たせない。Go のテストで確認）。
 `rollback` は FindPublishedImage → UpdateLaunchTemplateStack → PublishOutputs。
 ヘルスチェックは既定で行い、パイプライン変数 `HEALTH_CHECK=false`（`--health-check false`）で省略できる。省略時は SSM に依存する処理（紐付けの確認、ロールの許可の確認、紐付けと解除、停止中のインスタンスの起動、接続待ち、ヘルスチェック）をすべて行わず、AMI に `HealthCheck=skipped` を付ける（判定は `BaseStep#health_check?` と `BaseStep#skipped_without_health_check?`）。
 

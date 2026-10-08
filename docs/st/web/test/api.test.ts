@@ -25,8 +25,8 @@ describe('grantForPage (ticket grant API, JSON)', () => {
   });
 
   test('API errors become ApiError with the code and status', async () => {
-    stubFetch(json(422, { error: { code: 'IMAGE_INVALID', message: 'image was rejected' } }));
-    await expect(grantForPage(API, photo())).rejects.toMatchObject({ code: 'IMAGE_INVALID', status: 422 });
+    stubFetch(json(422, { error: { code: 'IMAGE_RETRY', message: 'image could not be verified; take it again' } }));
+    await expect(grantForPage(API, photo())).rejects.toMatchObject({ code: 'IMAGE_RETRY', status: 422 });
   });
 
   test('a 201 of the wrong shape is UNEXPECTED', async () => {

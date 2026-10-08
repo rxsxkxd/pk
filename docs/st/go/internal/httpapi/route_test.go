@@ -10,7 +10,7 @@ import (
 )
 
 func TestRoute(t *testing.T) {
-	h := newHandlers(t, analyzer.AlwaysValid{})
+	h := newHandlers(t, analyzer.AlwaysPass{})
 	code := "20261001194300-7K3QX9MZ2P"
 	signed := signedGet(h, code, h.Signer.Sign(code))
 	withKey := func(req Request, key string) Request { req.RouteKey = key; return req }

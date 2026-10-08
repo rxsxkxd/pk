@@ -7,11 +7,18 @@ from analyzer import Analysis, ApiKey, NoApiKey, analyze
 
 
 class Analyze(unittest.TestCase):
-    def test_every_image_is_valid_and_fingerprinted(self) -> None:
+    def test_every_image_passes_and_is_fingerprinted(self) -> None:
         image = bytes.fromhex("ffd8ffe000104a464946")
         self.assertEqual(
             analyze(image),
-            Analysis(valid=True, reason="stub", size=len(image), sha256=hashlib.sha256(image).hexdigest()),
+            Analysis(
+                result="PASS",
+                confidence=1.0,
+                detected="stub",
+                reason="stub: no analysis",
+                size=len(image),
+                sha256=hashlib.sha256(image).hexdigest(),
+            ),
         )
 
 

@@ -66,7 +66,7 @@ fn shared_cases() {
                 panic!("{name}: body is not text")
             };
             let json: Value = serde_json::from_str(text).unwrap();
-            assert_eq!(json["valid"], case["valid"], "{name}");
+            assert_eq!(json["result"], case["result"], "{name}");
             // The log proves the bytes arrived unchanged: same length and SHA-256 as what was sent.
             assert_eq!(logs[0]["bytes"], json!(body.len()), "{name}");
             assert_eq!(logs[0]["sha256"], json!(hex::encode(Sha256::digest(&body))), "{name}");
@@ -109,11 +109,15 @@ fn same_response_body_and_log_keys_as_node_and_python() {
     let Body::Text(text) = res.body() else {
         panic!("body is not text")
     };
-    assert_eq!(text, r#"{"valid":true,"reason":"stub"}"#);
+    // Same response as the Node and Python stubs (Node writes 1.0 as 1; same JSON value).
+    assert_eq!(
+        text,
+        r#"{"confidence":1.0,"detected":"stub","reason":"stub: no analysis","result":"PASS","status":200}"#
+    );
     let logs = logs.lock().unwrap();
     let keys: Vec<&str> = logs[0].keys().map(String::as_str).collect();
     // No request context here, so requestId is omitted (as Node's JSON.stringify drops undefined).
-    assert_eq!(keys, ["level", "msg", "status", "bytes", "sha256", "valid"]);
+    assert_eq!(keys, ["level", "msg", "status", "bytes", "sha256", "result"]);
 }
 
 #[test]

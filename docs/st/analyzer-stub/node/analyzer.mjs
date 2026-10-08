@@ -24,10 +24,18 @@ export class NoApiKey {
   }
 }
 
-// 画像を判定する。スタブは解析せず、受け付けた画像をすべて valid とする。
-// size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの。
+// 画像を判定する。スタブは解析せず、受け付けた画像をすべて PASS とする。
+// 判定結果は本物の解析サーバーの応答の項目（result: 'PASS' | 'REJECT' | 'RETRY'、confidence、detected、reason）。
+// size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの（応答には入れず、ログに出す）。
 export function analyze(image) {
-  return { valid: true, reason: 'stub', size: image.length, sha256: createHash('sha256').update(image).digest('hex') };
+  return {
+    result: 'PASS',
+    confidence: 1.0,
+    detected: 'stub',
+    reason: 'stub: no analysis',
+    size: image.length,
+    sha256: createHash('sha256').update(image).digest('hex'),
+  };
 }
 
 function sha256(value) {

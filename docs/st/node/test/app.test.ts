@@ -10,8 +10,8 @@ import { createApp, type Deps } from '../src/app.ts';
 import { MAX_IMAGE_BYTES } from '../src/image.ts';
 import { createExampleApp } from '../src/example.ts';
 import { qrPng } from '../src/shared.ts';
-import { VerifierError, generateTicket, newSigner, type Verifier, type Log } from '../src/domain.ts';
-import { alwaysValid, httpAnalyzer, loadConfig, newAnalyzer } from '../src/infra.ts';
+import { VerifierError, generateTicket, newSigner, type Verdict, type Verifier, type Log } from '../src/domain.ts';
+import { alwaysPass, httpAnalyzer, loadConfig, newAnalyzer } from '../src/infra.ts';
 
 const root = new URL('../../', import.meta.url);
 const vectors = (name: string) => JSON.parse(readFileSync(new URL(`testdata/${name}`, root), 'utf8'));
@@ -32,7 +32,7 @@ const GRANT = '/v1/tickets';
 
 type LambdaHandler = (event: Event) => Promise<Result>;
 
-function newRoute(verifier: Verifier = alwaysValid, log: Log = () => {}) {
+function newRoute(verifier: Verifier = alwaysPass, log: Log = () => {}) {
   const deps: Deps = {
     config: { publicBaseUrl: BASE, publicOrigin: BASE, suffixLength: 8 },
     verifier,
@@ -109,10 +109,10 @@ const header = (res: Result, name: string) =>
   String(Object.entries(res.headers ?? {}).find(([k]) => k.toLowerCase() === name.toLowerCase())?.[1] ?? '');
 const errorCode = (res: Result) => JSON.parse(res.body ?? '').error.code as string;
 const stub =
-  (result: Partial<{ valid: boolean; reason: string }>, err?: Error): Verifier =>
+  (result: Partial<Verdict>, err?: Error): Verifier =>
   async () => {
     if (err) throw err;
-    return { valid: true, reason: '', ...result };
+    return { result: 'PASS', ...result };
   };
 
 function assertCommonHeaders(res: Result) {
@@ -214,7 +214,7 @@ describe('qr', () => {
 describe('A: POST /v1/tickets/qr-inline', () => {
   test('grants a ticket and returns the QR as base64 JSON', async () => {
     let sent: Uint8Array | undefined;
-    const { handle } = newRoute(async (img) => ((sent = img.data), { valid: true, reason: '' }));
+    const { handle } = newRoute(async (img) => ((sent = img.data), { result: 'PASS' }));
     const res = await handle(await formEvent(GRANT_INLINE, 'image', JPEG));
 
     assert.equal(res.statusCode, 201, String(res.body));
@@ -232,28 +232,28 @@ describe('A: POST /v1/tickets/qr-inline', () => {
   const cases: Array<[string, Verifier, () => Promise<Event>, number, string]> = [
     [
       'json instead of form',
-      alwaysValid,
+      alwaysPass,
       async () => rawEvent(GRANT_INLINE, 'application/json', '{}'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'urlencoded instead of multipart',
-      alwaysValid,
+      alwaysPass,
       async () => rawEvent(GRANT_INLINE, 'application/x-www-form-urlencoded', 'image=x'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'no boundary',
-      alwaysValid,
+      alwaysPass,
       async () => rawEvent(GRANT_INLINE, 'multipart/form-data', 'x'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'image sent as a text field',
-      alwaysValid,
+      alwaysPass,
       async () =>
         rawEvent(
           GRANT_INLINE,
@@ -265,43 +265,38 @@ describe('A: POST /v1/tickets/qr-inline', () => {
     ],
     [
       'broken multipart',
-      alwaysValid,
+      alwaysPass,
       async () => rawEvent(GRANT_INLINE, 'multipart/form-data; boundary=xyz', 'garbage'),
       400,
       'BAD_REQUEST',
     ],
     [
       'empty boundary',
-      alwaysValid,
+      alwaysPass,
       () => withContentType(formEvent(GRANT_INLINE, 'image', JPEG), 'multipart/form-data; boundary=""'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
     [
       'boundary without value',
-      alwaysValid,
+      alwaysPass,
       () => withContentType(formEvent(GRANT_INLINE, 'image', JPEG), 'multipart/form-data; boundary'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    ['broken after the image part', alwaysValid, () => brokenAfterImage(GRANT_INLINE), 400, 'BAD_REQUEST'],
-    ['missing image field', alwaysValid, () => formEvent(GRANT_INLINE, 'file', JPEG), 400, 'BAD_REQUEST'],
-    ['empty image', alwaysValid, () => formEvent(GRANT_INLINE, 'image', new Uint8Array()), 400, 'BAD_REQUEST'],
+    ['broken after the image part', alwaysPass, () => brokenAfterImage(GRANT_INLINE), 400, 'BAD_REQUEST'],
+    ['missing image field', alwaysPass, () => formEvent(GRANT_INLINE, 'file', JPEG), 400, 'BAD_REQUEST'],
+    ['empty image', alwaysPass, () => formEvent(GRANT_INLINE, 'image', new Uint8Array()), 400, 'BAD_REQUEST'],
     [
       'not an image',
-      alwaysValid,
+      alwaysPass,
       () => formEvent(GRANT_INLINE, 'image', Buffer.from('hello')),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    ['too large', alwaysValid, () => formEvent(GRANT_INLINE, 'image', big), 413, 'PAYLOAD_TOO_LARGE'],
-    [
-      'rejected',
-      stub({ valid: false, reason: 'blurry' }),
-      () => formEvent(GRANT_INLINE, 'image', JPEG),
-      422,
-      'IMAGE_INVALID',
-    ],
+    ['too large', alwaysPass, () => formEvent(GRANT_INLINE, 'image', big), 413, 'PAYLOAD_TOO_LARGE'],
+    ['REJECT', stub({ result: 'REJECT' }), () => formEvent(GRANT_INLINE, 'image', JPEG), 422, 'IMAGE_REJECTED'],
+    ['RETRY', stub({ result: 'RETRY' }), () => formEvent(GRANT_INLINE, 'image', JPEG), 422, 'IMAGE_RETRY'],
     [
       'upstream error',
       stub({}, new VerifierError('upstream', 'boom')),
@@ -397,14 +392,15 @@ describe('B-1 errors are HTML views', () => {
   const cases: Array<[string, Verifier, () => Promise<Event>, number, string]> = [
     [
       'json instead of form',
-      alwaysValid,
+      alwaysPass,
       async () => rawEvent(GRANT, 'application/json', '{}'),
       415,
       'UNSUPPORTED_MEDIA_TYPE',
     ],
-    ['missing image field', alwaysValid, () => formEvent(GRANT, 'file', JPEG), 400, 'BAD_REQUEST'],
-    ['not an image', alwaysValid, () => formEvent(GRANT, 'image', Buffer.from('hello')), 415, 'UNSUPPORTED_MEDIA_TYPE'],
-    ['rejected', stub({ valid: false }), () => formEvent(GRANT, 'image', JPEG), 422, 'IMAGE_INVALID'],
+    ['missing image field', alwaysPass, () => formEvent(GRANT, 'file', JPEG), 400, 'BAD_REQUEST'],
+    ['not an image', alwaysPass, () => formEvent(GRANT, 'image', Buffer.from('hello')), 415, 'UNSUPPORTED_MEDIA_TYPE'],
+    ['REJECT', stub({ result: 'REJECT' }), () => formEvent(GRANT, 'image', JPEG), 422, 'IMAGE_REJECTED'],
+    ['RETRY', stub({ result: 'RETRY' }), () => formEvent(GRANT, 'image', JPEG), 422, 'IMAGE_RETRY'],
   ];
   for (const [name, analyzer, makeEvent, status, code] of cases) {
     test(name, async () => {
@@ -508,8 +504,10 @@ describe('http analyzer client', () => {
   const analyze = (a: Awaited<ReturnType<typeof client>>) => a({ data: JPEG, mimeType: 'image/jpeg' });
 
   test('posts the image bytes unchanged as octet-stream with the API key', async () => {
-    const a = await client(json(200, { valid: true, reason: 'ok' }));
-    assert.deepEqual(await analyze(a), { valid: true, reason: 'ok' });
+    const a = await client(
+      json(200, { confidence: 0.97, detected: 'certificate', reason: 'ok', result: 'PASS', status: 200 }),
+    );
+    assert.deepEqual(await analyze(a), { result: 'PASS' }); // only result is read
     assert.equal(received.length, 1);
     assert.equal(received[0].headers['content-type'], 'application/octet-stream');
     assert.equal(received[0].headers['x-api-key'], 'k');
@@ -517,29 +515,55 @@ describe('http analyzer client', () => {
   });
 
   test('without an API key, no x-api-key header is sent', async () => {
-    const a = await clientWithKey(undefined, json(200, { valid: true }));
-    assert.equal((await analyze(a)).valid, true);
+    const a = await clientWithKey(undefined, json(200, { result: 'PASS' }));
+    assert.equal((await analyze(a)).result, 'PASS');
     assert.equal(received[0].headers['x-api-key'], undefined);
   });
 
-  test('valid: false is a result, not an error', async () => {
-    assert.deepEqual(await analyze(await client(json(200, { valid: false }))), { valid: false, reason: '' });
+  test('every response body is logged as it came (not parsed), 2xx and others alike', async () => {
+    const pass = '{"confidence":0.97,"detected":"certificate","reason":"ok","result":"PASS","status":200}';
+    const cases: Array<[Reply, string, number, string]> = [
+      [(_req, res) => res.writeHead(200).end(pass), 'INFO', 200, pass],
+      [
+        (_req, res) => res.writeHead(401).end('{"error":"invalid api key"}'),
+        'WARN',
+        401,
+        '{"error":"invalid api key"}',
+      ],
+      [(_req, res) => res.writeHead(502).end('<html>bad gateway</html>'), 'WARN', 502, '<html>bad gateway</html>'],
+    ];
+    for (const [reply, level, status, body] of cases) {
+      await listening;
+      replies = [reply, reply];
+      received.length = 0;
+      const logs: Array<[string, string, Record<string, unknown> | undefined]> = [];
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/analyze`;
+      const a = httpAnalyzer({ url, apiKey: 'k', timeoutMs: 200, log: (l, m, f) => logs.push([l, m, f]) });
+      await analyze(a).catch(() => {});
+      assert.deepEqual(logs[0], [level, 'analyzer response', { status, body }]);
+    }
+  });
+
+  test('REJECT and RETRY are results, not errors of the client', async () => {
+    assert.deepEqual(await analyze(await client(json(200, { result: 'REJECT', reason: 'x' }))), { result: 'REJECT' });
+    assert.deepEqual(await analyze(await client(json(200, { result: 'RETRY' }))), { result: 'RETRY' });
   });
 
   // [name, server replies in order, expected request count, expected outcome]
-  const retries: Array<[string, Reply[], number, 'valid' | 'upstream' | 'timeout']> = [
-    ['5xx is retried once and succeeds', [json(500, {}), json(200, { valid: true })], 2, 'valid'],
-    ['no answer is retried once and succeeds', [hang, json(200, { valid: true })], 2, 'valid'],
+  const retries: Array<[string, Reply[], number, 'PASS' | 'upstream' | 'timeout']> = [
+    ['5xx is retried once and succeeds', [json(500, {}), json(200, { result: 'PASS' })], 2, 'PASS'],
+    ['no answer is retried once and succeeds', [hang, json(200, { result: 'PASS' })], 2, 'PASS'],
     ['5xx twice is an upstream error', [json(500, {}), json(502, {})], 2, 'upstream'],
     ['no answer twice is a timeout', [hang, hang], 2, 'timeout'],
     ['4xx is not retried', [json(401, {})], 1, 'upstream'],
-    ['malformed body is not retried', [json(200, { valid: 'yes' })], 1, 'upstream'],
+    ['malformed body is not retried', [json(200, { result: true })], 1, 'upstream'],
+    ['unknown result is not retried', [json(200, { result: 'pass' })], 1, 'upstream'],
   ];
   for (const [name, script, calls, outcome] of retries) {
     test(name, async () => {
       const a = await client(...script);
-      if (outcome === 'valid') {
-        assert.equal((await analyze(a)).valid, true);
+      if (outcome === 'PASS') {
+        assert.equal((await analyze(a)).result, 'PASS');
       } else {
         await assert.rejects(analyze(a), (err: unknown) => err instanceof VerifierError && err.kind === outcome);
       }
@@ -547,9 +571,10 @@ describe('http analyzer client', () => {
     });
   }
 
-  test('the API maps analyzer failures to 502 / 504 and invalid to 422', async () => {
+  test('the API maps REJECT / RETRY to 422 (separate codes) and analyzer failures to 502 / 504', async () => {
     const cases: Array<[Reply[], number, string]> = [
-      [[json(200, { valid: false })], 422, 'IMAGE_INVALID'],
+      [[json(200, { result: 'REJECT' })], 422, 'IMAGE_REJECTED'],
+      [[json(200, { result: 'RETRY' })], 422, 'IMAGE_RETRY'],
       [[json(500, {}), json(500, {})], 502, 'ANALYSIS_UPSTREAM_ERROR'],
       [[hang, hang], 504, 'ANALYSIS_TIMEOUT'],
     ];
@@ -569,7 +594,7 @@ describe('http analyzer client', () => {
       'function',
     );
     await assert.rejects(newAnalyzer({ ANALYZER_MODE: 'nope' }), /unsupported/);
-    assert.equal(await newAnalyzer({ ANALYZER_MODE: 'mock' }), alwaysValid);
+    assert.equal(await newAnalyzer({ ANALYZER_MODE: 'mock' }), alwaysPass);
     const a = await newAnalyzer({
       ANALYZER_MODE: 'http',
       ANALYZER_URL: 'http://x/v1/analyze',
@@ -594,7 +619,7 @@ describe('upload formats (iPhone / Android photos as-is)', () => {
   for (const [file, mimeType] of accepted) {
     test(`${file} is accepted as ${mimeType} and forwarded unchanged`, async () => {
       let sent: { data: Uint8Array; mimeType: string } | undefined;
-      const { handle } = newRoute(async (img) => ((sent = img), { valid: true, reason: '' }));
+      const { handle } = newRoute(async (img) => ((sent = img), { result: 'PASS' }));
       const res = await handle(await formEvent(GRANT_INLINE, 'image', image(file)));
       assert.equal(res.statusCode, 201, String(res.body));
       assert.equal(sent?.mimeType, mimeType);
@@ -672,7 +697,7 @@ describe('client log (browser and OS of image uploads)', () => {
   // Runs the events and returns the "request completed" entries.
   async function completedLogs(...events: Event[]) {
     const entries: Array<Record<string, unknown>> = [];
-    const { handle } = newRoute(alwaysValid, (_level, msg, fields) => {
+    const { handle } = newRoute(alwaysPass, (_level, msg, fields) => {
       if (msg === 'request completed') entries.push(fields ?? {});
     });
     for (const e of events) await handle(e);

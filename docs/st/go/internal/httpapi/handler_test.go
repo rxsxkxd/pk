@@ -149,7 +149,7 @@ func assertCommonHeaders(t *testing.T, res Response) {
 
 func TestGrantInline(t *testing.T) {
 	var sent ticket.CertificateImage
-	h := newHandlers(t, stubVerifier{res: ticket.Verdict{Valid: true}, got: &sent})
+	h := newHandlers(t, stubVerifier{res: ticket.Verdict{Result: ticket.ResultPass}, got: &sent})
 	res, _ := h.GrantInline(context.Background(), formRequest(t, "image", jpeg))
 
 	if res.StatusCode != http.StatusCreated {
@@ -191,19 +191,20 @@ func TestGrantInlineErrors(t *testing.T) {
 		status   int
 		code     string
 	}{
-		{"json instead of form", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "application/json"}, Body: "{}"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"no boundary", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "multipart/form-data"}, Body: "x"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"broken multipart", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "multipart/form-data; boundary=xyz"}, Body: "garbage"}, 400, "BAD_REQUEST"},
-		{"empty boundary", analyzer.AlwaysValid{}, withContentType(t, formRequest(t, "image", jpeg), `multipart/form-data; boundary=""`), 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"boundary without value", analyzer.AlwaysValid{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary"), 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"conflicting boundaries", analyzer.AlwaysValid{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary=%s; boundary=other"), 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"garbage after boundary", analyzer.AlwaysValid{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary=%s x"), 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"broken after the image part", analyzer.AlwaysValid{}, brokenAfterImage(t), 400, "BAD_REQUEST"},
-		{"missing image field", analyzer.AlwaysValid{}, formRequest(t, "file", jpeg), 400, "BAD_REQUEST"},
-		{"empty image", analyzer.AlwaysValid{}, formRequest(t, "image", nil), 400, "BAD_REQUEST"},
-		{"not an image", analyzer.AlwaysValid{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"too large", analyzer.AlwaysValid{}, formRequest(t, "image", big), 413, "PAYLOAD_TOO_LARGE"},
-		{"rejected", stubVerifier{res: ticket.Verdict{Valid: false, Reason: "blurry"}}, formRequest(t, "image", jpeg), 422, "IMAGE_INVALID"},
+		{"json instead of form", analyzer.AlwaysPass{}, Request{Headers: map[string]string{"content-type": "application/json"}, Body: "{}"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"no boundary", analyzer.AlwaysPass{}, Request{Headers: map[string]string{"content-type": "multipart/form-data"}, Body: "x"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"broken multipart", analyzer.AlwaysPass{}, Request{Headers: map[string]string{"content-type": "multipart/form-data; boundary=xyz"}, Body: "garbage"}, 400, "BAD_REQUEST"},
+		{"empty boundary", analyzer.AlwaysPass{}, withContentType(t, formRequest(t, "image", jpeg), `multipart/form-data; boundary=""`), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"boundary without value", analyzer.AlwaysPass{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary"), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"conflicting boundaries", analyzer.AlwaysPass{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary=%s; boundary=other"), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"garbage after boundary", analyzer.AlwaysPass{}, withContentType(t, formRequest(t, "image", jpeg), "multipart/form-data; boundary=%s x"), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"broken after the image part", analyzer.AlwaysPass{}, brokenAfterImage(t), 400, "BAD_REQUEST"},
+		{"missing image field", analyzer.AlwaysPass{}, formRequest(t, "file", jpeg), 400, "BAD_REQUEST"},
+		{"empty image", analyzer.AlwaysPass{}, formRequest(t, "image", nil), 400, "BAD_REQUEST"},
+		{"not an image", analyzer.AlwaysPass{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"too large", analyzer.AlwaysPass{}, formRequest(t, "image", big), 413, "PAYLOAD_TOO_LARGE"},
+		{"REJECT", stubVerifier{res: ticket.Verdict{Result: ticket.ResultReject}}, formRequest(t, "image", jpeg), 422, "IMAGE_REJECTED"},
+		{"RETRY", stubVerifier{res: ticket.Verdict{Result: ticket.ResultRetry}}, formRequest(t, "image", jpeg), 422, "IMAGE_RETRY"},
 		{"upstream error", stubVerifier{err: ticket.ErrVerifierUpstream}, formRequest(t, "image", jpeg), 502, "ANALYSIS_UPSTREAM_ERROR"},
 		{"timeout", stubVerifier{err: ticket.ErrVerifierTimeout}, formRequest(t, "image", jpeg), 504, "ANALYSIS_TIMEOUT"},
 	}
@@ -232,7 +233,7 @@ func TestContentTypeVariants(t *testing.T) {
 	} {
 		t.Run(format, func(t *testing.T) {
 			req := withContentType(t, formRequest(t, "image", jpeg), format)
-			res, _ := newHandlers(t, analyzer.AlwaysValid{}).GrantInline(context.Background(), req)
+			res, _ := newHandlers(t, analyzer.AlwaysPass{}).GrantInline(context.Background(), req)
 			if res.StatusCode != http.StatusCreated {
 				t.Errorf("status = %d, body = %s", res.StatusCode, res.Body)
 			}
@@ -242,7 +243,7 @@ func TestContentTypeVariants(t *testing.T) {
 
 // TestPatternBFlow follows the browser: POST form → 303 → view HTML → img src → PNG.
 func TestPatternBFlow(t *testing.T) {
-	h := newHandlers(t, analyzer.AlwaysValid{})
+	h := newHandlers(t, analyzer.AlwaysPass{})
 	ctx := context.Background()
 
 	res, _ := h.Grant(ctx, formRequest(t, "image", png))
@@ -290,11 +291,12 @@ func TestGrantErrorsAreHTML(t *testing.T) {
 		status   int
 		code     string
 	}{
-		{"json instead of form", analyzer.AlwaysValid{}, Request{Headers: map[string]string{"content-type": "application/json"}, Body: "{}"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"missing image field", analyzer.AlwaysValid{}, formRequest(t, "file", jpeg), 400, "BAD_REQUEST"},
-		{"not an image", analyzer.AlwaysValid{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
-		{"too large", analyzer.AlwaysValid{}, formRequest(t, "image", append(append([]byte{}, jpeg...), make([]byte, imageinput.MaxBytes)...)), 413, "PAYLOAD_TOO_LARGE"},
-		{"rejected", stubVerifier{res: ticket.Verdict{Valid: false}}, formRequest(t, "image", jpeg), 422, "IMAGE_INVALID"},
+		{"json instead of form", analyzer.AlwaysPass{}, Request{Headers: map[string]string{"content-type": "application/json"}, Body: "{}"}, 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"missing image field", analyzer.AlwaysPass{}, formRequest(t, "file", jpeg), 400, "BAD_REQUEST"},
+		{"not an image", analyzer.AlwaysPass{}, formRequest(t, "image", []byte("hello")), 415, "UNSUPPORTED_MEDIA_TYPE"},
+		{"too large", analyzer.AlwaysPass{}, formRequest(t, "image", append(append([]byte{}, jpeg...), make([]byte, imageinput.MaxBytes)...)), 413, "PAYLOAD_TOO_LARGE"},
+		{"REJECT", stubVerifier{res: ticket.Verdict{Result: ticket.ResultReject}}, formRequest(t, "image", jpeg), 422, "IMAGE_REJECTED"},
+		{"RETRY", stubVerifier{res: ticket.Verdict{Result: ticket.ResultRetry}}, formRequest(t, "image", jpeg), 422, "IMAGE_RETRY"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -313,7 +315,7 @@ func TestGrantErrorsAreHTML(t *testing.T) {
 }
 
 func TestSignatureRequired(t *testing.T) {
-	h := newHandlers(t, analyzer.AlwaysValid{})
+	h := newHandlers(t, analyzer.AlwaysPass{})
 	code := "20261001194300-7K3QX9MZ2P"
 	other := "20261001000000-0000000000"
 	cases := map[string]Request{
@@ -338,7 +340,7 @@ func TestSignatureRequired(t *testing.T) {
 
 func TestViewEscapesTicketCode(t *testing.T) {
 	// The code is not format-checked, so a signed but hostile value must still be escaped.
-	h := newHandlers(t, analyzer.AlwaysValid{})
+	h := newHandlers(t, analyzer.AlwaysPass{})
 	code := `"><script>alert(1)</script>`
 	res, _ := h.GetView(context.Background(), signedGet(h, code, h.Signer.Sign(code)))
 	if res.StatusCode != http.StatusOK {
@@ -349,8 +351,13 @@ func TestViewEscapesTicketCode(t *testing.T) {
 	}
 }
 
-// TestGrantInlineWithHTTPAnalyzer checks the real HTTP client end to end: the analysis server's answer or
-// failure becomes 201 / 422 / 502 / 504.
+// answer replies with a fixed analysis server response body.
+func answer(body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, body) }
+}
+
+// TestGrantInlineWithHTTPAnalyzer checks the real HTTP client end to end: the analysis server's answer
+// (its "result") or failure becomes 201 / 422 IMAGE_REJECTED / 422 IMAGE_RETRY / 502 / 504.
 func TestGrantInlineWithHTTPAnalyzer(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -358,8 +365,10 @@ func TestGrantInlineWithHTTPAnalyzer(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"valid", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{"valid":true}`) }, 201, ""},
-		{"invalid", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, `{"valid":false}`) }, 422, "IMAGE_INVALID"},
+		{"PASS", answer(`{"confidence":0.97,"detected":"certificate","reason":"ok","result":"PASS","status":200}`), 201, ""},
+		{"REJECT", answer(`{"confidence":0.12,"detected":"unknown","reason":"no certificate","result":"REJECT","status":200}`), 422, "IMAGE_REJECTED"},
+		{"RETRY", answer(`{"confidence":0.48,"detected":"certificate","reason":"blurry","result":"RETRY","status":200}`), 422, "IMAGE_RETRY"},
+		{"unknown result", answer(`{"result":"MAYBE"}`), 502, "ANALYSIS_UPSTREAM_ERROR"},
 		{"5xx", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(500) }, 502, "ANALYSIS_UPSTREAM_ERROR"},
 		{"no answer", hang, 504, "ANALYSIS_TIMEOUT"},
 	}
@@ -400,7 +409,7 @@ func TestUploadFormats(t *testing.T) {
 	} {
 		t.Run(file, func(t *testing.T) {
 			var sent ticket.CertificateImage
-			h := newHandlers(t, stubVerifier{res: ticket.Verdict{Valid: true}, got: &sent})
+			h := newHandlers(t, stubVerifier{res: ticket.Verdict{Result: ticket.ResultPass}, got: &sent})
 			data := mustRead(file)
 			res, _ := h.GrantInline(context.Background(), formRequest(t, "image", data))
 			if res.StatusCode != http.StatusCreated || sent.MimeType != want || !bytes.Equal(sent.Data, data) {
@@ -413,7 +422,7 @@ func TestUploadFormats(t *testing.T) {
 		"JPEG magic bytes only": {0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'},
 	} {
 		t.Run(name, func(t *testing.T) {
-			res, _ := newHandlers(t, analyzer.AlwaysValid{}).GrantInline(context.Background(), formRequest(t, "image", data))
+			res, _ := newHandlers(t, analyzer.AlwaysPass{}).GrantInline(context.Background(), formRequest(t, "image", data))
 			if res.StatusCode != http.StatusUnsupportedMediaType {
 				t.Errorf("status = %d, want 415", res.StatusCode)
 			}
@@ -424,7 +433,7 @@ func TestUploadFormats(t *testing.T) {
 // TestGrantAcceptJSON checks the SPA path of B-1: Accept: application/json gets the signed QR URL as JSON
 // (and JSON errors) instead of a redirect.
 func TestGrantAcceptJSON(t *testing.T) {
-	h := newHandlers(t, analyzer.AlwaysValid{})
+	h := newHandlers(t, analyzer.AlwaysPass{})
 	req := formRequest(t, "image", jpeg)
 	req.Headers["accept"] = "application/json"
 
@@ -491,7 +500,7 @@ func completedLogs(t *testing.T, h *Handlers, fn func()) []map[string]any {
 // the Node version), other endpoints do not.
 func TestClientLog(t *testing.T) {
 	const iOS13 = "Mozilla/5.0 (iPhone; CPU iPhone OS 13_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.4 Mobile/15E148 Safari/604.1"
-	h := newHandlers(t, analyzer.AlwaysValid{})
+	h := newHandlers(t, analyzer.AlwaysPass{})
 	ctx := context.Background()
 
 	withClient := func(req Request) Request {
@@ -538,7 +547,7 @@ func TestClientLog(t *testing.T) {
 }
 
 func TestClientLogLimits(t *testing.T) {
-	h := newHandlers(t, analyzer.AlwaysValid{})
+	h := newHandlers(t, analyzer.AlwaysPass{})
 	long := strings.Repeat("a", 2000)
 	logs := completedLogs(t, h, func() {
 		req := formRequest(t, "image", jpeg)

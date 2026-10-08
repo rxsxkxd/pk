@@ -77,11 +77,12 @@ export function checkRequest(request, auth) {
   }
   if (request.body.length === 0) return EMPTY_BODY;
 
-  const result = analyze(request.body);
+  const analysis = analyze(request.body);
+  const { confidence, detected, reason, result } = analysis;
   return outcome(
     200,
-    { valid: result.valid, reason: result.reason },
-    { bytes: result.size, sha256: result.sha256, valid: result.valid },
+    { confidence, detected, reason, result, status: 200 },
+    { bytes: analysis.size, sha256: analysis.sha256, result },
   );
 }
 

@@ -3,8 +3,10 @@ package analyzer
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -60,7 +62,7 @@ func server(t *testing.T, script ...reply) (*HTTP, *[]received) {
 }
 
 func TestHTTPWithoutAPIKeySendsNoHeader(t *testing.T) {
-	a, got := server(t, status(200, `{"valid":true}`))
+	a, got := server(t, status(200, `{"result":"PASS"}`))
 	a.cfg.APIKey = ""
 	if _, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg, MimeType: "image/jpeg"}); err != nil {
 		t.Fatal(err)
@@ -73,9 +75,9 @@ func TestHTTPWithoutAPIKeySendsNoHeader(t *testing.T) {
 var jpeg = []byte{0xFF, 0xD8, 0xFF, 0xE0, 'p', 'h', 'o', 't', 'o'}
 
 func TestHTTPPostsImageUnchanged(t *testing.T) {
-	a, got := server(t, status(200, `{"valid":true,"reason":"ok"}`))
+	a, got := server(t, status(200, `{"confidence":0.97,"detected":"certificate","reason":"ok","result":"PASS","status":200}`))
 	res, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg, MimeType: "image/jpeg"})
-	if err != nil || res != (ticket.Verdict{Valid: true, Reason: "ok"}) {
+	if err != nil || res != (ticket.Verdict{Result: ticket.ResultPass}) {
 		t.Fatalf("Analyze = %+v, %v", res, err)
 	}
 	if len(*got) != 1 {
@@ -90,37 +92,41 @@ func TestHTTPPostsImageUnchanged(t *testing.T) {
 	}
 }
 
-func TestHTTPValidFalseIsAResult(t *testing.T) {
-	a, _ := server(t, status(200, `{"valid":false}`))
-	res, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg})
-	if err != nil || res.Valid {
-		t.Fatalf("Analyze = %+v, %v", res, err)
+// REJECT and RETRY are results, not errors of the client; only "result" is read.
+func TestHTTPRejectAndRetryAreResults(t *testing.T) {
+	for _, want := range []ticket.Result{ticket.ResultReject, ticket.ResultRetry} {
+		a, _ := server(t, status(200, `{"confidence":0.5,"detected":"x","reason":"y","result":"`+string(want)+`","status":200}`))
+		res, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg})
+		if err != nil || res.Result != want {
+			t.Errorf("Analyze = %+v, %v; want %s", res, err, want)
+		}
 	}
 }
 
 func TestHTTPRetries(t *testing.T) {
-	ok := status(200, `{"valid":true}`)
+	ok := status(200, `{"result":"PASS"}`)
 	tests := []struct {
 		name    string
 		script  []reply
 		calls   int
-		wantErr error // nil = valid result
+		wantErr error // nil = PASS
 	}{
 		{"5xx is retried once and succeeds", []reply{status(500, `{}`), ok}, 2, nil},
 		{"no answer is retried once and succeeds", []reply{hang, ok}, 2, nil},
 		{"5xx twice is an upstream error", []reply{status(500, `{}`), status(502, `{}`)}, 2, ticket.ErrVerifierUpstream},
 		{"no answer twice is a timeout", []reply{hang, hang}, 2, ticket.ErrVerifierTimeout},
 		{"4xx is not retried", []reply{status(401, `{}`)}, 1, ticket.ErrVerifierUpstream},
-		{"malformed body is not retried", []reply{status(200, `{"valid":"yes"}`)}, 1, ticket.ErrVerifierUpstream},
-		{"missing valid is not retried", []reply{status(200, `{"reason":"x"}`)}, 1, ticket.ErrVerifierUpstream},
+		{"malformed body is not retried", []reply{status(200, `{"result":true}`)}, 1, ticket.ErrVerifierUpstream},
+		{"missing result is not retried", []reply{status(200, `{"reason":"x"}`)}, 1, ticket.ErrVerifierUpstream},
+		{"unknown result is not retried", []reply{status(200, `{"result":"pass"}`)}, 1, ticket.ErrVerifierUpstream},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a, got := server(t, tt.script...)
 			res, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg})
 			if tt.wantErr == nil {
-				if err != nil || !res.Valid {
-					t.Errorf("Analyze = %+v, %v; want valid", res, err)
+				if err != nil || res.Result != ticket.ResultPass {
+					t.Errorf("Analyze = %+v, %v; want PASS", res, err)
 				}
 			} else if !errors.Is(err, tt.wantErr) {
 				t.Errorf("err = %v, want %v", err, tt.wantErr)
@@ -143,7 +149,7 @@ func TestHTTPConnectionRefusedIsUpstream(t *testing.T) {
 }
 
 func TestNewModes(t *testing.T) {
-	if a, err := New("mock", HTTPConfig{}); err != nil || a != (AlwaysValid{}) {
+	if a, err := New("mock", HTTPConfig{}); err != nil || a != (AlwaysPass{}) {
 		t.Errorf("mock: %v, %v", a, err)
 	}
 	if a, err := New("http", HTTPConfig{URL: "http://x/v1/analyze"}); err != nil || a == nil {
@@ -151,5 +157,42 @@ func TestNewModes(t *testing.T) {
 	}
 	if _, err := New("nope", HTTPConfig{}); err == nil {
 		t.Error("unknown mode must fail")
+	}
+}
+
+// Every response body is logged as it came: not parsed, for 2xx and other statuses alike.
+func TestHTTPLogsTheRawResponseBody(t *testing.T) {
+	pass := `{"confidence":0.97,"detected":"certificate","reason":"ok","result":"PASS","status":200}`
+	tests := []struct {
+		name   string
+		reply  reply
+		status int
+		body   string
+		level  string
+	}{
+		{"2xx", status(200, pass), 200, pass, "INFO"},
+		{"4xx", status(401, `{"error":"invalid api key"}`), 401, `{"error":"invalid api key"}`, "WARN"},
+		{"not JSON", status(502, "<html>bad gateway</html>"), 502, "<html>bad gateway</html>", "WARN"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, _ := server(t, tt.reply, tt.reply)
+			var buf bytes.Buffer
+			a.cfg.Logger = slog.New(slog.NewJSONHandler(&buf, nil))
+			_, _ = a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg})
+
+			var line struct {
+				Level  string `json:"level"`
+				Msg    string `json:"msg"`
+				Status int    `json:"status"`
+				Body   string `json:"body"`
+			}
+			if err := json.Unmarshal(bytes.SplitN(buf.Bytes(), []byte("\n"), 2)[0], &line); err != nil {
+				t.Fatalf("log = %q: %v", buf.String(), err)
+			}
+			if line.Msg != "analyzer response" || line.Level != tt.level || line.Status != tt.status || line.Body != tt.body {
+				t.Errorf("log = %+v, want %s %d %q", line, tt.level, tt.status, tt.body)
+			}
+		})
 	}
 }

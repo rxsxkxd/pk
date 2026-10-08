@@ -101,7 +101,7 @@ jobs:
             -H 'content-type: application/octet-stream' --data-binary @"$RUNNER_TEMP/image.bin" \
             http://localhost:8090/v1/analyze)
           echo "$res"
-          test "$res" = '{"valid":true,"reason":"stub"}'
+          test "$(echo "$res" | jq -r .result)" = PASS
       - name: Container logs
         if: always()
         run: docker logs stub

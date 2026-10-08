@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -18,10 +19,12 @@ type HTTPConfig struct {
 	URL     string
 	APIKey  string        // optional: sent as x-api-key only when set
 	Timeout time.Duration // per attempt
+	Logger  *slog.Logger  // logs every response body as-is (nil: slog.Default())
 }
 
 // HTTP posts the image as-is (application/octet-stream, x-api-key when set) to the analysis server. It retries
-// once on 5xx, timeout or a transport error; 4xx and malformed responses are not retried.
+// once on 5xx, timeout or a transport error; 4xx and malformed responses are not retried. Every response body is
+// logged as-is ("analyzer response": status and the raw body), then only its "result" is read.
 type HTTP struct {
 	cfg    HTTPConfig
 	client *http.Client
@@ -30,6 +33,9 @@ type HTTP struct {
 const maxResponseBytes = 1 << 20
 
 func NewHTTP(cfg HTTPConfig) *HTTP {
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
 	return &HTTP{cfg: cfg, client: &http.Client{}}
 }
 
@@ -64,6 +70,12 @@ func (h *HTTP) attempt(ctx context.Context, img ticket.CertificateImage) (ticket
 	if err != nil {
 		return ticket.Verdict{}, true, transportError(ctx, err)
 	}
+	// The response body goes to the log as it came (not parsed), for 2xx and every other status alike.
+	level := slog.LevelInfo
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		level = slog.LevelWarn
+	}
+	h.cfg.Logger.Log(ctx, level, "analyzer response", "status", resp.StatusCode, "body", string(body))
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return ticket.Verdict{}, resp.StatusCode >= 500, fmt.Errorf("%w: analyzer returned %d", ticket.ErrVerifierUpstream, resp.StatusCode)
 	}
@@ -82,18 +94,20 @@ func transportError(ctx context.Context, err error) error {
 	return fmt.Errorf("%w: %v", ticket.ErrVerifierUpstream, err)
 }
 
-// parseResponse reads the provisional response format {"valid": bool, "reason": string}
-// (analyzer-stub/DESIGN.md 3.2). Replace only this when the real server's format is decided.
+// parseResponse reads the analysis server's response {"confidence", "detected", "reason", "result",
+// "status"} (analyzer-stub/DESIGN.md 3.2). The API looks at "result" only: PASS, REJECT or RETRY; anything
+// else is a malformed response.
 func parseResponse(body []byte) (ticket.Verdict, error) {
 	var out struct {
-		Valid  *bool  `json:"valid"`
-		Reason string `json:"reason"`
+		Result ticket.Result `json:"result"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
 		return ticket.Verdict{}, err
 	}
-	if out.Valid == nil {
-		return ticket.Verdict{}, errors.New(`"valid" must be a boolean`)
+	switch out.Result {
+	case ticket.ResultPass, ticket.ResultReject, ticket.ResultRetry:
+		return ticket.Verdict{Result: out.Result}, nil
+	default:
+		return ticket.Verdict{}, fmt.Errorf(`"result" must be PASS, REJECT or RETRY, got %q`, out.Result)
 	}
-	return ticket.Verdict{Valid: *out.Valid, Reason: out.Reason}, nil
 }

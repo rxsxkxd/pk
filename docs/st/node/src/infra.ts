@@ -71,25 +71,25 @@ async function readParameter(name: string): Promise<string> {
 
 const DEFAULT_ANALYZER_TIMEOUT_MS = 5000;
 
-// ANALYZER_MODE に応じた画像解析クライアントを返す（mock: その場で valid / http: 解析サーバーに POST）。
-export async function newAnalyzer(env: NodeJS.ProcessEnv): Promise<Verifier> {
+// ANALYZER_MODE に応じた画像解析クライアントを返す（mock: その場で PASS / http: 解析サーバーに POST）。
+export async function newAnalyzer(env: NodeJS.ProcessEnv, log: Log = consoleLog): Promise<Verifier> {
   switch (env.ANALYZER_MODE) {
     case 'mock':
-      return alwaysValid;
+      return alwaysPass;
     case 'http': {
       const url = absoluteUrl('ANALYZER_URL', env.ANALYZER_URL).href;
       const timeoutMs = Number(env.ANALYZER_TIMEOUT_MS ?? DEFAULT_ANALYZER_TIMEOUT_MS);
       if (!Number.isInteger(timeoutMs) || timeoutMs < 1)
         throw new Error('ANALYZER_TIMEOUT_MS must be a positive integer');
-      return httpAnalyzer({ url, apiKey: await loadAnalyzerApiKey(env), timeoutMs });
+      return httpAnalyzer({ url, apiKey: await loadAnalyzerApiKey(env), timeoutMs, log });
     }
     default:
       throw new Error(`unsupported ANALYZER_MODE "${env.ANALYZER_MODE ?? ''}"`);
   }
 }
 
-// 常に valid を返す画像解析のモック（通信しない）。
-export const alwaysValid: Verifier = async () => ({ valid: true, reason: 'mock' });
+// 常に PASS を返す画像解析のモック（通信しない）。
+export const alwaysPass: Verifier = async () => ({ result: 'PASS' });
 
 // Parameter Store から解析サーバーの API キーを取得する（APP_ENV=local のときだけ環境変数 ANALYZER_API_KEY の平文を使う）。
 // API キーは任意。どちらも無ければ undefined で、x-api-key を付けずに送る（例: VPC 内でセキュリティグループだけで許可する解析サーバー）。
@@ -102,14 +102,17 @@ async function loadAnalyzerApiKey(env: NodeJS.ProcessEnv): Promise<string | unde
 type Attempt = { result: Verdict } | { error: VerifierError; retry: boolean };
 
 // 画像を octet-stream でそのまま POST する HTTP クライアントを作る（5xx・タイムアウト・通信エラーのときだけ1回リトライ）。
+// 応答の本文は、2xx でもそれ以外でも、JSON として読まずにそのままログに出す（"analyzer response"）。そのあと result だけを読む。
 export function httpAnalyzer({
   url,
   apiKey,
   timeoutMs,
+  log = consoleLog,
 }: {
   url: string;
   apiKey?: string;
   timeoutMs: number;
+  log?: Log;
 }): Verifier {
   const headers: Record<string, string> = { 'content-type': 'application/octet-stream' };
   if (apiKey) headers['x-api-key'] = apiKey;
@@ -129,17 +132,24 @@ export function httpAnalyzer({
         retry: true,
       };
     }
+    let text: string;
+    try {
+      text = await res.text();
+    } catch (err) {
+      const timedOut = err instanceof DOMException && err.name === 'TimeoutError';
+      return {
+        error: new VerifierError(timedOut ? 'timeout' : 'upstream', `analyzer response read failed: ${err}`),
+        retry: true,
+      };
+    }
+    log(res.ok ? 'INFO' : 'WARN', 'analyzer response', { status: res.status, body: text });
     if (!res.ok) {
       return { error: new VerifierError('upstream', `analyzer returned ${res.status}`), retry: res.status >= 500 };
     }
     try {
-      return { result: parseAnalyzerResponse(await res.json()) };
+      return { result: parseAnalyzerResponse(JSON.parse(text)) };
     } catch (err) {
-      const timedOut = err instanceof DOMException && err.name === 'TimeoutError';
-      return {
-        error: new VerifierError(timedOut ? 'timeout' : 'upstream', `bad analyzer response: ${err}`),
-        retry: timedOut,
-      };
+      return { error: new VerifierError('upstream', `bad analyzer response: ${err}`), retry: false };
     }
   };
 
@@ -151,11 +161,13 @@ export function httpAnalyzer({
   };
 }
 
-// 解析サーバーのレスポンス本文を Verdict にする（仮の形式 {valid, reason}。本物の仕様が決まったらここだけ差し替える）。
+// 解析サーバーのレスポンス本文（confidence・detected・reason・result・status）を Verdict にする。API が見るのは result だけ。
 function parseAnalyzerResponse(body: unknown): Verdict {
-  const { valid, reason } = (body ?? {}) as { valid?: unknown; reason?: unknown };
-  if (typeof valid !== 'boolean') throw new Error('"valid" must be a boolean');
-  return { valid, reason: typeof reason === 'string' ? reason : '' };
+  const { result } = (body ?? {}) as { result?: unknown };
+  if (result !== 'PASS' && result !== 'REJECT' && result !== 'RETRY') {
+    throw new Error(`"result" must be PASS, REJECT or RETRY, got ${JSON.stringify(result)}`);
+  }
+  return { result };
 }
 
 // =================================================================================================

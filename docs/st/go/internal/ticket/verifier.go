@@ -12,10 +12,19 @@ type Verifier interface {
 	Verify(ctx context.Context, img CertificateImage) (Verdict, error)
 }
 
+// Result is the verifier's judgment: the "result" of the image analysis server's response. The API
+// looks at nothing else in the response.
+type Result string
+
+const (
+	ResultPass   Result = "PASS"   // grant a ticket
+	ResultReject Result = "REJECT" // not a usable certificate image: ErrCertificateRejected
+	ResultRetry  Result = "RETRY"  // could not judge this image; take it again: ErrCertificateRetry
+)
+
 // Verdict is the verifier's answer.
 type Verdict struct {
-	Valid  bool
-	Reason string
+	Result Result
 }
 
 // Errors a Verifier wraps so VerifyAndGrant can tell a timeout from other failures.

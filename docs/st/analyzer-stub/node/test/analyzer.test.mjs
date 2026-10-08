@@ -5,11 +5,13 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { analyze, ApiKey, NoApiKey } from '../analyzer.mjs';
 
-test('every image is valid and fingerprinted', () => {
+test('every image passes and is fingerprinted', () => {
   const image = Buffer.from('ffd8ffe000104a464946', 'hex');
   assert.deepEqual(analyze(image), {
-    valid: true,
-    reason: 'stub',
+    result: 'PASS',
+    confidence: 1.0,
+    detected: 'stub',
+    reason: 'stub: no analysis',
     size: image.length,
     sha256: createHash('sha256').update(image).digest('hex'),
   });

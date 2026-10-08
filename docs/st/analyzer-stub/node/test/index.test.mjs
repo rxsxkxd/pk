@@ -26,7 +26,7 @@ for (const c of cases) {
     assert.equal(res.statusCode, c.status, res.body);
     assert.equal(logs.length, 1);
     if (c.status === 200) {
-      assert.equal(JSON.parse(res.body).valid, c.valid);
+      assert.equal(JSON.parse(res.body).result, c.result);
       // The log proves the bytes arrived unchanged: same length and SHA-256 as what was sent.
       assert.equal(logs[0].bytes, body.length);
       assert.equal(logs[0].sha256, createHash('sha256').update(body).digest('hex'));
@@ -48,8 +48,11 @@ test('header names are case-insensitive', () => {
 test('same response body and log keys as the Python stub', () => {
   const logs = [];
   const res = respond(event({ body: Buffer.from('ffd8ff', 'hex') }), { auth, log: (f) => logs.push(f) });
-  assert.equal(res.body, '{"valid":true,"reason":"stub"}');
-  assert.deepEqual(Object.keys(logs[0]), ['level', 'msg', 'requestId', 'status', 'bytes', 'sha256', 'valid']);
+  // Same response as the Python and Rust stubs (compared as JSON: JSON.stringify writes 1.0 as 1).
+  const body = JSON.parse(res.body);
+  assert.deepEqual(body, { confidence: 1.0, detected: 'stub', reason: 'stub: no analysis', result: 'PASS', status: 200 });
+  assert.deepEqual(Object.keys(body), ['confidence', 'detected', 'reason', 'result', 'status']);
+  assert.deepEqual(Object.keys(logs[0]), ['level', 'msg', 'requestId', 'status', 'bytes', 'sha256', 'result']);
 });
 
 test('API key comes from Parameter Store, or from STUB_API_KEY only when APP_ENV=local', async () => {

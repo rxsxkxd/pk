@@ -9,4 +9,5 @@ var (
 	ErrEmptyImage          = errors.New("image is empty")
 	ErrUnsupportedImage    = errors.New("image must be JPEG, PNG, HEIC/HEIF, AVIF or WebP")
 	ErrCertificateRejected = errors.New("image was rejected")
+	ErrCertificateRetry    = errors.New("image could not be verified; take it again")
 )

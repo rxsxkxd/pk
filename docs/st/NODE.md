@@ -345,6 +345,6 @@ ANALYZER_MODE=http ANALYZER_URL=http://localhost:8090/v1/analyze ANALYZER_API_KE
 ```
 
 - 依存は増やさない（標準の `fetch` と `AbortSignal.timeout` を使う）
-- 1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライする。失敗は `AnalyzerError`（`timeout` / `upstream`）として `domain.ts` に返し、API のエラー（504 / 502）になる。`valid: false` は 422
+- 1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライする。失敗は `AnalyzerError`（`timeout` / `upstream`）として `domain.ts` に返し、API のエラー（504 / 502）になる。`result` が `REJECT` / `RETRY` は 422（`IMAGE_REJECTED` / `IMAGE_RETRY`）
 - AWS へのデプロイは node/DEPLOY.md 4-A.3（手動は 4-B.3。`AnalyzerMode=http`、`AnalyzerUrl`、`AnalyzerApiKeyParameterName`）。スタブの用意は DEPLOY.md 3章
 

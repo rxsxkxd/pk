@@ -53,7 +53,7 @@ type Endpoint = (c: Ctx, deps: Deps) => Promise<Response>;
 // 設定と salt を読み込み依存部品を組み立てる（Lambda 実行環境ごとに初期化時に1回だけ呼ぶ）。
 export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<Deps> {
   const config = loadConfig(env);
-  const verifier = await newAnalyzer(env);
+  const verifier = await newAnalyzer(env, consoleLog);
   const salts = await loadSalts(env);
   const signer = newSigner(salts.current, salts.previous);
   return { config, verifier, signer, newTicket: () => generateTicket(config.suffixLength), log: consoleLog };

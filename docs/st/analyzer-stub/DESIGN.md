@@ -11,13 +11,13 @@ API の設計は [../DESIGN.md](../DESIGN.md)（7章 画像解析サーバー連
   - API 側の HTTP 版の画像解析クライアント（`ANALYZER_MODE=http`。これから実装する）
   - 画像を `application/octet-stream` でそのまま送る経路（確定済みの仕様）
   - API キーの受け渡し（Parameter Store の SecureString）
-- **解析は何もしない**。受け付けた画像は常に `valid` を返す
+- **解析は何もしない**。受け付けた画像は常に `result: "PASS"` を返す
 - **本番用ではない**。動作確認が終わったら削除する。本物のサーバーの仕様が決まったら、API 側のクライアントを本物に合わせる
 
 | 対象 | このスタブで確認する | 確認しない |
 |---|---|---|
 | 送信形式（POST、octet-stream、画像そのまま） | ○（受け取ったバイト数と SHA-256 をログに出す） | |
-| レスポンスの解釈 | ○（`valid: true` のみ。このスタブが定める仮の形式） | 本物の形式、`valid: false` |
+| レスポンスの解釈 | ○（本物の形式。`result: "PASS"` のみ） | `REJECT`・`RETRY`（API 側の単体テストで確認する。必要になったら 4章の案を実装する） |
 | 認証 | 仮の API キー（3.3） | 本物の認証方式 |
 | 失敗時の挙動（invalid、5xx、タイムアウト） | | ×（API 側の単体テストで確認する。必要になったら 4章の案を実装する） |
 | 画像の中身の解析 | | × |
@@ -43,7 +43,7 @@ flowchart LR
 
 Function URL の代わりに IAM 認証（`AuthType: AWS_IAM`）を使う案もあるが、API 側のクライアントに SigV4 の署名処理が必要になり、本物のサーバーにはない処理をクライアントに入れることになる。そのため、仮の API キーにする。
 
-## 3. 仮のプロトコル
+## 3. プロトコル
 
 本物のサーバーの仕様が決まるまでの**仮の取り決め**。確定しているのは送信形式（3.1）だけで、それ以外はこのスタブ用に決めたもの。
 
@@ -57,11 +57,29 @@ x-api-key: {API キー}
 <画像のバイト列そのまま>
 ```
 
-### 3.2 レスポンス（仮）
+### 3.2 レスポンス
+
+成功の応答（200）は、**本物の解析サーバーの応答の形式**に合わせる（2026-10-08。それまでは仮の `{ "valid": true, "reason": "stub" }`）。
+
+| 項目 | 型 | 本物の解析サーバーでの意味 | スタブの値 |
+|---|---|---|---|
+| `confidence` | 数値（小数） | 判定の確からしさ | `1.0` |
+| `detected` | 文字列 | 画像から検出したもの | `"stub"` |
+| `reason` | 文字列 | 判定の理由 | `"stub: no analysis"` |
+| `result` | `"PASS"` / `"REJECT"` / `"RETRY"` | 判定の結果 | `"PASS"`（解析しないので、常に合格） |
+| `status` | 整数 | 状態のコード（意味は解析側に確認中） | `200`（HTTP のステータスと同じ値） |
+
+```json
+{"confidence":1.0,"detected":"stub","reason":"stub: no analysis","result":"PASS","status":200}
+```
+
+- キーの順序は、3つの実装で同じ（上のとおり）。Node 版だけ `confidence` を `1` と書く（JavaScript の `JSON.stringify` が `1.0` を `1` にするため。JSON としては同じ値）。テストは、文字列ではなく読み込んだ値で比べる
+- `confidence`・`detected` の範囲と値の一覧、`status` の意味、`RETRY` の扱い、失敗したときの本物の応答の形は、解析側に確認中。分かったら、ここと API 側の解釈を合わせる
+- API 側の解析クライアント（Go・Node）は、この形式の **`result` だけ**を読む（2026-10-08 に対応済み）。`PASS` → 発行、`REJECT` → 422 `IMAGE_REJECTED`、`RETRY` → 422 `IMAGE_RETRY`、それ以外の値や `result` がないとき → 502 `ANALYSIS_UPSTREAM_ERROR`（../DESIGN.md 7章）
 
 | ステータス | 本文 | 条件 | API 側の扱い（DESIGN.md 5.6） |
 |---|---|---|---|
-| 200 | `{ "valid": true, "reason": "stub" }` | 受け付けた画像はすべて（解析しない） | 採番してチケットを発行する |
+| 200 | 上の形式（`result: "PASS"`） | 受け付けた画像はすべて（解析しない） | 採番してチケットを発行する |
 | 400 | `{ "error": "..." }` | `Content-Type` が `application/octet-stream` でない、またはボディが空 | 502 `ANALYSIS_UPSTREAM_ERROR`（API 側のバグ扱い） |
 | 401 | `{ "error": "invalid api key" }` | `x-api-key` がない、または一致しない | 502（設定ミス扱い） |
 | 404 | `{ "error": "not found" }` | `POST /v1/analyze` 以外 | 502（設定ミス扱い） |
@@ -86,7 +104,7 @@ x-api-key: {API キー}
 1リクエストにつき1行の JSON ログを出す。**画像そのものは保存もログ出力もしない。**
 
 ```json
-{"time":"…","level":"INFO","msg":"analyzed","requestId":"…","status":200,"bytes":10240,"sha256":"…","valid":true}
+{"time":"…","level":"INFO","msg":"analyzed","requestId":"…","status":200,"bytes":10240,"sha256":"…","result":"PASS"}
 ```
 
 - `bytes` と `sha256` で、API が画像を加工せずにそのまま送っていることを確かめる（ブラウザで送ったファイルの `shasum -a 256` と比べる）
@@ -99,18 +117,19 @@ API 側の失敗時の挙動（422 / 502 / 504、リトライ）も AWS 上で�
 
 | 画像に含まれる ASCII 文字列 | 挙動 | API 側の結果 |
 |---|---|---|
-| （目印なし） | `STUB_DEFAULT`（既定は `valid`）に従う | 発行 |
-| `STUB:VALID` | 200 `{ "valid": true }` | 発行 |
-| `STUB:INVALID` | 200 `{ "valid": false, "reason": "stub: marked invalid" }` | 422 `IMAGE_INVALID` |
+| （目印なし） | `STUB_DEFAULT`（既定は `PASS`）に従う | 発行 |
+| `STUB:PASS` | 200 `result: "PASS"` | 発行 |
+| `STUB:REJECT` | 200 `result: "REJECT"` | 422 `IMAGE_REJECTED` |
+| `STUB:RETRY` | 200 `result: "RETRY"` | 422 `IMAGE_RETRY` |
 | `STUB:ERROR` | 500 | リトライ1回のあと 502 |
 | `STUB:TIMEOUT` | `STUB_TIMEOUT_MS`（既定 8000ms）待ってから 200 | 504 `ANALYSIS_TIMEOUT`（API 側のタイムアウトは5秒） |
 | `STUB:SLOW` | `STUB_SLOW_MS`（既定 2000ms）待ってから 200 | 発行（タイムアウトにならない遅延の確認用） |
 
 - 目印は、JPEG なら末尾（EOI マーカーの後ろ）、PNG なら `IEND` チャンクの後ろに付け足す。どちらも画像としては壊れず、API の形式判定（先頭バイト）も通る
   ```sh
-  cp sample.jpg invalid.jpg && printf 'STUB:INVALID' >> invalid.jpg
+  cp sample.jpg reject.jpg && printf 'STUB:REJECT' >> reject.jpg
   ```
-- 追加する環境変数: `STUB_DEFAULT`（`valid` / `invalid` / `error`）、`STUB_TIMEOUT_MS`、`STUB_SLOW_MS`。`STUB_TIMEOUT_MS` は Lambda のタイムアウト（10秒）より短くする
+- 追加する環境変数: `STUB_DEFAULT`（`PASS` / `REJECT` / `RETRY` / `error`）、`STUB_TIMEOUT_MS`、`STUB_SLOW_MS`。`STUB_TIMEOUT_MS` は Lambda のタイムアウト（10秒）より短くする
 - 別案: スタブの環境変数だけで、デプロイ単位に挙動を固定する。実装は簡単だが、E2E で複数のシナリオを一度に試せない
 
 ## 5. Node 版（実装済み）
@@ -246,7 +265,7 @@ aws ssm delete-parameter --name $ANALYZER_KEY_PARAM
 |---|---|
 | 画像解析クライアント | `ANALYZER_MODE=http` を追加する。`ANALYZER_URL` に POST する（octet-stream、`x-api-key` 付き）。接続1秒・全体5秒でタイムアウトし、5xx とタイムアウトのときだけ1回リトライする（DESIGN.md 7章） |
 | 設定 | `ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` を追加する |
-| エラーの変換 | タイムアウト → `ANALYSIS_TIMEOUT`（504）、それ以外の失敗 → 502、`valid: false` → 422。すでに `AnalyzerError`（Node）と `ErrUpstream` / `ErrTimeout`（Go）で用意してある |
+| エラーの変換 | タイムアウト → `ANALYSIS_TIMEOUT`（504）、それ以外の失敗 → 502、`result` が `REJECT` / `RETRY` → 422（`IMAGE_REJECTED` / `IMAGE_RETRY`）。すでに `AnalyzerError`（Node）と `ErrUpstream` / `ErrTimeout`（Go）で用意してある |
 | CloudFormation（`infra/cloudformation/api.yaml`） | パラメータ `AnalyzerUrl`、`AnalyzerApiKeyParameterName` を追加する。Lambda の環境変数と、パラメータの読み取り権限を追加する |
 | テスト | API のテストでは、ローカルの HTTP サーバー（このスタブの `local.mjs` など）を立てて、クライアントの挙動（タイムアウト、リトライ、エラーの変換）を確かめる |
 
@@ -258,7 +277,7 @@ Node 版の実装（`node/src/infra.ts`）:
 |---|---|
 | `newAnalyzer(env)` | `ANALYZER_MODE=mock` → プロセス内のモック、`http` → `httpAnalyzer`。`http` のときは `ANALYZER_URL`（必須）、`ANALYZER_API_KEY_PARAMETER_NAME`（Lambda 上。ローカルは `APP_ENV=local` + `ANALYZER_API_KEY`）、`ANALYZER_TIMEOUT_MS`（既定 5000）を読む |
 | `httpAnalyzer` | 標準の `fetch` で POST する（依存なし）。1回ごとに `AbortSignal.timeout` で打ち切る。5xx・タイムアウト・通信エラーのときだけ1回リトライし、4xx と形式の崩れたレスポンスはリトライしない |
-| `parseAnalyzerResponse` | 仮の形式 `{valid: boolean, reason?: string}` の解釈。本物の仕様が決まったら、ここだけを差し替える |
+| `parseAnalyzerResponse` | 解析サーバーの応答から `result`（`PASS` / `REJECT` / `RETRY`）だけを読む。それ以外の値はエラー（502） |
 | テスト | `node/test/app.test.ts` の `http analyzer client`。ローカルの HTTP サーバーを立てて、送ったバイト列とヘッダー、リトライの回数、タイムアウト、API のエラー（422 / 502 / 504）への変換を確認する |
 
 ローカルでの通し確認（スタブの `npm run dev` + API の `ANALYZER_MODE=http`）: 発行（201 / 303）が通り、スタブのログの SHA-256 が送った画像と一致した。スタブを止めたとき・API キーが違うときは 502 になった。

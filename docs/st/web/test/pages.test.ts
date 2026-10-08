@@ -93,13 +93,21 @@ describe('SPA grant screen', () => {
     expect(result.get('[data-testid="issued-at"]').text()).toBe('発行: 2026-10-05 13:50:54');
   });
 
-  test('an API error is shown', async () => {
-    stubFetch(json(422, { error: { code: 'IMAGE_INVALID', message: 'image was rejected' } }));
+  // REJECT and RETRY from the image analysis server come back as separate codes with separate messages.
+  test.each([
+    ['IMAGE_REJECTED', 'image was rejected', 'この証明書の画像ではチケットを発行できません'],
+    [
+      'IMAGE_RETRY',
+      'image could not be verified; take it again',
+      '画像をうまく確認できませんでした。明るい場所で、証明書全体が写るように撮り直してください',
+    ],
+  ])('an API error is shown: %s', async (code, message, shown) => {
+    stubFetch(json(422, { error: { code, message } }));
     const { wrapper } = await mountAt('/');
     await choosePhoto(wrapper);
     await wrapper.get('[data-testid="grant-page"]').trigger('click');
     await flushPromises();
-    expect(wrapper.get('[data-testid="error"]').text()).toBe('この証明書の画像ではチケットを発行できません');
+    expect(wrapper.get('[data-testid="error"]').text()).toBe(shown);
   });
 });
 

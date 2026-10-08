@@ -51,8 +51,10 @@ func toAPIError(err error) *apiError {
 		return badRequest(ticket.ErrEmptyImage.Error())
 	case errors.Is(err, ticket.ErrUnsupportedImage):
 		return unsupportedMediaType(ticket.ErrUnsupportedImage.Error())
-	case errors.Is(err, ticket.ErrCertificateRejected):
-		return &apiError{http.StatusUnprocessableEntity, "IMAGE_INVALID", ticket.ErrCertificateRejected.Error()}
+	case errors.Is(err, ticket.ErrCertificateRejected): // result REJECT
+		return &apiError{http.StatusUnprocessableEntity, "IMAGE_REJECTED", ticket.ErrCertificateRejected.Error()}
+	case errors.Is(err, ticket.ErrCertificateRetry): // result RETRY
+		return &apiError{http.StatusUnprocessableEntity, "IMAGE_RETRY", ticket.ErrCertificateRetry.Error()}
 	case errors.Is(err, ticket.ErrVerifierTimeout):
 		return &apiError{http.StatusGatewayTimeout, "ANALYSIS_TIMEOUT", "image analysis timed out"}
 	case errors.Is(err, ticket.ErrVerifierUpstream):

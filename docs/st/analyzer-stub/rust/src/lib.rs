@@ -144,12 +144,17 @@ impl Stub {
             return Outcome::new(StatusCode::BAD_REQUEST, json!({ "error": "empty body" }));
         }
 
-        let result = analyze(request.body);
-        Outcome::new(
-            StatusCode::OK,
-            json!({ "valid": result.valid, "reason": result.reason }),
-        )
-        .with_log(json!({ "bytes": result.size, "sha256": result.sha256, "valid": result.valid }))
+        let analysis = analyze(request.body);
+        let result = analysis.result.as_str();
+        let body = json!({
+            "confidence": analysis.confidence,
+            "detected": analysis.detected,
+            "reason": analysis.reason,
+            "result": result,
+            "status": StatusCode::OK.as_u16(),
+        });
+        Outcome::new(StatusCode::OK, body)
+            .with_log(json!({ "bytes": analysis.size, "sha256": analysis.sha256, "result": result }))
     }
 }
 

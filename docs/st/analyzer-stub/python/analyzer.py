@@ -5,6 +5,7 @@ here. Knows nothing about Lambda or HTTP."""
 import hashlib
 import hmac
 from dataclasses import dataclass
+from typing import Literal
 
 
 class ApiKey:
@@ -29,17 +30,27 @@ type Auth = ApiKey | NoApiKey
 
 @dataclass(frozen=True)
 class Analysis:
-    """1枚の画像の判定結果。size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの。"""
+    """1枚の画像の判定結果（本物の解析サーバーの応答の項目: result・confidence・detected・reason）。
+    size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの（応答には入れず、ログに出す）。"""
 
-    valid: bool
+    result: Literal["PASS", "REJECT", "RETRY"]
+    confidence: float
+    detected: str
     reason: str
     size: int
     sha256: str
 
 
 def analyze(image: bytes) -> Analysis:
-    """画像を判定する。スタブは解析せず、受け付けた画像をすべて valid とする。"""
-    return Analysis(valid=True, reason="stub", size=len(image), sha256=hashlib.sha256(image).hexdigest())
+    """画像を判定する。スタブは解析せず、受け付けた画像をすべて PASS とする。"""
+    return Analysis(
+        result="PASS",
+        confidence=1.0,
+        detected="stub",
+        reason="stub: no analysis",
+        size=len(image),
+        sha256=hashlib.sha256(image).hexdigest(),
+    )
 
 
 def _sha256(value: bytes) -> bytes:

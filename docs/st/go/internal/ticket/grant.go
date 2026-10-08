@@ -29,9 +29,10 @@ var acceptedTypes = map[string]bool{
 }
 
 // VerifyAndGrant verifies a certificate image and grants a new ticket only when it passes: the image
-// must be non-empty and in an accepted format, then the verifier must judge it valid. Otherwise it
-// returns a business error (ErrEmptyImage, ErrUnsupportedImage, ErrCertificateRejected, or a wrapped
-// ErrVerifierTimeout / ErrVerifierUpstream). Shared by the QR inline grant API and the ticket grant API.
+// must be non-empty and in an accepted format, then the verifier's result must be PASS. Otherwise it
+// returns a business error (ErrEmptyImage, ErrUnsupportedImage, ErrCertificateRejected for REJECT,
+// ErrCertificateRetry for RETRY, or a wrapped ErrVerifierTimeout / ErrVerifierUpstream). Shared by the QR
+// inline grant API and the ticket grant API.
 func VerifyAndGrant(ctx context.Context, p Ports, img CertificateImage) (Ticket, error) {
 	if len(img.Data) == 0 {
 		return Ticket{}, ErrEmptyImage
@@ -50,9 +51,18 @@ func VerifyAndGrant(ctx context.Context, p Ports, img CertificateImage) (Ticket,
 			err = fmt.Errorf("%w: %v", ErrVerifierUpstream, err)
 		}
 		return Ticket{}, err
-	case !v.Valid:
-		p.Logger.InfoContext(ctx, "image rejected", "reason", v.Reason)
+	}
+	switch v.Result {
+	case ResultPass:
+	case ResultReject:
+		p.Logger.InfoContext(ctx, "image rejected", "result", v.Result)
 		return Ticket{}, ErrCertificateRejected
+	case ResultRetry:
+		p.Logger.InfoContext(ctx, "image to be taken again", "result", v.Result)
+		return Ticket{}, ErrCertificateRetry
+	default: // a Verifier returns only the three results; anything else is its bug
+		p.Logger.ErrorContext(ctx, "image analysis failed", "error", "unknown result", "result", v.Result)
+		return Ticket{}, fmt.Errorf("%w: unknown result %q", ErrVerifierUpstream, v.Result)
 	}
 
 	t, err := p.Generator.Generate()
@@ -60,6 +70,6 @@ func VerifyAndGrant(ctx context.Context, p Ports, img CertificateImage) (Ticket,
 		return Ticket{}, err
 	}
 	p.Logger.InfoContext(ctx, "ticket issued",
-		"ticketCode", t.Code, "issuedAt", t.IssuedAt.Format(time.RFC3339), "analysisReason", v.Reason)
+		"ticketCode", t.Code, "issuedAt", t.IssuedAt.Format(time.RFC3339), "result", v.Result)
 	return t, nil
 }

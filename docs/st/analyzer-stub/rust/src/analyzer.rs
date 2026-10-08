@@ -38,20 +38,44 @@ impl Auth {
     }
 }
 
-/// 1枚の画像の判定結果。size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 判定の結果（本物の解析サーバーの応答の `result`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Judgment {
+    Pass,
+    Reject,
+    Retry,
+}
+
+impl Judgment {
+    /// 応答に書く値（`PASS` / `REJECT` / `RETRY`）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Judgment::Pass => "PASS",
+            Judgment::Reject => "REJECT",
+            Judgment::Retry => "RETRY",
+        }
+    }
+}
+
+/// 1枚の画像の判定結果（本物の解析サーバーの応答の項目: result・confidence・detected・reason）。
+/// size と sha256 は、API が画像を加工せずに送ったことを確かめるためのもの（応答には入れず、ログに出す）。
+#[derive(Debug, Clone, PartialEq)]
 pub struct Analysis {
-    pub valid: bool,
+    pub result: Judgment,
+    pub confidence: f64,
+    pub detected: &'static str,
     pub reason: &'static str,
     pub size: usize,
     pub sha256: String,
 }
 
-/// 画像を判定する。スタブは解析せず、受け付けた画像をすべて valid とする。
+/// 画像を判定する。スタブは解析せず、受け付けた画像をすべて PASS とする。
 pub fn analyze(image: &[u8]) -> Analysis {
     Analysis {
-        valid: true,
-        reason: "stub",
+        result: Judgment::Pass,
+        confidence: 1.0,
+        detected: "stub",
+        reason: "stub: no analysis",
         size: image.len(),
         sha256: hex::encode(sha256(image)),
     }
@@ -66,17 +90,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_image_is_valid_and_fingerprinted() {
+    fn every_image_passes_and_is_fingerprinted() {
         let image = [0xff, 0xd8, 0xff, 0xe0];
         assert_eq!(
             analyze(&image),
             Analysis {
-                valid: true,
-                reason: "stub",
+                result: Judgment::Pass,
+                confidence: 1.0,
+                detected: "stub",
+                reason: "stub: no analysis",
                 size: 4,
                 sha256: hex::encode(Sha256::digest(image)),
             }
         );
+        assert_eq!(Judgment::Pass.as_str(), "PASS");
     }
 
     #[test]

@@ -30,7 +30,7 @@ func newHandlers(ctx context.Context) (*httpapi.Handlers, error) {
 		if err != nil {
 			return nil, err
 		}
-		httpCfg = analyzer.HTTPConfig{URL: cfg.AnalyzerURL, APIKey: key, Timeout: cfg.AnalyzerTimeout}
+		httpCfg = analyzer.HTTPConfig{URL: cfg.AnalyzerURL, APIKey: key, Timeout: cfg.AnalyzerTimeout, Logger: logger}
 	}
 	an, err := analyzer.New(cfg.AnalyzerMode, httpCfg)
 	if err != nil {

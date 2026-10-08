@@ -37,13 +37,22 @@ export async function verifyAndGrant(ports: Ports, img: CertificateImage): Promi
     ports.log('ERROR', 'image analysis failed', { error: String(err) });
     throw analysisUpstream();
   }
-  if (!verdict.valid) {
-    ports.log('INFO', 'image rejected', { reason: verdict.reason });
-    throw certificateRejected('image was rejected');
+  switch (verdict.result) {
+    case 'PASS':
+      break;
+    case 'REJECT':
+      ports.log('INFO', 'image rejected', { result: verdict.result });
+      throw certificateRejected();
+    case 'RETRY':
+      ports.log('INFO', 'image to be taken again', { result: verdict.result });
+      throw certificateRetry();
+    default: // a Verifier returns only the three results; anything else is its bug
+      ports.log('ERROR', 'image analysis failed', { error: 'unknown result', result: String(verdict.result) });
+      throw analysisUpstream();
   }
 
   const t = ports.newTicket();
-  ports.log('INFO', 'ticket issued', { ticketCode: t.code, issuedAt: t.issuedAt, analysisReason: verdict.reason });
+  ports.log('INFO', 'ticket issued', { ticketCode: t.code, issuedAt: t.issuedAt, result: verdict.result });
   return t;
 }
 
@@ -118,7 +127,9 @@ export function newSigner(current: string, previous?: string): Signer {
 export type CertificateImage = { data: Uint8Array; mimeType: string | undefined };
 
 // Verification by the image analysis server: POST application/octet-stream with the bytes as-is (DESIGN.md 7).
-export type Verdict = { valid: boolean; reason: string };
+// 解析サーバーの判定（応答の result）。API はこれ以外の項目を見ない。
+export type AnalysisResult = 'PASS' | 'REJECT' | 'RETRY';
+export type Verdict = { result: AnalysisResult };
 export type Verifier = (img: { data: Uint8Array; mimeType: string }) => Promise<Verdict>;
 
 // 検証サーバーの通信失敗（502）/ タイムアウト（504）を表すエラー（検証のクライアントが投げる）。
@@ -130,7 +141,7 @@ export class VerifierError extends Error {
   }
 }
 
-export type Log = (level: 'INFO' | 'ERROR', msg: string, fields?: Record<string, unknown>) => void;
+export type Log = (level: 'INFO' | 'WARN' | 'ERROR', msg: string, fields?: Record<string, unknown>) => void;
 
 // =================================================================================================
 // Errors  (↔ go/internal/ticket/errors.go and go/internal/httpapi/errors.go)
@@ -153,7 +164,9 @@ export const forbidden = () => new AppError(403, 'FORBIDDEN', 'invalid signature
 export const notFound = () => new AppError(404, 'NOT_FOUND', 'route not found');
 export const payloadTooLarge = (msg: string) => new AppError(413, 'PAYLOAD_TOO_LARGE', msg);
 export const unsupportedMediaType = (msg: string) => new AppError(415, 'UNSUPPORTED_MEDIA_TYPE', msg);
-export const certificateRejected = (msg: string) => new AppError(422, 'IMAGE_INVALID', msg);
+// result REJECT / RETRY。Web はコードごとに別の文言を出す。
+export const certificateRejected = () => new AppError(422, 'IMAGE_REJECTED', 'image was rejected');
+export const certificateRetry = () => new AppError(422, 'IMAGE_RETRY', 'image could not be verified; take it again');
 export const analysisUpstream = () => new AppError(502, 'ANALYSIS_UPSTREAM_ERROR', 'image analysis failed');
 export const analysisTimeout = () => new AppError(504, 'ANALYSIS_TIMEOUT', 'image analysis timed out');
 export const internal = () => new AppError(500, 'INTERNAL_ERROR', 'internal error');

@@ -292,7 +292,8 @@ const TicketRouteSchema = z.object({ code: TicketCode, sig: Sig });   // SPA の
 |---|---|
 | `PAYLOAD_TOO_LARGE`（413） | 画像のサイズが大きすぎます（4MB まで） |
 | `UNSUPPORTED_MEDIA_TYPE`（415） | この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP） |
-| `IMAGE_INVALID`（422） | この証明書の画像ではチケットを発行できません |
+| `IMAGE_REJECTED`（422。解析サーバーの判定が `REJECT`） | この証明書の画像ではチケットを発行できません |
+| `IMAGE_RETRY`（422。解析サーバーの判定が `RETRY`） | 画像をうまく確認できませんでした。明るい場所で、証明書全体が写るように撮り直してください |
 | `ANALYSIS_UPSTREAM_ERROR`（502）/ `ANALYSIS_TIMEOUT`（504） | ただいま混み合っています。時間をおいてお試しください |
 | `BAD_REQUEST`（400） / その他 / 通信エラー | 発行できませんでした。もう一度お試しください |
 | SPA のチケット画面の QR が読み込めない（QR 画像 API の 403 など） | 無効なチケット URL です |

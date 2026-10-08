@@ -34,8 +34,10 @@ export function messageFor(err: unknown): string {
       return '画像のサイズが大きすぎます（4MB まで）';
     case 'UNSUPPORTED_MEDIA_TYPE':
       return 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）';
-    case 'IMAGE_INVALID':
+    case 'IMAGE_REJECTED': // 解析サーバーの判定が REJECT
       return 'この証明書の画像ではチケットを発行できません';
+    case 'IMAGE_RETRY': // 解析サーバーの判定が RETRY
+      return '画像をうまく確認できませんでした。明るい場所で、証明書全体が写るように撮り直してください';
     case 'ANALYSIS_UPSTREAM_ERROR':
     case 'ANALYSIS_TIMEOUT':
       return 'ただいま混み合っています。時間をおいてお試しください';

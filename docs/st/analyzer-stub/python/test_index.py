@@ -10,6 +10,7 @@ from typing import Any
 from analyzer import ApiKey, NoApiKey
 from index import Event, Stub, load_api_key, load_auth
 
+PASS_BODY = {"confidence": 1.0, "detected": "stub", "reason": "stub: no analysis", "result": "PASS", "status": 200}
 CASES: list[dict[str, Any]] = json.loads((Path(__file__).parent.parent / "testdata/cases.json").read_text())["cases"]
 
 
@@ -52,7 +53,7 @@ class SharedCases(unittest.TestCase):
                 self.assertEqual(res["statusCode"], case["status"], res["body"])
                 self.assertEqual(len(logs), 1)
                 if case["status"] == 200:
-                    self.assertEqual(json.loads(res["body"])["valid"], case["valid"])
+                    self.assertEqual(json.loads(res["body"])["result"], case["result"])
                     # The log proves the bytes arrived unchanged: same length and SHA-256 as what was sent.
                     self.assertEqual(logs[0]["bytes"], len(body))
                     self.assertEqual(logs[0]["sha256"], hashlib.sha256(body).hexdigest())
@@ -68,8 +69,10 @@ class Behavior(unittest.TestCase):
     def test_same_response_body_and_log_as_node(self) -> None:
         logs: list[dict[str, Any]] = []
         res = Stub(ApiKey("test-key"), logs.append)(event(bytes.fromhex("ffd8ff")))
-        self.assertEqual(res["body"], '{"valid":true,"reason":"stub"}')
-        self.assertEqual(list(logs[0]), ["level", "msg", "requestId", "status", "bytes", "sha256", "valid"])
+        # Same response as the Node and Rust stubs (compared as JSON: Node writes 1.0 as 1).
+        self.assertEqual(json.loads(res["body"]), PASS_BODY)
+        self.assertEqual(list(json.loads(res["body"])), ["confidence", "detected", "reason", "result", "status"])
+        self.assertEqual(list(logs[0]), ["level", "msg", "requestId", "status", "bytes", "sha256", "result"])
         self.assertIs(type(logs[0]["status"]), int)
 
     def test_api_key_comes_from_stub_api_key_only_when_app_env_is_local(self) -> None:

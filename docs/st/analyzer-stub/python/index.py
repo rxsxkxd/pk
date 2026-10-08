@@ -139,9 +139,16 @@ class Stub:
         if not request.body:
             return EMPTY_BODY
 
-        result = analyze(request.body)
-        fields = {"bytes": result.size, "sha256": result.sha256, "valid": result.valid}
-        return Outcome(HTTPStatus.OK, {"valid": result.valid, "reason": result.reason}, fields)
+        analysis = analyze(request.body)
+        body = {
+            "confidence": analysis.confidence,
+            "detected": analysis.detected,
+            "reason": analysis.reason,
+            "result": analysis.result,
+            "status": HTTPStatus.OK.value,
+        }
+        fields = {"bytes": analysis.size, "sha256": analysis.sha256, "result": analysis.result}
+        return Outcome(HTTPStatus.OK, body, fields)
 
 
 def _compact_json(value: Any) -> str:

@@ -367,8 +367,8 @@ sig = base64url( HMAC-SHA256(salt, ticketCode) ) の先頭 22 文字（128bit）
 
 | エンドポイント | エラー形式 |
 |---|---|
-| A, B-2 | JSON `{ "error": { "code": "IMAGE_INVALID", "message": "..." } }` |
-| B-3、B-1（フォーム送信） | HTMLエラービュー（`<main data-error-code="IMAGE_INVALID">` に code を載せる） |
+| A, B-2 | JSON `{ "error": { "code": "IMAGE_REJECTED", "message": "..." } }` |
+| B-3、B-1（フォーム送信） | HTMLエラービュー（`<main data-error-code="IMAGE_REJECTED">` に code を載せる） |
 | B-1（`Accept: application/json`） | JSON（A・B-2 と同じ） |
 
 | HTTP | code | 条件 |
@@ -377,7 +377,8 @@ sig = base64url( HMAC-SHA256(salt, ticketCode) ) の先頭 22 文字（128bit）
 | 403 | `FORBIDDEN` | `sig` 欠落・不一致（B-3, B-2） |
 | 413 | `PAYLOAD_TOO_LARGE` | 画像サイズ上限超過 |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | Content-Type が `multipart/form-data` でない、非対応の画像形式 |
-| 422 | `IMAGE_INVALID` | 画像解析サーバーが invalid と判定 |
+| 422 | `IMAGE_REJECTED` | 画像解析サーバーの判定（`result`）が `REJECT`（証明書として受け付けられない） |
+| 422 | `IMAGE_RETRY` | 画像解析サーバーの判定（`result`）が `RETRY`（この画像では判定できない。撮り直してもらう） |
 | 502 | `ANALYSIS_UPSTREAM_ERROR` | 解析サーバーが 5xx / 想定外レスポンス |
 | 504 | `ANALYSIS_TIMEOUT` | 解析サーバーのタイムアウト |
 | 500 | `INTERNAL_ERROR` | その他 |
@@ -418,7 +419,9 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 |---|---|
 | 送信形式 | **確定**: `POST`、`Content-Type: application/octet-stream`、ボディは画像バイト列そのもの（multipart から取り出した `image` パートの中身。圧縮・リサイズ・形式変換・再エンコードはしないパススルー） |
 | 送信先URL / メソッド以外のヘッダ | 要確認（画像形式を `X-Image-Type` 等で伝えるか、ファイル名などのメタデータを送るか） |
-| レスポンス | 要確認。想定: `{ "valid": true/false, "reason": "..." }` |
+| レスポンス | **確定（2026-10-08）**: `{ "confidence": 数値, "detected": 文字列, "reason": 文字列, "result": "PASS" \| "REJECT" \| "RETRY", "status": 整数 }`。**API が見るのは `result` だけ**: `PASS` → チケットを発行、`REJECT` → 422 `IMAGE_REJECTED`、`RETRY` → 422 `IMAGE_RETRY`（Web はそれぞれ別の文言を出す）、それ以外の値・`result` なし → 502 `ANALYSIS_UPSTREAM_ERROR`。ほかの項目の意味（`status` など）は解析側に確認中 |
+| ローカルでの確認 | ローカル PC の API・SPA から、インターネット上のテスト用の解析 API につないで確かめる手順: [LOCAL_ANALYZER_TEST.md](LOCAL_ANALYZER_TEST.md) |
+| ログ | 解析サーバーの応答の本文は、2xx でもそれ以外でも、**JSON として読まずにそのまま**ログに出す（`"msg":"analyzer response"`、`status` と `body`（本文の文字列）。2xx は INFO、それ以外は WARN。リトライしたときは1回ごと）。判定に使うのは、そのあと読む `result` だけ（2026-10-08） |
 | 認証 | APIキー等を Parameter Store（SecureString）から取得し、コールド起動時にキャッシュ（メモリ内のみ） |
 | タイムアウト | 接続 1s / 全体 5s 程度（解析時間の実測で調整）。API Gateway の 29s 上限内に収める |
 | リトライ | 5xx・タイムアウトのみ 1回。4xx はリトライしない |
@@ -426,7 +429,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 
 ImageAnalyzer はインターフェースとして抽象化し、テスト時はスタブに差し替える。
 
-> 実装状況: Go 版・Node 版とも HTTP クライアント（`ANALYZER_MODE=http`）を、仮のプロトコル（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`、レスポンス `{valid, reason}`）で実装済み。`x-api-key` は任意（API キーを指定したときだけ付ける）。本番の解析サーバーは、VPC 内で Lambda のセキュリティグループからのアクセスだけを許可し、API キーを使わない想定（[notes/lambda-vpc.md](notes/lambda-vpc.md)）。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。`ANALYZER_MODE=mock` では、通信せずに常に valid を返す。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 3章（スタブ）と go/DEPLOY.md・node/DEPLOY.md 6章（API の切り替え）。
+> 実装状況: Go 版・Node 版とも HTTP クライアント（`ANALYZER_MODE=http`）を実装済み（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`（任意）、レスポンスは本物の形式で `result` だけを読む。2026-10-08 に仮の `{valid, reason}` から切り替えた）。`x-api-key` は任意（API キーを指定したときだけ付ける）。本番の解析サーバーは、VPC 内で Lambda のセキュリティグループからのアクセスだけを許可し、API キーを使わない想定（[notes/lambda-vpc.md](notes/lambda-vpc.md)）。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。`ANALYZER_MODE=mock` では、通信せずに常に valid を返す。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 3章（スタブ）と go/DEPLOY.md・node/DEPLOY.md 6章（API の切り替え）。
 
 ## 8. 状態・データ
 

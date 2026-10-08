@@ -32,7 +32,8 @@ describe('checkFile (before sending)', () => {
 test.each([
   ['PAYLOAD_TOO_LARGE', '画像のサイズが大きすぎます（4MB まで）'],
   ['UNSUPPORTED_MEDIA_TYPE', 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）'],
-  ['IMAGE_INVALID', 'この証明書の画像ではチケットを発行できません'],
+  ['IMAGE_REJECTED', 'この証明書の画像ではチケットを発行できません'],
+  ['IMAGE_RETRY', '画像をうまく確認できませんでした。明るい場所で、証明書全体が写るように撮り直してください'],
   ['ANALYSIS_UPSTREAM_ERROR', 'ただいま混み合っています。時間をおいてお試しください'],
   ['ANALYSIS_TIMEOUT', 'ただいま混み合っています。時間をおいてお試しください'],
   ['BAD_REQUEST', '発行できませんでした。もう一度お試しください'],

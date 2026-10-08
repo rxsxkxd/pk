@@ -2,8 +2,8 @@
 // ticket.Verifier (clean architecture: an outbound adapter).
 //
 // Request format is fixed: POST with Content-Type application/octet-stream and the raw image
-// bytes (ticket.CertificateImage.Data) as the body. ANALYZER_MODE=mock answers valid in-process; ANALYZER_MODE=http
-// posts to the server (http.go) using the provisional protocol in analyzer-stub/DESIGN.md 3.
+// bytes (ticket.CertificateImage.Data) as the body. ANALYZER_MODE=mock answers PASS in-process; ANALYZER_MODE=http
+// posts to the server (http.go; analyzer-stub/DESIGN.md 3). The API reads only "result" of the response.
 package analyzer
 
 import (
@@ -17,7 +17,7 @@ import (
 func New(mode string, httpCfg HTTPConfig) (ticket.Verifier, error) {
 	switch mode {
 	case "mock":
-		return AlwaysValid{}, nil
+		return AlwaysPass{}, nil
 	case "http":
 		return NewHTTP(httpCfg), nil
 	default:
@@ -25,8 +25,9 @@ func New(mode string, httpCfg HTTPConfig) (ticket.Verifier, error) {
 	}
 }
 
-type AlwaysValid struct{}
+// AlwaysPass is the in-process mock (ANALYZER_MODE=mock): every image passes.
+type AlwaysPass struct{}
 
-func (AlwaysValid) Verify(context.Context, ticket.CertificateImage) (ticket.Verdict, error) {
-	return ticket.Verdict{Valid: true, Reason: "mock"}, nil
+func (AlwaysPass) Verify(context.Context, ticket.CertificateImage) (ticket.Verdict, error) {
+	return ticket.Verdict{Result: ticket.ResultPass}, nil
 }

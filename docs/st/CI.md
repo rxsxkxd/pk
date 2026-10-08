@@ -30,7 +30,8 @@ pull request / master への push
 
 pull request / master への push
   └─ CI（ci.yml）: 画像解析サーバーのスタブ
-       ├─ infra        スタブのテンプレート（template.yaml・vpc-template.yaml）の cfn-lint
+       ├─ infra        スタブのテンプレート（template.yaml・network.yaml）の cfn-lint
+       ├─ cdk          VPC 版のスタブ（AWS CDK、Python）のテスト・mypy・synth と、生成したテンプレートの cfn-lint
        ├─ stub-node / stub-python / stub-rust  テスト・型チェックや lint・Lambda 用の zip → 成果物 stub-*
        └─ stub-image   matrix: node / python / rust  VPC 版のスタブのイメージのビルドと起動の確認
 ```
@@ -106,7 +107,8 @@ pull request / master への push
 
 | ジョブ（スタブの `ci.yml`） | 内容 | 成果物 |
 |---|---|---|
-| `infra` | cfn-lint で `analyzer-stub/*.yaml`（スタブの Function URL 版・VPC 版）を検査する | - |
+| `infra` | cfn-lint で `template.yaml`（Function URL 版）と `network.yaml`（VPC 版のネットワーク）を検査する | - |
+| `cdk` | VPC 版のスタブ（`cdk/`。AWS CDK、Python 3.13）の `unittest`（テンプレートの中身を `aws_cdk.assertions` で確かめる）、`mypy --strict`、`cdk synth`（AWS のアカウントも Docker も要らない）と、生成したテンプレートの cfn-lint | - |
 | `stub-node` | スタブ（Node）の `npm test`（依存がないので `npm ci` はしない）と `npm run build` | `stub-node`（Lambda 用の zip） |
 | `stub-python` | スタブ（Python 3.13。Lambda のランタイムと同じ）の `python -m unittest`、`mypy --strict`（型チェックのためだけに `mypy` を入れる）、`build.sh` | `stub-python` |
 | `stub-rust` | スタブ（Rust）の `build.sh lint`（rustfmt・clippy）、`build.sh test`、`build.sh`（リリースビルド）。arm64 のランナー（`ubuntu-24.04-arm`）で、Amazon Linux 2023 の arm64 のコンテナでビルドする | `stub-rust` |

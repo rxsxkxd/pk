@@ -1,6 +1,6 @@
 # 【検討】画像解析サーバーのスタブを VPC 内で、セキュリティグループで許可した送信元からだけ受け付ける
 
-> 一時ドキュメント（2026-10-07）。**A2（Fargate のタスク）を3パターンで実装済み（2026-10-08）**: パブリックサブネット（テスト用に推奨。`analyzer-stub/network.yaml` でスタブ用の VPC を作る）、プライベートサブネット + VPC エンドポイント、プライベートサブネット + NAT。テンプレート `analyzer-stub/vpc-template.yaml`、手順 [../DEPLOY.md](../DEPLOY.md) 3.4、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) 付録 B。AWS 上では未検証。案が決まったら、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) とテンプレート・手順書に反映し、このファイルは削除する。関連: [lambda-vpc.md](lambda-vpc.md)（API の `tickets` を VPC に置く構成）、[analyzer-stub-cost.md](analyzer-stub-cost.md)（スタブを VPC から新しく作る場合の費用の試算と、パブリックサブネット / プライベートサブネットの違い）。
+> 一時ドキュメント（2026-10-07）。**A2（Fargate のタスク）を3パターンで実装済み（2026-10-08）**: パブリックサブネット（テスト用に推奨。`analyzer-stub/network.yaml` でスタブ用の VPC を作る）、プライベートサブネット + VPC エンドポイント、プライベートサブネット + NAT。スタブは AWS CDK（Python。`analyzer-stub/cdk/`。イメージのビルドを含む）、手順 [../DEPLOY.md](../DEPLOY.md) 3.4、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) 付録 B。AWS 上では未検証。案が決まったら、[../analyzer-stub/DESIGN.md](../analyzer-stub/DESIGN.md) とテンプレート・手順書に反映し、このファイルは削除する。関連: [lambda-vpc.md](lambda-vpc.md)（API の `tickets` を VPC に置く構成）、[analyzer-stub-cost.md](analyzer-stub-cost.md)（スタブを VPC から新しく作る場合の費用の試算と、パブリックサブネット / プライベートサブネットの違い）。
 
 ## 1. 目的と条件
 
@@ -194,7 +194,7 @@ aws ec2 describe-vpc-endpoints --filters Name=vpc-id,Values=$VPC_ID --query 'Vpc
 
 | 要素 | 持ち主 | 内容 |
 |---|---|---|
-| ECS クラスター、タスク定義、タスクの実行ロール、ロググループ | スタブのスタック（新規 `vpc-template.yaml` など） | 置いておいても課金されない |
+| ECS クラスター、タスク定義、タスクの実行ロール、ロググループ | スタブのスタック（AWS CDK、Python。`analyzer-stub/cdk/`） | 置いておいても課金されない |
 | ECR のリポジトリとイメージ | スタブのスタック | スタブのコンテナ（Node 版なら `node:24-alpine` + `index.mjs` + `analyzer.mjs` + `local.mjs`。Rust 版ならローカル用サーバーのバイナリ） |
 | タスクの SG（`stub-task`） | スタブのスタック | 受信: 8090 を、**パラメータで指定した送信元 SG（`tickets` の SG。P1 ではピアの SG）からだけ**許可する |
 | ネットワーク | P1: スタブ専用の VPC（スタブのスタックで作る）。P2: 既存（指定） | P1 はパブリックサブネット + パブリック IP。P2 はプライベートサブネット（ECR・Logs への既存の経路を使う） |

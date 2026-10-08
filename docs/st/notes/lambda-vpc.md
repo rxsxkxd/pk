@@ -171,7 +171,7 @@ aws cloudformation deploy \
 | チケット API の `tickets` | Lambda | VPC 内（`VpcSubnetIds`・`VpcSecurityGroupIds` を指定したとき） | 実装済み（go/node DEPLOY.md 4-A.4 / 4-B.4） |
 | チケット API の `get-qr` | Lambda | VPC の外のまま | 実装済み |
 | スタブ（Function URL 版） | Lambda | VPC の外（インターネットに公開。API キーで制限） | 実装済み（../DEPLOY.md 3.1〜3.3） |
-| スタブ（VPC 版） | ECS Fargate（コンテナ） | VPC 内（プライベートサブネット。VPC エンドポイントか NAT） | 実装済み（../DEPLOY.md 3.4、`analyzer-stub/vpc-template.yaml`） |
+| スタブ（VPC 版） | ECS Fargate（コンテナ） | VPC 内（テスト用にはスタブ用の VPC のパブリックサブネット。プライベートサブネット + VPC エンドポイントか NAT も可） | 実装済み（../DEPLOY.md 3.4。ネットワークは `analyzer-stub/network.yaml`、スタブは AWS CDK `analyzer-stub/cdk/`） |
 | スタブ（内部向け ALB + Lambda） | Lambda | ALB だけが VPC 内 | 実装しない（ALB から Lambda に渡せるボディが 1MB まで、ALB の時間課金。../notes/analyzer-stub-vpc.md） |
 
 ### 6.5.2 ALB が要るかどうか
@@ -202,9 +202,9 @@ flowchart LR
     ENI["tickets の ENI<br/>SG: TICKETS_SG"]
     SSMP["Parameter Store への経路（既存）"]
   end
-  subgraph SV["スタブ用の VPC（既存の指定、または DEPLOY.md 3.4.2 で新規）"]
-    TASK["Fargate のスタブ<br/>STUB_AUTH=none<br/>SG 受信: TICKETS_SG から 8090 だけ"]
-    EG["ECR・Logs への経路<br/>（エンドポイント or NAT）"]
+  subgraph SV["スタブ用の VPC（DEPLOY.md 3.4.2 の network.yaml で新規。パブリックサブネット）"]
+    TASK["Fargate のスタブ（パブリック IP あり）<br/>STUB_AUTH=none<br/>SG 受信: TICKETS_SG から 8090 だけ"]
+    EG["ECR・Logs への経路<br/>（インターネットゲートウェイ。プライベートならエンドポイント or NAT）"]
   end
   LT -.-> ENI
   ENI -->|salt の取得| SSMP
@@ -216,12 +216,12 @@ flowchart LR
 | 要るもの | 置き場所 | 手順 |
 |---|---|---|
 | `tickets` を置くサブネット（Parameter Store に届く） | `tickets` の VPC（既存） | 3章・4章 |
-| スタブ（Fargate）とその外向きの経路 | スタブ用の VPC | ../DEPLOY.md 3.4.2〜3.4.5 |
-| ピアリングとルート（両方向とも、サブネットの CIDR だけ） | 両方の VPC | ../DEPLOY.md 3.4.2 の手順 4 |
+| スタブ（Fargate）とその外向きの経路 | スタブ用の VPC | ../DEPLOY.md 3.4.2〜3.4.4 |
+| ピアリングとルート（両方向とも、サブネットの CIDR だけ） | 両方の VPC | ../DEPLOY.md 3.4.2（`network.yaml` が作る） |
 | スタブの SG の送信元に `tickets` の SG | スタブのスタック | ../DEPLOY.md 3.4.3（`AllowedSourceSecurityGroupId`） |
 | `tickets` の `AnalyzerUrl` をスタブの IP に | API のスタック | go/node DEPLOY.md 4-A.4（タスクを起動するたび） |
 
-- スタブ用の VPC（3.4.2 で新規に作るもの）には Parameter Store への経路がないので、`tickets` はそこに置かない。`tickets` は Parameter Store に届く既存の VPC に置き、ピアリングでつなぐ
+- スタブ用の VPC（3.4.2 で新規に作るもの）はパブリックサブネットだけで、Lambda はそこでは外に出られない（パブリック IP を持てない）ので、`tickets` はそこに置かない。`tickets` は Parameter Store に届く既存の VPC に置き、ピアリングでつなぐ
 
 ## 7. 注意すること
 

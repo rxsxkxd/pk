@@ -3,7 +3,7 @@ Description: >-
   Network for the VPC stub (test only): a new VPC with one public subnet (route to an internet gateway), the
   task's security group (inbound TCP 8090 from the ticket API's tickets function only, outbound 443 only) and a
   VPC peering to the tickets VPC with routes on both sides limited to the subnet CIDRs. No NAT gateway and no
-  VPC endpoints, so nothing here is billed by the hour. The stub itself (ECR, ECS) is vpc-template.yaml.
+  VPC endpoints, so nothing here is billed by the hour. The stub itself (image, ECS) is the CDK app in cdk/
   See docs/st/DEPLOY.md 3.4.
 
 Parameters:
@@ -173,12 +173,12 @@ Outputs:
   VpcId:
     Value: !Ref Vpc
   SubnetId:
-    Description: Public subnet for the task (SubnetId of vpc-template.yaml; run-task with assignPublicIp=ENABLED).
+    Description: Public subnet for the task (cdk deploy -c subnetId=...; run-task with assignPublicIp=ENABLED).
     Value: !Ref PublicSubnet
   RouteTableId:
     Value: !Ref PublicRouteTable
   TaskSecurityGroupId:
-    Description: Security group of the task (TaskSecurityGroupId of vpc-template.yaml).
+    Description: Security group of the task (cdk deploy -c taskSecurityGroupId=...).
     Value: !Ref TaskSecurityGroup
   PeeringConnectionId:
     Value: !Ref Peering

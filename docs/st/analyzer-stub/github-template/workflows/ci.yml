@@ -27,7 +27,32 @@ jobs:
         with:
           python-version: "3.13"
       - run: pip install cfn-lint==1.57.1
-      - run: cfn-lint --regions=ap-northeast-1 -- *.yaml # template.yaml (Function URL) and vpc-template.yaml (VPC, Fargate)
+      - run: cfn-lint --regions=ap-northeast-1 -- *.yaml # template.yaml (Function URL) and network.yaml (VPC stub network)
+
+  cdk:
+    name: CDK (test, mypy, synth)
+    # The VPC stub (ECS Fargate) in AWS CDK, Python. synth needs no AWS account and no Docker (the image is built
+    # by cdk deploy); the synthesized template is checked with cfn-lint.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cdk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24 # the CDK CLI (npx aws-cdk)
+      - run: python -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt cfn-lint==1.57.1
+      - run: .venv/bin/python -m unittest -v
+      - run: .venv/bin/python -m mypy --strict app.py stub_cdk tests
+      - name: Synthesize (public subnet pattern)
+        run: >-
+          npx -y aws-cdk@2.1145.0 synth -q -c impl=node -c vpcId=vpc-0123456789abcdef0
+          -c subnetId=subnet-0123456789abcdef0 -c taskSecurityGroupId=sg-0123456789abcdef0
+      - run: .venv/bin/cfn-lint --regions=ap-northeast-1 -- cdk.out/*.template.json
 
   stub-node:
     name: Stub Node (test, build)

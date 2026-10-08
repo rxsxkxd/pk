@@ -4,11 +4,11 @@
 
 | ファイル | 内容 |
 |---|---|
-| `workflows/ci.yml` | Node・Python・Rust のテスト・型チェック / lint・Lambda 用の zip、VPC 版のコンテナのビルドと起動の確認、テンプレートの cfn-lint（[../DESIGN.md](../DESIGN.md)「CI」） |
+| `workflows/ci.yml` | Node・Python・Rust のテスト・型チェック / lint・Lambda 用の zip、VPC 版のコンテナのビルドと起動の確認、CDK（VPC 版のスタブ）のテスト・`mypy`・`synth`、テンプレートの cfn-lint（[../DESIGN.md](../DESIGN.md)「CI」） |
 
 使い方:
 
-1. 専用のリポジトリのルートに、この `analyzer-stub` の内容を置く。ワークフローは、リポジトリのルートを今の `analyzer-stub` として書いてある（`node/`、`python/`、`rust/`、`testdata/`、`template.yaml`、`vpc-template.yaml` がルートにある前提）
+1. 専用のリポジトリのルートに、この `analyzer-stub` の内容を置く。ワークフローは、リポジトリのルートを今の `analyzer-stub` として書いてある（`node/`、`python/`、`rust/`、`cdk/`、`testdata/`、`template.yaml`、`network.yaml` がルートにある前提）
 2. このフォルダの中身を `.github/` にコピーする（`github-template/workflows/ci.yml` → `.github/workflows/ci.yml`）
 3. `stub-rust`・`stub-image` は arm64 の GitHub ホストランナー（`ubuntu-24.04-arm`）を使う。使えない場合は `ubuntu-latest` に `docker/setup-qemu-action` を足す（Rust のビルドは数倍遅くなる）
 

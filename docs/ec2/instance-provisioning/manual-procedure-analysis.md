@@ -4,7 +4,7 @@
 >
 > スコープ: AMI からインスタンスを起動し、サーバー固有の設定をして、Elastic IP と Route 53 のレコードで公開するまで
 >
-> スコープ外: Let's Encrypt の証明書の発行・Apache の SSL 設定・証明書の自動更新（別途検討する。参考: [EC2 での Let's Encrypt 証明書発行・初期設定の自動化](../notes/ec2-operations/letsencrypt-automation.md)）
+> スコープ外: Let's Encrypt の証明書の発行・Apache の SSL 設定・証明書の自動更新（どの段階で何をするかは [補足: 構築の流れの中で Let's Encrypt の証明書をいつ扱うか](../notes/instance-provisioning/letsencrypt-certificate-timing.md)。自動化そのものは [EC2 での Let's Encrypt 証明書発行・初期設定の自動化](../notes/ec2-operations/letsencrypt-automation.md)）
 
 ## 現状の手作業の手順
 

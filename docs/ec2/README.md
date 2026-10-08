@@ -76,7 +76,8 @@ docs/ec2/
 │   ├── release-verification/          # 前段の補足
 │   │   └── e2e-testing-on-codebuild-memo.md               # メモ: CodeBuild での E2E テストの構成（未決定）
 │   ├── instance-provisioning/         # 後段の補足
-│   │   └── launch-template-auto-scaling-readiness-memo.md # メモ: 起動テンプレートを後から Auto Scaling グループで使う余地
+│   │   ├── launch-template-auto-scaling-readiness-memo.md # メモ: 起動テンプレートを後から Auto Scaling グループで使う余地
+│   │   └── letsencrypt-certificate-timing.md              # 構築の流れの中で Let's Encrypt の証明書をいつ扱うか
 │   └── ec2-operations/                # EC2 の運用に関する個別の調査
 │       ├── cfn-s3-userdata-provisioning.md    # CloudFormation + S3 + UserData によるファイル配備
 │       ├── letsencrypt-automation.md          # Let's Encrypt の証明書発行・初期設定の自動化

@@ -31,11 +31,10 @@ Parameters:
     Default: ""
     AllowedPattern: ^(/.+)?$
     Description: Optional. Parameter Store SecureString holding the analysis server's x-api-key (AnalyzerMode=http), e.g. /ticketqr/analyzer-stub/node/api-key. Empty sends no x-api-key (e.g. an analyzer in the VPC that only admits the Lambda's security group).
-  TicketSuffixLength:
-    Type: Number
-    Default: 8
-    MinValue: 1
-    MaxValue: 32
+  TicketCodeSuffixParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store String holding the fixed suffix of ticket codes (1-32 letters or digits), e.g. /ticketqr/{impl}/ticket-code-suffix (created outside this stack).
   PublicBaseUrl:
     Type: String
     Default: ""
@@ -102,7 +101,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TicketCodeSuffixParameterName}
         - !If
           - HasAnalyzerApiKey
           - PolicyName: read-analyzer-api-key
@@ -174,7 +175,7 @@ Resources:
           ANALYZER_URL: !Ref AnalyzerUrl
           ANALYZER_API_KEY_PARAMETER_NAME: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeyParameterName, !Ref AWS::NoValue]
           SIGNING_SALT_PARAMETER_NAME: !Ref SigningSaltParameterName
-          TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
+          TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref TicketCodeSuffixParameterName
   TicketsIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
@@ -236,7 +237,7 @@ Resources:
           ANALYZER_URL: !Ref AnalyzerUrl
           ANALYZER_API_KEY_PARAMETER_NAME: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeyParameterName, !Ref AWS::NoValue]
           SIGNING_SALT_PARAMETER_NAME: !Ref SigningSaltParameterName
-          TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
+          TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref TicketCodeSuffixParameterName
   GetQRIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:

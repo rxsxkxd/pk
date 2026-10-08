@@ -9,7 +9,7 @@ import { configKey, type AppConfig } from '../src/config.ts';
 import { createAppRouter } from '../src/router.ts';
 
 export const API = 'https://api.example.com';
-export const CODE = '20261005135054-4BV81K5V';
+export const CODE = '202610051350543f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR';
 export const SIG = 'abcdefghijklmnopqrstuv';
 
 export function config(modes: AppConfig['modes'] = ['page']): AppConfig {

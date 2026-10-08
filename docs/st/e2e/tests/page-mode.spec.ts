@@ -5,7 +5,8 @@ import { expect, test } from '@playwright/test';
 import { join } from 'node:path';
 import { API_URL, FIXTURES } from '../env.ts';
 
-const CODE_RE = /^\d{14}-[0-9A-HJKMNP-TV-Z]{8}$/;
+// {YYYYMMDDHHmmss}{UUIDv4, 32 lowercase hex}{fixed suffix: TICKET_CODE_SUFFIX of compose.e2e.yaml}
+const CODE_RE = /^\d{14}[0-9a-f]{32}E2E$/;
 
 test('page mode: grant, move to the SPA ticket screen and show the QR', async ({ page }) => {
   await page.goto('/');

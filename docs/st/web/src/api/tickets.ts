@@ -3,7 +3,8 @@
 
 import { z } from 'zod';
 
-const TicketCode = z.string().regex(/^\d{14}-[0-9A-HJKMNP-TV-Z]+$/);
+// {YYYYMMDDHHmmss}{UUIDv4 のハイフンなし小文字16進32桁}{固定文字列（英数字1〜32文字）}（../../DESIGN.md 4章）
+const TicketCode = z.string().regex(/^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$/);
 const Sig = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
 const IssuedAt = z.iso.datetime({ offset: true });
 

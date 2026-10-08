@@ -1,23 +1,23 @@
 {
-  "description": "code = JSTの発行日時(YYYYMMDDHHmmss) + '-' + 乱数バイトごとに Crockford Base32 alphabet[byte & 31]",
+  "description": "code = JST の発行日時（YYYYMMDDHHmmss）+ UUIDv4 のハイフンなし小文字16進32桁（16バイトの乱数の byte6 を (b & 0x0f) | 0x40、byte8 を (b & 0x3f) | 0x80 にしたもの）+ 固定文字列（英数字1〜32文字。Parameter Store で定義）",
   "cases": [
     {
       "now": "2026-09-30T15:00:00Z",
-      "random": "00010203040506070809",
-      "suffixLength": 10,
-      "expected": "20261001000000-0123456789"
+      "random": "000102030405060708090a0b0c0d0e0f",
+      "suffix": "TQR",
+      "expected": "20261001000000000102030405460788090a0b0c0d0e0fTQR"
     },
     {
       "now": "2026-09-30T14:59:59Z",
-      "random": "1f20ff7f80e0a1b2c3d4",
-      "suffixLength": 10,
-      "expected": "20260930235959-Z0ZZ001J3M"
+      "random": "ffffffffffffffffffffffffffffffff",
+      "suffix": "Ab1",
+      "expected": "20260930235959ffffffffffff4fffbfffffffffffffffAb1"
     },
     {
       "now": "2026-12-31T23:30:05+09:00",
-      "random": "0a0b0c0d0e0f101112131415",
-      "suffixLength": 12,
-      "expected": "20261231233005-ABCDEFGHJKMN"
+      "random": "3f2b9c1e8a4d0f6bce0c7a1d2b3c4d5e",
+      "suffix": "STAGEFIXEDSUFFIX0123456789abcdef",
+      "expected": "202612312330053f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eSTAGEFIXEDSUFFIX0123456789abcdef"
     }
   ]
 }

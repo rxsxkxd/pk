@@ -11,7 +11,7 @@ import (
 
 func TestRoute(t *testing.T) {
 	h := newHandlers(t, analyzer.AlwaysPass{})
-	code := "20261001194300-7K3QX9MZ2P"
+	code := "202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR"
 	signed := signedGet(h, code, h.Signer.Sign(code))
 	withKey := func(req Request, key string) Request { req.RouteKey = key; return req }
 

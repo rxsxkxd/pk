@@ -30,7 +30,7 @@ import (
 var (
 	jpeg     = mustRead("photo.jpg")
 	png      = mustRead("photo.png")
-	codeRe   = regexp.MustCompile(`^\d{14}-[0-9A-HJKMNP-TV-Z]{10}$`)
+	codeRe   = regexp.MustCompile(`^\d{14}[0-9a-f]{32}TQR$`)
 	pngMagic = []byte("\x89PNG\r\n\x1a\n")
 )
 
@@ -66,10 +66,14 @@ func newHandlers(t *testing.T, an ticket.Verifier) *Handlers {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	generator, err := ticket.NewGenerator("TQR")
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &Handlers{
 		PublicBaseURL: "https://api.example.com",
 		PublicOrigin:  "https://api.example.com",
-		Ports:         ticket.Ports{Verifier: an, Generator: ticket.NewGenerator(10), Logger: logger},
+		Ports:         ticket.Ports{Verifier: an, Generator: generator, Logger: logger},
 		Signer:        sg,
 		View:          vw,
 		Logger:        logger,
@@ -316,8 +320,8 @@ func TestGrantErrorsAreHTML(t *testing.T) {
 
 func TestSignatureRequired(t *testing.T) {
 	h := newHandlers(t, analyzer.AlwaysPass{})
-	code := "20261001194300-7K3QX9MZ2P"
-	other := "20261001000000-0000000000"
+	code := "202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR"
+	other := "2026100100000000000000000040008000000000000000TQR"
 	cases := map[string]Request{
 		"missing sig":        signedGet(h, code, ""),
 		"sig for other code": signedGet(h, code, h.Signer.Sign(other)),

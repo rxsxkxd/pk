@@ -11,25 +11,14 @@ import { VerifierError, type Verifier, type Verdict, type Log } from './domain.t
 export type Config = {
   publicBaseUrl: string; // absolute, no trailing slash
   publicOrigin: string; // scheme://host[:port], for CSP
-  suffixLength: number;
 };
-
-const DEFAULT_SUFFIX_LENGTH = 8;
 
 // 環境変数を読み込んで検証し、Config を返す。
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const base = (env.PUBLIC_BASE_URL ?? '').replace(/\/+$/, '');
   const url = absoluteUrl('PUBLIC_BASE_URL', base);
 
-  let suffixLength = DEFAULT_SUFFIX_LENGTH;
-  if (env.TICKET_SUFFIX_LENGTH) {
-    suffixLength = Number(env.TICKET_SUFFIX_LENGTH);
-    if (!Number.isInteger(suffixLength) || suffixLength < 1 || suffixLength > 32) {
-      throw new Error(`TICKET_SUFFIX_LENGTH must be 1-32, got "${env.TICKET_SUFFIX_LENGTH}"`);
-    }
-  }
-
-  return { publicBaseUrl: base, publicOrigin: url.origin, suffixLength };
+  return { publicBaseUrl: base, publicOrigin: url.origin };
 }
 
 // 絶対 URL（http / https）であることを確かめて返す。
@@ -55,6 +44,14 @@ export async function loadSalts(env: NodeJS.ProcessEnv): Promise<Salts> {
     return { current: env.SIGNING_SALT };
   }
   throw new Error('SIGNING_SALT_PARAMETER_NAME is not set');
+}
+
+// チケットコードの末尾の固定文字列を、Parameter Store の String（TICKET_CODE_SUFFIX_PARAMETER_NAME）から取得する。
+// 秘密ではないので、環境変数 TICKET_CODE_SUFFIX で直接渡してもよい（ローカル実行・E2E）。値の形は generateTicket が確かめる。
+export async function loadTicketCodeSuffix(env: NodeJS.ProcessEnv): Promise<string> {
+  if (env.TICKET_CODE_SUFFIX_PARAMETER_NAME) return readParameter(env.TICKET_CODE_SUFFIX_PARAMETER_NAME);
+  if (env.TICKET_CODE_SUFFIX) return env.TICKET_CODE_SUFFIX;
+  throw new Error('TICKET_CODE_SUFFIX_PARAMETER_NAME is not set');
 }
 
 // Parameter Store から SecureString を復号して取得する（SDK は Lambda ランタイム同梱のものを使い、バンドルしない）。

@@ -50,7 +50,7 @@ async function listFiles(dir: string): Promise<string[]> {
 // The Lambda image has no healthcheck command: poll the gateway until the function answers (a QR request
 // with a wrong signature is a 403 from the function itself).
 async function waitForApi(): Promise<void> {
-  const url = `${API_URL}/v1/tickets/20260101000000-WAIT0000/qr?sig=AAAAAAAAAAAAAAAAAAAAAA`;
+  const url = `${API_URL}/v1/tickets/2026010100000000000000000000000000000000000000WAIT/qr?sig=AAAAAAAAAAAAAAAAAAAAAA`;
   const deadline = Date.now() + 60_000;
   for (;;) {
     const status = await fetch(url).then(

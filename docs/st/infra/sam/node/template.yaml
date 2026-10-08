@@ -32,11 +32,10 @@ Parameters:
     Default: ""
     AllowedPattern: ^(/.+)?$
     Description: Optional. Parameter Store SecureString holding the analysis server's x-api-key. Empty sends no x-api-key.
-  TicketSuffixLength:
-    Type: Number
-    Default: 8
-    MinValue: 1
-    MaxValue: 32
+  TicketCodeSuffixParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store String holding the fixed suffix of ticket codes (1-32 letters or digits), e.g. /ticketqr/node/ticket-code-suffix (created outside this stack).
   PublicBaseUrl:
     Type: String
     Default: ""
@@ -72,7 +71,7 @@ Globals:
         ANALYZER_URL: !Ref AnalyzerUrl
         ANALYZER_API_KEY_PARAMETER_NAME: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeyParameterName, !Ref AWS::NoValue]
         SIGNING_SALT_PARAMETER_NAME: !Ref SigningSaltParameterName
-        TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
+        TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref TicketCodeSuffixParameterName
 
 Resources:
   # ---------- HTTP API ($default stage, auto deploy, throttling, access log) ----------
@@ -139,7 +138,9 @@ Resources:
         - Statement:
             - Effect: Allow
               Action: ssm:GetParameter
-              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TicketCodeSuffixParameterName}
         - !If
           - HasAnalyzerApiKey
           - Statement:
@@ -212,7 +213,9 @@ Resources:
         - Statement:
             - Effect: Allow
               Action: ssm:GetParameter
-              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TicketCodeSuffixParameterName}
         - !If
           - HasAnalyzerApiKey
           - Statement:

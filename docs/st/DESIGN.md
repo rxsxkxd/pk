@@ -165,54 +165,36 @@ sequenceDiagram
 
 ## 4. チケットコード仕様
 
-### フォーマット（案）
+### フォーマット（確定。2026-10-09）
 
 ```
-{YYYYMMDDHHmmss}-{suffix}
-例: 20261001194300-7K3QX9MZ（2026-10-01 19:43:00 JST に発行）
+{YYYYMMDD}{HHmmss}{UUIDv4（ハイフンなし、小文字の16進32桁）}{固定文字列}
+例: 20261001194300 3f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5e TQR
+  → 202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR（2026-10-01 19:43:00 JST に発行、固定文字列 TQR）
 ```
 
-| 要素 | 内容 |
-|---|---|
-| 日時 | 発行日時（14桁、秒まで）。**タイムゾーンは JST 固定**（Lambda は UTC のため明示変換）。レスポンスの `issuedAt` と同じ時刻 |
-| suffix | ルールに従いステートレスに生成（下記） |
+| 要素 | 桁 | 内容 |
+|---|---|---|
+| 日付・時刻 | 14 | 発行日時（秒まで）。**タイムゾーンは JST 固定**（Lambda は UTC のため明示変換）。レスポンスの `issuedAt` と同じ時刻 |
+| UUIDv4 | 32 | 暗号論的乱数（Go: `crypto/rand`、Node: `crypto.randomBytes`）の16バイトから作る UUID のバージョン4（RFC 9562。乱数122ビット）。ハイフンなし、**小文字**の16進 |
+| 固定文字列 | 1〜32 | Parameter Store の **String**（`TICKET_CODE_SUFFIX_PARAMETER_NAME`。秘密ではないので、ローカル実行と E2E は環境変数 `TICKET_CODE_SUFFIX` で直接渡せる）。**英数字だけ**（URL のパスと QR にそのまま入るため）。起動時に読み込み、形が違えば起動に失敗する |
 
-全体で 23 文字（suffix 8文字）。
+- 区切り文字はない。日時は14桁・UUID は32桁で固定なので、固定文字列は47文字目から最後まで
+- 全体の形: `^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$`（47〜78文字）。SPA は、チケット画面の URL のコードをこの形で確かめる（`web/src/api/tickets.ts`）
+- 以前の案（`{YYYYMMDDHHmmss}-{Crockford Base32 の乱数8文字}`、環境変数 `TICKET_SUFFIX_LENGTH`）は廃止した
 
-### ステートレス採番の方針
+### ステートレス採番
 
-カウンタ等の共有状態を持たないため、**連番は採用できない**。一意性は suffix の乱数空間の大きさで確率的に担保する。
+カウンタ等の共有状態を持たないため、**連番は採用できない**。一意性は UUIDv4 の乱数（122ビット）で確率的に担保する。
 
-- suffix は暗号論的乱数（Go: `crypto/rand`、Node: `crypto.randomBytes`）から生成
-- 表記は Crockford Base32（`0-9A-Z` から `I L O U` を除く。読み間違いに強い）を想定
-- 衝突は**同じ秒に発行されたコード同士でしか起こらない**（日時が1秒でも違えば別コード）
-
-1秒あたりの発行数 r、suffix のビット数 b のとき、ある1秒の中で衝突する確率 ≈ r² / 2^(b+1)。
-#### 想定する発行量
-
-| 項目 | 値 |
-|---|---|
-| ピーク | 1秒あたり 2件 |
-| 1日あたり | 多くても数千件（計算では 5,000件/日） |
-
-最悪ケースとして、1日 5,000件がすべて「同じ秒に2件ずつ」発行されたとする（同じ秒の組が 2,500組できる）。このとき、その日に1件以上衝突する確率 ≈ 2,500 / 2^b。
-あわせて、API Gateway のスロットリング上限（`ThrottlingRateLimit` = 50件/秒）いっぱいの発行が1日中続いた場合（濫用時の上限）も示す。
-
-| suffix 長 (Base32) | ビット数 | 想定（1日あたり） | 想定（1年あたり） | スロットリング上限が1日続いた場合 |
-|---|---|---|---|---|
-| 6文字 | 30 | 約 2.3×10⁻⁶ | 約 8.5×10⁻⁴ | 約 9.9% |
-| 7文字 | 35 | 約 7.3×10⁻⁸ | 約 2.7×10⁻⁵ | 約 0.31% |
-| **8文字（採用）** | 40 | 約 2.3×10⁻⁹ | 約 8.3×10⁻⁷ | 約 9.6×10⁻⁵ |
-| 10文字 | 50 | 約 2.2×10⁻¹² | 約 8.1×10⁻¹⁰ | 約 9.4×10⁻⁸ |
-
-→ **suffix は 8文字を採用**（環境変数 `TICKET_SUFFIX_LENGTH` の既定値）。想定の発行量では、1年間で衝突する確率がおよそ100万分の1。スロットリング上限いっぱいの濫用が丸1日続いても、約1万分の1に収まる。
-発行量の想定が大きく変わる場合は、この表で桁数を見直す。
+- 衝突は**同じ秒に発行されたコード同士でしか起こらない**（日時が1秒でも違えば別コード）。さらに UUIDv4 が 122 ビットあるので、想定の発行量（ピーク 1秒あたり2件、1日 数千件）でも、スロットリングの上限（50件/秒）いっぱいの発行が続いても、衝突は事実上起こらない（1秒に50件で、その秒に衝突する確率 ≈ 50² / 2^123 ≈ 2.4×10⁻³⁴）
+- 固定文字列は衝突の確率に影響しない（すべてのコードで同じ）
 
 ### ルールとの関係
 
 - 生成ルールはチケット利用側と共有された仕様であり、APIはそれに**厳密に準拠したコードのみ**を生成する
-- 採番ロジックは `TicketCodeGenerator` として分離し、ルール変更の影響をここに閉じ込める（コードの形式チェックはAPIでは行わない）
-- 時刻と乱数源はインターフェース化し、テスト時は固定値を注入する。Go/Node の両実装に**同一のテストベクタ**（`testdata/ticketcode.json`。入力: 時刻・乱数バイト → 期待コード。UTC→JST の日付またぎも含む）を流す
+- 採番ロジックは生成器（Go: `ticket.Generator`、Node: `generateTicket`）に分離し、ルール変更の影響をここに閉じ込める（コードの形式チェックは API では行わない。署名で照合する）
+- 時刻と乱数源はインターフェース化し、テスト時は固定値を注入する。Go/Node の両実装に**同一のテストベクタ**（`testdata/ticketcode.json`。入力: 時刻・乱数16バイト・固定文字列 → 期待コード。UTC→JST の日付またぎ、UUID の版と種別のビット、32文字の固定文字列も含む）を流す
 
 > suffix の具体的なルールは **要確定**。ルールが連番など状態を必要とするものだった場合、本前提（外部ストアなし）と両立しないため再検討が必要。
 
@@ -247,7 +229,7 @@ const res = await fetch(`${apiBaseUrl}/v1/tickets/qr-inline`, { method: "POST", 
 Response `201 Created`, `Content-Type: application/json`
 ```json
 {
-  "ticketCode": "20261001194300-7K3QX9MZ",
+  "ticketCode": "202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR",
   "issuedAt": "2026-10-01T19:43:00+09:00",
   "qr": {
     "mimeType": "image/png",
@@ -269,7 +251,7 @@ Request `Content-Type: multipart/form-data`
 Response（成功。フォーム送信など、`Accept` に `application/json` を含まないとき）
 ```
 HTTP/1.1 303 See Other
-Location: https://api.example.com/v1/tickets/20261001194300-7K3QX9MZ/view?sig=Xq3v9bJk2mPz8RtY1cWnHA
+Location: https://api.example.com/v1/tickets/202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR/view?sig=Xq3v9bJk2mPz8RtY1cWnHA
 Cache-Control: no-store
 ```
 
@@ -280,10 +262,10 @@ Content-Type: application/json
 Vary: Accept
 
 {
-  "ticketCode": "20261001194300-7K3QX9MZ",
+  "ticketCode": "202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR",
   "issuedAt": "2026-10-01T19:43:00+09:00",
   "sig": "Xq3v9bJk2mPz8RtY1cWnHA",
-  "qrUrl": "https://api.example.com/v1/tickets/20261001194300-7K3QX9MZ/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
+  "qrUrl": "https://api.example.com/v1/tickets/202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
 }
 ```
 
@@ -304,14 +286,14 @@ Response `200 OK`, `Content-Type: text/html; charset=utf-8`
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>チケット 20261001194300-7K3QX9MZ</title>
+  <title>チケット 202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR</title>
 </head>
 <body>
-  <main data-ticket-code="20261001194300-7K3QX9MZ">
+  <main data-ticket-code="202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR">
     <h1>チケット</h1>
-    <img src="https://api.example.com/v1/tickets/20261001194300-7K3QX9MZ/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
+    <img src="https://api.example.com/v1/tickets/202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR/qr?sig=Xq3v9bJk2mPz8RtY1cWnHA"
          alt="チケットQRコード" width="256" height="256">
-    <p>20261001194300-7K3QX9MZ</p>
+    <p>202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR</p>
   </main>
 </body>
 </html>

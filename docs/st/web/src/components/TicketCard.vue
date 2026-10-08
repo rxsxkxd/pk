@@ -7,7 +7,8 @@ defineEmits<{ qrError: [] }>();
 <template>
   <div class="flex flex-col items-center gap-3" :data-ticket-code="ticketCode">
     <img :src="qrSrc" alt="チケットQRコード" width="256" height="256" class="size-64" @error="$emit('qrError')" />
-    <p class="font-mono text-lg tracking-wide" data-testid="ticket-code">{{ ticketCode }}</p>
+    <!-- The code is long (14 + 32 + up to 32 characters): wrap anywhere so it fits a phone screen. -->
+    <p class="max-w-full text-center font-mono text-sm break-all" data-testid="ticket-code">{{ ticketCode }}</p>
     <p class="text-sm text-slate-600" data-testid="issued-at">発行: {{ issuedAt }}</p>
   </div>
 </template>

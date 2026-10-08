@@ -155,6 +155,7 @@ aws cloudformation deploy \
     ArtifactBucket=$ARTIFACT_BUCKET \
     ArtifactPrefix=$ARTIFACT_PREFIX \
     SigningSaltParameterName=$SALT_PARAM \
+    TicketCodeSuffixParameterName=$CODE_SUFFIX_PARAM \
     AnalyzerMode=http \
     AnalyzerUrl=$ANALYZER_URL \
     VpcSubnetIds=$SUBNET_A,$SUBNET_B \

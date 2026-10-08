@@ -13,6 +13,7 @@ const defaults: Record<string, string> = {
   PUBLIC_BASE_URL: `http://localhost:${port}`,
   SIGNING_SALT: 'local-dev-salt',
   ANALYZER_MODE: 'mock',
+  TICKET_CODE_SUFFIX: 'LOCAL',
 };
 for (const [k, v] of Object.entries(defaults)) process.env[k] ??= v;
 

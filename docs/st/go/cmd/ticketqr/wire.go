@@ -48,13 +48,21 @@ func newHandlers(ctx context.Context) (*httpapi.Handlers, error) {
 	if err != nil {
 		return nil, err
 	}
+	suffix, err := config.LoadTicketCodeSuffix(ctx)
+	if err != nil {
+		return nil, err
+	}
+	generator, err := ticket.NewGenerator(suffix)
+	if err != nil {
+		return nil, err
+	}
 
 	return &httpapi.Handlers{
 		PublicBaseURL: cfg.PublicBaseURL,
 		PublicOrigin:  cfg.PublicOrigin,
 		Ports: ticket.Ports{
 			Verifier:  an,
-			Generator: ticket.NewGenerator(cfg.SuffixLength),
+			Generator: generator,
 			Logger:    logger,
 		},
 		Signer: sg,

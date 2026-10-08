@@ -1,25 +1,25 @@
 {
-  "description": "sig = base64url(HMAC-SHA256(salt, ticketCode)) の先頭22文字（パディングなし）",
+  "description": "sig = base64url(HMAC-SHA256(salt, ticketCode)) の先頭22文字（パディングなし）。ticketCode は DESIGN.md 4章の形式（署名はコードの形式に依存しない）",
   "cases": [
     {
       "salt": "test-salt-1",
-      "ticketCode": "20261001194300-7K3QX9MZ2P",
-      "sig": "Imqkn3lIKI0aAHG-O6XAmt"
+      "ticketCode": "202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR",
+      "sig": "5pK-FD_FTxmmmnNudhxkQ-"
     },
     {
       "salt": "test-salt-1",
-      "ticketCode": "20261001000000-0000000000",
-      "sig": "HZLz0BayBhi-y01k7qhZa7"
+      "ticketCode": "2026100100000000000000000040008000000000000000TQR",
+      "sig": "61nGG0phspyFW21IsnkKxO"
     },
     {
       "salt": "another-salt",
-      "ticketCode": "20261231235959-ZZZZZZZZZZ",
-      "sig": "6_ur4H8c7E8ppsAC_zst7i"
+      "ticketCode": "20261231235959ffffffffffff4fffbfffffffffffffffSTAGEFIXEDSUFFIX0123456789abcdef",
+      "sig": "Hsxz4CuQJbikOy1WSZw2EU"
     },
     {
       "salt": "日本語salt",
-      "ticketCode": "20260101000000-ABCDEFGHJK",
-      "sig": "9Y1vilnJBQBS0XaRbqWLin"
+      "ticketCode": "202601010000000a1b2c3d4e5f40718293a4b5c6d7e8f9Ab1",
+      "sig": "ECqMqaA2Qgd2J2x5nx6qDO"
     }
   ]
 }

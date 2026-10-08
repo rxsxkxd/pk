@@ -20,6 +20,7 @@ func runLocal() {
 	setDefault("PUBLIC_BASE_URL", "http://localhost"+*addr)
 	setDefault("SIGNING_SALT", "local-dev-salt")
 	setDefault("ANALYZER_MODE", "mock")
+	setDefault("TICKET_CODE_SUFFIX", "LOCAL")
 
 	h := mustNewHandlers()
 	mux := http.NewServeMux()

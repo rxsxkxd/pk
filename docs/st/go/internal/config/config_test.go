@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -32,5 +33,17 @@ func TestAnalyzerSettings(t *testing.T) {
 	t.Setenv("ANALYZER_TIMEOUT_MS", "0")
 	if _, err := Load(); err == nil {
 		t.Error("ANALYZER_TIMEOUT_MS=0 must fail")
+	}
+}
+
+func TestLoadTicketCodeSuffix(t *testing.T) {
+	t.Setenv("TICKET_CODE_SUFFIX_PARAMETER_NAME", "")
+	t.Setenv("TICKET_CODE_SUFFIX", "TQR")
+	if got, err := LoadTicketCodeSuffix(context.Background()); err != nil || got != "TQR" {
+		t.Errorf("LoadTicketCodeSuffix = %q, %v; want TQR (plain value: not a secret)", got, err)
+	}
+	t.Setenv("TICKET_CODE_SUFFIX", "")
+	if _, err := LoadTicketCodeSuffix(context.Background()); err == nil {
+		t.Error("want an error when neither TICKET_CODE_SUFFIX_PARAMETER_NAME nor TICKET_CODE_SUFFIX is set")
 	}
 }

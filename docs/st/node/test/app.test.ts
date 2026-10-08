@@ -11,7 +11,7 @@ import { MAX_IMAGE_BYTES } from '../src/image.ts';
 import { createExampleApp } from '../src/example.ts';
 import { qrPng } from '../src/shared.ts';
 import { VerifierError, generateTicket, newSigner, type Verdict, type Verifier, type Log } from '../src/domain.ts';
-import { alwaysPass, httpAnalyzer, loadConfig, newAnalyzer } from '../src/infra.ts';
+import { alwaysPass, httpAnalyzer, loadConfig, loadTicketCodeSuffix, newAnalyzer } from '../src/infra.ts';
 
 const root = new URL('../../', import.meta.url);
 const vectors = (name: string) => JSON.parse(readFileSync(new URL(`testdata/${name}`, root), 'utf8'));
@@ -21,7 +21,7 @@ const image = (name: string) => new Uint8Array(readFileSync(new URL(`testdata/im
 const JPEG = image('photo.jpg');
 const PNG = image('photo.png');
 const PNG_MAGIC = PNG.subarray(0, 8);
-const CODE_RE = /^\d{14}-[0-9A-HJKMNP-TV-Z]{8}$/;
+const CODE_RE = /^\d{14}[0-9a-f]{32}TQR$/;
 const BASE = 'https://api.example.com';
 
 const GRANT_INLINE = '/v1/tickets/qr-inline';
@@ -34,10 +34,10 @@ type LambdaHandler = (event: Event) => Promise<Result>;
 
 function newRoute(verifier: Verifier = alwaysPass, log: Log = () => {}) {
   const deps: Deps = {
-    config: { publicBaseUrl: BASE, publicOrigin: BASE, suffixLength: 8 },
+    config: { publicBaseUrl: BASE, publicOrigin: BASE },
     verifier,
     signer: newSigner('test-salt'),
-    newTicket: () => generateTicket(8),
+    newTicket: () => generateTicket('TQR'),
     log,
   };
   return { deps, handle: handle(createApp(deps)) as LambdaHandler };
@@ -128,7 +128,7 @@ const pngSize = (png: Buffer) => [png.readUInt32BE(16), png.readUInt32BE(20)];
 describe('ticket code', () => {
   for (const c of vectors('ticketcode.json').cases) {
     test(c.expected, () => {
-      const t = generateTicket(c.suffixLength, new Date(c.now), () => Buffer.from(c.random, 'hex'));
+      const t = generateTicket(c.suffix, new Date(c.now), () => Buffer.from(c.random, 'hex'));
       assert.equal(t.code, c.expected);
       assert.match(t.issuedAt, /\+09:00$/);
       assert.equal(t.issuedAt.slice(0, 19).replace(/\D/g, ''), c.expected.slice(0, 14));
@@ -138,7 +138,8 @@ describe('ticket code', () => {
   test('random shape and uniqueness', () => {
     const seen = new Set<string>();
     for (let i = 0; i < 1000; i++) {
-      const { code } = generateTicket(8);
+      const { code } = generateTicket('TQR');
+      assert.match(code, /^\d{14}[0-9a-f]{12}4[0-9a-f]{3}[89ab][0-9a-f]{15}TQR$/); // UUID v4 version and variant
       assert.match(code, CODE_RE);
       assert.ok(!seen.has(code), `duplicate ${code}`);
       seen.add(code);
@@ -146,7 +147,9 @@ describe('ticket code', () => {
   });
 
   test('short random source fails', () => {
-    assert.throws(() => generateTicket(8, new Date(), () => Uint8Array.of(1, 2)));
+    assert.throws(() => generateTicket('TQR', new Date(), () => Uint8Array.of(1, 2)));
+    for (const bad of ['', 'has-hyphen', 'has space', '日本語', 'A'.repeat(33)])
+      assert.throws(() => generateTicket(bad), /suffix/);
   });
 });
 
@@ -160,14 +163,14 @@ describe('signer', () => {
   }
 
   test('verify', () => {
-    const code = '20261001194300-7K3QX9MZ';
+    const code = '202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR';
     const old = newSigner('old-salt');
     const cur = newSigner('new-salt');
     const rotating = newSigner('new-salt', 'old-salt');
     assert.ok(rotating.verify(code, cur.sign(code)));
     assert.ok(rotating.verify(code, old.sign(code)), 'previous salt during rotation');
     assert.ok(!cur.verify(code, old.sign(code)), 'previous salt after rotation');
-    assert.ok(!cur.verify('20261001000000-00000000', cur.sign(code)));
+    assert.ok(!cur.verify('2026100100000000000000000040008000000000000000TQR', cur.sign(code)));
     assert.ok(!cur.verify(code, ''));
     assert.ok(!cur.verify(code, cur.sign(code).slice(0, 21)));
     assert.ok(!cur.verify(code, 'あ'.repeat(22)), 'multi-byte input of the right length');
@@ -184,18 +187,24 @@ describe('config', () => {
     assert.deepEqual(c, {
       publicBaseUrl: 'https://api.example.com:8443',
       publicOrigin: 'https://api.example.com:8443',
-      suffixLength: 8,
     });
+  });
+  test('ticket code suffix: Parameter Store, or TICKET_CODE_SUFFIX directly (not a secret)', async () => {
+    assert.equal(await loadTicketCodeSuffix({ TICKET_CODE_SUFFIX: 'TQR' }), 'TQR');
+    await assert.rejects(loadTicketCodeSuffix({}), /TICKET_CODE_SUFFIX_PARAMETER_NAME/);
   });
   test('invalid values', () => {
     assert.throws(() => loadConfig({}));
     assert.throws(() => loadConfig({ PUBLIC_BASE_URL: 'ftp://x' }));
-    assert.throws(() => loadConfig({ PUBLIC_BASE_URL: BASE, TICKET_SUFFIX_LENGTH: '0' }));
   });
 });
 
 describe('qr', () => {
-  for (const text of ['20261001194300-7K3QX9MZ', '20261231235959-ABCDEFGHJKMN', 'x'.repeat(120)]) {
+  for (const text of [
+    '202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR',
+    '20261231235959ffffffffffff4fffbfffffffffffffffSTAGEFIXEDSUFFIX0123456789abcdef',
+    'x'.repeat(120),
+  ]) {
     test(text, () => {
       const png = qrPng(text);
       assert.deepEqual(png.subarray(0, 8), Buffer.from(PNG_MAGIC));
@@ -417,10 +426,10 @@ describe('B-1 errors are HTML views', () => {
 
 describe('signature required', () => {
   const { deps, handle } = newRoute();
-  const code = '20261001194300-7K3QX9MZ';
+  const code = '202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR';
   const cases: Array<[string, string, string]> = [
     ['missing sig', code, ''],
-    ['sig for other code', code, deps.signer.sign('20261001000000-00000000')],
+    ['sig for other code', code, deps.signer.sign('2026100100000000000000000040008000000000000000TQR')],
     ['garbage sig', code, 'x'.repeat(22)],
   ];
   for (const [name, c, sig] of cases) {

@@ -35,6 +35,7 @@ API Gateway を SAM の `AWS::Serverless::HttpApi` と関数の `Events` で書�
 cd docs/st
 export IMPL=go                                      # go / node
 export SALT_PARAM=/ticketqr/$IMPL/signing-salt
+export CODE_SUFFIX_PARAM=/ticketqr/$IMPL/ticket-code-suffix   # String（チケットコードの末尾の固定文字列。go/node DEPLOY.md 3章）
 
 # ネットワークのスタック（tickets-network-*.yaml）の出力
 export TICKETS_SUBNETS=$(aws cloudformation describe-stacks --stack-name ticketqr-tickets-network \
@@ -56,7 +57,8 @@ sam deploy --template-file infra/sam/$IMPL/.aws-sam/build/template.yaml \
   --parameter-overrides \
     VpcSubnetIds=$TICKETS_SUBNETS \
     VpcSecurityGroupIds=$TICKETS_SG \
-    SigningSaltParameterName=$SALT_PARAM
+    SigningSaltParameterName=$SALT_PARAM \
+    TicketCodeSuffixParameterName=$CODE_SUFFIX_PARAM
 
 export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-sam-$IMPL \
   --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)

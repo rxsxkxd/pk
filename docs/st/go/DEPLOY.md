@@ -32,6 +32,7 @@ export AWS_REGION=ap-northeast-1
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export IMPL=go
 export SALT_PARAM=/ticketqr/$IMPL/signing-salt
+export CODE_SUFFIX_PARAM=/ticketqr/$IMPL/ticket-code-suffix
 ```
 
 ## 2. ビルド
@@ -67,6 +68,21 @@ rm -f "$SALT_FILE"
 - 暗号化は既定の `aws/ssm` キーを使う。この場合、実行ロールには `ssm:GetParameter` だけを付ければよい。独自の KMS キーを使う場合は、実行ロールに `kms:Decrypt` を追加する
 - Node 版とは別のパラメータにする（スタックごとに URL が別になるため、同じ salt を使う必要はない）
 
+### 3.1 チケットコードの固定文字列の作成（初回だけ）
+
+チケットコードは `{日付8桁}{時刻6桁}{UUIDv4 のハイフンなし小文字16進32桁}{固定文字列}`（../DESIGN.md 4章）。末尾の固定文字列を、Parameter Store の **String**（秘密ではないので平文）に作る。使える文字は英数字だけ、1〜32文字（URL のパスと QR にそのまま入るため）。値が違う形だと、Lambda の起動に失敗する。
+
+```sh
+aws ssm put-parameter \
+  --name $CODE_SUFFIX_PARAM \
+  --type String \
+  --description "Ticket QR: fixed suffix of ticket codes ($IMPL)" \
+  --value 'TQR'          # 実際の固定文字列に置き換える
+```
+
+- 値を変えると、それ以降に発行するコードの末尾が変わる（発行済みのコードと URL はそのまま使える。署名はコード全体に対して付けるため）。反映には Lambda の実行環境の作り直しが要る（9章の salt と同じ。デプロイし直す）
+- ローカル実行と E2E では、Parameter Store の代わりに環境変数 `TICKET_CODE_SUFFIX` で直接渡せる（ローカルの既定値は `LOCAL`、E2E は `E2E`）
+
 ## 4. API のデプロイ
 
 方法は2つ。**4-A（CloudFormation。推奨）と 4-B（手動の AWS CLI）は、末尾の番号が同じものが同じ結果になる**（例: 4-A.4 と 4-B.4）。どちらか一方の手順だけを使う（同じ環境で混ぜない）。
@@ -97,7 +113,7 @@ rm -f "$SALT_FILE"
 | `AnalyzerMode` | `mock` | 画像解析クライアントの種類。`mock`（プロセス内で常に valid）/ `http`（`AnalyzerUrl` に POST）。5.1 |
 | `AnalyzerUrl` | 空 | `AnalyzerMode=http` のときの POST 先 |
 | `AnalyzerApiKeyParameterName` | 空 | `AnalyzerMode=http` のときの API キーのパラメータ名（任意）。指定すると `x-api-key` を付けて送り、Lambda の実行ロールに読み取り権限が付く（4-A.3）。空なら API キーなしで送る（4-A.4） |
-| `TicketSuffixLength` | `8` | suffix の桁数 |
+| `TicketCodeSuffixParameterName` | - | 3.1 で作ったチケットコードの固定文字列のパラメータ名（`/ticketqr/go/ticket-code-suffix`。String） |
 | `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。空なら execute-api の URL を自動で使う |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `50` / `100` | 全ルートに共通のスロットリング |
 | `GrantReservedConcurrency` | `-1`（設定しない） | `tickets` 関数に予約する同時実行数（画像解析サーバーの保護用） |
@@ -128,7 +144,8 @@ aws cloudformation deploy \
     Impl=$IMPL \
     ArtifactBucket=$ARTIFACT_BUCKET \
     ArtifactPrefix=$ARTIFACT_PREFIX \
-    SigningSaltParameterName=$SALT_PARAM
+    SigningSaltParameterName=$SALT_PARAM \
+    TicketCodeSuffixParameterName=$CODE_SUFFIX_PARAM
 
 export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-$IMPL \
   --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
@@ -158,6 +175,7 @@ aws cloudformation deploy \
     ArtifactBucket=$ARTIFACT_BUCKET \
     ArtifactPrefix=$ARTIFACT_PREFIX \
     SigningSaltParameterName=$SALT_PARAM \
+    TicketCodeSuffixParameterName=$CODE_SUFFIX_PARAM \
     AnalyzerMode=http \
     AnalyzerUrl=$ANALYZER_URL \
     AnalyzerApiKeyParameterName=$ANALYZER_KEY_PARAM
@@ -186,6 +204,7 @@ aws cloudformation deploy \
     ArtifactBucket=$ARTIFACT_BUCKET \
     ArtifactPrefix=$ARTIFACT_PREFIX \
     SigningSaltParameterName=$SALT_PARAM \
+    TicketCodeSuffixParameterName=$CODE_SUFFIX_PARAM \
     AnalyzerMode=http \
     AnalyzerUrl=$ANALYZER_URL \
     VpcSubnetIds=$SUBNET_A,$SUBNET_B \
@@ -230,7 +249,7 @@ aws iam attach-role-policy --role-name $ROLE_NAME \
   --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
 
 aws iam put-role-policy --role-name $ROLE_NAME --policy-name read-signing-salt \
-  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ssm:GetParameter\",\"Resource\":\"arn:aws:ssm:$AWS_REGION:$ACCOUNT_ID:parameter$SALT_PARAM\"}]}"
+  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ssm:GetParameter\",\"Resource\":[\"arn:aws:ssm:$AWS_REGION:$ACCOUNT_ID:parameter$SALT_PARAM\",\"arn:aws:ssm:$AWS_REGION:$ACCOUNT_ID:parameter$CODE_SUFFIX_PARAM\"]}]}"
 
 export ROLE_ARN=$(aws iam get-role --role-name $ROLE_NAME --query Role.Arn --output text)
 sleep 10   # 作ったばかりの IAM ロールが反映されるまで待つ
@@ -263,7 +282,7 @@ aws lambda create-function \
   --runtime provided.al2023 --architectures arm64 --handler bootstrap \
   --role $ROLE_ARN --memory-size 256 --timeout 15 \
   --zip-file fileb://go/bin/ticketqr.zip \
-  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_CODE_SUFFIX_PARAMETER_NAME=$CODE_SUFFIX_PARAM}" \
   --query FunctionArn --output text
 
 aws logs create-log-group --log-group-name /aws/lambda/ticketqr-$IMPL-get-qr
@@ -273,7 +292,7 @@ aws lambda create-function \
   --runtime provided.al2023 --architectures arm64 --handler bootstrap \
   --role $ROLE_ARN --memory-size 256 --timeout 5 \
   --zip-file fileb://go/bin/ticketqr.zip \
-  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_CODE_SUFFIX_PARAMETER_NAME=$CODE_SUFFIX_PARAM}" \
   --query FunctionArn --output text
 ```
 
@@ -344,10 +363,10 @@ aws iam put-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-ana
   --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ssm:GetParameter\",\"Resource\":\"arn:aws:ssm:$AWS_REGION:$ACCOUNT_ID:parameter$ANALYZER_KEY_PARAM\"}]}"
 
 aws lambda update-function-configuration --function-name ticketqr-$IMPL-tickets \
-  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_PARAMETER_NAME=$ANALYZER_KEY_PARAM,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_PARAMETER_NAME=$ANALYZER_KEY_PARAM,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_CODE_SUFFIX_PARAMETER_NAME=$CODE_SUFFIX_PARAM}" \
   --query LastUpdateStatus --output text
 aws lambda update-function-configuration --function-name ticketqr-$IMPL-get-qr \
-  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_PARAMETER_NAME=$ANALYZER_KEY_PARAM,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,ANALYZER_API_KEY_PARAMETER_NAME=$ANALYZER_KEY_PARAM,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_CODE_SUFFIX_PARAMETER_NAME=$CODE_SUFFIX_PARAM}" \
   --query LastUpdateStatus --output text
 ```
 
@@ -355,10 +374,10 @@ aws lambda update-function-configuration --function-name ticketqr-$IMPL-get-qr \
 
 ```sh
 aws lambda update-function-configuration --function-name ticketqr-$IMPL-tickets \
-  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_CODE_SUFFIX_PARAMETER_NAME=$CODE_SUFFIX_PARAM}" \
   --query LastUpdateStatus --output text
 aws lambda update-function-configuration --function-name ticketqr-$IMPL-get-qr \
-  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=mock,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_CODE_SUFFIX_PARAMETER_NAME=$CODE_SUFFIX_PARAM}" \
   --query LastUpdateStatus --output text
 aws iam delete-role-policy --role-name ticketqr-$IMPL-lambda --policy-name read-analyzer-api-key
 ```
@@ -379,12 +398,12 @@ sleep 10   # ロールの変更が反映されるまで待つ
 
 aws lambda update-function-configuration --function-name ticketqr-$IMPL-tickets \
   --vpc-config SubnetIds=$SUBNET_A,$SUBNET_B,SecurityGroupIds=$LAMBDA_SG \
-  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_CODE_SUFFIX_PARAMETER_NAME=$CODE_SUFFIX_PARAM}" \
   --query LastUpdateStatus --output text
 aws lambda wait function-updated --function-name ticketqr-$IMPL-tickets   # ENI ができて Active になるまで（数十秒〜数分）
 
 aws lambda update-function-configuration --function-name ticketqr-$IMPL-get-qr \
-  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_SUFFIX_LENGTH=8}" \
+  --environment "Variables={PUBLIC_BASE_URL=$API_URL,ANALYZER_MODE=http,ANALYZER_URL=$ANALYZER_URL,SIGNING_SALT_PARAMETER_NAME=$SALT_PARAM,TICKET_CODE_SUFFIX_PARAMETER_NAME=$CODE_SUFFIX_PARAM}" \
   --query LastUpdateStatus --output text
 ```
 

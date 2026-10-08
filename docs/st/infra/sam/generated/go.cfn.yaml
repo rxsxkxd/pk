@@ -30,11 +30,10 @@ Parameters:
     Default: ''
     AllowedPattern: ^(/.+)?$
     Description: Optional. Parameter Store SecureString holding the analysis server's x-api-key. Empty sends no x-api-key.
-  TicketSuffixLength:
-    Type: Number
-    Default: 8
-    MinValue: 1
-    MaxValue: 32
+  TicketCodeSuffixParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store String holding the fixed suffix of ticket codes (1-32 letters or digits), e.g. /ticketqr/go/ticket-code-suffix (created outside this stack).
   PublicBaseUrl:
     Type: String
     Default: ''
@@ -194,7 +193,7 @@ Resources:
             - !Ref 'AnalyzerApiKeyParameterName'
             - !Ref 'AWS::NoValue'
           SIGNING_SALT_PARAMETER_NAME: !Ref 'SigningSaltParameterName'
-          TICKET_SUFFIX_LENGTH: !Ref 'TicketSuffixLength'
+          TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref 'TicketCodeSuffixParameterName'
       Tags:
         - Key: lambda:createdBy
           Value: SAM
@@ -225,7 +224,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TicketCodeSuffixParameterName}'
         - !If
           - HasAnalyzerApiKey
           - PolicyName: TicketsFunctionRolePolicy1
@@ -266,7 +267,7 @@ Resources:
             - !Ref 'AnalyzerApiKeyParameterName'
             - !Ref 'AWS::NoValue'
           SIGNING_SALT_PARAMETER_NAME: !Ref 'SigningSaltParameterName'
-          TICKET_SUFFIX_LENGTH: !Ref 'TicketSuffixLength'
+          TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref 'TicketCodeSuffixParameterName'
       Tags:
         - Key: lambda:createdBy
           Value: SAM
@@ -292,7 +293,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: ssm:GetParameter
-                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}'
+                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TicketCodeSuffixParameterName}'
         - !If
           - HasAnalyzerApiKey
           - PolicyName: GetQRFunctionRolePolicy1

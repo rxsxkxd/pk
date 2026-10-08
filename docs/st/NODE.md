@@ -297,7 +297,7 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 
 | 環境変数 | 内容 |
 |---|---|
-| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_PARAMETER_NAME`、`TICKET_SUFFIX_LENGTH`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。`ANALYZER_MODE` は `mock` / `http` |
+| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_PARAMETER_NAME`、`TICKET_CODE_SUFFIX_PARAMETER_NAME`（または `TICKET_CODE_SUFFIX`）、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。`ANALYZER_MODE` は `mock` / `http` |
 | `ANALYZER_URL` | `ANALYZER_MODE=http` のときの POST 先（例: `http://localhost:8090/v1/analyze`） |
 | `ANALYZER_API_KEY_PARAMETER_NAME` | `ANALYZER_MODE=http` のときの API キーのパラメータ名（Parameter Store の SecureString）。任意で、指定したときだけ `x-api-key` を付ける（VPC 内でセキュリティグループだけで許可する解析サーバーでは不要）。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
 | `ANALYZER_TIMEOUT_MS` | 1回の呼び出しのタイムアウト（既定 5000） |

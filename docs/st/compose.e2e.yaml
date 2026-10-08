@@ -25,6 +25,7 @@ services:
       APP_ENV: local
       ANALYZER_MODE: mock
       SIGNING_SALT: e2e-salt
+      TICKET_CODE_SUFFIX: E2E # plain value (not a secret); Parameter Store on AWS
       PUBLIC_BASE_URL: http://api:3000
       ALLOWED_ORIGINS: http://web:3902
       # Read by the gateway: the HTTP API's CORS configuration.

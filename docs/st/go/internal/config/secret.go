@@ -1,6 +1,7 @@
 package config
 
-// Secrets from Parameter Store: the signing salts and the analyzer API key.
+// Values from Parameter Store: the signing salts and the analyzer API key (SecureString), and the ticket
+// code's fixed suffix (String).
 
 import (
 	"context"
@@ -40,6 +41,23 @@ func LoadSalts(ctx context.Context) (Salts, error) {
 		}
 	}
 	return Salts{}, errors.New("SIGNING_SALT_PARAMETER_NAME is not set")
+}
+
+// LoadTicketCodeSuffix reads the fixed suffix of ticket codes (DESIGN.md 4) from the String parameter named
+// by TICKET_CODE_SUFFIX_PARAMETER_NAME. Not a secret, so TICKET_CODE_SUFFIX may also hold it directly (local
+// runs and E2E). The value is checked by ticket.NewGenerator.
+func LoadTicketCodeSuffix(ctx context.Context) (string, error) {
+	if name := os.Getenv("TICKET_CODE_SUFFIX_PARAMETER_NAME"); name != "" {
+		value, err := getParameter(ctx, name)
+		if err != nil {
+			return "", fmt.Errorf("get ticket code suffix: %w", err)
+		}
+		return value, nil
+	}
+	if v := os.Getenv("TICKET_CODE_SUFFIX"); v != "" {
+		return v, nil
+	}
+	return "", errors.New("TICKET_CODE_SUFFIX_PARAMETER_NAME is not set")
 }
 
 // LoadAnalyzerAPIKey reads the image analysis server's API key from the SecureString parameter named by

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { ApiError, grantForPage, grantInline, qrUrl } from '../src/api/tickets.ts';
+import { ApiError, grantForPage, grantInline, qrUrl, TicketRouteSchema } from '../src/api/tickets.ts';
 import { API, CODE, json, photo, SIG, stubFetch } from './helpers.ts';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -64,4 +64,18 @@ describe('grantInline (QR inline grant API)', () => {
 test('qrUrl builds the QR image API URL from the route parameters', () => {
   expect(qrUrl(API, CODE, 'a+b/c')).toBe(`${API}/v1/tickets/${CODE}/qr?sig=a%2Bb%2Fc`);
   expect(qrUrl('', CODE, SIG)).toBe(`/v1/tickets/${CODE}/qr?sig=${SIG}`);
+});
+
+describe('ticket code format', () => {
+  // {YYYYMMDDHHmmss}{UUIDv4, 32 lowercase hex}{fixed suffix, 1-32 letters or digits}
+  test.each([
+    ['202610051350543f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR', true],
+    ['202610051350543f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eSTAGEFIXEDSUFFIX0123456789abcdef', true],
+    ['202610051350543f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5e', false], // no suffix
+    ['202610051350543F2B9C1E8A4D4F6B8E0C7A1D2B3C4D5ETQR', false], // uppercase UUID
+    ['20261005135054-3f2b9c1e-8a4d-4f6b-8e0c-7a1d2b3c4d5eTQR', false], // hyphens
+    ['20261005135054-4BV81K5V', false], // the former format
+  ])('%s → %s', (code, ok) => {
+    expect(TicketRouteSchema.safeParse({ code, sig: SIG }).success).toBe(ok);
+  });
 });

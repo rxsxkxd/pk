@@ -41,6 +41,7 @@ jobs:
       ARTIFACT_BUCKET: ${{ vars.ARTIFACT_BUCKET }}
       ARTIFACT_PREFIX: ticketqr/${{ inputs.impl }}/${{ github.sha }}-${{ github.run_attempt }}
       SALT_PARAM: /ticketqr/${{ inputs.impl }}/signing-salt
+      CODE_SUFFIX_PARAM: /ticketqr/${{ inputs.impl }}/ticket-code-suffix
       WEB_MODES: ${{ vars.WEB_MODES || '["page"]' }}
     steps:
       - uses: actions/checkout@v7
@@ -75,7 +76,8 @@ jobs:
               Impl="$IMPL" \
               ArtifactBucket="$ARTIFACT_BUCKET" \
               ArtifactPrefix="$ARTIFACT_PREFIX" \
-              SigningSaltParameterName="$SALT_PARAM"
+              SigningSaltParameterName="$SALT_PARAM" \
+              TicketCodeSuffixParameterName="$CODE_SUFFIX_PARAM"
           API_URL=$(aws cloudformation describe-stacks --stack-name "ticketqr-$IMPL" \
             --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
           echo "API_URL=$API_URL" >> "$GITHUB_ENV"

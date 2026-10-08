@@ -142,14 +142,15 @@ const supportsRequestStreams = (() => {
 | SPA のチケット画面 | `#/tickets/{code}?sig={sig}` | 画面遷移方式の結果。URL だけで描画できる（リロード・共有に強い） |
 
 ```
-SPA の発行画面 #/                         SPA のチケット画面 #/tickets/20261005135054-4BV81K5V?sig=…
+SPA の発行画面 #/                         SPA のチケット画面 #/tickets/202610051350543f2b9c…TQR?sig=…
 ┌──────────────────────────────┐       ┌──────────────────────────────┐
 │ チケット発行                    │       │ チケット                        │
 │ [ 証明書の画像を選ぶ ] ※Android は │       │  ┌────────┐                  │
 │ [ 画像を選ぶ ][ カメラを起動 ]   │       │                              │
 │  IMG_0001.HEIC  2.1MB          │       │  │  QR    │ ← <img>           │
 │ [ 発行する ]  ← 画面遷移方式      │       │  └────────┘  （QR 画像 API）   │
-│ ┄ オプション ┄                  │       │  20261005135054-4BV81K5V      │
+│ ┄ オプション ┄                  │       │  202610051350543f2b9c1e8a4d4f │
+│  6b8e0c7a1d2b3c4d5eTQR（折り返す）│
 │ [ その場で表示 ]  ← その場表示方式 │       │  発行: 2026-10-05 13:50:54     │
 │ [ API の画面で表示 ] ← フォーム送信 │       │  [ 別の証明書の画像で発行する ]  │
 │ ── 結果（その場表示方式のとき）── │       └──────────────────────────────┘
@@ -269,7 +270,7 @@ export async function grantInline(apiBaseUrl: string, file: File): Promise<Inlin
 ### 4.3 検証（zod）
 
 ```ts
-const TicketCode = z.string().regex(/^\d{14}-[0-9A-HJKMNP-TV-Z]+$/);
+const TicketCode = z.string().regex(/^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$/); // ../DESIGN.md 4章
 const Sig = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
 
 const InlineTicketSchema = z.object({

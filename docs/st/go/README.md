@@ -44,7 +44,7 @@ make build          # bin/ticketqr.zip（チケット系4エンドポイント�
 | `ANALYZER_API_KEY_PARAMETER_NAME` | | API キーの Parameter Store の SecureString の名前（任意。指定したときだけ `x-api-key` を付ける。VPC 内でセキュリティグループだけで許可する解析サーバーでは不要）。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
 | `ANALYZER_TIMEOUT_MS` | | 1回の呼び出しのタイムアウト（既定 5000） |
 | `SIGNING_SALT_PARAMETER_NAME` | ○ | 署名用 salt を保存した Parameter Store の SecureString の名前（例: `/ticketqr/go/signing-salt`）。中身は `{"current":"...","previous":"..."}` 形式 |
-| `TICKET_SUFFIX_LENGTH` | | suffix の桁数（既定値 8。根拠は DESIGN.md 4章） |
+| `TICKET_CODE_SUFFIX_PARAMETER_NAME` | ○（Lambda 上） | チケットコードの末尾の固定文字列（英数字1〜32文字）を置いた Parameter Store の String の名前（DESIGN.md 4章）。秘密ではないので、代わりに `TICKET_CODE_SUFFIX` に値を直接入れてもよい（ローカル実行の既定値は `LOCAL`） |
 | `APP_ENV` / `SIGNING_SALT` | | `APP_ENV=local` のときに限り、`SIGNING_SALT` に平文で書いた salt を使う（ローカル専用） |
 
 `make run` は、ローカル用の値（`APP_ENV=local`、`ANALYZER_MODE=mock` など）を自動で設定する。

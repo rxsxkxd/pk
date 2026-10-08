@@ -57,10 +57,11 @@ export async function verifyAndGrant(ports: Ports, img: CertificateImage): Promi
 }
 
 // =================================================================================================
-// Ticket code: {YYYYMMDDHHmmss}-{suffix}  (↔ go/internal/ticket/code.go, DESIGN.md 4)
+// Ticket code: {YYYYMMDDHHmmss}{UUIDv4, 32 lowercase hex}{fixed suffix}  (↔ go/internal/ticket/code.go, DESIGN.md 4)
 // =================================================================================================
 
-const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'; // Crockford Base32 (no I, L, O, U)
+// 末尾の固定文字列（Parameter Store で定義）に使える文字。URL のパスと QR にそのまま入る。
+export const SUFFIX_PATTERN = /^[A-Za-z0-9]{1,32}$/;
 
 // Formats the time a ticket is granted (issuedAt) in JST. hourCycle h23 gives "00" (not "24") at midnight. Pure, so bundles that
 // never grant tickets (exampleqr) drop it.
@@ -77,20 +78,29 @@ const JST = /* @__PURE__ */ new Intl.DateTimeFormat('en-US', {
 
 export type Ticket = { code: string; issuedAt: string }; // issuedAt: RFC 3339 in JST
 
-// JST の発行日時と乱数 suffix からチケットコードを生成する（時刻と乱数源はテスト用に差し替え可能）。
+// JST の発行日時・UUIDv4・固定文字列からチケットコードを生成する（時刻と乱数源はテスト用に差し替え可能）。
 export function generateTicket(
-  suffixLength: number,
+  suffix: string,
   now: Date = new Date(),
   random: (size: number) => Uint8Array = randomBytes,
 ): Ticket {
-  const bytes = random(suffixLength);
-  if (bytes.length < suffixLength) throw new Error('read random: short read');
-  // 256 is a multiple of 32, so the low 5 bits of each byte are uniform.
-  const suffix = Array.from(bytes.subarray(0, suffixLength), (b) => ALPHABET[b & 31]).join('');
+  if (!SUFFIX_PATTERN.test(suffix))
+    throw new Error(`ticket code suffix must be 1-32 letters or digits, got "${suffix}"`);
+  const id = uuidV4(random);
 
   const part = Object.fromEntries(JST.formatToParts(now).map((p) => [p.type, p.value]));
   const { year: y, month: mo, day: d, hour: h, minute: mi, second: s } = part;
-  return { code: `${y}${mo}${d}${h}${mi}${s}-${suffix}`, issuedAt: `${y}-${mo}-${d}T${h}:${mi}:${s}+09:00` };
+  return { code: `${y}${mo}${d}${h}${mi}${s}${id}${suffix}`, issuedAt: `${y}-${mo}-${d}T${h}:${mi}:${s}+09:00` };
+}
+
+// 16 バイトの乱数から UUID v4 を作り、ハイフンなしの小文字16進32桁で返す（RFC 9562: byte 6 の上位4ビットに版 4、
+// byte 8 の上位2ビットに種別 10）。crypto.randomUUID() と同じものだが、乱数源を差し替えられるようにする。
+function uuidV4(random: (size: number) => Uint8Array): string {
+  const b = Uint8Array.from(random(16));
+  if (b.length < 16) throw new Error('read random: short read');
+  b[6] = (b[6]! & 0x0f) | 0x40;
+  b[8] = (b[8]! & 0x3f) | 0x80;
+  return Buffer.from(b.subarray(0, 16)).toString('hex');
 }
 
 // =================================================================================================

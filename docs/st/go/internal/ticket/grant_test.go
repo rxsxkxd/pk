@@ -18,7 +18,11 @@ func (s stubVerifier) Verify(context.Context, CertificateImage) (Verdict, error)
 }
 
 func ports(v Verifier) Ports {
-	return Ports{Verifier: v, Generator: NewGenerator(8), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	g, err := NewGenerator("TQR")
+	if err != nil {
+		panic(err)
+	}
+	return Ports{Verifier: v, Generator: g, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
 
 // TestVerifyAndGrantErrors: only business errors come back (the HTTP layer maps them).

@@ -301,6 +301,7 @@ phases:
       - SHA=$(python3 -c 'import json;print(json.load(open("manifest.json"))["sha"])')
       - export ARTIFACT_PREFIX=ticketqr/$IMPL/$SHA-$CODEBUILD_BUILD_NUMBER
       - export SALT_PARAM=/ticketqr/$IMPL/signing-salt
+      - export CODE_SUFFIX_PARAM=/ticketqr/$IMPL/ticket-code-suffix
   build:
     commands:
       # 再パッケージ: zip をデプロイごとの接頭辞で置く（go/node DEPLOY.md 4-A.1）
@@ -311,6 +312,7 @@ phases:
         aws cloudformation deploy --stack-name ticketqr-$IMPL --template-file infra/cloudformation/api.yaml
         --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset
         --parameter-overrides Impl=$IMPL ArtifactBucket=$ARTIFACT_BUCKET ArtifactPrefix=$ARTIFACT_PREFIX SigningSaltParameterName=$SALT_PARAM
+        TicketCodeSuffixParameterName=$CODE_SUFFIX_PARAM
       - export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-$IMPL --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
       # Web のスタック（web/DEPLOY.md 3章）
       - >-

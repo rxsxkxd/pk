@@ -24,7 +24,7 @@ import {
   type Ticket,
   type CertificateImage,
 } from './domain.ts';
-import { consoleLog, loadConfig, loadSalts, newAnalyzer, type Config } from './infra.ts';
+import { consoleLog, loadConfig, loadSalts, loadTicketCodeSuffix, newAnalyzer, type Config } from './infra.ts';
 import { detectImageType, MAX_IMAGE_BYTES } from './image.ts';
 import { commonHeaders, pngResponse, qrPng } from './shared.ts';
 
@@ -55,8 +55,10 @@ export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<De
   const config = loadConfig(env);
   const verifier = await newAnalyzer(env, consoleLog);
   const salts = await loadSalts(env);
+  const suffix = await loadTicketCodeSuffix(env);
+  generateTicket(suffix); // checks the suffix at start-up, as the Go version does
   const signer = newSigner(salts.current, salts.previous);
-  return { config, verifier, signer, newTicket: () => generateTicket(config.suffixLength), log: consoleLog };
+  return { config, verifier, signer, newTicket: () => generateTicket(suffix), log: consoleLog };
 }
 
 // チケット系エンドポイントの Hono アプリを組み立てる（ログ・共通ヘッダー・エラー変換を含む）。

@@ -1,18 +1,16 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Image analysis server stub for checking the ticket QR API on AWS (Lambda + Function URL). See docs/st/analyzer-stub/DESIGN.md.
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Image analysis server stub for checking the ticket QR API on AWS (AWS SAM: Lambda + Function URL, public,
+  limited by the x-api-key check in the function). The code is the zip that the chosen implementation's build
+  makes, copied to dist/analyzer-stub.zip; sam deploy uploads it. See docs/st/DEPLOY.md 3.2.
 
 Parameters:
   Impl:
     Type: String
     AllowedValues: [node, python, rust]
     Default: node
-    Description: Stub implementation. One stack per implementation.
-  ArtifactBucket:
-    Type: String
-    Description: S3 bucket holding analyzer-stub.zip.
-  ArtifactPrefix:
-    Type: String
-    Description: Key prefix of analyzer-stub.zip, e.g. analyzer-stub/node/<git-sha>. Change it on every deploy.
+    Description: Stub implementation (must match the zip in dist/). One stack per implementation.
   ApiKeyParameterName:
     Type: String
     AllowedPattern: ^/.+
@@ -39,27 +37,6 @@ Mappings:
       Handler: bootstrap
 
 Resources:
-  FunctionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        # SecureString with the AWS managed key (aws/ssm) needs no kms:Decrypt.
-        - PolicyName: read-api-key
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: ssm:GetParameter
-                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParameterName}
-
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -67,40 +44,35 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   Function:
-    Type: AWS::Lambda::Function
+    Type: AWS::Serverless::Function
     DependsOn: LogGroup
     Properties:
       FunctionName: !Sub ticketqr-analyzer-stub-${Impl}
+      # The built zip of the chosen implementation (npm run build / python/build.sh / rust/build.sh), copied here.
+      CodeUri: dist/analyzer-stub.zip
       Runtime: !FindInMap [ImplMap, !Ref Impl, Runtime]
       Handler: !FindInMap [ImplMap, !Ref Impl, Handler]
       Architectures: [arm64]
       MemorySize: 128
       Timeout: 10
       ReservedConcurrentExecutions: !Ref ReservedConcurrency
-      Role: !GetAtt FunctionRole.Arn
-      Code:
-        S3Bucket: !Ref ArtifactBucket
-        S3Key: !Sub ${ArtifactPrefix}/analyzer-stub.zip
       Environment:
         Variables:
           API_KEY_PARAMETER_NAME: !Ref ApiKeyParameterName
+      Policies:
+        # SecureString with the AWS managed key (aws/ssm) needs no kms:Decrypt. (The SAM policy template
+        # SSMParameterReadPolicy expects a name without the leading slash, so the statement is written out.)
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ApiKeyParameterName}
+      # Public HTTPS endpoint; access is limited by the x-api-key check in the function. SAM adds the
+      # lambda:InvokeFunctionUrl permission for AuthType NONE.
+      FunctionUrlConfig:
+        AuthType: NONE
 
-  # Public HTTPS endpoint; access is limited by the x-api-key check in the function.
-  FunctionUrl:
-    Type: AWS::Lambda::Url
-    Properties:
-      TargetFunctionArn: !GetAtt Function.Arn
-      AuthType: NONE
-
-  # Function URLs with AuthType NONE need both permissions.
-  UrlInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunctionUrl
-      FunctionName: !Ref Function
-      Principal: "*"
-      FunctionUrlAuthType: NONE
-  FunctionInvokePermission:
+  # Function URLs with AuthType NONE also need lambda:InvokeFunction (InvokedViaFunctionUrl).
+  FunctionInvokeViaUrlPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction

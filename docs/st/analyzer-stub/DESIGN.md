@@ -39,7 +39,7 @@ flowchart LR
 | 実行環境 | Lambda（arm64、128MB、タイムアウト10秒） | API と同じ AWS アカウント・リージョンに置ける。使わないときの費用はほぼゼロ |
 | 実装 | **Node 版**（`nodejs24.x`、依存なしの `index.mjs` と `analyzer.mjs`）、**Rust 版**（`provided.al2023`、`bootstrap`）、**Python 版**（`python3.13`、依存なしの `index.py` と `analyzer.py`。付録） | 同じ仕様で実装し、API と同様に比較できるようにする |
 | 公開方法 | **Lambda Function URL**（`AuthType: NONE`） | API Gateway を作らずに HTTPS のエンドポイントが手に入る。アクセス制限は API キーで行う（3.3） |
-| デプロイ | 共通の CloudFormation テンプレート `template.yaml`。`Impl=node|python|rust` で切り替え、実装ごとに別スタックにする | API のスタックとは別に作成・削除できる。zip は API と同じ成果物バケットに置く |
+| デプロイ | 共通の AWS SAM テンプレート `template.yaml`（2026-10-08 に CloudFormation から移行。AWS 上では未検証）。選んだ実装の zip を `dist/analyzer-stub.zip` に置いて `sam deploy`。`Impl=node|python|rust` でランタイムを切り替え、実装ごとに別スタックにする。Lambda 版は今後使わない可能性が高い（VPC 版。付録 B） | API のスタックとは別に作成・削除できる。zip は API と同じ成果物バケットに置く |
 
 Function URL の代わりに IAM 認証（`AuthType: AWS_IAM`）を使う案もあるが、API 側のクライアントに SigV4 の署名処理が必要になり、本物のサーバーにはない処理をクライアントに入れることになる。そのため、仮の API キーにする。
 
@@ -225,7 +225,7 @@ cd docs/st/analyzer-stub/rust
 
 ```sh
 cd docs/st
-export STUB_IMPL=node                                        # Rust 版なら: rust
+export STUB_IMPL=node                                        # python / rust も可
 export ANALYZER_KEY_PARAM=/ticketqr/analyzer-stub/$STUB_IMPL/api-key
 
 # 1. API キーを Parameter Store の SecureString に作る（初回だけ。CloudFormation は SecureString を作れない）
@@ -233,14 +233,12 @@ umask 077; KEY_FILE=$(mktemp); openssl rand -hex 20 | tr -d '\n' > "$KEY_FILE"
 aws ssm put-parameter --name $ANALYZER_KEY_PARAM --type SecureString --value file://"$KEY_FILE"
 rm -f "$KEY_FILE"
 
-# 2. ビルドしてアップロードし、スタックをデプロイする
-npm --prefix analyzer-stub/node run build                    # Rust 版なら: analyzer-stub/rust/build.sh
-export STUB_PREFIX=analyzer-stub/$STUB_IMPL/$(git rev-parse --short HEAD)
-aws s3 cp analyzer-stub/$STUB_IMPL/dist/analyzer-stub.zip s3://$ARTIFACT_BUCKET/$STUB_PREFIX/analyzer-stub.zip
-aws cloudformation deploy --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
-  --template-file analyzer-stub/template.yaml --capabilities CAPABILITY_IAM \
-  --parameter-overrides Impl=$STUB_IMPL ArtifactBucket=$ARTIFACT_BUCKET ArtifactPrefix=$STUB_PREFIX \
-    ApiKeyParameterName=$ANALYZER_KEY_PARAM
+# 2. ビルドして zip を共通の置き場所にコピーし、SAM でデプロイする（../DEPLOY.md 3.2）
+npm --prefix analyzer-stub/node run build                    # Python 版: analyzer-stub/python/build.sh、Rust 版: analyzer-stub/rust/build.sh
+mkdir -p analyzer-stub/dist && cp analyzer-stub/$STUB_IMPL/dist/analyzer-stub.zip analyzer-stub/dist/
+sam deploy --template-file analyzer-stub/template.yaml --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
+  --s3-bucket $ARTIFACT_BUCKET --s3-prefix analyzer-stub/$STUB_IMPL --capabilities CAPABILITY_IAM \
+  --parameter-overrides Impl=$STUB_IMPL ApiKeyParameterName=$ANALYZER_KEY_PARAM
 
 # 出力: AnalyzeUrl（API の ANALYZER_URL）、ApiKeyParameterName（API の AnalyzerApiKeyParameterName）
 ANALYZE_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
@@ -251,7 +249,7 @@ KEY=$(aws ssm get-parameter --name $ANALYZER_KEY_PARAM --with-decryption --query
 curl -s -X POST -H 'content-type: application/octet-stream' -H "x-api-key: $KEY" --data-binary @testdata/images/photo.jpg "$ANALYZE_URL"
 
 # 4. 確認が終わったら削除する（API キーはスタックの外にあるので別に削除する）
-aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL
+sam delete --stack-name ticketqr-analyzer-stub-$STUB_IMPL --no-prompts
 aws ssm delete-parameter --name $ANALYZER_KEY_PARAM
 ```
 

@@ -96,22 +96,32 @@ aws ssm put-parameter --name $ANALYZER_KEY_PARAM --type SecureString \
 rm -f "$KEY_FILE"
 ```
 
-### 3.2 スタブをデプロイする（初回、またはスタブを更新するとき）
+### 3.2 スタブをデプロイする（初回、またはスタブを更新するとき。AWS SAM）
+
+> Lambda 版のスタブは、今後使わない可能性が高い（VPC 内のスタブ（3.4）を使う見込み）。SAM のテンプレートは、`sam validate --lint` と cfn-lint だけを確かめていて、AWS 上へのデプロイは未検証。
+
+テンプレートは AWS SAM（`analyzer-stub/template.yaml`）。選んだ実装のビルドで作った zip を `analyzer-stub/dist/analyzer-stub.zip` にコピーし、`sam deploy` がそれを成果物バケットに上げてからスタックを作る（`Impl` でランタイムとハンドラーを切り替える。zip と `Impl` は同じ実装にそろえる）。SAM CLI が要る（例: `uvx --from aws-sam-cli sam …`、または SAM CLI をインストールする）。
 
 ```sh
-npm --prefix analyzer-stub/node run build     # Python 版は: analyzer-stub/python/build.sh、Rust 版は: analyzer-stub/rust/build.sh
-export STUB_PREFIX=analyzer-stub/$STUB_IMPL/$(git rev-parse --short HEAD)$(git diff --quiet || echo -dirty-$(date +%s))
-aws s3 cp analyzer-stub/$STUB_IMPL/dist/analyzer-stub.zip s3://$ARTIFACT_BUCKET/$STUB_PREFIX/analyzer-stub.zip
+# 1. 選んだ実装をビルドし、zip を共通の置き場所にコピーする（どれか1つ）
+npm --prefix analyzer-stub/node run build && mkdir -p analyzer-stub/dist && cp analyzer-stub/node/dist/analyzer-stub.zip analyzer-stub/dist/
+# analyzer-stub/python/build.sh && mkdir -p analyzer-stub/dist && cp analyzer-stub/python/dist/analyzer-stub.zip analyzer-stub/dist/
+# analyzer-stub/rust/build.sh && mkdir -p analyzer-stub/dist && cp analyzer-stub/rust/dist/analyzer-stub.zip analyzer-stub/dist/
 
-aws cloudformation deploy --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
-  --template-file analyzer-stub/template.yaml --capabilities CAPABILITY_IAM \
-  --parameter-overrides Impl=$STUB_IMPL ArtifactBucket=$ARTIFACT_BUCKET ArtifactPrefix=$STUB_PREFIX \
-    ApiKeyParameterName=$ANALYZER_KEY_PARAM
+# 2. デプロイする（作成と更新は同じコマンド）
+sam deploy --template-file analyzer-stub/template.yaml \
+  --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
+  --s3-bucket $ARTIFACT_BUCKET --s3-prefix analyzer-stub/$STUB_IMPL \
+  --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
+  --parameter-overrides Impl=$STUB_IMPL ApiKeyParameterName=$ANALYZER_KEY_PARAM
 
 export ANALYZER_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-analyzer-stub-$STUB_IMPL \
   --query "Stacks[0].Outputs[?OutputKey=='AnalyzeUrl'].OutputValue" --output text)
 echo $ANALYZER_URL
 ```
+
+- `sam deploy` は、zip の中身が変わったときだけ新しいキーで上げ直すので、`ArtifactPrefix` のような接頭辞の管理は要らない
+- テンプレートの確認だけなら `sam validate --lint --template-file analyzer-stub/template.yaml`
 
 スタブを直接 curl で叩くときは、`aws ssm get-parameter --name $ANALYZER_KEY_PARAM --with-decryption --query Parameter.Value --output text` で API キーの値を取り出す。
 
@@ -122,7 +132,7 @@ echo $ANALYZER_URL
 API を `mock` に戻してから削除する（`http` のまま削除すると、発行の API がすべて 502 になる）。
 
 ```sh
-aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-$STUB_IMPL
+sam delete --stack-name ticketqr-analyzer-stub-$STUB_IMPL --no-prompts
 aws ssm delete-parameter --name $ANALYZER_KEY_PARAM   # API キーはスタックの外にあるので別に削除する
 ```
 

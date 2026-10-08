@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Network for the tickets function, pattern N1 (docs/st/notes/tickets-network.md 3.2): new private subnets in
+  an existing VPC, routed to existing NAT gateways, and the function's security group. Existing subnets, route
+  tables and NAT gateways are not changed. The ticket API stack (SAM) takes the PrivateSubnetIds and
+  SecurityGroupId outputs.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing VPC.
+  PrivateSubnetCidrA:
+    Type: String
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: Free CIDR in the VPC for the first private subnet (e.g. a /26).
+  PrivateSubnetCidrB:
+    Type: String
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: Free CIDR in the VPC for the second private subnet (another AZ).
+  AvailabilityZoneA:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: AZ of the first private subnet (same AZ as NatGatewayIdA if possible).
+  AvailabilityZoneB:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: AZ of the second private subnet (different from AvailabilityZoneA).
+  NatGatewayIdA:
+    Type: String
+    AllowedPattern: ^nat-[0-9a-f]+$
+    Description: Existing NAT gateway for the first subnet's 0.0.0.0/0 (preferably in AvailabilityZoneA).
+  NatGatewayIdB:
+    Type: String
+    Default: ""
+    AllowedPattern: ^(nat-[0-9a-f]+)?$
+    Description: Existing NAT gateway for the second subnet (preferably in AvailabilityZoneB). Empty = NatGatewayIdA (one NAT for both).
+  AnalyzerPort:
+    Type: Number
+    Default: 443
+    MinValue: 1
+    MaxValue: 65535
+    Description: TCP port of the image analysis server. 443 is already allowed for Parameter Store.
+  AnalyzerCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: Destination CIDR of the analysis server for AnalyzerPort (when it is not 443). 0.0.0.0/0 until the server's address is known.
+  NamePrefix:
+    Type: String
+    Default: ticketqr
+    AllowedPattern: ^[a-z0-9-]+$
+    Description: Prefix of the Name tags.
+
+Conditions:
+  HasNatB: !Not [!Equals [!Ref NatGatewayIdB, ""]]
+  AnalyzerPortIsNot443: !Not [!Equals [!Ref AnalyzerPort, 443]]
+
+Resources:
+  # ---------- Private subnets (new) and their route tables (new) ----------
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref PrivateSubnetCidrA
+      AvailabilityZone: !Ref AvailabilityZoneA
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub "${NamePrefix}-tickets-private-a" }]
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VpcId
+      CidrBlock: !Ref PrivateSubnetCidrB
+      AvailabilityZone: !Ref AvailabilityZoneB
+      MapPublicIpOnLaunch: false
+      Tags: [{ Key: Name, Value: !Sub "${NamePrefix}-tickets-private-b" }]
+
+  # New route tables, associated with the new subnets only (the existing route tables are not touched).
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags: [{ Key: Name, Value: !Sub "${NamePrefix}-tickets-private-a" }]
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VpcId
+      Tags: [{ Key: Name, Value: !Sub "${NamePrefix}-tickets-private-b" }]
+  PrivateSubnetRouteTableA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTableA
+  PrivateSubnetRouteTableB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTableB
+
+  # Outbound through the existing NAT gateways (the analysis server sees the NAT's Elastic IP).
+  DefaultRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayIdA
+  DefaultRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !If [HasNatB, !Ref NatGatewayIdB, !Ref NatGatewayIdA]
+
+  # ---------- The tickets function's security group (new) ----------
+  TicketsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ticketqr tickets function (no inbound; outbound HTTPS and the analysis server)
+      VpcId: !Ref VpcId
+      # Replaces the default allow-all egress. No inbound: the function is invoked by API Gateway, not over the VPC.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Parameter Store and the analysis server over HTTPS (through the NAT)
+      Tags: [{ Key: Name, Value: !Sub "${NamePrefix}-tickets" }]
+  AnalyzerEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: AnalyzerPortIsNot443
+    Properties:
+      GroupId: !Ref TicketsSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref AnalyzerPort
+      ToPort: !Ref AnalyzerPort
+      CidrIp: !Ref AnalyzerCidr
+      Description: the image analysis server
+
+Outputs:
+  PrivateSubnetIds:
+    Description: Subnets for the tickets function (VpcSubnetIds of the ticket API stack).
+    Value: !Join [",", [!Ref PrivateSubnetA, !Ref PrivateSubnetB]]
+  SecurityGroupId:
+    Description: Security group for the tickets function (VpcSecurityGroupIds of the ticket API stack).
+    Value: !Ref TicketsSecurityGroup
+  NatGatewayIds:
+    Description: NAT gateways in use. Their Elastic IPs are the source the analysis server sees (aws ec2 describe-nat-gateways).
+    Value: !If [HasNatB, !Join [",", [!Ref NatGatewayIdA, !Ref NatGatewayIdB]], !Ref NatGatewayIdA]

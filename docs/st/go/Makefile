@@ -3,7 +3,7 @@
 PACKAGES := ticketqr exampleqr
 BIN      := bin
 
-.PHONY: test run run-example build clean
+.PHONY: test run run-example build clean build-TicketsFunction build-GetQRFunction
 
 test:
 	go vet ./... && go test ./...
@@ -27,3 +27,9 @@ clean:
 	rm -rf $(BIN)
 
 FORCE:
+
+# sam build (infra/sam/go/template.yaml, BuildMethod makefile): the same bootstrap as `build`, written to the
+# directory SAM gives in ARTIFACTS_DIR. Both functions run the ticketqr package.
+build-TicketsFunction build-GetQRFunction:
+	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -trimpath -ldflags='-s -w' \
+		-o $(ARTIFACTS_DIR)/bootstrap ./cmd/ticketqr

@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Ticket QR API, go implementation (AWS SAM): sam build builds the Lambda code and sam deploy uploads it and
+  deploys the HTTP API and the two functions. Go (provided.al2023): sam build runs the make targets build-TicketsFunction / build-GetQRFunction in go/Makefile. The tickets function goes into the private subnets made
+  beforehand by infra/cloudformation/tickets-network-*.yaml (outputs PrivateSubnetIds, SecurityGroupId) and
+  reaches the analysis server through their NAT gateway. Same API as infra/cloudformation/api.yaml (Impl=go),
+  which is kept for comparison. See docs/st/infra/sam/README.md.
+
+Parameters:
+  VpcSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnets for the tickets function (PrivateSubnetIds output of the network stack).
+  VpcSecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: Security group for the tickets function (SecurityGroupId output of the network stack).
+  SigningSaltParameterName:
+    Type: String
+    AllowedPattern: ^/.+
+    Description: Parameter Store SecureString {"current":"...","previous":"..."}, e.g. /ticketqr/go/signing-salt (created outside this stack).
+  AnalyzerMode:
+    Type: String
+    Default: mock
+    AllowedValues: [mock, http]
+    Description: mock = in-process, always PASS. http = POST to AnalyzerUrl.
+  AnalyzerUrl:
+    Type: String
+    Default: ""
+    Description: Image analysis endpoint for AnalyzerMode=http.
+  AnalyzerApiKeyParameterName:
+    Type: String
+    Default: ""
+    AllowedPattern: ^(/.+)?$
+    Description: Optional. Parameter Store SecureString holding the analysis server's x-api-key. Empty sends no x-api-key.
+  TicketSuffixLength:
+    Type: Number
+    Default: 8
+    MinValue: 1
+    MaxValue: 32
+  PublicBaseUrl:
+    Type: String
+    Default: ""
+    Description: Public API URL (custom domain). Empty uses the execute-api default URL.
+  ThrottlingRateLimit:
+    Type: Number
+    Default: 50
+  ThrottlingBurstLimit:
+    Type: Number
+    Default: 100
+  GrantReservedConcurrency:
+    Type: Number
+    Default: -1
+    Description: Reserved concurrency for the tickets function (protects the analysis server). -1 = not set.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 180, 365]
+
+Conditions:
+  UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]
+  HasGrantReservedConcurrency: !Not [!Equals [!Ref GrantReservedConcurrency, -1]]
+  HasAnalyzerApiKey: !Not [!Equals [!Ref AnalyzerApiKeyParameterName, ""]]
+
+Globals:
+  Function:
+    Architectures: [arm64]
+    MemorySize: 256
+    Environment:
+      Variables:
+        PUBLIC_BASE_URL: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+        ANALYZER_MODE: !Ref AnalyzerMode
+        ANALYZER_URL: !Ref AnalyzerUrl
+        ANALYZER_API_KEY_PARAMETER_NAME: !If [HasAnalyzerApiKey, !Ref AnalyzerApiKeyParameterName, !Ref AWS::NoValue]
+        SIGNING_SALT_PARAMETER_NAME: !Ref SigningSaltParameterName
+        TICKET_SUFFIX_LENGTH: !Ref TicketSuffixLength
+
+Resources:
+  # ---------- HTTP API ($default stage, auto deploy, throttling, access log) ----------
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/apigateway/ticketqr-go
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Plain API Gateway resources, as in infra/cloudformation/api.yaml. (AWS::Serverless::HttpApi with function
+  # Events embeds the function ARNs in the API, while the functions' PUBLIC_BASE_URL refers to the API: a
+  # circular dependency. Separate integrations and routes avoid it.)
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: ticketqr-go
+      ProtocolType: HTTP
+
+  DefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingRateLimit: !Ref ThrottlingRateLimit
+        ThrottlingBurstLimit: !Ref ThrottlingBurstLimit
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","routeKey":"$context.routeKey","status":"$context.status","latency":"$context.responseLatency","integrationError":"$context.integrationErrorMessage"}'
+
+  # ---------- tickets: QR inline grant API, ticket grant API, ticket view page (in the VPC) ----------
+  TicketsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/ticketqr-go-tickets
+      RetentionInDays: !Ref LogRetentionDays
+  TicketsFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: TicketsLogGroup
+    # Built by `make build-TicketsFunction` in go/ (same flags as `make -C go build`): bootstrap for arm64.
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: ticketqr-go-tickets
+      CodeUri: ../../../go
+      Runtime: provided.al2023
+      Handler: bootstrap
+      Timeout: 15
+      ReservedConcurrentExecutions: !If [HasGrantReservedConcurrency, !Ref GrantReservedConcurrency, !Ref AWS::NoValue]
+      # In the private subnets; out to the analysis server and Parameter Store through the NAT gateway. SAM adds
+      # AWSLambdaVPCAccessExecutionRole to the function's role.
+      VpcConfig:
+        SubnetIds: !Ref VpcSubnetIds
+        SecurityGroupIds: !Ref VpcSecurityGroupIds
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+        - !If
+          - HasAnalyzerApiKey
+          - Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AnalyzerApiKeyParameterName}
+          - !Ref AWS::NoValue
+
+  TicketsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt TicketsFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 20000
+  GrantInlineRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /v1/tickets/qr-inline
+      Target: !Sub integrations/${TicketsIntegration}
+  GrantRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /v1/tickets
+      Target: !Sub integrations/${TicketsIntegration}
+  GetViewRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /v1/tickets/{ticketCode}/view
+      Target: !Sub integrations/${TicketsIntegration}
+  TicketsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref TicketsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+  # ---------- get-qr: QR image API (outside the VPC; calls no analysis server) ----------
+  GetQRLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/ticketqr-go-get-qr
+      RetentionInDays: !Ref LogRetentionDays
+  GetQRFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: GetQRLogGroup
+    # Built by `make build-GetQRFunction` in go/ (same flags as `make -C go build`): bootstrap for arm64.
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: ticketqr-go-get-qr
+      CodeUri: ../../../go
+      Runtime: provided.al2023
+      Handler: bootstrap
+      Timeout: 5
+      # Same code and start-up as tickets, which reads the salt (and the analyzer key when set).
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SigningSaltParameterName}
+        - !If
+          - HasAnalyzerApiKey
+          - Statement:
+              - Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AnalyzerApiKeyParameterName}
+          - !Ref AWS::NoValue
+
+  GetQRIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt GetQRFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 10000
+  GetQRRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /v1/tickets/{ticketCode}/qr
+      Target: !Sub integrations/${GetQRIntegration}
+  GetQRPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref GetQRFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*
+
+Outputs:
+  ApiUrl:
+    Description: Base URL of the API (PUBLIC_BASE_URL when no custom domain is set).
+    Value: !If [UseDefaultUrl, !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}", !Ref PublicBaseUrl]
+  ApiId:
+    Value: !Ref HttpApi

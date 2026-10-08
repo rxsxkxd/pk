@@ -1,5 +1,7 @@
 # 【構成案】Lambda を既存の VPC に置き、画像解析サーバーにセキュリティグループで接続する
 
+> **2026-10-08: 方針を更新**。`tickets` はプライベートサブネットに置き、NAT ゲートウェイ経由で外の解析サーバー（置き場所・経路は未確定）につなぐことに決めた。ネットワークの2パターン（既存の VPC・新規のサブネット・既存の NAT / すべて新規）は [tickets-network.md](tickets-network.md)。このファイルの「解析サーバーが VPC 内で SG の参照で許可する」前提の部分は、経緯として残す。`api.yaml` の VPC のパラメータ（5章）とデプロイの手順（go/node DEPLOY.md 4-A.4）は、そのまま使う。
+
 > 2026-10-07。`api.yaml` に実装済み（パラメータ `VpcSubnetIds`・`VpcSecurityGroupIds`。同じテンプレートで、すべて VPC の外と、`tickets` だけ VPC 内の両方に対応）。デプロイ手順は [../go/DEPLOY.md](../go/DEPLOY.md)・[../node/DEPLOY.md](../node/DEPLOY.md) 4-A.4（手動は 4-B.4）。AWS 上では未検証。未確定事項（8章）が決まったら、内容を [../DESIGN.md](../DESIGN.md) 7章に移し、このファイルは削除する。
 
 ## 1. 前提

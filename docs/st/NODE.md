@@ -133,7 +133,7 @@ app.ts ──▶ domain.ts ◀── infra.ts
 |---|---|---|---|
 | `domain.ts` | ビジネスロジック | `verifyAndGrant`（証明書の画像の検証 → チケットの付与。`ACCEPTED_IMAGE_TYPES`）、`generateTicket`、`newSigner`、外部とのインターフェース（`Ports`、`Verifier`、`Verdict`、`Log`、`VerifierError`）、`AppError` と各エラー | `ticket`（`VerifyAndGrant`・採番・業務のエラー・`Verifier` のインターフェース）、`signer` |
 | `infra.ts` | 外部とのやり取りの実装 | `loadConfig`、`loadSalts`（Parameter Store）、`newAnalyzer` / `alwaysValid` / `httpAnalyzer`（画像解析クライアント。モックと HTTP）、`consoleLog` | `config`（環境変数と Parameter Store）、`analyzer`、slog |
-| `image.ts` | HTTP 層（入力の技術的な検査） | `MAX_IMAGE_BYTES`、`detectImageType`（image-size） | `imageinput` |
+| `image.ts` | HTTP 層（入力の技術的な検査） | `MAX_IMAGE_BYTES`（実行環境の上限。環境変数で下げられる）、`detectImageType`（image-size） | `imageinput` |
 | `app.ts` | HTTP 層と組み立て | `createApp`（ルートの宣言・ミドルウェア・`onError`・`notFound`）、`routes`（ルート登録のラッパー）、`setRoute` / `requestLog` / `commonHeaders`、各エンドポイント（`grantInline` / `grant` / `getView` / `getQr`）、`verified`、`ticketUrl`、`readUpload` / `readFormImage` / `isMultipart`、`ticketView` / `errorView`、`loadDeps` | `cmd/ticketqr/wire.go`（組み立て）、`httpapi`（ハンドラー・ルート・エラーの応答）、`view` |
 | `shared.ts` | HTTP の共通部品 | `commonHeaders`、`pngResponse`、`qrPng`（lean-qr） | `qr` |
 | `example.ts` | example アプリ | `createExampleApp`、`EXAMPLE_CONTENT` | `cmd/exampleqr`（handler.go） |
@@ -297,7 +297,7 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 
 | 環境変数 | 内容 |
 |---|---|
-| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_PARAMETER_NAME`、`TICKET_CODE_SUFFIX_PARAMETER_NAME`（または `TICKET_CODE_SUFFIX`）、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。`ANALYZER_MODE` は `mock` / `http` |
+| `PUBLIC_BASE_URL`、`ANALYZER_MODE`、`SIGNING_SALT_PARAMETER_NAME`、`TICKET_CODE_SUFFIX_PARAMETER_NAME`（または `TICKET_CODE_SUFFIX`）、`MAX_IMAGE_BYTES`、`APP_ENV` / `SIGNING_SALT` | Go 版と同じ（`go/README.md`）。`ANALYZER_MODE` は `mock` / `http` |
 | `ANALYZER_URL` | `ANALYZER_MODE=http` のときの POST 先（例: `http://localhost:8090/v1/analyze`） |
 | `ANALYZER_API_KEY_PARAMETER_NAME` | `ANALYZER_MODE=http` のときの API キーのパラメータ名（Parameter Store の SecureString）。任意で、指定したときだけ `x-api-key` を付ける（VPC 内でセキュリティグループだけで許可する解析サーバーでは不要）。ローカルでは代わりに `APP_ENV=local` + `ANALYZER_API_KEY` |
 | `ANALYZER_TIMEOUT_MS` | 1回の呼び出しのタイムアウト（既定 5000） |

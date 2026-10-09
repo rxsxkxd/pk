@@ -161,7 +161,7 @@ SPA の発行画面 #/                         SPA のチケット画面 #/ticke
 ### 証明書の画像の選択（共通）
 
 - `accept="image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp"`。`image/heic` を含めると、iPhone が変換せずに HEIC のまま渡すことが期待できる（実機で要確認）
-- 4MB を超えるファイルは、送る前に知らせる（API の上限と同じ）。形式は拡張子で目安として確かめる。最終的な判定は API に任せる
+- 上限（`config.json` の `maxImageBytes`。既定 4MB。API の上限と同じ値にする）を超えるファイルは、送る前に知らせる。形式は拡張子で目安として確かめる。最終的な判定は API に任せる
 - プレビューは出さない（HEIC は多くのブラウザで表示できないため）。ファイル名とサイズだけを出す
 - 証明書の画像は加工せず、そのまま `FormData` に入れて送る
 - **Android だけ、ボタンを2つに分ける**（`src/platform.ts` の `isAndroid`）
@@ -202,7 +202,7 @@ SPA の発行画面 #/                         SPA のチケット画面 #/ticke
 - `fetch` を使わないので CORS が要らない。CORS の設定前や、`fetch` がうまく動かない環境での代替になる
 - 画面のデザインは API 側の HTML（Go・Node）になり、SPA とはそろわない
 - SPA 自体は JavaScript で描画するので、JavaScript が使えない環境には、この方式でも対応できない
-- 証明書の画像の選択欄はこのフォーム専用のものを使う（`CertificateImagePicker` で選んだファイルを使い回さない）。送信前の確認（4MB 超など）はしない。API がエラーページで知らせる
+- 証明書の画像の選択欄はこのフォーム専用のものを使う（`CertificateImagePicker` で選んだファイルを使い回さない）。送信前の確認（上限超えなど）はしない。API がエラーページで知らせる
 
 ### 3つの方式の違い
 
@@ -233,10 +233,17 @@ API の URL などは**ビルドに埋め込まず**、起動時に `/config.jso
 ```ts
 // src/config.ts
 const ConfigSchema = z.object({
-  apiBaseUrl: z.string().transform((u) => u.replace(/\/+$/, '')),   // 空文字 = 同じオリジン（開発時のプロキシ。8章）
+  apiBaseUrl: z.string().transform((u) => u.replace(/\/+$/, '')),   // 空文字 = 同じオリジン（統合の構成、開発時のプロキシ。8・9章）
   modes: z.array(z.enum(['page', 'inline', 'form'])).min(1).default(['page']),
+  maxImageBytes: z.number().int().min(1).max(MAX_IMAGE_BYTES).default(MAX_IMAGE_BYTES),  // MAX_IMAGE_BYTES = 4MB
 });
 ```
+
+| キー | 内容 |
+|---|---|
+| `apiBaseUrl` | API のオリジン。直結の構成では execute-api の URL、統合の構成（CloudFront の `/v1/*` が API）では `""`（同じオリジン） |
+| `modes` | 使う発行方式（下の表） |
+| `maxImageBytes` | 画像の上限（バイト。任意、既定 4MB）。API の `MAX_IMAGE_BYTES`（`MaxImageBytes`）と同じ値にする。API までの経路によって上限が下がる場合に使う（../DESIGN.md 5章）。4MB（API の上限）より大きい値は設定のエラー。エラーの文言（「…（2MB まで）」）もこの値から作る |
 
 | `modes` の値 | 方式 | 既定 |
 |---|---|---|
@@ -291,7 +298,7 @@ const TicketRouteSchema = z.object({ code: TicketCode, sig: Sig });   // SPA の
 
 | API のエラーコード | 画面の表示（案） |
 |---|---|
-| `PAYLOAD_TOO_LARGE`（413） | 画像のサイズが大きすぎます（4MB まで） |
+| `PAYLOAD_TOO_LARGE`（413） | 画像のサイズが大きすぎます（4MB まで）。「4MB」は `maxImageBytes` から作る |
 | `UNSUPPORTED_MEDIA_TYPE`（415） | この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP） |
 | `IMAGE_REJECTED`（422。解析サーバーの判定が `REJECT`） | この証明書の画像ではチケットを発行できません |
 | `IMAGE_RETRY`（422。解析サーバーの判定が `RETRY`） | 画像をうまく確認できませんでした。明るい場所で、証明書全体が写るように撮り直してください |
@@ -311,7 +318,7 @@ export const useTicketStore = defineStore('ticket', () => {
   const inlineTicket = ref<InlineTicket | null>(null);   // その場表示方式（オプション）の結果（SPA の発行画面に表示）
   const error = ref<string | null>(null);                // 画面に出すメッセージ（4.4）
 
-  const fileProblem = computed(() => …);                  // 未選択・4MB 超・非対応の拡張子
+  const fileProblem = computed(() => …);                  // 未選択・上限（maxImageBytes）超え・非対応の拡張子
   async function grantForPage(): Promise<TicketRoute> { … } // 画面遷移方式: 成功したら { code, sig } を返し、画面が SPA のチケット画面へ移る
   async function grantInline() { … }                      // その場表示方式（オプション）
   function reset() { … }
@@ -390,6 +397,13 @@ npm run dev          # http://localhost:5173
 
 hash モードのルーティングなので、どちらの方式でも、存在しないパスを `index.html` に向ける設定は不要。
 
+API への経路は、環境ごとに2つから選ぶ（同じ `web.yaml` のパラメータ `ApiOriginDomain` で切り替える。手順は web/DEPLOY.md 3章）。
+
+| 構成 | 経路 | `apiBaseUrl` | CORS | CSP の API の分 |
+|---|---|---|---|---|
+| 直結 | ブラウザ → API Gateway（別オリジン） | API の URL | 必要 | `img-src`・`connect-src` に `{apiBaseUrl}` |
+| 統合 | ブラウザ → CloudFront の `/v1/*` → API Gateway（同じオリジン） | `""` | 不要 | なし（`'self'` で足りる） |
+
 ### キャッシュ
 
 | ファイル | Cache-Control | 理由 |
@@ -398,6 +412,8 @@ hash モードのルーティングなので、どちらの方式でも、存在
 | `index.html`、`config.json` | `no-cache` | 新しいデプロイや設定をすぐに反映させる |
 
 ### セキュリティヘッダー（CloudFront の Response Headers Policy）
+
+直結の場合（統合では `{apiBaseUrl}` の部分がなくなり、`img-src 'self' data:; connect-src 'self'` になる。フォーム送信方式を使うなら `form-action 'self'`）:
 
 ```
 Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self';
@@ -418,7 +434,8 @@ Strict-Transport-Security: max-age=31536000
 
 - S3 バケット・CloudFront・OAC・Response Headers Policy は、API とは別の CloudFormation テンプレート `infra/cloudformation/web.yaml`（スタック `ticketqr-web-{impl}`）で作る。手動（AWS CLI）の手順もある
 - `config.json` は環境ごとに作ってアップロードする。ビルドに含まれる `dist/config.json`（ローカル開発用）はアップロードしない
-- CloudFront のドメインを、API Gateway の CORS 設定（`AllowOrigins`）に入れる。`api.yaml` にはまだ CORS の設定がないため、今は `aws apigatewayv2 update-api` で設定する（web/DEPLOY.md 5章）
+- 直結では、CloudFront のドメインを、API Gateway の CORS 設定（`AllowOrigins`）に入れる。`api.yaml` にはまだ CORS の設定がないため、今は `aws apigatewayv2 update-api` で設定する（web/DEPLOY.md 5章）
+- 統合では CORS は要らない。代わりに、API の `PublicBaseUrl` を CloudFront の URL にする（web/DEPLOY.md 3.2）
 
 ## 10. テスト
 
@@ -427,7 +444,7 @@ Strict-Transport-Security: max-age=31536000
 | `config.ts`、`api/tickets.ts` のスキーマ | 正しい JSON・欠けた項目・形の違う値を zod で検証する単体テスト |
 | API クライアント | `fetch` を差し替えて、201 / 各エラー / 予期しない応答 / 通信エラーの扱い、画面遷移方式で `Accept: application/json` を付けることを確かめる |
 | SPA の発行画面 | `modes` の値に応じて、出るボタンが変わること（既定は画面遷移方式だけ）。フォーム送信方式のフォームの `action` と `enctype` |
-| ストア | 送信前の確認（未選択、4MB 超、拡張子）、二重送信の防止、エラーメッセージの対応 |
+| ストア | 送信前の確認（未選択、上限超え（`maxImageBytes`）、拡張子）、二重送信の防止、エラーメッセージの対応 |
 | SPA のチケット画面 | URL のパラメータの検証、`<img>` の読み込みエラー時の表示、コードからの発行日時の表示 |
 | 通しの確認（**保留中**） | E2E.md の Playwright で、ビルドしたサイト + API（ローカル）を使って、スマートフォン相当の画面幅で操作する。メインの画面遷移方式は必ず確かめ、SPA のチケット画面のリロードで再発行されないことも確かめる。オプションの方式は、`modes` で有効にした設定でも確かめる |
 

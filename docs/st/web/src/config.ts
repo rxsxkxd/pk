@@ -8,10 +8,16 @@ import { z } from 'zod';
 export const ModeSchema = z.enum(['page', 'inline', 'form']);
 export type Mode = z.infer<typeof ModeSchema>;
 
+// Upload ceiling of the API (Lambda's 6MB request, base64 by API Gateway). An environment can only lower it.
+export const MAX_IMAGE_BYTES = 4 << 20;
+
 export const ConfigSchema = z.object({
   // "" = same origin (the Vite proxy in development); otherwise the API's http(s) origin, without a trailing slash.
   apiBaseUrl: z.union([z.literal(''), z.url({ protocol: /^https?$/ })]).transform((u) => u.replace(/\/+$/, '')),
   modes: z.array(ModeSchema).min(1).default(['page']),
+  // Upload limit of this environment: the same value as the API's MAX_IMAGE_BYTES (it may differ by the
+  // path to the API, ../DESIGN.md 5). Checked before sending; the API makes the final decision.
+  maxImageBytes: z.number().int().min(1).max(MAX_IMAGE_BYTES).default(MAX_IMAGE_BYTES),
 });
 export type AppConfig = z.infer<typeof ConfigSchema>;
 

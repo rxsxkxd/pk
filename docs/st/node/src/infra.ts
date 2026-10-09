@@ -11,14 +11,22 @@ import { VerifierError, type Verifier, type Verdict, type Log } from './domain.t
 export type Config = {
   publicBaseUrl: string; // absolute, no trailing slash
   publicOrigin: string; // scheme://host[:port], for CSP
+  maxImageBytes?: number; // MAX_IMAGE_BYTES; undefined = the runtime ceiling (image.ts MAX_IMAGE_BYTES)
 };
 
 // 環境変数を読み込んで検証し、Config を返す。
 export function loadConfig(env: NodeJS.ProcessEnv): Config {
   const base = (env.PUBLIC_BASE_URL ?? '').replace(/\/+$/, '');
   const url = absoluteUrl('PUBLIC_BASE_URL', base);
-
-  return { publicBaseUrl: base, publicOrigin: url.origin };
+  const config: Config = { publicBaseUrl: base, publicOrigin: url.origin };
+  if (env.MAX_IMAGE_BYTES) {
+    const n = Number(env.MAX_IMAGE_BYTES);
+    if (!/^\d+$/.test(env.MAX_IMAGE_BYTES) || n < 1) {
+      throw new Error(`MAX_IMAGE_BYTES must be a positive integer, got "${env.MAX_IMAGE_BYTES}"`);
+    }
+    config.maxImageBytes = n;
+  }
+  return config;
 }
 
 // 絶対 URL（http / https）であることを確かめて返す。

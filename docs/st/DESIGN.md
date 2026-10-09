@@ -203,12 +203,28 @@ sequenceDiagram
 共通事項:
 - ベースパス: `/v1`
 - 画像の受け取り: A・B-1 とも `multipart/form-data` の `image` フィールド（ブラウザの `<input type="file">` / `FormData` で送る形式に統一）
-- 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため）
+- 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため）。環境ごとに**下げられる**（API の環境変数 `MAX_IMAGE_BYTES`、CloudFormation の `MaxImageBytes`、SPA の `config.json` の `maxImageBytes`。両方を同じ値にする）。4MB より大きい値は、API は起動時のエラー、SPA は設定の読み込みのエラーにする。経路ごとの上限は次の表
 - 画像の形式判定はファイルの中身で行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）。先頭のバイトで形式を決め、その形式のヘッダーを画像サイズまで解析できることまで確かめる（画像本体はデコードしない）。先頭数バイトだけの偽の画像は 415
   - Node: `image-size` が両方を行う
   - Go: 形式は `github.com/gabriel-vasile/mimetype`、確認は形式ごとのパーサー（JPEG / PNG は標準の `DecodeConfig`、WebP は `golang.org/x/image/webp`、HEIC / HEIF / AVIF は `go4.org/media/heif` で primary item の ispe ボックスを読む）。バイト列を直接比べる処理は自前で持たない
 - 受け付ける形式: JPEG、PNG、HEIC / HEIF（iPhone の標準、Samsung などの HEIF）、AVIF、WebP。画像は変換せずにそのまま解析サーバーへ送る
 - `Cache-Control: no-store`（全エンドポイント）
+
+画像のアップロードの経路と上限（2026-10-09 時点の AWS の公式の値）:
+
+| 区間 | 上限 | 直結（ブラウザ → API Gateway） | 統合（ブラウザ → CloudFront → API Gateway） |
+|---|---|---|---|
+| CloudFront のリクエストのボディ | 64GB | - | 効かない |
+| API Gateway HTTP API のペイロード | 10MB | 効かない（Lambda が先） | 効かない（同左） |
+| Lambda の同期呼び出しのリクエスト | 6MB（base64 後。元の画像で 約4.5MB、multipart の分を引いて 4MB） | **これで 4MB** | **これで 4MB** |
+| AWS WAF のマネージドルール（Core rule set の `SizeRestrictions_BODY`） | ボディ 8KB を超えるとブロック | HTTP API には WAF を付けられない | **WAF を付けたとき、何もしないと画像のアップロードがすべて 403 になる** |
+| AWS WAF のボディの検査 | 先頭 16KB（64KB まで広げられる）だけを検査。超えた分の扱いは設定（Continue / Match / No match） | - | 上限ではないが、画像の中身はほぼ検査されない |
+| Lambda@Edge・CloudFront Functions | Lambda@Edge がボディを読むのは 1MB まで（CloudFront Functions は読めない） | - | 今は使っていない。ボディを読む Lambda@Edge を `/v1/*` に付けると 1MB に下がる |
+| タイムアウト | API Gateway の統合 30 秒（`tickets` は 20 秒）、CloudFront のオリジンの応答 30 秒（`web.yaml` で設定） | 30 秒 | 30 秒（同じ） |
+
+- 今の構成では、どちらの経路でも上限は **4MB** で同じ。違いが出るのは、統合の CloudFront に WAF を付けるとき（`SizeRestrictions_BODY` を `/v1/tickets` と `/v1/tickets/qr-inline` で除外するか、Count にしてから本体のサイズ制限を別のルールで書く。Web ACL の案は web/DEPLOY.md 13章）と、ボディを読む Lambda@Edge を付けるとき（1MB）
+- どちらかの経路でもっと小さい上限が必要になったら、その環境の `MaxImageBytes` と `config.json` の `maxImageBytes` を下げる（コードの変更は要らない）。4MB より大きくしたい場合は、この設計（Lambda にボディを渡す）のままではできない。S3 の署名付き URL に直接アップロードし、Lambda には S3 のキーを渡す、などの設計の変更が要る
+- Lambda の上限（6MB）を超えたリクエストは Lambda まで届かず、API Gateway がエラーを返す（API の JSON の 413 `PAYLOAD_TOO_LARGE` にはならない。ステータスは AWS 上で要確認。確かめ方と記録の表は web/DEPLOY.md 12章）。SPA は送る前に `maxImageBytes` で止めるので、SPA からは通常は起きない
 
 ### 5.1 パターンA: `POST /v1/tickets/qr-inline`
 
@@ -485,7 +501,7 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
   - A: API Gateway で API キー / JWT（Cognito等）/ IAM のいずれか（**要確定**）
   - B-1: **認証なし（公開）**。ブラウザのフォーム送信ではヘッダ認証が使えないため、発行者の制限は行わず、レート制限で濫用を抑える
     - API Gateway のスロットリング（ルート単位のレート / バースト上限）
-    - AWS WAF のレートベースルール（送信元IP単位）を HTTP API 前段の CloudFront 等に適用（WAF は HTTP API に直接関連付けできないため。採否は要確定）
+    - AWS WAF のレートベースルール（送信元IP単位）を HTTP API 前段の CloudFront 等に適用（WAF は HTTP API に直接関連付けできないため。採否は要確定。統合の構成での Web ACL の案と作り方は web/DEPLOY.md 13章）
     - Lambda 予約同時実行数で画像解析サーバーへの同時リクエスト数に上限を設ける
     - Cookie を使わないため CSRF 対策は不要
     - 将来制限が必要になった場合の拡張候補: フォームトークン（有効期限付き HMAC を hidden フィールドに埋め込む）/ Cookie ログイン + Lambda オーソライザ

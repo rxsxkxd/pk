@@ -4,7 +4,7 @@
 
 | 項目 | 内容 |
 |---|---|
-| 状態 | **提案中（Proposed）** |
+| 状態 | **一部実装（2026-10-09）**。本番の2構成（S = 直結、U = 統合）は、テンプレートを分けずに `web.yaml` のパラメータで実装した（7章）。構成 T（CloudFront なし）とテンプレートの分割は、提案のまま |
 | 日付 | 2026-10-06 |
 | 決める人 | （未定） |
 | 関係する文書 | [../web/DEPLOY.md](../web/DEPLOY.md)、[../web/DESIGN.md](../web/DESIGN.md) 9章、[../CD_CI.md](../CD_CI.md) 0.5、[../E2E.md](../E2E.md)、`infra/cloudformation/web.yaml`・`api.yaml` |
@@ -83,3 +83,18 @@
 2. 構成 U で、CloudFront を通らない API へのアクセスを防ぐか（防ぐなら、秘密のヘッダーか、独自ドメイン + `DisableExecuteApiEndpoint`）
 3. テスト・開発の環境で、S3 の公開のウェブサイトを使ってよいか（アカウントの設定）
 4. 構成の選び方を、CI/CD でどう渡すか（例: 環境変数 `EDGE_MODE=none|split|unified`）
+
+## 7. 実装したもの（2026-10-09）
+
+「API Gateway に直接つなぐ構成」と「CloudFront で S3 と API をまとめる構成」の両方を使えるようにする、という方針になった。4章の O3（テンプレートを3つに分ける）ではなく、**O2 に近い形**（`web.yaml` にパラメータを足す）で実装した。
+
+| 4章の構成 | 実装での呼び名 | `web.yaml` | 手順 |
+|---|---|---|---|
+| S（オリジンを分ける） | 直結 | `ApiOriginDomain` 空、`ApiBaseUrl=$API_URL`（今までと同じ） | web/DEPLOY.md 3.1 |
+| U（1つの CloudFront） | 統合 | `ApiOriginDomain=$API_DOMAIN`（`/v1/*` を API へ。CSP は `'self'` だけ） | web/DEPLOY.md 3.2 |
+| T（CloudFront なし） | - | 未実装 | - |
+
+- O2 にした理由: 今動いている `web.yaml` のスタックを作り直さずに済む（論理 ID が変わらない）。条件は `Unified` の1つだけで、テンプレートの見通しは保てた。同じスタックのまま、パラメータの変更で直結と統合を切り替えられる（web/DEPLOY.md 10章）
+- O3 の利点のうち、残っているもの: テスト・開発の環境から CloudFront を外すこと（構成 T）。これをやるときは、改めて S3 の部分を分ける
+- 合わせて行ったこと: `api.yaml`・SAM のテンプレートに出力 `ApiDomain`、WAF を付けるパラメータ `WebAclArn`（`web.yaml`）、画像の上限を環境ごとに下げる設定（API の `MaxImageBytes` / `MAX_IMAGE_BYTES`、SPA の `config.json` の `maxImageBytes`。経路ごとの上限は DESIGN.md 5章）
+- 6章の未解決の事項のうち、1（本番を U にするか S にするか）は「環境ごとに選ぶ」になった。2（CloudFront を通らないアクセスを防ぐか）は未実装のまま（web/DEPLOY.md 11章）。3・4 は構成 T の話なので、そのまま

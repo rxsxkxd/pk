@@ -114,7 +114,8 @@ aws ssm put-parameter \
 | `AnalyzerUrl` | 空 | `AnalyzerMode=http` のときの POST 先 |
 | `AnalyzerApiKeyParameterName` | 空 | `AnalyzerMode=http` のときの API キーのパラメータ名（任意）。指定すると `x-api-key` を付けて送り、Lambda の実行ロールに読み取り権限が付く（4-A.3）。空なら API キーなしで送る（4-A.4） |
 | `TicketCodeSuffixParameterName` | - | 3.1 で作ったチケットコードの固定文字列のパラメータ名（`/ticketqr/go/ticket-code-suffix`。String） |
-| `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。空なら execute-api の URL を自動で使う |
+| `PublicBaseUrl` | 空 | 独自ドメインを使う場合に指定する。CloudFront で SPA と API をまとめる構成（統合。../web/DEPLOY.md 3.2）では、CloudFront の URL（`$WEB_URL`）にする。空なら execute-api の URL を自動で使う |
+| `MaxImageBytes` | `4194304`（4MB） | 証明書の画像の上限（バイト。環境変数 `MAX_IMAGE_BYTES`）。4MB が実行環境の上限で、それより小さくだけできる。API までの経路にもっと小さい上限があるときに下げ、SPA の `config.json` の `maxImageBytes` も同じ値にする（../DESIGN.md 5章） |
 | `ThrottlingRateLimit` / `ThrottlingBurstLimit` | `50` / `100` | 全ルートに共通のスロットリング |
 | `GrantReservedConcurrency` | `-1`（設定しない） | `tickets` 関数に予約する同時実行数（画像解析サーバーの保護用） |
 | `VpcSubnetIds` | 空 | `tickets` 関数（画像解析とチケットコードの生成）を置く既存のプライベートサブネット（カンマ区切り、2 AZ 以上）。空ならすべての関数が VPC の外。4-A.4 |
@@ -154,7 +155,7 @@ echo $API_URL
 
 - 変更内容を先に確認したいときは `--no-execute-changeset` を付ける。表示された変更セットを確認し、`aws cloudformation execute-change-set` で反映する
 - 失敗したときは、`aws cloudformation describe-stack-events --stack-name ticketqr-$IMPL` で原因を確認する
-- `$API_URL` は、Web フロントエンドのデプロイ（../web/DEPLOY.md）でも使う
+- `$API_URL` は、Web フロントエンドのデプロイ（../web/DEPLOY.md）でも使う。CloudFront で SPA と API をまとめる構成（統合）では、出力 `ApiDomain`（execute-api のドメイン）も使い、Web のスタックを作ったあとで `PublicBaseUrl=$WEB_URL` を付けてもう一度デプロイする（../web/DEPLOY.md 3.2）
 - `aws cloudformation deploy` は、指定しなかったパラメータを既定値に戻す。4-A.3・4-A.4 の設定にしている環境では、ここでも 4-A.3・4-A.4 のパラメータを毎回付ける（付けないと `mock`・VPC の外に戻る）
 
 #### 4-A.2 コードの更新
@@ -631,6 +632,8 @@ aws logs tail /aws/apigateway/ticketqr-$IMPL --since 10m   # CloudFormation の�
 aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 1d --filter-pattern '"request completed"' \
   | python3 scripts/client_log_summary.py
 ```
+
+上限（4MB）を超えた画像を送ったときの応答（Lambda まで届かない大きさで API Gateway が返すもの）の確かめ方は、../web/DEPLOY.md 12章（直結・統合の両方の経路をまとめて確かめる）。
 
 次は Web フロントエンド（SPA）のデプロイ: [../web/DEPLOY.md](../web/DEPLOY.md)（`$API_URL` を使う）。
 

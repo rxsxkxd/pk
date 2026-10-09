@@ -1,5 +1,7 @@
 # Deploy to AWS (CI.md 4). Runs the whole CI first, then deploys the artifacts it built:
 # Lambda zips → ticket API stack (api.yaml) → web stack (web.yaml) → SPA files → smoke test.
+# layout (web/DEPLOY.md): direct = the SPA calls the API Gateway URL (CORS); unified = CloudFront also
+# forwards /v1/* to the API (same origin; the API's PublicBaseUrl is the CloudFront URL).
 # NOT VERIFIED YET: needs the IAM role and the repository / environment settings of CI.md 4.2.
 # Template for the ticket repository: copy github-template/ to .github/ (github-template/README.md).
 name: Deploy
@@ -12,6 +14,11 @@ on:
         type: choice
         options: [go, node]
         default: go
+      layout:
+        description: Path from the SPA to the API (web/DEPLOY.md)
+        type: choice
+        options: [direct, unified]
+        default: direct
       environment:
         description: GitHub environment (holds the AWS settings and the approval rule)
         type: environment
@@ -43,6 +50,9 @@ jobs:
       SALT_PARAM: /ticketqr/${{ inputs.impl }}/signing-salt
       CODE_SUFFIX_PARAM: /ticketqr/${{ inputs.impl }}/ticket-code-suffix
       WEB_MODES: ${{ vars.WEB_MODES || '["page"]' }}
+      LAYOUT: ${{ inputs.layout }}
+      # Upload limit of this environment (DESIGN.md 5): the API's MaxImageBytes and the SPA's maxImageBytes.
+      MAX_IMAGE_BYTES: ${{ vars.MAX_IMAGE_BYTES || '4194304' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -64,8 +74,67 @@ jobs:
           aws s3 cp artifacts/lambda/ticketqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip"
           aws s3 cp artifacts/lambda/exampleqr.zip "s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.zip"
 
-      # {go,node}/DEPLOY.md 4-A.1 (stack deploy)
+      # {go,node}/DEPLOY.md 4-A.1 (stack deploy). unified: PublicBaseUrl is the CloudFront URL of the web
+      # stack; on the first deploy that stack does not exist yet, so the API is deployed again after it.
       - name: Deploy ticket API stack
+        run: |
+          # Only a web stack that already forwards /v1/* (Layout=unified) may become the API's public URL.
+          PUBLIC_BASE_URL=""
+          if [ "$LAYOUT" = unified ]; then
+            read -r WEB_LAYOUT WEB_URL_NOW < <(aws cloudformation describe-stacks --stack-name "ticketqr-web-$IMPL" \
+              --query "[Stacks[0].Outputs[?OutputKey=='Layout'].OutputValue | [0], Stacks[0].Outputs[?OutputKey=='WebUrl'].OutputValue | [0]]" \
+              --output text 2>/dev/null || true)
+            if [ "${WEB_LAYOUT:-}" = unified ]; then PUBLIC_BASE_URL=$WEB_URL_NOW; fi
+          fi
+          echo "PUBLIC_BASE_URL=$PUBLIC_BASE_URL" >> "$GITHUB_ENV"
+          aws cloudformation deploy \
+            --stack-name "ticketqr-$IMPL" \
+            --template-file infra/cloudformation/api.yaml \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              Impl="$IMPL" \
+              ArtifactBucket="$ARTIFACT_BUCKET" \
+              ArtifactPrefix="$ARTIFACT_PREFIX" \
+              SigningSaltParameterName="$SALT_PARAM" \
+              TicketCodeSuffixParameterName="$CODE_SUFFIX_PARAM" \
+              MaxImageBytes="$MAX_IMAGE_BYTES" \
+              PublicBaseUrl="$PUBLIC_BASE_URL"
+          out() {
+            aws cloudformation describe-stacks --stack-name "ticketqr-$IMPL" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+          }
+          {
+            echo "API_URL=$(out ApiUrl)"
+            echo "API_DOMAIN=$(out ApiDomain)"
+          } >> "$GITHUB_ENV"
+
+      # web/DEPLOY.md 3.1 (direct) / 3.2 (unified)
+      - name: Deploy web stack
+        run: |
+          if [ "$LAYOUT" = unified ]; then
+            WEB_PARAMS="ApiOriginDomain=$API_DOMAIN"
+          else
+            WEB_PARAMS="ApiBaseUrl=$API_URL"
+          fi
+          aws cloudformation deploy \
+            --stack-name "ticketqr-web-$IMPL" \
+            --template-file infra/cloudformation/web.yaml \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "$WEB_PARAMS"
+          out() {
+            aws cloudformation describe-stacks --stack-name "ticketqr-web-$IMPL" \
+              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+          }
+          {
+            echo "WEB_BUCKET=$(out BucketName)"
+            echo "DIST_ID=$(out DistributionId)"
+            echo "WEB_URL=$(out WebUrl)"
+          } >> "$GITHUB_ENV"
+
+      # web/DEPLOY.md 3.2 step 3: the first unified deploy (or a switch from direct) tells the API its public URL.
+      - name: Point the API at CloudFront (unified)
+        if: inputs.layout == 'unified' && env.PUBLIC_BASE_URL != env.WEB_URL
         run: |
           aws cloudformation deploy \
             --stack-name "ticketqr-$IMPL" \
@@ -77,31 +146,13 @@ jobs:
               ArtifactBucket="$ARTIFACT_BUCKET" \
               ArtifactPrefix="$ARTIFACT_PREFIX" \
               SigningSaltParameterName="$SALT_PARAM" \
-              TicketCodeSuffixParameterName="$CODE_SUFFIX_PARAM"
-          API_URL=$(aws cloudformation describe-stacks --stack-name "ticketqr-$IMPL" \
-            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
-          echo "API_URL=$API_URL" >> "$GITHUB_ENV"
+              TicketCodeSuffixParameterName="$CODE_SUFFIX_PARAM" \
+              MaxImageBytes="$MAX_IMAGE_BYTES" \
+              PublicBaseUrl="$WEB_URL"
 
-      # web/DEPLOY.md 3
-      - name: Deploy web stack
-        run: |
-          aws cloudformation deploy \
-            --stack-name "ticketqr-web-$IMPL" \
-            --template-file infra/cloudformation/web.yaml \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides ApiBaseUrl="$API_URL"
-          out() {
-            aws cloudformation describe-stacks --stack-name "ticketqr-web-$IMPL" \
-              --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
-          }
-          {
-            echo "WEB_BUCKET=$(out BucketName)"
-            echo "DIST_ID=$(out DistributionId)"
-            echo "WEB_URL=$(out WebUrl)"
-          } >> "$GITHUB_ENV"
-
-      # web/DEPLOY.md 5 (interim until api.yaml has a CorsConfiguration)
+      # web/DEPLOY.md 5 (direct only; interim until api.yaml has a CorsConfiguration)
       - name: Allow the SPA origin in the API's CORS
+        if: inputs.layout == 'direct'
         run: |
           API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='ticketqr-$IMPL'].ApiId | [0]" --output text)
           aws apigatewayv2 update-api --api-id "$API_ID" \
@@ -111,7 +162,10 @@ jobs:
       # web/DEPLOY.md 6
       - name: Upload the SPA and its config
         run: |
-          printf '{ "apiBaseUrl": "%s", "modes": %s }\n' "$API_URL" "$WEB_MODES" > "$RUNNER_TEMP/config.json"
+          # unified: "" = same origin (CloudFront /v1/*)
+          if [ "$LAYOUT" = unified ]; then SPA_API=""; else SPA_API="$API_URL"; fi
+          printf '{ "apiBaseUrl": "%s", "modes": %s, "maxImageBytes": %s }\n' "$SPA_API" "$WEB_MODES" "$MAX_IMAGE_BYTES" \
+            > "$RUNNER_TEMP/config.json"
           aws s3 sync web/dist/ "s3://$WEB_BUCKET/" --delete \
             --exclude index.html --exclude config.json \
             --cache-control 'public, max-age=31536000, immutable'
@@ -126,13 +180,20 @@ jobs:
         run: |
           curl -fsS -o /dev/null "$WEB_URL/"
           curl -fsS "$WEB_URL/config.json"
-          curl -fsS -D headers.txt -o ticket.json -H "Origin: $WEB_URL" -H 'Accept: application/json' \
-            -F image=@testdata/images/photo.jpg "$API_URL/v1/tickets"
-          grep -i "^access-control-allow-origin: $WEB_URL" headers.txt
+          if [ "$LAYOUT" = unified ]; then
+            # Through CloudFront; the QR URL is on the same origin (the API's PublicBaseUrl).
+            curl -fsS -o ticket.json -H 'Accept: application/json' \
+              -F image=@testdata/images/photo.jpg "$WEB_URL/v1/tickets"
+          else
+            curl -fsS -D headers.txt -o ticket.json -H "Origin: $WEB_URL" -H 'Accept: application/json' \
+              -F image=@testdata/images/photo.jpg "$API_URL/v1/tickets"
+            grep -i "^access-control-allow-origin: $WEB_URL" headers.txt
+          fi
           QR_URL=$(python3 -c 'import json;print(json.load(open("ticket.json"))["qrUrl"])')
+          if [ "$LAYOUT" = unified ]; then case "$QR_URL" in "$WEB_URL"/*) ;; *) echo "qrUrl not on $WEB_URL: $QR_URL"; exit 1 ;; esac; fi
           test "$(curl -fsS -o /dev/null -w '%{content_type}' "$QR_URL")" = image/png
           {
-            echo "### Deployed ($IMPL)"
+            echo "### Deployed ($IMPL, $LAYOUT)"
             echo "- SPA: $WEB_URL"
             echo "- API: $API_URL"
           } >> "$GITHUB_STEP_SUMMARY"

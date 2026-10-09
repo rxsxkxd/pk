@@ -36,6 +36,26 @@ func TestAnalyzerSettings(t *testing.T) {
 	}
 }
 
+func TestMaxImageBytes(t *testing.T) {
+	t.Setenv("PUBLIC_BASE_URL", "https://api.example.com")
+	t.Setenv("ANALYZER_MODE", "mock")
+
+	t.Setenv("MAX_IMAGE_BYTES", "")
+	if cfg, err := Load(); err != nil || cfg.MaxImageBytes != 0 {
+		t.Errorf("unset: %+v, %v", cfg, err)
+	}
+	t.Setenv("MAX_IMAGE_BYTES", "1048576")
+	if cfg, err := Load(); err != nil || cfg.MaxImageBytes != 1<<20 {
+		t.Errorf("1MB: %+v, %v", cfg, err)
+	}
+	for _, v := range []string{"0", "-1", "4MB"} {
+		t.Setenv("MAX_IMAGE_BYTES", v)
+		if _, err := Load(); err == nil {
+			t.Errorf("MAX_IMAGE_BYTES=%s must fail", v)
+		}
+	}
+}
+
 func TestLoadTicketCodeSuffix(t *testing.T) {
 	t.Setenv("TICKET_CODE_SUFFIX_PARAMETER_NAME", "")
 	t.Setenv("TICKET_CODE_SUFFIX", "TQR")

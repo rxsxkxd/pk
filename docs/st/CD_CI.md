@@ -287,6 +287,7 @@ release.zip
 | 入力 | Source の成果物（リリースの zip を展開したもの） |
 | 環境変数 | `IMPL`（`go` / `node`）、`DEPLOY_ENV`（`dev` / `prod`）、`ARTIFACT_BUCKET`、`WEB_MODES`（`config.json` の `modes`。既定 `["page"]`） |
 | buildspec | リリースの中の `buildspec/deploy.yml` |
+| 構成と画像の上限 | 下の案は直結（web/DEPLOY.md 3.1）だけ。統合（3.2）にする環境では、`github-template/workflows/deploy.yml` と同じ分岐（`LAYOUT`、`ApiOriginDomain`、API の2回目のデプロイ、CORS なし、`apiBaseUrl: ""`）と、`MAX_IMAGE_BYTES`（API の `MaxImageBytes` と `config.json` の `maxImageBytes`）を足す |
 
 `buildspec/deploy.yml`（案。コマンドは各手順書と同じ）:
 

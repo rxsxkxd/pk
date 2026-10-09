@@ -16,8 +16,8 @@ import (
 	"golang.org/x/image/webp"
 )
 
-// MaxBytes is the upload limit set by the runtime: a Lambda request is at most 6MB and API Gateway
-// base64-encodes binary bodies (×4/3).
+// MaxBytes is the upload ceiling set by the runtime: a Lambda request is at most 6MB and API Gateway
+// base64-encodes binary bodies (×4/3). A deployment can lower it with MAX_IMAGE_BYTES (DESIGN.md 5).
 const MaxBytes = 4 << 20
 
 // validators confirm that data of a detected type really is that image, by parsing its header up to the

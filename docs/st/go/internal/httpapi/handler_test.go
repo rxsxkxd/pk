@@ -225,6 +225,31 @@ func TestGrantInlineErrors(t *testing.T) {
 	}
 }
 
+// TestMaxImageBytes: a deployment can lower the upload limit (MAX_IMAGE_BYTES); the runtime ceiling stays.
+func TestMaxImageBytes(t *testing.T) {
+	tests := []struct {
+		name   string
+		limit  int
+		size   int
+		status int
+	}{
+		{"at the lowered limit", len(jpeg), len(jpeg), 201},
+		{"over the lowered limit", len(jpeg), len(jpeg) + 1, 413},
+		{"above the ceiling is ignored", imageinput.MaxBytes + 1, imageinput.MaxBytes + 1, 413},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHandlers(t, analyzer.AlwaysPass{})
+			h.MaxImageBytes = tt.limit
+			data := append(append([]byte{}, jpeg...), make([]byte, tt.size-len(jpeg))...)
+			res, err := h.GrantInline(context.Background(), formRequest(t, "image", data))
+			if err != nil || res.StatusCode != tt.status {
+				t.Fatalf("got %d (%v), want %d: %s", res.StatusCode, err, tt.status, res.Body)
+			}
+		})
+	}
+}
+
 // TestContentTypeVariants: valid spellings of a multipart Content-Type. The Node tests have the same cases
 // except spaces around "=", a known difference (NODE.md 10).
 func TestContentTypeVariants(t *testing.T) {

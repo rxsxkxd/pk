@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { ApiError } from '../src/api/tickets.ts';
-import { checkFile, MAX_IMAGE_BYTES, messageFor, useTicketStore } from '../src/stores/ticket.ts';
-import { API, CODE, json, photo, SIG, setupStore, stubFetch } from './helpers.ts';
+import { MAX_IMAGE_BYTES } from '../src/config.ts';
+import { checkFile, messageFor, sizeLabel, useTicketStore } from '../src/stores/ticket.ts';
+import { API, CODE, config, json, photo, SIG, setupStore, stubFetch } from './helpers.ts';
 
 beforeEach(() => setupStore());
 afterEach(() => vi.unstubAllGlobals());
@@ -26,6 +27,35 @@ describe('checkFile (before sending)', () => {
     ['exactly 4MB', photo('a.webp', 'image/webp', MAX_IMAGE_BYTES)],
   ])('%s is fine', (_name, file) => {
     expect(checkFile(file)).toBeUndefined();
+  });
+});
+
+describe('upload limit of the environment (config.json maxImageBytes)', () => {
+  test('a lowered limit is checked and shown', () => {
+    expect(checkFile(photo('a.jpg', 'image/jpeg', (1 << 20) + 1), 1 << 20)).toBe(
+      '画像のサイズが大きすぎます（1MB まで）',
+    );
+    expect(checkFile(photo('a.jpg', 'image/jpeg', 1 << 20), 1 << 20)).toBeUndefined();
+    expect(messageFor(new ApiError('PAYLOAD_TOO_LARGE', ''), 3 << 19)).toBe('画像のサイズが大きすぎます（1.5MB まで）');
+  });
+
+  test.each([
+    [4 << 20, '4MB'],
+    [3 << 19, '1.5MB'],
+    [5_000_000, '4.7MB'],
+    [512 << 10, '512KB'],
+  ])('sizeLabel(%i) = %s', (bytes, label) => {
+    expect(sizeLabel(bytes)).toBe(label);
+  });
+
+  test('the store uses the limit in config.json', () => {
+    const store = useTicketStore();
+    store.file = photo('a.jpg', 'image/jpeg', 2 << 20);
+    expect(store.fileProblem).toBeUndefined();
+    setupStore({ ...config(), maxImageBytes: 1 << 20 });
+    const limited = useTicketStore();
+    limited.file = photo('a.jpg', 'image/jpeg', 2 << 20);
+    expect(limited.fileProblem).toBe('画像のサイズが大きすぎます（1MB まで）');
   });
 });
 

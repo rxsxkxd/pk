@@ -1,6 +1,8 @@
 # 【提案】CloudFront の定義を Web のバケットから分ける
 
 > 提案（2026-10-06。未実装）。採用が決まったら、テンプレート（`infra/cloudformation/`）、[../web/DEPLOY.md](../web/DEPLOY.md)、[../CD_CI.md](../CD_CI.md) に反映し、このファイルは削除する。
+>
+> **2026-10-09**: 構成 S（直結）と U（統合）は、テンプレートを分けずに `web.yaml` のパラメータ `ApiOriginDomain` で実装した（[adr-0001-cloudfront-split.md](adr-0001-cloudfront-split.md) 7章、[../web/DEPLOY.md](../web/DEPLOY.md)）。この文書の残りの提案は、構成 T（CloudFront なし）とテンプレートの分割。
 
 ## 1. 背景
 

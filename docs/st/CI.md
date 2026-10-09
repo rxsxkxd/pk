@@ -129,7 +129,7 @@ pull request / master への push
 
 ### 4.1 流れ
 
-手動で実行し、**実装**（`go` / `node`）と **環境**（GitHub の environment。例: `dev`、`prod`）を選ぶ。
+手動で実行し、**実装**（`go` / `node`）、**構成**（`layout`。`direct` = 直結、`unified` = 統合。web/DEPLOY.md の冒頭）と **環境**（GitHub の environment。例: `dev`、`prod`）を選ぶ。画像の上限は、environment の変数 `MAX_IMAGE_BYTES`（任意。既定 4194304）で API と `config.json` の両方に入る。
 
 | ステップ | 内容 | 手順書 |
 |---|---|---|
@@ -137,11 +137,12 @@ pull request / master への push
 | 承認 | environment に承認者を設定していれば、ここで承認を待つ | - |
 | AWS の認証 | OIDC で `AWS_DEPLOY_ROLE_ARN` のロールを引き受ける | - |
 | zip のアップロード | `s3://$ARTIFACT_BUCKET/ticketqr/{impl}/{sha}-{試行回数}/` に置く（接頭辞を毎回変えるので、Lambda のコードが必ず更新される） | {impl}/DEPLOY.md 4-A.1（zip のアップロード） |
-| API のスタック | `api.yaml` を `ticketqr-{impl}` にデプロイし、`ApiUrl` を取り出す | {impl}/DEPLOY.md 4-A.1（スタックのデプロイ） |
-| Web のスタック | `web.yaml` を `ticketqr-web-{impl}` にデプロイし（`ApiBaseUrl` を渡す）、バケット・ディストリビューション・URL を取り出す | web/DEPLOY.md 3章 |
-| CORS | API Gateway の CORS に SPA のオリジンを入れる（暫定。`api.yaml` に CORS の設定が入るまで） | web/DEPLOY.md 5章 |
-| SPA のアップロード | `config.json`（`apiBaseUrl` と `modes`）を作り、`dist` と一緒に S3 に置いて、CloudFront のキャッシュを消す | web/DEPLOY.md 6章 |
-| スモークテスト | SPA と `config.json` が取れること、SPA のオリジンからの発行に CORS のヘッダーが付くこと、QR 画像 API が PNG を返すこと。URL はジョブのサマリーに出す | {impl}/DEPLOY.md 7章、web/DEPLOY.md 7章 |
+| API のスタック | `api.yaml` を `ticketqr-{impl}` にデプロイし、`ApiUrl`・`ApiDomain` を取り出す。統合で、Web のスタックがすでに統合になっていれば、`PublicBaseUrl` にその CloudFront の URL を渡す | {impl}/DEPLOY.md 4-A.1（スタックのデプロイ） |
+| Web のスタック | `web.yaml` を `ticketqr-web-{impl}` にデプロイし（直結は `ApiBaseUrl`、統合は `ApiOriginDomain` を渡す）、バケット・ディストリビューション・URL を取り出す | web/DEPLOY.md 3.1・3.2 |
+| API の公開 URL（統合だけ） | 初回（または直結からの切り替え）だけ、API を `PublicBaseUrl=$WEB_URL` でもう一度デプロイする | web/DEPLOY.md 3.2 の 3 |
+| CORS（直結だけ） | API Gateway の CORS に SPA のオリジンを入れる（暫定。`api.yaml` に CORS の設定が入るまで） | web/DEPLOY.md 5章 |
+| SPA のアップロード | `config.json`（`apiBaseUrl`（統合では `""`）、`modes`、`maxImageBytes`）を作り、`dist` と一緒に S3 に置いて、CloudFront のキャッシュを消す | web/DEPLOY.md 6章 |
+| スモークテスト | SPA と `config.json` が取れること、発行できること（直結: API に直接送り、CORS のヘッダーが付くこと。統合: CloudFront の `/v1/tickets` に送り、`qrUrl` が CloudFront の URL であること）、QR 画像 API が PNG を返すこと。URL はジョブのサマリーに出す | {impl}/DEPLOY.md 7章、web/DEPLOY.md 7章 |
 
 同じ環境・同じ実装のデプロイは、同時に1つだけ動く（`concurrency`。実行中のものは取り消さない）。
 

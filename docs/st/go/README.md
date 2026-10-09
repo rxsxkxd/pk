@@ -45,6 +45,7 @@ make build          # bin/ticketqr.zip（チケット系4エンドポイント�
 | `ANALYZER_TIMEOUT_MS` | | 1回の呼び出しのタイムアウト（既定 5000） |
 | `SIGNING_SALT_PARAMETER_NAME` | ○ | 署名用 salt を保存した Parameter Store の SecureString の名前（例: `/ticketqr/go/signing-salt`）。中身は `{"current":"...","previous":"..."}` 形式 |
 | `TICKET_CODE_SUFFIX_PARAMETER_NAME` | ○（Lambda 上） | チケットコードの末尾の固定文字列（英数字1〜32文字）を置いた Parameter Store の String の名前（DESIGN.md 4章）。秘密ではないので、代わりに `TICKET_CODE_SUFFIX` に値を直接入れてもよい（ローカル実行の既定値は `LOCAL`） |
+| `MAX_IMAGE_BYTES` | - | 証明書の画像の上限（バイト）。未設定なら実行環境の上限 4MB（4194304）。それより大きい値は起動時のエラー。API までの経路の上限に合わせて下げるときに使う（DESIGN.md 5章） |
 | `APP_ENV` / `SIGNING_SALT` | | `APP_ENV=local` のときに限り、`SIGNING_SALT` に平文で書いた salt を使う（ローカル専用） |
 
 `make run` は、ローカル用の値（`APP_ENV=local`、`ANALYZER_MODE=mock` など）を自動で設定する。

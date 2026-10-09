@@ -3,7 +3,8 @@
 
 import { imageSize } from 'image-size';
 
-// Upload limit set by the runtime: a Lambda request is at most 6MB and binary bodies are base64 (×4/3).
+// Upload ceiling set by the runtime: a Lambda request is at most 6MB and binary bodies are base64 (×4/3).
+// A deployment can lower it with MAX_IMAGE_BYTES (DESIGN.md 5).
 export const MAX_IMAGE_BYTES = 4 << 20;
 
 // image-size's type → MIME type (heic / mif1 are HEIF brands).

@@ -32,9 +32,9 @@ const GRANT = '/v1/tickets';
 
 type LambdaHandler = (event: Event) => Promise<Result>;
 
-function newRoute(verifier: Verifier = alwaysPass, log: Log = () => {}) {
+function newRoute(verifier: Verifier = alwaysPass, log: Log = () => {}, maxImageBytes?: number) {
   const deps: Deps = {
-    config: { publicBaseUrl: BASE, publicOrigin: BASE },
+    config: { publicBaseUrl: BASE, publicOrigin: BASE, maxImageBytes },
     verifier,
     signer: newSigner('test-salt'),
     newTicket: () => generateTicket('TQR'),
@@ -189,6 +189,13 @@ describe('config', () => {
       publicOrigin: 'https://api.example.com:8443',
     });
   });
+  test('MAX_IMAGE_BYTES lowers the upload limit', () => {
+    const base = { PUBLIC_BASE_URL: 'https://api.example.com' };
+    assert.equal(loadConfig({ ...base, MAX_IMAGE_BYTES: '1048576' }).maxImageBytes, 1 << 20);
+    for (const v of ['0', '-1', '4MB', '1.5']) {
+      assert.throws(() => loadConfig({ ...base, MAX_IMAGE_BYTES: v }), /MAX_IMAGE_BYTES/);
+    }
+  });
   test('ticket code suffix: Parameter Store, or TICKET_CODE_SUFFIX directly (not a secret)', async () => {
     assert.equal(await loadTicketCodeSuffix({ TICKET_CODE_SUFFIX: 'TQR' }), 'TQR');
     await assert.rejects(loadTicketCodeSuffix({}), /TICKET_CODE_SUFFIX_PARAMETER_NAME/);
@@ -333,6 +340,28 @@ describe('A: POST /v1/tickets/qr-inline', () => {
       const res = await newRoute(analyzer).handle(await makeEvent());
       assert.equal(res.statusCode, status);
       assert.equal(errorCode(res), code);
+    });
+  }
+});
+
+// Same cases as the Go TestMaxImageBytes.
+describe('a deployment can lower the upload limit (MAX_IMAGE_BYTES); the runtime ceiling stays', () => {
+  const padded = (size: number) => {
+    const data = new Uint8Array(size);
+    data.set(JPEG);
+    return data;
+  };
+  const cases: Array<[string, number, number, number]> = [
+    ['at the lowered limit', JPEG.length, JPEG.length, 201],
+    ['over the lowered limit', JPEG.length, JPEG.length + 1, 413],
+    ['above the ceiling is ignored', MAX_IMAGE_BYTES + 1, MAX_IMAGE_BYTES + 1, 413],
+  ];
+  for (const [name, limit, size, status] of cases) {
+    test(name, async () => {
+      const res = await newRoute(alwaysPass, () => {}, limit).handle(
+        await formEvent(GRANT_INLINE, 'image', padded(size)),
+      );
+      assert.equal(res.statusCode, status);
     });
   }
 });

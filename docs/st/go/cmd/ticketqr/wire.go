@@ -5,12 +5,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 
 	"ticketqr/internal/analyzer"
 	"ticketqr/internal/config"
 	"ticketqr/internal/httpapi"
+	"ticketqr/internal/imageinput"
 	"ticketqr/internal/signer"
 	"ticketqr/internal/ticket"
 	"ticketqr/internal/view"
@@ -23,6 +25,10 @@ func newHandlers(ctx context.Context) (*httpapi.Handlers, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
+	}
+	// The runtime ceiling (Lambda's 6MB request, base64 by API Gateway) cannot be raised by configuration.
+	if cfg.MaxImageBytes > imageinput.MaxBytes {
+		return nil, fmt.Errorf("MAX_IMAGE_BYTES must be %d or less, got %d", imageinput.MaxBytes, cfg.MaxImageBytes)
 	}
 	var httpCfg analyzer.HTTPConfig
 	if cfg.AnalyzerMode == "http" {
@@ -65,9 +71,10 @@ func newHandlers(ctx context.Context) (*httpapi.Handlers, error) {
 			Generator: generator,
 			Logger:    logger,
 		},
-		Signer: sg,
-		View:   vw,
-		Logger: logger,
+		Signer:        sg,
+		View:          vw,
+		Logger:        logger,
+		MaxImageBytes: cfg.MaxImageBytes,
 	}, nil
 }
 

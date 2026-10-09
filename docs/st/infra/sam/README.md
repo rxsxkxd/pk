@@ -65,6 +65,8 @@ export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-sam-$I
 ```
 
 - 外の解析サーバーにつなぐときは、`--parameter-overrides` に `AnalyzerMode=http AnalyzerUrl=…`（API キーを使うなら `AnalyzerApiKeyParameterName=…`）を足す
+- CloudFront で SPA と API をまとめる構成（統合。../../web/DEPLOY.md 3.2）では、Web のスタックを作ったあとで `PublicBaseUrl=$WEB_URL` を足してもう一度デプロイする。Web のスタックには出力 `ApiDomain` を渡す
+- 画像の上限を下げるときは `MaxImageBytes=…`（既定 4194304。../../DESIGN.md 5章）
 - スタック名を `ticketqr-sam-$IMPL` にしているのは、`api.yaml` のスタック（`ticketqr-$IMPL`）と並べて試せるようにするため。ただし、関数・API・ロググループの**名前は `api.yaml` と同じ**なので、同じアカウント・リージョンに両方を同時に作ることはできない（どちらかを消してから作る）
 - 変更内容を先に見たいときは、`sam deploy` に `--no-execute-changeset` を付ける
 - 削除: `sam delete --stack-name ticketqr-sam-$IMPL --no-prompts`（ネットワークのスタックは、これを消した後に消す。Lambda の ENI が残っているとサブネットを消せない）

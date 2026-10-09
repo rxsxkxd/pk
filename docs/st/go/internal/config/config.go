@@ -18,6 +18,8 @@ type Config struct {
 	AnalyzerMode    string        // mock | http
 	AnalyzerURL     string        // http only
 	AnalyzerTimeout time.Duration // http only, per attempt
+
+	MaxImageBytes int // MAX_IMAGE_BYTES; 0 = unset (the runtime ceiling imageinput.MaxBytes)
 }
 
 const (
@@ -36,6 +38,13 @@ func Load() (Config, error) {
 		PublicOrigin:    u.Scheme + "://" + u.Host,
 		AnalyzerMode:    os.Getenv("ANALYZER_MODE"),
 		AnalyzerTimeout: defaultAnalyzerTimeout,
+	}
+	if v := os.Getenv("MAX_IMAGE_BYTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return Config{}, fmt.Errorf("MAX_IMAGE_BYTES must be a positive integer, got %q", v)
+		}
+		cfg.MaxImageBytes = n
 	}
 	if cfg.AnalyzerMode == "http" {
 		cfg.AnalyzerURL = os.Getenv("ANALYZER_URL")

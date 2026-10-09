@@ -5,7 +5,7 @@ import { vi } from 'vitest';
 import { createApp } from 'vue';
 import { createMemoryHistory } from 'vue-router';
 import App from '../src/App.vue';
-import { configKey, type AppConfig } from '../src/config.ts';
+import { configKey, MAX_IMAGE_BYTES, type AppConfig } from '../src/config.ts';
 import { createAppRouter } from '../src/router.ts';
 
 export const API = 'https://api.example.com';
@@ -13,7 +13,7 @@ export const CODE = '202610051350543f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR';
 export const SIG = 'abcdefghijklmnopqrstuv';
 
 export function config(modes: AppConfig['modes'] = ['page']): AppConfig {
-  return { apiBaseUrl: API, modes };
+  return { apiBaseUrl: API, modes, maxImageBytes: MAX_IMAGE_BYTES };
 }
 
 // A store needs the app-level config (inject) and an active Pinia, as in main.ts.

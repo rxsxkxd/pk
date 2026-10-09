@@ -53,6 +53,10 @@ type Endpoint = (c: Ctx, deps: Deps) => Promise<Response>;
 // 設定と salt を読み込み依存部品を組み立てる（Lambda 実行環境ごとに初期化時に1回だけ呼ぶ）。
 export async function loadDeps(env: NodeJS.ProcessEnv = process.env): Promise<Deps> {
   const config = loadConfig(env);
+  // The runtime ceiling (Lambda's 6MB request, base64 by API Gateway) cannot be raised by configuration.
+  if ((config.maxImageBytes ?? 0) > MAX_IMAGE_BYTES) {
+    throw new Error(`MAX_IMAGE_BYTES must be ${MAX_IMAGE_BYTES} or less, got ${config.maxImageBytes}`);
+  }
   const verifier = await newAnalyzer(env, consoleLog);
   const salts = await loadSalts(env);
   const suffix = await loadTicketCodeSuffix(env);
@@ -164,7 +168,7 @@ function errorBody(e: AppError) {
 
 // A: 画像を受け取って発行し、QR を base64 で埋め込んだ JSON を返す（DESIGN.md 5.1）。
 async function grantInline(c: Ctx, deps: Deps): Promise<Response> {
-  const t = await verifyAndGrant(deps, await readUpload(c));
+  const t = await verifyAndGrant(deps, await readUpload(c, maxImageBytes(deps)));
   const png = qrPng(t.code);
   return c.json(
     { ticketCode: t.code, issuedAt: t.issuedAt, qr: { mimeType: 'image/png', data: png.toString('base64') } },
@@ -175,7 +179,7 @@ async function grantInline(c: Ctx, deps: Deps): Promise<Response> {
 // B-1: 画像で発行する。フォーム送信には署名付きビュー URL への 303、Accept: application/json（SPA）には
 // 署名付き QR URL の JSON を返す（DESIGN.md 5.2）。
 async function grant(c: Ctx, deps: Deps): Promise<Response> {
-  const t = await verifyAndGrant(deps, await readUpload(c));
+  const t = await verifyAndGrant(deps, await readUpload(c, maxImageBytes(deps)));
   c.header('Vary', 'Accept');
   if (!acceptsJson(c)) return c.redirect(ticketUrl(deps, t.code, 'view'), 303);
   const sig = deps.signer.sign(t.code);
@@ -216,10 +220,15 @@ function ticketUrl(deps: Deps, code: string, resource: 'view' | 'qr'): string {
 // =================================================================================================
 
 // リクエストを ユースケースの入力（CertificateImage。証明書の画像）に変換する。バイト列は加工せず、サイズ上限の確認と形式の判定だけ行う。
-async function readUpload(c: Ctx): Promise<CertificateImage> {
+async function readUpload(c: Ctx, maxBytes: number): Promise<CertificateImage> {
   const data = await readFormImage(c);
-  if (data.length > MAX_IMAGE_BYTES) throw payloadTooLarge(`image must be ${MAX_IMAGE_BYTES} bytes or less`);
+  if (data.length > maxBytes) throw payloadTooLarge(`image must be ${maxBytes} bytes or less`);
   return { data, mimeType: detectImageType(data) } satisfies CertificateImage;
+}
+
+// この環境の画像サイズの上限（MAX_IMAGE_BYTES。実行環境の上限を超える値は使わない）。
+function maxImageBytes(deps: Deps): number {
+  return Math.min(deps.config.maxImageBytes ?? MAX_IMAGE_BYTES, MAX_IMAGE_BYTES);
 }
 
 // multipart/form-data から image ファイルのバイト列を取り出す（HTTP の都合だけを扱う）。

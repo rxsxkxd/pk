@@ -37,7 +37,15 @@ Parameters:
   PublicBaseUrl:
     Type: String
     Default: ''
-    Description: Public API URL (custom domain). Empty uses the execute-api default URL.
+    Description: 'Public API URL: a custom domain, or the CloudFront URL (web.yaml WebUrl) when CloudFront forwards /v1/* to this API (unified layout). Empty uses the execute-api default URL.'
+  MaxImageBytes:
+    Type: Number
+    Default: 4194304
+    MinValue: 1
+    MaxValue: 4194304
+    Description: >-
+      Upload limit of the certificate image in bytes (MAX_IMAGE_BYTES). 4194304 (4MB) is the ceiling (Lambda's 6MB request, base64 by API Gateway); lower it when the path to the API has a smaller limit.
+      Keep the SPA's config.json maxImageBytes the same (DESIGN.md 5).
   ThrottlingRateLimit:
     Type: Number
     Default: 50
@@ -204,6 +212,7 @@ Resources:
             - !Ref 'AWS::NoValue'
           SIGNING_SALT_PARAMETER_NAME: !Ref 'SigningSaltParameterName'
           TICKET_CODE_SUFFIX_PARAMETER_NAME: !Ref 'TicketCodeSuffixParameterName'
+          MAX_IMAGE_BYTES: !Ref 'MaxImageBytes'
       Tags:
         - Key: lambda:createdBy
           Value: SAM
@@ -337,3 +346,6 @@ Outputs:
       - !Ref 'PublicBaseUrl'
   ApiId:
     Value: !Ref 'HttpApi'
+  ApiDomain:
+    Description: Domain of the execute-api endpoint, for web.yaml ApiOriginDomain (unified layout, CloudFront forwards /v1/* here).
+    Value: !Sub '${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}'

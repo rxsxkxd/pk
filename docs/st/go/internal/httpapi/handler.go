@@ -40,12 +40,15 @@ type Handlers struct {
 	Signer        *signer.Signer
 	View          *view.Renderer
 	Logger        *slog.Logger
+	// MaxImageBytes is the upload limit of this deployment (MAX_IMAGE_BYTES), at most imageinput.MaxBytes.
+	// 0 = imageinput.MaxBytes.
+	MaxImageBytes int
 }
 
 // GrantInline is pattern A (the QR inline grant API): POST /v1/tickets/qr-inline (multipart image in, JSON with base64 QR out).
 func (h *Handlers) GrantInline(ctx context.Context, req Request) (Response, error) {
 	return h.run(ctx, req, "grant-inline", h.jsonError, func() (Response, error) {
-		img, err := readUpload(req)
+		img, err := readUpload(req, h.maxImageBytes())
 		if err != nil {
 			return Response{}, err
 		}
@@ -84,7 +87,7 @@ func (h *Handlers) Grant(ctx context.Context, req Request) (Response, error) {
 		onError = h.jsonError
 	}
 	return h.run(ctx, req, "grant", onError, func() (Response, error) {
-		img, err := readUpload(req)
+		img, err := readUpload(req, h.maxImageBytes())
 		if err != nil {
 			return Response{}, err
 		}
@@ -288,16 +291,23 @@ func header(req Request, name string) string {
 	return ""
 }
 
-// readUpload reads the certificate image from the multipart "image" field, enforces the runtime size
-// limit and detects the format.
+func (h *Handlers) maxImageBytes() int {
+	if h.MaxImageBytes > 0 && h.MaxImageBytes < imageinput.MaxBytes {
+		return h.MaxImageBytes
+	}
+	return imageinput.MaxBytes
+}
+
+// readUpload reads the certificate image from the multipart "image" field, enforces the size limit
+// (maxBytes) and detects the format.
 // Whether the format is accepted is decided by ticket.VerifyAndGrant.
-func readUpload(req Request) (ticket.CertificateImage, error) {
-	data, err := readFormImage(req)
+func readUpload(req Request, maxBytes int) (ticket.CertificateImage, error) {
+	data, err := readFormImage(req, maxBytes)
 	if err != nil {
 		return ticket.CertificateImage{}, err
 	}
-	if len(data) > imageinput.MaxBytes {
-		return ticket.CertificateImage{}, payloadTooLarge(fmt.Sprintf("image must be %d bytes or less", imageinput.MaxBytes))
+	if len(data) > maxBytes {
+		return ticket.CertificateImage{}, payloadTooLarge(fmt.Sprintf("image must be %d bytes or less", maxBytes))
 	}
 	return ticket.CertificateImage{Data: data, MimeType: imageinput.Detect(data)}, nil
 }
@@ -306,7 +316,7 @@ func readUpload(req Request) (ticket.CertificateImage, error) {
 // Content-Type is ignored; the format is detected from magic bytes later. The whole body must be valid
 // multipart, as in the Node version: the body is already in memory on Lambda, so there is nothing to
 // gain from stopping at the image part.
-func readFormImage(req Request) ([]byte, error) {
+func readFormImage(req Request, maxBytes int) ([]byte, error) {
 	mt, params, err := mime.ParseMediaType(header(req, "Content-Type"))
 	if err != nil || mt != "multipart/form-data" || params["boundary"] == "" {
 		return nil, unsupportedMediaType("Content-Type must be multipart/form-data")
@@ -329,7 +339,7 @@ func readFormImage(req Request) ([]byte, error) {
 		if found || part.FormName() != "image" {
 			continue
 		}
-		if data, err = io.ReadAll(io.LimitReader(part, imageinput.MaxBytes+1)); err != nil {
+		if data, err = io.ReadAll(io.LimitReader(part, int64(maxBytes)+1)); err != nil {
 			return nil, badRequest("invalid multipart body")
 		}
 		found = true

@@ -10,17 +10,27 @@ import {
   type InlineTicket,
   type TicketRoute,
 } from '../api/tickets.ts';
-import { configKey } from '../config.ts';
+import { configKey, MAX_IMAGE_BYTES } from '../config.ts';
 
-// Same limit and formats as the API; the API makes the final decision from the file's content.
-export const MAX_IMAGE_BYTES = 4 << 20;
+// Same formats as the API (the size limit is config.json's maxImageBytes); the API makes the final
+// decision from the file's content.
 export const ACCEPT = 'image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp';
 const EXTENSIONS = /\.(jpe?g|png|heic|heif|avif|webp)$/i;
 
+// バイト数を画面に出す大きさにする（例: 4MB、1.5MB、512KB）。
+export function sizeLabel(bytes: number): string {
+  if (bytes < 1 << 20) return `${Math.floor(bytes / 1024)}KB`;
+  return `${Math.floor((bytes / (1 << 20)) * 10) / 10}MB`;
+}
+
+function tooLarge(maxBytes: number): string {
+  return `画像のサイズが大きすぎます（${sizeLabel(maxBytes)} まで）`;
+}
+
 // 送信前に分かる問題を返す（なければ undefined）。形式は MIME タイプか拡張子で目安として確かめる。
-export function checkFile(file: File | null): string | undefined {
+export function checkFile(file: File | null, maxBytes = MAX_IMAGE_BYTES): string | undefined {
   if (!file) return '証明書の画像を選んでください';
-  if (file.size > MAX_IMAGE_BYTES) return '画像のサイズが大きすぎます（4MB まで）';
+  if (file.size > maxBytes) return tooLarge(maxBytes);
   if (!ACCEPT.split(',').includes(file.type) && !EXTENSIONS.test(file.name)) {
     return 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）';
   }
@@ -28,10 +38,10 @@ export function checkFile(file: File | null): string | undefined {
 }
 
 // API のエラーを画面に出す文言にする（DESIGN.md 4.4）。
-export function messageFor(err: unknown): string {
+export function messageFor(err: unknown, maxBytes = MAX_IMAGE_BYTES): string {
   switch (err instanceof ApiError ? err.code : '') {
     case 'PAYLOAD_TOO_LARGE':
-      return '画像のサイズが大きすぎます（4MB まで）';
+      return tooLarge(maxBytes);
     case 'UNSUPPORTED_MEDIA_TYPE':
       return 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）';
     case 'IMAGE_REJECTED': // 解析サーバーの判定が REJECT
@@ -54,7 +64,7 @@ export const useTicketStore = defineStore('ticket', () => {
   const inlineTicket = ref<InlineTicket | null>(null);
   const error = ref<string | null>(null);
 
-  const fileProblem = computed(() => checkFile(file.value));
+  const fileProblem = computed(() => checkFile(file.value, config.maxImageBytes));
   const canSend = computed(() => !fileProblem.value && status.value !== 'sending');
 
   // 送信中の状態とエラーを管理して send を実行する。送信できない状態なら何もしない（二重発行の防止）。
@@ -69,7 +79,7 @@ export const useTicketStore = defineStore('ticket', () => {
       return result;
     } catch (err) {
       status.value = 'failed';
-      error.value = messageFor(err);
+      error.value = messageFor(err, config.maxImageBytes);
       return undefined;
     }
   }

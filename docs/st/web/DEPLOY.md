@@ -345,6 +345,41 @@ curl -sI $WEB_URL/ | grep -i '^content-security-policy'
 | 開発者ツールに CSP のエラー | CSP の `connect-src` / `img-src` の API のオリジンが `$API_URL` と一致しているか（3章の `ApiBaseUrl`、4章の `headers.json`）。`config.json` が読めないときは、`connect-src` に `'self'` があるか |
 | 古い画面のまま | 6章の無効化（`create-invalidation`）をしたか |
 
+### 7.1 統合での API のエラーの応答
+
+CloudFront は、API のエラーの応答（ステータスと JSON の本文）を**変えずにそのまま返す**。2026-10-10 に、統合の環境で、CloudFront 経由の発行 API が解析結果のエラーを 422 で返すことを確かめた（利用者による確認。本文の中身までは厳密に比べていない）。
+
+そのままになる理由:
+
+| 理由 | 内容 |
+|---|---|
+| カスタムエラーページがない | `web.yaml` に `CustomErrorResponses` を書いていない。CloudFront はオリジンのステータスと本文を、そのまま利用者に返す |
+| キャッシュされない | `/v1/*` はマネージドのキャッシュポリシー CachingDisabled。このポリシーでは、CloudFront はエラーの応答（404・5xx など）もキャッシュしない（CloudFront の開発者ガイド「How CloudFront processes HTTP 4xx and 5xx status codes from your origin」）。さらに、発行は POST で、CloudFront は GET・HEAD 以外をキャッシュしない。API もすべての応答に `Cache-Control: no-store` を付けている |
+
+エラーの応答を返すのは、次の4か所。SPA が文言を出し分けられるのは、API の JSON（`{"error":{"code":…}}`）だけ。ほかは「発行できませんでした。もう一度お試しください」になる。
+
+| 返すところ | 例 | 見分け方 |
+|---|---|---|
+| API（Lambda） | 400 / 403 / 404 / 413 / 415 / 422（`IMAGE_REJECTED`・`IMAGE_RETRY`）/ 502 / 504（../DESIGN.md のエラーコードの表） | 本文が `{"error":{"code":…}}`。`apigw-requestid` が付く |
+| API Gateway | Lambda まで届かないとき（大きすぎる画像など。12章）、ルートがないとき | 本文が `{"message":…}`。`apigw-requestid` が付く |
+| CloudFront | API Gateway につながらない・30 秒以内に応答がない（502 / 504） | CloudFront の HTML の本文。`x-cache: Error from cloudfront`、`apigw-requestid` が付かない |
+| WAF（付けた環境） | ブロックしたとき（403） | CloudFront の HTML の本文。WAF のログ（13.4）に出る |
+
+確かめるときは、直結と統合で同じステータス・本文になることを比べる（解析サーバーが REJECT / RETRY を返す画像があれば 422 も。なければ 415 と 403 で足りる）:
+
+```sh
+for base in $API_URL $WEB_URL; do
+  echo "== $base"
+  # 415 UNSUPPORTED_MEDIA_TYPE（画像でないファイル）
+  curl -s -w '  status=%{http_code}\n' -H 'Accept: application/json' -F image=@DESIGN.md $base/v1/tickets
+  # 403（署名の改ざん）
+  curl -s -w '  status=%{http_code}\n' "$base/v1/tickets/2026101000000000000000000040008000000000000000TQR/qr?sig=AAAAAAAAAAAAAAAAAAAAAA"
+done
+```
+
+- **`CustomErrorResponses`（カスタムエラーページ）を足さない**。SPA でよく使う「403・404 を `index.html` にする」設定は、ディストリビューション全体（`/v1/*` を含む）に効く。足すと、API の 403（署名の照合の失敗）や 404 が、200 の `index.html` に変わってしまう。この SPA は hash モードのルーティングなので、その設定は要らない
+- `/v1/*` のキャッシュポリシーを CachingDisabled 以外にすると、GET の 404・5xx（QR 画像 API・チケット表示ページ）が、既定で 10 秒キャッシュされるようになる
+
 ## 8. 更新
 
 SPA を変えたときは、2章のビルドと 6章のアップロード（無効化を含む）を行う。`config.json` だけを変えるときは、6章の `config.json` のアップロードと無効化だけでよい。

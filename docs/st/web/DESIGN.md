@@ -19,12 +19,12 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 
 | SPA の発行方式 | 位置づけ | API の使い方 | 使う API |
 |---|---|---|---|
-| **画面遷移方式**（`page`） | **メイン**（既定で有効） | パターン2 | チケット付与 API（`Accept: application/json` で JSON を受け取る）→ QR 画像 API（SPA のチケット画面の `<img>`） |
+| **画面遷移方式**（`page`） | **メイン**（ビルドの既定） | パターン2 | チケット付与 API（`Accept: application/json` で JSON を受け取る）→ QR 画像 API（SPA のチケット画面の `<img>`） |
 | その場表示方式（`inline`） | オプション | パターン1 | QR 同梱付与 API |
 | フォーム送信方式（`form`） | オプション | パターン3 | チケット付与 API（フォーム送信でリダイレクトを受け取る）→ API のチケット表示ページ → QR 画像 API |
 
 - API 側は、3パターンすべてに対応したまま残す（QR 同梱付与 API・チケット付与 API・チケット表示ページ・QR 画像 API）。SPA がオプションを使わない環境でも、API の機能は削らない
-- どの方式を出すかは `config.json` の `modes` で決める（4.1）
+- 運用ではどれか1つの方式に決まるので、**方式はビルドのときに選ぶ**（`GRANT_MODE=page|inline|form`。既定は `page`）。1つのビルドには1つの方式のコードだけが入る（4.1、6章）
 
 ## 2. 技術スタック
 
@@ -219,14 +219,31 @@ SPA の発行画面 #/                         SPA のチケット画面 #/ticke
 
 ## 4. API との連携
 
-### 4.1 実行時設定（`config.json`）
+### 4.1 発行方式（ビルド時）と実行時設定（`config.json`）
 
-API の URL などは**ビルドに埋め込まず**、起動時に `/config.json` を読み込む。同じビルド結果を、環境ごとに `config.json` だけ差し替えて配置できるようにするため。
+**発行方式はビルドのときに選ぶ。** 運用ではどれか1つの方式に決まるため。
+
+| `GRANT_MODE` | 方式 | コード |
+|---|---|---|
+| `page`（既定） | 画面遷移方式（メイン） | `src/modes/page/` |
+| `inline` | その場表示方式（オプション） | `src/modes/inline/` |
+| `form` | フォーム送信方式（オプション） | `src/modes/form/` |
+
+```sh
+npm run build                       # page
+GRANT_MODE=inline npm run build     # inline（ローカルの開発も GRANT_MODE=inline npm run dev）
+```
+
+- `vite.config.ts` が、別名 `@mode` を `src/modes/$GRANT_MODE/index.ts` に向ける。`main.ts` はそこから画面（ルート）を受け取る。選ばれなかった方式のファイルは、ビルドに入らない（最適化で消えるのを期待するのではなく、そもそも読み込まれない）
+- 3つ以外の値はビルドのエラー
+- 方式を変えるには、ビルドし直す。CI は3方式ともビルドし（`web-dist-{page,inline,form}`）、デプロイは環境の方式のものを置く（`GRANT_MODE`。CI.md 4章）
+- フォーム送信方式は、CloudFront の CSP の `form-action` に送信先を入れる（web/DEPLOY.md 3.3 の `FormActionSource`。9章）
+
+API の URL などは**ビルドに埋め込まず**、起動時に `/config.json` を読み込む。同じ方式のビルド結果を、環境ごとに `config.json` だけ差し替えて配置できるようにするため。
 
 ```json
 {
-  "apiBaseUrl": "https://api.example.com",
-  "modes": ["page"]
+  "apiBaseUrl": "https://api.example.com"
 }
 ```
 
@@ -234,7 +251,6 @@ API の URL などは**ビルドに埋め込まず**、起動時に `/config.jso
 // src/config.ts
 const ConfigSchema = z.object({
   apiBaseUrl: z.string().transform((u) => u.replace(/\/+$/, '')),   // 空文字 = 同じオリジン（統合の構成、開発時のプロキシ。8・9章）
-  modes: z.array(z.enum(['page', 'inline', 'form'])).min(1).default(['page']),
   maxImageBytes: z.number().int().min(1).max(MAX_IMAGE_BYTES).default(MAX_IMAGE_BYTES),  // MAX_IMAGE_BYTES = 4MB
 });
 ```
@@ -242,32 +258,31 @@ const ConfigSchema = z.object({
 | キー | 内容 |
 |---|---|
 | `apiBaseUrl` | API のオリジン。直結の構成では execute-api の URL、統合の構成（CloudFront の `/v1/*` が API）では `""`（同じオリジン） |
-| `modes` | 使う発行方式（下の表） |
 | `maxImageBytes` | 画像の上限（バイト。任意、既定 4MB）。API の `MAX_IMAGE_BYTES`（`MaxImageBytes`）と同じ値にする。API までの経路によって上限が下がる場合に使う（../DESIGN.md 5章）。4MB（API の上限）より大きい値は設定のエラー。エラーの文言（「…（2MB まで）」）もこの値から作る |
 
-| `modes` の値 | 方式 | 既定 |
-|---|---|---|
-| `page` | 画面遷移方式（メイン） | 有効 |
-| `inline` | その場表示方式（オプション） | 無効 |
-| `form` | フォーム送信方式（オプション） | 無効 |
+- 以前の `modes`（実行時に方式を選んでいたときのキー）が残っていても、無視する（エラーにはしない）
 
-- 既定は `["page"]`。オプションを使う環境だけ、`config.json` に `"inline"` や `"form"` を足す
-- `form` を有効にするときは、CloudFront の CSP の `form-action` を `{apiBaseUrl}` にする（9章）
+### 4.2 API クライアント（共通: `src/api/client.ts`、方式ごと: `src/modes/<方式>/api.ts`）
 
-### 4.2 API クライアント（`src/api/tickets.ts`）
+共通の部分（`postImage`・`ApiError`・コードと署名のスキーマ）と、方式ごとの呼び出しに分ける。
 
 ```ts
+// src/api/client.ts（共通）: 画像を FormData の image として POST し、201 を schema で解釈する（失敗は ApiError）。
+export async function postImage<T>(url: string, file: File, schema: z.ZodType<T>, headers?: Record<string, string>): Promise<T> { … }
+
+// src/modes/page/api.ts
 // 画面遷移方式（メイン）: チケット付与 API に画像をそのまま送り、署名付きの QR の URL を返す（Accept: application/json。失敗は ApiError）。
 export async function grantForPage(apiBaseUrl: string, file: File): Promise<PageTicket> { … }
 
 // SPA のチケット画面の QR の URL を組み立てる（QR 画像 API）。
 export function qrUrl(apiBaseUrl: string, code: string, sig: string): string { … }
 
+// src/modes/inline/api.ts
 // その場表示方式（オプション）: QR 同梱付与 API に画像をそのまま送り、QR（base64）付きの発行結果を返す（失敗は ApiError）。
 export async function grantInline(apiBaseUrl: string, file: File): Promise<InlineTicket> { … }
 ```
 
-- フォーム送信方式は `fetch` を使わないので、API クライアントには関数がない（フォームの `action` に `{apiBaseUrl}/v1/tickets` を入れるだけ）
+- フォーム送信方式は `fetch` を使わないので、`src/modes/form/api.ts` は送信先の URL（`grantFormAction`。`{apiBaseUrl}/v1/tickets`）を作るだけ
 - `grantForPage` と `grantInline` は、どちらも `FormData` で送る。Content-Type はブラウザが boundary 付きで付ける
 - `fetch` の `FormData` 送信は CORS の「単純リクエスト」で、`Accept` ヘッダーを付けても変わらない。そのためプリフライトは発生しない。ただし、レスポンスを読むには API が `Access-Control-Allow-Origin` を返す必要がある（7章）
 - タイムアウト: 30秒（API Gateway の上限 29 秒より少し長く）。`AbortController` と `setTimeout` で作る（2.2。今の実装の `AbortSignal.timeout()` は iOS 13 で使えないので置き換える）。タイムアウトや通信エラーは「通信できませんでした」として扱う
@@ -279,14 +294,15 @@ export async function grantInline(apiBaseUrl: string, file: File): Promise<Inlin
 ```ts
 const TicketCode = z.string().regex(/^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$/); // ../DESIGN.md 4章
 const Sig = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
+const ApiErrorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });   // ここまで共通（src/api/client.ts）
 
+// 方式ごと（src/modes/inline/api.ts・src/modes/page/api.ts）
 const InlineTicketSchema = z.object({
   ticketCode: TicketCode,
   issuedAt: z.iso.datetime({ offset: true }),
   qr: z.object({ mimeType: z.literal('image/png'), data: z.base64() }),
 });
 const PageTicketSchema = z.object({ ticketCode: TicketCode, issuedAt: z.iso.datetime({ offset: true }), sig: Sig, qrUrl: z.url() });
-const ApiErrorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });
 const TicketRouteSchema = z.object({ code: TicketCode, sig: Sig });   // SPA のチケット画面の URL パラメータ
 ```
 
@@ -311,22 +327,24 @@ const TicketRouteSchema = z.object({ code: TicketCode, sig: Sig });   // SPA の
 ## 5. 状態管理（Pinia）
 
 ```ts
-// src/stores/ticket.ts
+// src/stores/ticket.ts（方式に共通。方式ごとの API の呼び出しは send に渡す）
 export const useTicketStore = defineStore('ticket', () => {
   const file = ref<File | null>(null);
   const status = ref<'idle' | 'sending' | 'granted' | 'failed'>('idle');
-  const inlineTicket = ref<InlineTicket | null>(null);   // その場表示方式（オプション）の結果（SPA の発行画面に表示）
   const error = ref<string | null>(null);                // 画面に出すメッセージ（4.4）
 
   const fileProblem = computed(() => …);                  // 未選択・上限（maxImageBytes）超え・非対応の拡張子
-  async function grantForPage(): Promise<TicketRoute> { … } // 画面遷移方式: 成功したら { code, sig } を返し、画面が SPA のチケット画面へ移る
-  async function grantInline() { … }                      // その場表示方式（オプション）
+  async function send<T>(request: (apiBaseUrl: string, file: File) => Promise<T>): Promise<T | undefined> { … }
   function reset() { … }
-  return { file, status, inlineTicket, error, fileProblem, grantInline, grantForPage, reset };
+  return { file, status, error, fileProblem, canSend, send, reset };
 });
+
+// 使い方（src/modes/page/GrantPage.vue）
+const t = await store.send(grantForPage);   // 失敗なら undefined（error に文言が入る）
 ```
 
-- 送信中は、すべてのボタンを押せないようにする（二重発行の防止）
+- 送信中は、ボタンを押せないようにする（二重発行の防止。`send` は送信中なら何もしない）
+- その場表示方式の結果は、その方式の発行画面（`src/modes/inline/GrantPage.vue`）の中だけに持つ
 - 画面遷移方式の結果はストアに持たない。SPA のチケット画面は URL だけから描画する
 - フォーム送信方式はストアを使わない（ブラウザが API の画面に移るため）
 - 設定（`AppConfig`）は起動時に読み込み、`provide` / `inject` で渡す
@@ -337,32 +355,46 @@ export const useTicketStore = defineStore('ticket', () => {
 st/web/
 ├── DESIGN.md
 ├── package.json            # scripts: dev / build / preview / typecheck / test / format
-├── vite.config.ts          # @vitejs/plugin-vue、@tailwindcss/vite、開発時のプロキシ（8章）
-├── tsconfig.json
+├── vite.config.ts          # @vitejs/plugin-vue、@tailwindcss/vite、GRANT_MODE → 別名 @mode（4.1）、開発時のプロキシ（8章）
+├── tsconfig.json           # 型の確認用に @mode を src/modes/page に向ける（ほかの方式は ModeEntry で形を確かめる）
 ├── index.html
 ├── public/
-│   └── config.json         # ローカル開発用の値。すべての方式を確かめられるよう modes は3つとも有効（配置時は環境ごとに差し替える）
+│   └── config.json         # ローカル開発用の値（配置時は環境ごとに差し替える）
 ├── src/
-│   ├── main.ts             # 設定を読み込み、Pinia と router を入れてマウント
+│   ├── main.ts             # 設定を読み込み、Pinia と router（@mode のルート）を入れてマウント
 │   ├── App.vue             # <RouterView>
-│   ├── router.ts           # hash モード。#/ と #/tickets/:code
+│   ├── router.ts           # hash モード。方式のルートに、知らないパスを / に戻すルートを足す
 │   ├── style.css           # @import "tailwindcss";
 │   ├── config.ts           # config.json の読み込みと検証（zod）
 │   ├── issuedAt.ts         # 発行日時の表示（コードの先頭14桁、API の issuedAt から）
 │   ├── env.d.ts            # vite/client の型
-│   ├── api/tickets.ts      # API クライアント、スキーマ（zod）、ApiError
-│   ├── stores/ticket.ts    # 発行の状態（Pinia）
 │   ├── platform.ts         # 端末の判定（isAndroid）
-│   ├── pages/
-│   │   ├── GrantPage.vue       # SPA の発行画面（証明書の画像の選択、画面遷移方式のボタン。modes に応じてオプションの方式も出す）
-│   │   └── TicketPage.vue      # SPA のチケット画面（URL から描画。QR の読み込みエラーの表示）
-│   └── components/
-│       ├── CertificateImagePicker.vue  # 証明書の画像のファイル選択と送信前の確認（Android は「画像を選ぶ」「カメラを起動」の2つ）
-│       ├── TicketCard.vue      # QR・コード・発行日時の表示（画面遷移方式・その場表示方式で共用）
-│       ├── PostForm.vue        # フォーム送信方式（オプション）の普通のフォーム
-│       └── ErrorMessage.vue
-└── test/                   # Vitest + happy-dom（helpers.ts、config / api / store / pages のテスト）
+│   ├── api/client.ts       # 共通: postImage、ApiError、コードと署名のスキーマ（zod）
+│   ├── stores/ticket.ts    # 共通: 発行の状態（Pinia）、送る前の確認、エラーの文言
+│   ├── components/         # 共通の部品
+│   │   ├── CertificateImagePicker.vue  # 証明書の画像のファイル選択と送信前の確認（Android は「画像を選ぶ」「カメラを起動」の2つ）
+│   │   ├── TicketCard.vue      # QR・コード・発行日時の表示（画面遷移方式・その場表示方式で共用）
+│   │   └── ErrorMessage.vue
+│   └── modes/              # 発行方式ごと。ビルドに入るのは GRANT_MODE の1つだけ（4.1）
+│       ├── types.ts            # GRANT_MODES、ModeEntry（各方式の index.ts が返す形）
+│       ├── page/               # 画面遷移方式（メイン）
+│       │   ├── index.ts            # ルート: / と /tickets/:code
+│       │   ├── api.ts              # grantForPage、qrUrl、PageTicketSchema、TicketRouteSchema
+│       │   ├── GrantPage.vue       # 発行画面（成功したらチケット画面へ）
+│       │   └── TicketPage.vue      # SPA のチケット画面（URL から描画。QR の読み込みエラーの表示）
+│       ├── inline/             # その場表示方式（オプション）
+│       │   ├── index.ts            # ルート: / だけ
+│       │   ├── api.ts              # grantInline、InlineTicketSchema
+│       │   └── GrantPage.vue       # 発行画面（結果の QR をこの画面に出す）
+│       └── form/               # フォーム送信方式（オプション）
+│           ├── index.ts            # ルート: / だけ
+│           ├── api.ts              # grantFormAction（フォームの送信先）
+│           └── GrantPage.vue       # 発行画面（fetch を使わない普通のフォーム）
+└── test/                   # Vitest + happy-dom。共通（config / api / store / platform）と、test/modes/（方式ごと。3方式とも1回で流す）
 ```
+
+- レビューは、共通の部分（`api/client.ts`・`stores/ticket.ts`・`components/`）と、その環境の方式のディレクトリ（`modes/<方式>/`）だけを読めば済む
+- 方式を足すときは、`modes/<方式>/` に `index.ts`（`ModeEntry` の形）を作り、`types.ts` の `GRANT_MODES` に足す
 
 ## 7. 前提となる API 側の変更
 
@@ -441,12 +473,12 @@ Strict-Transport-Security: max-age=31536000
 
 | 対象 | 方法 |
 |---|---|
-| `config.ts`、`api/tickets.ts` のスキーマ | 正しい JSON・欠けた項目・形の違う値を zod で検証する単体テスト |
+| `config.ts`、`api/client.ts`・`modes/*/api.ts` のスキーマ | 正しい JSON・欠けた項目・形の違う値を zod で検証する単体テスト |
 | API クライアント | `fetch` を差し替えて、201 / 各エラー / 予期しない応答 / 通信エラーの扱い、画面遷移方式で `Accept: application/json` を付けることを確かめる |
-| SPA の発行画面 | `modes` の値に応じて、出るボタンが変わること（既定は画面遷移方式だけ）。フォーム送信方式のフォームの `action` と `enctype` |
+| SPA の発行画面（`test/modes/`） | 方式ごとに、その方式の部品だけが出ること。画面遷移方式はチケット画面へ移ること、その場表示方式は結果をその場に出すこと、フォーム送信方式はフォームの `action` と `enctype`。`test/modes/modes.test.ts` で、`GRANT_MODES` のすべてに `index.ts` と `/` のルートがあることを確かめる |
 | ストア | 送信前の確認（未選択、上限超え（`maxImageBytes`）、拡張子）、二重送信の防止、エラーメッセージの対応 |
 | SPA のチケット画面 | URL のパラメータの検証、`<img>` の読み込みエラー時の表示、コードからの発行日時の表示 |
-| 通しの確認（**保留中**） | E2E.md の Playwright で、ビルドしたサイト + API（ローカル）を使って、スマートフォン相当の画面幅で操作する。メインの画面遷移方式は必ず確かめ、SPA のチケット画面のリロードで再発行されないことも確かめる。オプションの方式は、`modes` で有効にした設定でも確かめる |
+| 通しの確認（**保留中**） | E2E.md の Playwright で、ビルドしたサイト + API（ローカル）を使って、スマートフォン相当の画面幅で操作する。メインの画面遷移方式は必ず確かめ、SPA のチケット画面のリロードで再発行されないことも確かめる。オプションの方式は、その方式でビルドしたもので確かめる（今の E2E は画面遷移方式だけ） |
 
 ## 11. 決めておきたいこと
 
@@ -454,7 +486,7 @@ Strict-Transport-Security: max-age=31536000
 
 | 項目 | 決定 |
 |---|---|
-| SPA の発行方式 | **画面遷移方式（チケット付与 API ＋ QR 画像 API）をメインにする**。その場表示方式とフォーム送信方式はオプション（`config.json` の `modes` で有効にする。既定は無効） |
+| SPA の発行方式 | **画面遷移方式（チケット付与 API ＋ QR 画像 API）をメインにする**。その場表示方式とフォーム送信方式はオプション。**方式はビルドのときに1つ選ぶ**（`GRANT_MODE`。既定は `page`。4.1） |
 | API 側の機能 | 3パターンすべてに対応したまま残す（QR 同梱付与 API、チケット付与 API の JSON とリダイレクト、チケット表示ページ、QR 画像 API） |
 | チケット付与 API の返し方 | `Accept: application/json` で JSON に切り替える（API 側は実装済み） |
 | 対応ブラウザ | iOS 13 / Android 9 以上（2.1）。`fetch`・`Promise`・`async`/`await`・`AbortController`/`AbortSignal` を使う（2.2） |

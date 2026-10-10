@@ -2,10 +2,16 @@ import { describe, expect, test } from 'vitest';
 import { ConfigSchema } from '../src/config.ts';
 
 describe('config.json', () => {
-  test('modes default to the main page mode', () => {
+  test('defaults', () => {
     expect(ConfigSchema.parse({ apiBaseUrl: 'https://api.example.com' })).toEqual({
       apiBaseUrl: 'https://api.example.com',
-      modes: ['page'],
+      maxImageBytes: 4 << 20,
+    });
+  });
+
+  test('a leftover "modes" (the grant mode is chosen at build time now) is ignored', () => {
+    expect(ConfigSchema.parse({ apiBaseUrl: '', modes: ['page', 'inline'] })).toEqual({
+      apiBaseUrl: '',
       maxImageBytes: 4 << 20,
     });
   });
@@ -24,8 +30,6 @@ describe('config.json', () => {
     ['missing apiBaseUrl', {}],
     ['not a URL', { apiBaseUrl: 'api.example.com' }],
     ['not http(s)', { apiBaseUrl: 'ftp://api.example.com' }],
-    ['unknown mode', { apiBaseUrl: '', modes: ['page', 'b'] }],
-    ['no modes', { apiBaseUrl: '', modes: [] }],
     ['maxImageBytes 0', { apiBaseUrl: '', maxImageBytes: 0 }],
     ['maxImageBytes not an integer', { apiBaseUrl: '', maxImageBytes: 1.5 }],
   ])('%s is rejected', (_name, value) => {

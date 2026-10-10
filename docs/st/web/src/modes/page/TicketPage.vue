@@ -3,12 +3,12 @@
 // 共有をしても同じ画面が出る。API の呼び出しは QR 画像 API だけで、再発行はしない。
 import { computed, inject, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { qrUrl, TicketRouteSchema } from '../api/tickets.ts';
-import ErrorMessage from '../components/ErrorMessage.vue';
-import TicketCard from '../components/TicketCard.vue';
-import { configKey } from '../config.ts';
-import { issuedAtFromCode } from '../issuedAt.ts';
-import { useTicketStore } from '../stores/ticket.ts';
+import ErrorMessage from '../../components/ErrorMessage.vue';
+import TicketCard from '../../components/TicketCard.vue';
+import { configKey } from '../../config.ts';
+import { issuedAtFromCode } from '../../issuedAt.ts';
+import { useTicketStore } from '../../stores/ticket.ts';
+import { qrUrl, TicketRouteSchema } from './api.ts';
 
 const config = inject(configKey)!;
 const route = useRoute();

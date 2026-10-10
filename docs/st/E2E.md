@@ -122,10 +122,10 @@ SPA（`web/`）は、compose を起動する前に、ホストか CI でビル�
 | `evil` | 同じもの（攻撃者のサイトとして使う） |
 
 ```json
-{ "apiBaseUrl": "http://api:3000", "modes": ["page", "inline", "form"] }
+{ "apiBaseUrl": "http://api:3000" }
 ```
 
-- オプションの方式もテストするため、`modes` は3つとも有効にする
+- 発行方式は `config.json` ではなく、`web/` のビルドのときに決まる（web/DESIGN.md 4.1）。E2E は既定のビルド（画面遷移方式 `page`）を使う。ほかの方式を E2E で確かめるには、その方式でビルドした `web/dist`（`GRANT_MODE=inline npm --prefix web run build` など）とテストが要る（今は画面遷移方式のテストだけ）
 - 各ファイルには拡張子から `Content-Type` を付ける（Garage はそのまま返すため）
 - 接続に使うキーは、`storage` の初期設定スクリプトがテスト用の固定値で作る（テスト専用で、秘密の値ではない）
 
@@ -298,7 +298,7 @@ API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container
 
 E2E は CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。専用のリポジトリでは `.github/workflows/ci.yml`）のジョブ `e2e` で動く。構成は [CI.md](CI.md) 3章。
 
-- SPA は `web` ジョブで1回だけビルドし、成果物 `web-dist` として `e2e` ジョブに渡す（Go 版・Node 版で同じ SPA を使う）
+- SPA は `web` ジョブでビルドし、画面遷移方式（`page`）の成果物 `web-dist-page` を `e2e` ジョブに渡す（Go 版・Node 版で同じ SPA を使う。ほかの方式のビルドはデプロイ用）
 - matrix（`go` / `node`）で `API_IMPL` を切り替え、`docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` を実行する
 - 成果物 `e2e-go` / `e2e-node` に、Playwright のレポート・トレースと、失敗したときのコンテナのログを残す
 

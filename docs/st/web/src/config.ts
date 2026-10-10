@@ -1,12 +1,9 @@
 // Runtime configuration, read from /config.json at startup so one build can be deployed to every
-// environment by swapping that file (DESIGN.md 4.1).
+// environment of its grant mode by swapping that file (DESIGN.md 4.1). The grant mode itself is chosen at
+// build time (GRANT_MODE, src/modes/types.ts), not here.
 
 import type { InjectionKey } from 'vue';
 import { z } from 'zod';
-
-// Grant modes: page = 画面遷移方式 (main), inline = その場表示方式, form = フォーム送信方式 (options).
-export const ModeSchema = z.enum(['page', 'inline', 'form']);
-export type Mode = z.infer<typeof ModeSchema>;
 
 // Upload ceiling of the API (Lambda's 6MB request, base64 by API Gateway). An environment can only lower it.
 export const MAX_IMAGE_BYTES = 4 << 20;
@@ -14,7 +11,6 @@ export const MAX_IMAGE_BYTES = 4 << 20;
 export const ConfigSchema = z.object({
   // "" = same origin (the Vite proxy in development); otherwise the API's http(s) origin, without a trailing slash.
   apiBaseUrl: z.union([z.literal(''), z.url({ protocol: /^https?$/ })]).transform((u) => u.replace(/\/+$/, '')),
-  modes: z.array(ModeSchema).min(1).default(['page']),
   // Upload limit of this environment: the same value as the API's MAX_IMAGE_BYTES (it may differ by the
   // path to the API, ../DESIGN.md 5). Checked before sending; the API makes the final decision.
   maxImageBytes: z.number().int().min(1).max(MAX_IMAGE_BYTES).default(MAX_IMAGE_BYTES),

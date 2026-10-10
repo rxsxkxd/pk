@@ -15,10 +15,10 @@ pull request / master への push
   └─ CI（ci.yml）: チケット API と SPA
        ├─ go     Go のテスト・ビルド       → 成果物 lambda-go（ticketqr.zip、exampleqr.zip）
        ├─ node   Node の型チェック・テスト・ビルド → 成果物 lambda-node
-       ├─ web    SPA のテスト・ビルド       → 成果物 web-dist
+       ├─ web    SPA のテスト・ビルド（発行方式ごと） → 成果物 web-dist-page / web-dist-inline / web-dist-form
        ├─ infra  CloudFormation テンプレート（infra/）の cfn-lint
        └─ e2e    （go・node・web の後）matrix: go / node
-                  web-dist を使い、compose（storage + api + e2e）で Playwright を流す
+                  web-dist-page を使い、compose（storage + api + e2e）で Playwright を流す
 
 手動実行（workflow_dispatch: 実装と環境を選ぶ）
   └─ Deploy（deploy.yml）
@@ -72,9 +72,9 @@ pull request / master への push
 |---|---|---|
 | `go` | `make -C go test`（vet・テスト）、`make -C go build`（arm64 の Lambda 用 zip） | `lambda-go` |
 | `node` | `npm ci`、型チェック、prettier、テスト、`npm run build`（esbuild と zip） | `lambda-node` |
-| `web` | `npm ci`、prettier、テスト（Vitest）、`npm run build`（vue-tsc と vite） | `web-dist` |
+| `web` | `npm ci`、prettier、テスト（Vitest。3方式とも）、`npm run build`（vue-tsc と vite）を発行方式ごとに3回（`GRANT_MODE`。web/DESIGN.md 4.1） | `web-dist-page`・`web-dist-inline`・`web-dist-form` |
 | `infra` | cfn-lint で `infra/cloudformation/*.yaml` を検査する | - |
-| `e2e` | `go`・`node`・`web` の後に、matrix（`go` / `node`）で実行する。`web-dist` を `web/dist` に置き、`docker compose -f compose.e2e.yaml up` を実行する | `e2e-go` / `e2e-node`（Playwright のレポート、トレース、失敗したときのコンテナのログ） |
+| `e2e` | `go`・`node`・`web` の後に、matrix（`go` / `node`）で実行する。`web-dist-page` を `web/dist` に置き、`docker compose -f compose.e2e.yaml up` を実行する | `e2e-go` / `e2e-node`（Playwright のレポート、トレース、失敗したときのコンテナのログ） |
 
 - `go`・`node`・`web`・`infra` は並列に動く
 - E2E の `api` コンテナは、ソースから Lambda 用のビルドをやり直す（Docker のマルチステージビルド）。`lambda-*` の zip は使わない。E2E で確かめるのは「同じソースから同じ手順で作ったもの」になる
@@ -141,7 +141,7 @@ pull request / master への push
 | Web のスタック | `web.yaml` を `ticketqr-web-{impl}` にデプロイし（直結は `ApiBaseUrl`、統合は `ApiOriginDomain` を渡す）、バケット・ディストリビューション・URL を取り出す | web/DEPLOY.md 3.1・3.2 |
 | API の公開 URL（統合だけ） | 初回（または直結からの切り替え）だけ、API を `PublicBaseUrl=$WEB_URL` でもう一度デプロイする | web/DEPLOY.md 3.2 の 3 |
 | CORS（直結だけ） | API Gateway の CORS に SPA のオリジンを入れる（暫定。`api.yaml` に CORS の設定が入るまで） | web/DEPLOY.md 5章 |
-| SPA のアップロード | `config.json`（`apiBaseUrl`（統合では `""`）、`modes`、`maxImageBytes`）を作り、`dist` と一緒に S3 に置いて、CloudFront のキャッシュを消す | web/DEPLOY.md 6章 |
+| SPA のアップロード | 環境の発行方式（変数 `GRANT_MODE`。既定 `page`）の `web-dist-{方式}` を使う。`config.json`（`apiBaseUrl`（統合では `""`）、`maxImageBytes`）を作り、`dist` と一緒に S3 に置いて、CloudFront のキャッシュを消す | web/DEPLOY.md 6章 |
 | スモークテスト | SPA と `config.json` が取れること、発行できること（直結: API に直接送り、CORS のヘッダーが付くこと。統合: CloudFront の `/v1/tickets` に送り、`qrUrl` が CloudFront の URL であること）、QR 画像 API が PNG を返すこと。URL はジョブのサマリーに出す | {impl}/DEPLOY.md 7章、web/DEPLOY.md 7章 |
 
 同じ環境・同じ実装のデプロイは、同時に1つだけ動く（`concurrency`。実行中のものは取り消さない）。
@@ -192,7 +192,7 @@ pull request / master への push
 | 設定 | 内容 |
 |---|---|
 | environment | `dev`、`prod` など。`prod` には承認者（Required reviewers）を設定する |
-| environment の変数（Variables） | `AWS_REGION`（例: `ap-northeast-1`）、`AWS_DEPLOY_ROLE_ARN`、`ARTIFACT_BUCKET`、`WEB_MODES`（任意。既定は `["page"]`） |
+| environment の変数（Variables） | `AWS_REGION`（例: `ap-northeast-1`）、`AWS_DEPLOY_ROLE_ARN`、`ARTIFACT_BUCKET`、`GRANT_MODE`（任意。SPA の発行方式 `page` / `inline` / `form`。既定は `page`。`form` では CSP の `form-action` も自動で設定する）、`MAX_IMAGE_BYTES`（任意） |
 
 秘密の値（Secrets）は使わない。ロールの ARN やバケット名は秘密ではないので、変数に入れる。
 

@@ -180,7 +180,7 @@ sequenceDiagram
 | 固定文字列 | 1〜32 | Parameter Store の **String**（`TICKET_CODE_SUFFIX_PARAMETER_NAME`。秘密ではないので、ローカル実行と E2E は環境変数 `TICKET_CODE_SUFFIX` で直接渡せる）。**英数字だけ**（URL のパスと QR にそのまま入るため）。起動時に読み込み、形が違えば起動に失敗する |
 
 - 区切り文字はない。日時は14桁・UUID は32桁で固定なので、固定文字列は47文字目から最後まで
-- 全体の形: `^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$`（47〜78文字）。SPA は、チケット画面の URL のコードをこの形で確かめる（`web/src/api/tickets.ts`）
+- 全体の形: `^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$`（47〜78文字）。SPA は、チケット画面の URL のコードをこの形で確かめる（`web/src/api/client.ts`）
 - 以前の案（`{YYYYMMDDHHmmss}-{Crockford Base32 の乱数8文字}`、環境変数 `TICKET_SUFFIX_LENGTH`）は廃止した
 
 ### ステートレス採番

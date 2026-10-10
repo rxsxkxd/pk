@@ -70,11 +70,28 @@ jobs:
       - run: npm --prefix web ci
       - run: npm --prefix web run format:check
       - run: npm --prefix web test
-      - run: npm --prefix web run build # vue-tsc + vite build → web/dist
+      # The grant mode is chosen at build time (web/DESIGN.md 4.1): one build per mode. E2E uses page.
+      - run: npm --prefix web run build # vue-tsc + vite build → web/dist (GRANT_MODE unset = page)
+      - run: npm --prefix web run build -- --outDir dist-inline
+        env:
+          GRANT_MODE: inline
+      - run: npm --prefix web run build -- --outDir dist-form
+        env:
+          GRANT_MODE: form
       - uses: actions/upload-artifact@v7
         with:
-          name: web-dist
+          name: web-dist-page
           path: web/dist
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist-inline
+          path: web/dist-inline
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-dist-form
+          path: web/dist-form
           retention-days: 7
 
   infra:
@@ -98,10 +115,10 @@ jobs:
         impl: [go, node]
     steps:
       - uses: actions/checkout@v7
-      # The SPA is built once (web job) and served to both implementations.
+      # The SPA (page mode, the one the E2E tests) is built once (web job) and served to both implementations.
       - uses: actions/download-artifact@v8
         with:
-          name: web-dist
+          name: web-dist-page
           path: web/dist
       - uses: docker/setup-buildx-action@v4
       - name: Run E2E (storage + api + e2e)

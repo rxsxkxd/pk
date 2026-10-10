@@ -33,7 +33,8 @@ SPA の JS ──fetch / <img>──▶ チケット API（execute-api の URL�
 | S3 バケット | 非公開（パブリックアクセスはすべてブロック）。CloudFront の OAC だけが読める |
 | CloudFront | HTTPS へリダイレクト、既定のルートオブジェクト `index.html`（hash モードのルーティングなので、ほかのパスを `index.html` に向ける設定は不要）、マネージドのキャッシュポリシー CachingOptimized |
 | セキュリティヘッダー | Response Headers Policy で CSP・HSTS・`X-Content-Type-Options`・`Referrer-Policy: no-referrer`・`X-Frame-Options: DENY` を付ける（DESIGN.md 9章） |
-| `config.json` | 環境ごとに作ってアップロードする（ビルドには埋め込まない）。API の URL（統合では `""`）、使う発行方式（`modes`）、画像の上限（`maxImageBytes`。任意）を書く |
+| 発行方式 | **ビルドのときに選ぶ**（`GRANT_MODE=page|inline|form`。既定は `page`。2章）。1つのビルドには1つの方式だけが入る |
+| `config.json` | 環境ごとに作ってアップロードする（ビルドには埋め込まない）。API の URL（統合では `""`）と、画像の上限（`maxImageBytes`。任意）を書く |
 | `/v1/*`（統合だけ） | オリジンは API Gateway（HTTPS だけ）。マネージドのキャッシュポリシー CachingDisabled、オリジンリクエストポリシー AllViewerExceptHostHeader、すべてのメソッド、オリジンの応答のタイムアウト 30 秒。SPA のセキュリティヘッダーは付けない（API が自分で付ける） |
 
 ## 1. 前提
@@ -59,9 +60,14 @@ export API_DOMAIN=$(aws cloudformation describe-stacks --stack-name ticketqr-$IM
 ```sh
 npm --prefix web ci
 npm --prefix web test
-npm --prefix web run build      # 型チェック（vue-tsc）とビルド → web/dist/
+export GRANT_MODE=page          # この環境の発行方式: page（画面遷移方式。既定）/ inline（その場表示方式）/ form（フォーム送信方式）
+npm --prefix web run build      # 型チェック（vue-tsc）とビルド → web/dist/（GRANT_MODE の方式だけが入る）
 ls web/dist                     # index.html、assets/、config.json（ローカル開発用。アップロードしない）
 ```
+
+- 方式を変えるときは、ビルドし直して 6章のアップロードをやり直す（`config.json` では変わらない）
+- `form` の環境では、CSP の `form-action` に送信先を入れる（3.3 の `FormActionSource`、4章の `headers.json`）。入れないと、フォームの送信をブラウザが止める
+- 3つ以外の値を入れると、ビルドがエラーになる
 
 `web/dist/config.json` は開発用の値（`apiBaseUrl` が空）なので、アップロードしない。環境ごとの `config.json` は 6章で作る。
 
@@ -127,7 +133,7 @@ aws cloudformation deploy \
 |---|---|---|
 | `ApiOriginDomain` | 空 | **統合だけ**。`/v1/*` を振り分ける API のドメイン（`$API_DOMAIN`。`https://` なし）。空なら直結 |
 | `ApiBaseUrl` | 空 | **直結だけ（必須）**。チケット API のオリジン（`$API_URL`）。CSP の `img-src` と `connect-src` に入る（`connect-src` には、SPA が自分のオリジンから `config.json` を `fetch` するための `'self'` も入る）。統合では使わない（CSP は `'self'` だけ） |
-| `FormActionSource` | `'none'` | CSP の `form-action`。フォーム送信方式（`modes` の `form`）を有効にする環境だけ、直結では `$API_URL`、統合では `"'self'"` にする |
+| `FormActionSource` | `'none'` | CSP の `form-action`。フォーム送信方式（`GRANT_MODE=form` でビルドした SPA）の環境だけ、直結では `$API_URL`、統合では `"'self'"` にする |
 | `WebAclArn` | 空 | 付ける AWS WAF の Web ACL の ARN（任意。スコープ CLOUDFRONT、us-east-1 で作る。作り方は 13章）。統合では API も守る。**AWS のマネージドルール Core rule set の `SizeRestrictions_BODY`（8KB 超をブロック）を、`/v1/tickets` と `/v1/tickets/qr-inline` では除外する**（しないと、画像のアップロードがすべて 403 になる。../DESIGN.md 5章） |
 | `PriceClass` | `PriceClass_200` | CloudFront の配信地域（日本を含む） |
 
@@ -278,14 +284,14 @@ aws apigatewayv2 update-api --api-id $API_ID \
 ## 6. config.json の作成とアップロード
 
 ```sh
-# 環境ごとの設定。modes は既定の画面遷移方式（page）だけ。オプションの方式を使う環境だけ "inline" / "form" を足す
+# 環境ごとの設定（発行方式はビルドで決まっているので書かない。2章）
 # 直結: API の URL
 cat > $WORK/config.json <<EOF
-{ "apiBaseUrl": "$API_URL", "modes": ["page"] }
+{ "apiBaseUrl": "$API_URL" }
 EOF
 # 統合: 同じオリジン（"" = SPA と同じ CloudFront の /v1/*）
 cat > $WORK/config.json <<EOF
-{ "apiBaseUrl": "", "modes": ["page"] }
+{ "apiBaseUrl": "" }
 EOF
 
 # assets/*（ファイル名にハッシュが入る）は長くキャッシュする。--delete で古いファイルを消す
@@ -305,7 +311,7 @@ aws cloudfront create-invalidation --distribution-id $DIST_ID --paths /index.htm
 
 - `--exclude` したファイルは、`--delete` でも消されない
 - 画像の上限を 4MB より下げた環境（API の `MaxImageBytes`）では、`config.json` に同じ値の `"maxImageBytes": 2097152` などを足す（省略すると 4MB。4MB より大きい値は、SPA が設定の読み込みのエラーにする）。SPA は送る前にこの値で確かめ、「画像のサイズが大きすぎます（2MB まで）」のように出す
-- `modes` に `form` を入れるときは、CSP の `form-action` も変える（3章の `FormActionSource`、4章の `headers.json`）
+- 以前の `modes`（実行時に方式を選んでいたときのキー）は、書いてあっても無視される
 
 ## 7. 動作確認
 

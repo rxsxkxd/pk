@@ -137,7 +137,7 @@ E2 のために必要な変更:
 | する | しない |
 |---|---|
 | リリースの中の zip を、成果物バケットに**デプロイごとの接頭辞**で置き直す（CloudFormation が Lambda のコードを更新できるようにする） | Go・Node のコンパイルやバンドルのやり直し（**ビルドは CI で1回だけ**。テストと E2E を通ったものと同じバイナリを反映する） |
-| 環境ごとの値（API の URL、`config.json` の `modes`、CORS のオリジン）を入れる | |
+| 環境ごとの値（API の URL、`config.json`、CORS のオリジン）を入れ、環境の発行方式の SPA のビルド（`web-dist-{方式}`）を選ぶ | SPA のビルドのやり直し（発行方式ごとのビルドは CI で作っておく） |
 | スタックのパラメータを環境ごとに決めて、CloudFormation でデプロイする | |
 
 方針:
@@ -205,7 +205,7 @@ Y で用意するもの（これだけで動く）:
 |---|---|
 | 条件 | master への push で、`go`・`node`・`web`・`infra`・`e2e` がすべて成功したとき（PR では動かない） |
 | 権限 | `id-token: write`（OIDC）。GitHub の environment `release`（任意で承認者を付けられる） |
-| やること | 各ジョブの成果物（`lambda-go`、`lambda-node`、`web-dist`）とテンプレートを、1つの zip（リリース）にまとめて S3 に置き、パイプラインを開始する |
+| やること | 各ジョブの成果物（`lambda-go`、`lambda-node`、`web-dist-{page,inline,form}`）とテンプレートを、1つの zip（リリース）にまとめて S3 に置き、パイプラインを開始する |
 
 ```yaml
   publish:
@@ -251,7 +251,7 @@ release.zip
 ├── artifacts/
 │   ├── lambda-go/{ticketqr.zip,exampleqr.zip}
 │   ├── lambda-node/{ticketqr.zip,exampleqr.zip}
-│   └── web-dist/                 # SPA のビルド結果（config.json は環境ごとに作り直す）
+│   └── web-dist-{page,inline,form}/  # SPA のビルド結果（発行方式ごと。config.json は環境ごとに作り直す）
 ├── infra/cloudformation/{api.yaml,example.yaml,web.yaml}
 ├── buildspec/{deploy.yml}        # CodeBuild の手順（リポジトリの docs/st/cd/buildspec/ から）
 └── testdata/photo.jpg            # スモークテスト用
@@ -285,7 +285,7 @@ release.zip
 |---|---|
 | 環境 | Amazon Linux の ARM（`aws/codebuild/amazonlinux-aarch64-standard`）。使うのは AWS CLI と `curl`、`python3` だけで、ビルドのツール（Go・Node のコンパイラー）は要らない |
 | 入力 | Source の成果物（リリースの zip を展開したもの） |
-| 環境変数 | `IMPL`（`go` / `node`）、`DEPLOY_ENV`（`dev` / `prod`）、`ARTIFACT_BUCKET`、`WEB_MODES`（`config.json` の `modes`。既定 `["page"]`） |
+| 環境変数 | `IMPL`（`go` / `node`）、`DEPLOY_ENV`（`dev` / `prod`）、`ARTIFACT_BUCKET`、`GRANT_MODE`（SPA の発行方式。`page` / `inline` / `form`。既定 `page`。`artifacts/web-dist-$GRANT_MODE` を置く） |
 | buildspec | リリースの中の `buildspec/deploy.yml` |
 | 構成と画像の上限 | 下の案は直結（web/DEPLOY.md 3.1）だけ。統合（3.2）にする環境では、`github-template/workflows/deploy.yml` と同じ分岐（`LAYOUT`、`ApiOriginDomain`、API の2回目のデプロイ、CORS なし、`apiBaseUrl: ""`）と、`MAX_IMAGE_BYTES`（API の `MaxImageBytes` と `config.json` の `maxImageBytes`）を足す |
 
@@ -329,9 +329,10 @@ phases:
         --cors-configuration "{\"AllowOrigins\":[\"$WEB_URL\"],\"AllowMethods\":[\"GET\",\"POST\"],\"MaxAge\":300}"
       # SPA と環境ごとの config.json（web/DEPLOY.md 6章）
       - |
-        printf '{ "apiBaseUrl": "%s", "modes": %s }\n' "$API_URL" "${WEB_MODES:-[\"page\"]}" > config.json
-      - aws s3 sync artifacts/web-dist/ s3://$WEB_BUCKET/ --delete --exclude index.html --exclude config.json --cache-control 'public, max-age=31536000, immutable'
-      - aws s3 cp artifacts/web-dist/index.html s3://$WEB_BUCKET/index.html --cache-control no-cache --content-type 'text/html; charset=utf-8'
+        printf '{ "apiBaseUrl": "%s" }\n' "$API_URL" > config.json
+      - export WEB_DIST=artifacts/web-dist-${GRANT_MODE:-page}
+      - aws s3 sync $WEB_DIST/ s3://$WEB_BUCKET/ --delete --exclude index.html --exclude config.json --cache-control 'public, max-age=31536000, immutable'
+      - aws s3 cp $WEB_DIST/index.html s3://$WEB_BUCKET/index.html --cache-control no-cache --content-type 'text/html; charset=utf-8'
       - aws s3 cp config.json s3://$WEB_BUCKET/config.json --cache-control no-cache --content-type application/json
       - aws cloudfront create-invalidation --distribution-id $DIST_ID --paths /index.html /config.json
   post_build:

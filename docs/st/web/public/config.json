@@ -1,4 +1,3 @@
 {
-  "apiBaseUrl": "",
-  "modes": ["page", "inline", "form"]
+  "apiBaseUrl": ""
 }

@@ -1,15 +1,9 @@
-// Grant state of the SPA (DESIGN.md 5): the chosen photo, sending / failed, the inline result and the
-// message to show. The page-mode result is not stored: the ticket screen is drawn from its URL only.
+// Grant state shared by the grant modes (DESIGN.md 5): the chosen photo, sending / failed and the message to
+// show. What a grant returns is up to each mode (src/modes/<mode>/), which passes its API call to send().
 
 import { defineStore } from 'pinia';
 import { computed, inject, ref } from 'vue';
-import {
-  ApiError,
-  grantForPage as postForPage,
-  grantInline as postInline,
-  type InlineTicket,
-  type TicketRoute,
-} from '../api/tickets.ts';
+import { ApiError } from '../api/client.ts';
 import { configKey, MAX_IMAGE_BYTES } from '../config.ts';
 
 // Same formats as the API (the size limit is config.json's maxImageBytes); the API makes the final
@@ -61,20 +55,19 @@ export const useTicketStore = defineStore('ticket', () => {
 
   const file = ref<File | null>(null);
   const status = ref<'idle' | 'sending' | 'granted' | 'failed'>('idle');
-  const inlineTicket = ref<InlineTicket | null>(null);
   const error = ref<string | null>(null);
 
   const fileProblem = computed(() => checkFile(file.value, config.maxImageBytes));
   const canSend = computed(() => !fileProblem.value && status.value !== 'sending');
 
-  // 送信中の状態とエラーを管理して send を実行する。送信できない状態なら何もしない（二重発行の防止）。
-  async function run<T>(send: (file: File) => Promise<T>): Promise<T | undefined> {
+  // 選んだ画像で request（方式ごとの API の呼び出し）を実行し、送信中の状態とエラーを管理する。
+  // 送信できない状態なら何もしない（二重発行の防止）。失敗したら undefined を返し、error に文言を入れる。
+  async function send<T>(request: (apiBaseUrl: string, file: File) => Promise<T>): Promise<T | undefined> {
     if (!canSend.value || !file.value) return undefined;
     status.value = 'sending';
     error.value = null;
-    inlineTicket.value = null;
     try {
-      const result = await send(file.value);
+      const result = await request(config.apiBaseUrl, file.value);
       status.value = 'granted';
       return result;
     } catch (err) {
@@ -84,24 +77,11 @@ export const useTicketStore = defineStore('ticket', () => {
     }
   }
 
-  // 画面遷移方式（メイン）: 発行して、SPA のチケット画面に移るための { code, sig } を返す。
-  async function grantForPage(): Promise<TicketRoute | undefined> {
-    const t = await run((f) => postForPage(config.apiBaseUrl, f));
-    return t && { code: t.ticketCode, sig: t.sig };
-  }
-
-  // その場表示方式（オプション）: 発行して、結果を inlineTicket に入れる。
-  async function grantInline(): Promise<void> {
-    const t = await run((f) => postInline(config.apiBaseUrl, f));
-    if (t) inlineTicket.value = t;
-  }
-
   function reset(): void {
     file.value = null;
     status.value = 'idle';
-    inlineTicket.value = null;
     error.value = null;
   }
 
-  return { file, status, inlineTicket, error, fileProblem, canSend, grantForPage, grantInline, reset };
+  return { file, status, error, fileProblem, canSend, send, reset };
 });

@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { vi } from 'vitest';
 import { createApp } from 'vue';
-import { createMemoryHistory } from 'vue-router';
+import { createMemoryHistory, type RouteRecordRaw } from 'vue-router';
 import App from '../src/App.vue';
 import { configKey, MAX_IMAGE_BYTES, type AppConfig } from '../src/config.ts';
 import { createAppRouter } from '../src/router.ts';
@@ -12,8 +12,8 @@ export const API = 'https://api.example.com';
 export const CODE = '202610051350543f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR';
 export const SIG = 'abcdefghijklmnopqrstuv';
 
-export function config(modes: AppConfig['modes'] = ['page']): AppConfig {
-  return { apiBaseUrl: API, modes, maxImageBytes: MAX_IMAGE_BYTES };
+export function config(): AppConfig {
+  return { apiBaseUrl: API, maxImageBytes: MAX_IMAGE_BYTES };
 }
 
 // A store needs the app-level config (inject) and an active Pinia, as in main.ts.
@@ -25,8 +25,9 @@ export function setupStore(cfg = config()) {
   return app;
 }
 
-export async function mountAt(path: string, cfg = config()) {
-  const router = createAppRouter(createMemoryHistory());
+// Mounts the app with one grant mode's routes (src/modes/<mode>/index.ts), as main.ts does with '@mode'.
+export async function mountAt(routes: RouteRecordRaw[], path: string, cfg = config()) {
+  const router = createAppRouter(routes, createMemoryHistory());
   await router.push(path);
   await router.isReady();
   const wrapper = mount(App, {
@@ -53,3 +54,10 @@ export function stubFetch(...responses: Array<Response | Error>) {
 
 export const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+
+// 画像の選択欄でファイルを選んだことにする。
+export async function choosePhoto(wrapper: Awaited<ReturnType<typeof mountAt>>['wrapper'], file = photo()) {
+  const input = wrapper.get('[data-testid="image-input"]');
+  Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+  await input.trigger('change');
+}

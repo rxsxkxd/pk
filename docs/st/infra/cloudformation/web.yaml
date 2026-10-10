@@ -111,6 +111,8 @@ Resources:
         Enabled: true
         WebACLId: !If [HasWebAcl, !Ref WebAclArn, !Ref AWS::NoValue]
         DefaultRootObject: index.html # hash routing: no other path needs to fall back to index.html
+        # No CustomErrorResponses: they apply to every behavior, /v1/* included, and would replace the API's own
+        # error responses (e.g. 403 for a bad signature). API errors pass through unchanged (web/DEPLOY.md 7.1).
         HttpVersion: http2and3
         PriceClass: !Ref PriceClass
         Origins:

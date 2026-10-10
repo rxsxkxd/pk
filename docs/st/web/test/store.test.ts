@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { ApiError } from '../src/api/tickets.ts';
+import { ApiError } from '../src/api/client.ts';
 import { MAX_IMAGE_BYTES } from '../src/config.ts';
 import { checkFile, messageFor, sizeLabel, useTicketStore } from '../src/stores/ticket.ts';
-import { API, CODE, config, json, photo, SIG, setupStore, stubFetch } from './helpers.ts';
+import { API, config, photo, setupStore } from './helpers.ts';
 
 beforeEach(() => setupStore());
 afterEach(() => vi.unstubAllGlobals());
@@ -72,46 +72,60 @@ test.each([
   expect(messageFor(new ApiError(code, ''))).toBe(message);
 });
 
-describe('issuing', () => {
-  test('page mode returns the route of the ticket screen and keeps no result', async () => {
-    stubFetch(json(201, { ticketCode: CODE, issuedAt: '2026-10-05T13:50:54+09:00', sig: SIG, qrUrl: `${API}/x` }));
+// send() is what every grant mode uses (src/modes/<mode>/); the request is the mode's API call.
+describe('sending', () => {
+  test('passes the API base URL and the chosen photo to the request and returns its result', async () => {
     const store = useTicketStore();
-    store.file = photo();
-    expect(await store.grantForPage()).toEqual({ code: CODE, sig: SIG });
+    const file = photo();
+    store.file = file;
+    const request = vi.fn(async () => 'granted ticket');
+    expect(await store.send(request)).toBe('granted ticket');
+    expect(request).toHaveBeenCalledWith(API, file);
     expect(store.status).toBe('granted');
-    expect(store.inlineTicket).toBeNull();
+    expect(store.error).toBeNull();
   });
 
   test('a failure shows the message and allows another try', async () => {
-    stubFetch(json(504, { error: { code: 'ANALYSIS_TIMEOUT', message: 'image analysis timed out' } }));
     const store = useTicketStore();
     store.file = photo();
-    expect(await store.grantForPage()).toBeUndefined();
+    const request = async () => {
+      throw new ApiError('ANALYSIS_TIMEOUT', 'image analysis timed out', 504);
+    };
+    expect(await store.send(request)).toBeUndefined();
     expect(store.status).toBe('failed');
     expect(store.error).toBe('ただいま混み合っています。時間をおいてお試しください');
     expect(store.canSend).toBe(true);
   });
 
   test('a second click while sending does not grant twice', async () => {
-    let resolve!: (r: Response) => void;
-    const fetch = vi.fn(() => new Promise<Response>((r) => (resolve = r)));
-    vi.stubGlobal('fetch', fetch);
+    let resolve!: (v: string) => void;
+    const request = vi.fn(() => new Promise<string>((r) => (resolve = r)));
     const store = useTicketStore();
     store.file = photo();
 
-    const first = store.grantForPage();
+    const first = store.send(request);
     expect(store.canSend).toBe(false);
-    expect(await store.grantInline()).toBeUndefined();
-    resolve(json(201, { ticketCode: CODE, issuedAt: '2026-10-05T13:50:54+09:00', sig: SIG, qrUrl: `${API}/x` }));
-    await first;
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(await store.send(request)).toBeUndefined();
+    resolve('granted ticket');
+    expect(await first).toBe('granted ticket');
+    expect(request).toHaveBeenCalledTimes(1);
   });
 
   test('nothing is sent when the file has a problem', async () => {
-    const fetch = stubFetch();
+    const request = vi.fn(async () => 'granted ticket');
     const store = useTicketStore();
     store.file = photo('a.pdf', 'application/pdf');
-    expect(await store.grantForPage()).toBeUndefined();
-    expect(fetch).not.toHaveBeenCalled();
+    expect(await store.send(request)).toBeUndefined();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  test('reset clears the photo, the status and the message', async () => {
+    const store = useTicketStore();
+    store.file = photo();
+    await store.send(async () => {
+      throw new ApiError('IMAGE_REJECTED', 'image was rejected', 422);
+    });
+    store.reset();
+    expect([store.file, store.status, store.error]).toEqual([null, 'idle', null]);
   });
 });

@@ -16,8 +16,9 @@ const CONTENT_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
-// The SPA's runtime config in E2E: every mode on, so the optional ones can be tested too.
-const CONFIG = { apiBaseUrl: API_URL, modes: ['page', 'inline', 'form'] };
+// The SPA's runtime config in E2E. The grant mode is not in it: it is chosen when web/ is built (page by
+// default, the mode the E2E tests).
+const CONFIG = { apiBaseUrl: API_URL };
 
 export default async function globalSetup(): Promise<void> {
   await waitForApi();

@@ -49,7 +49,8 @@ jobs:
       ARTIFACT_PREFIX: ticketqr/${{ inputs.impl }}/${{ github.sha }}-${{ github.run_attempt }}
       SALT_PARAM: /ticketqr/${{ inputs.impl }}/signing-salt
       CODE_SUFFIX_PARAM: /ticketqr/${{ inputs.impl }}/ticket-code-suffix
-      WEB_MODES: ${{ vars.WEB_MODES || '["page"]' }}
+      # Grant mode of this environment (web/DESIGN.md 4.1): picks the SPA build made by ci.yml.
+      GRANT_MODE: ${{ vars.GRANT_MODE || 'page' }}
       LAYOUT: ${{ inputs.layout }}
       # Upload limit of this environment (DESIGN.md 5): the API's MaxImageBytes and the SPA's maxImageBytes.
       MAX_IMAGE_BYTES: ${{ vars.MAX_IMAGE_BYTES || '4194304' }}
@@ -61,7 +62,7 @@ jobs:
           path: artifacts/lambda
       - uses: actions/download-artifact@v8
         with:
-          name: web-dist
+          name: web-dist-${{ vars.GRANT_MODE || 'page' }}
           path: web/dist
       - uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -112,16 +113,20 @@ jobs:
       # web/DEPLOY.md 3.1 (direct) / 3.2 (unified)
       - name: Deploy web stack
         run: |
+          # The form mode posts a plain form to the API: allow it in the CSP form-action (web/DEPLOY.md 3.3).
           if [ "$LAYOUT" = unified ]; then
-            WEB_PARAMS="ApiOriginDomain=$API_DOMAIN"
+            WEB_PARAMS=("ApiOriginDomain=$API_DOMAIN")
+            FORM_ACTION="'self'"
           else
-            WEB_PARAMS="ApiBaseUrl=$API_URL"
+            WEB_PARAMS=("ApiBaseUrl=$API_URL")
+            FORM_ACTION="$API_URL"
           fi
+          if [ "$GRANT_MODE" = form ]; then WEB_PARAMS+=("FormActionSource=$FORM_ACTION"); fi
           aws cloudformation deploy \
             --stack-name "ticketqr-web-$IMPL" \
             --template-file infra/cloudformation/web.yaml \
             --no-fail-on-empty-changeset \
-            --parameter-overrides "$WEB_PARAMS"
+            --parameter-overrides "${WEB_PARAMS[@]}"
           out() {
             aws cloudformation describe-stacks --stack-name "ticketqr-web-$IMPL" \
               --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
@@ -164,7 +169,7 @@ jobs:
         run: |
           # unified: "" = same origin (CloudFront /v1/*)
           if [ "$LAYOUT" = unified ]; then SPA_API=""; else SPA_API="$API_URL"; fi
-          printf '{ "apiBaseUrl": "%s", "modes": %s, "maxImageBytes": %s }\n' "$SPA_API" "$WEB_MODES" "$MAX_IMAGE_BYTES" \
+          printf '{ "apiBaseUrl": "%s", "maxImageBytes": %s }\n' "$SPA_API" "$MAX_IMAGE_BYTES" \
             > "$RUNNER_TEMP/config.json"
           aws s3 sync web/dist/ "s3://$WEB_BUCKET/" --delete \
             --exclude index.html --exclude config.json \
@@ -193,7 +198,7 @@ jobs:
           if [ "$LAYOUT" = unified ]; then case "$QR_URL" in "$WEB_URL"/*) ;; *) echo "qrUrl not on $WEB_URL: $QR_URL"; exit 1 ;; esac; fi
           test "$(curl -fsS -o /dev/null -w '%{content_type}' "$QR_URL")" = image/png
           {
-            echo "### Deployed ($IMPL, $LAYOUT)"
+            echo "### Deployed ($IMPL, $LAYOUT, $GRANT_MODE)"
             echo "- SPA: $WEB_URL"
             echo "- API: $API_URL"
           } >> "$GITHUB_STEP_SUMMARY"

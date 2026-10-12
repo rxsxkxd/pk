@@ -65,7 +65,7 @@ flowchart LR
 ブラウザ ──multipart/form-data（フィールド image）──▶ API ──application/octet-stream（画像バイト列そのまま）──▶ 画像解析サーバー
 ```
 
-API が変えるのは**送り方（multipart → octet-stream）だけ**。画像の中身はパススルーで、圧縮・リサイズ・形式変換・メタデータ（EXIF など）の除去は行わない。
+API が変えるのは**送り方（multipart → octet-stream）だけ**。画像の中身はパススルーで、圧縮・リサイズ・形式変換・メタデータ（EXIF など）の除去は行わない。ただし SPA（画面遷移方式・その場表示方式）は、上限（4MB）を超えた写真だけをブラウザで縮めて JPEG にしてから送る（web/DESIGN.md 3章。上限以下の写真は加工しない）。そのため、解析サーバーには縮めた JPEG（長辺 2048〜4096、EXIF なし）が届くことがある
 
 1. **入力検証**（置き場所を性質で分ける）
    - HTTP 層: Content-Type が boundary 付きの `multipart/form-data` か（なければ 415）、ボディ全体が正しい multipart か（壊れていれば 400）、`image` フィールドがあるか、サイズ上限（4MB。実行環境の制約）、画像形式の判定（技術的な処理）

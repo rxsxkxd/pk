@@ -13,7 +13,7 @@
 | 利用者 | スマートフォン（iPhone / Android）のブラウザが主。PC のブラウザも対象 |
 | できること | 証明書の画像を選んでチケットを発行し、QR を表示する。**メインは画面遷移方式**（チケット画面を SPA が描画する）。その場表示方式とフォーム送信方式はオプション（3章） |
 | 配置 | ビルド結果（HTML / JS / CSS / 設定ファイル）を S3 に置く。サーバー側の処理は持たない |
-| 範囲外 | ログイン、チケットの一覧や履歴（API がチケットを保存しないため）、画像の加工（証明書の画像はそのまま送る） |
+| 範囲外 | ログイン、チケットの一覧や履歴（API がチケットを保存しないため）、画像の加工（証明書の画像はそのまま送る。上限を超えた写真を縮めることだけは行う。3章） |
 
 SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）との対応:
 
@@ -37,9 +37,10 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 | スタイル | **Tailwind CSS 3.4**（3.4.19。`v3-lts`）+ PostCSS + autoprefixer | 2026-10-13 に 4 から戻した（4 は iOS 13〜15.3 でスタイルがまったく付かない。notes/tailwind-compat.md）。`tailwind.config.js`（`content` だけ）、`postcss.config.js`、`src/style.css` は `@tailwind` の3行。autoprefixer の対象は `package.json` の `browserslist`（`ios_saf >= 13`、`chrome >= 80`。Chrome の下限は仮。11章の 6） |
 | 検証 | **zod** 4 | 実行時設定（`config.json`）、API のレスポンス（成功・エラー）、チケット画面の URL パラメータを検証する |
 | 言語 | TypeScript **6** | 型チェックは `vue-tsc --noEmit`。vue-tsc が TypeScript 7（Go 製のコンパイラー）に対応していないため、Node 版（7）とは違い 6 系に固定する |
+| 画像の縮小 | **Compressor.js** 1.4.0（`compressorjs`。版は固定） | 上限を超えた写真だけを縮めて JPEG にする（3章）。npm の依存は3つに見えるが、`is-blob`・`blueimp-canvas-to-blob` は実行時に使われない（説明は notes/image-compression.md 6.1） |
 | テスト | Vitest + `@vue/test-utils` + happy-dom | ストア、API クライアント、コンポーネント。ブラウザでの通しの確認は E2E（Playwright。E2E.md） |
 
-採用しないもの: UI コンポーネントライブラリ（画面が小さく、Tailwind で足りる）、axios（標準の `fetch` で足りる）、画像の縮小・変換ライブラリ（証明書の画像はそのまま送る方針）。
+採用しないもの: UI コンポーネントライブラリ（画面が小さく、Tailwind で足りる）、axios（標準の `fetch` で足りる）、ほかの画像の縮小・変換ライブラリ（比較は notes/image-compression.md）。
 
 ### 2.1 対応ブラウザ（最低動作バージョン）
 
@@ -79,6 +80,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Pro
 
 ### 2.3 Fetch Upload Streams（検討中・優先度低）
 
+> **保留（2026-10-12）**: 遅い環境には、上限を超えた写真を縮める処理（3章）のほうが効くので、進み具合は保留にした。以下は保留にする前の案。
+>
 > **検討中（優先度は低い）**: アップロードの進み具合は、**Android だけ** Fetch Upload Streams で出す案で考えている。iOS の Safari は、最新の正式版（26.x）でも対応していない（開発者向けの Safari Technology Preview 250 で初期の対応をした段階）ので、iOS では進み具合を出さない。将来の Safari の正式版が対応すれば、下の判定で自動的に進み具合が出る。全端末で進み具合を出せる XMLHttpRequest（`xhr.upload.onprogress`）案は、今は採らない。検討の経緯は [notes/upload-progress.md](notes/upload-progress.md)（一時メモ）。この節は、採用が決まったときの仕様の案。
 
 証明書の画像のアップロードの進み具合（％）を出すために、対応ブラウザでは、リクエストのボディを `ReadableStream` で送る（Fetch Upload Streams。`duplex: 'half'`）。対応しないブラウザでは、進み具合の表示を削り、今までどおり `FormData` で送る。
@@ -165,9 +168,16 @@ SPA の発行画面 #/（画面遷移方式）           SPA のチケット画�
 ### 証明書の画像の選択（共通）
 
 - `accept="image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp"`。`image/heic` を含めると、iPhone が変換せずに HEIC のまま渡すことが期待できる（実機で要確認）
-- 上限（`config.json` の `maxImageBytes`。既定 4MB。API の上限と同じ値にする）を超えるファイルは、送る前に知らせる。形式は拡張子で目安として確かめる。最終的な判定は API に任せる
+- 形式は拡張子と MIME タイプで目安として確かめる。最終的な判定は API に任せる
+- **上限（`config.json` の `maxImageBytes`。既定 4MB。API の上限と同じ値にする）を超えた写真は、選んだときにブラウザで縮める**（`src/image/shrink.ts`。Compressor.js。2026-10-12）
+  - 長辺 4096・画質 0.9 から、上限に収まるまで順に試す（4096・0.8 → 3072・0.8 → 2048・0.8）。出力は JPEG（名前も `.jpg`）。写真の向きは直し、EXIF は消える
+  - 縮めている間は「画像を縮小しています…」と出し、送れない。縮んだら「縮小しました（11.9MB → 3.4MB）」と出し、縮めた写真を送る
+  - どれでも収まらないとき、縮められないとき（デコードできない HEIC など）は、今までどおり「画像のサイズが大きすぎます（4MB まで）」で送れない
+  - 縮めている間に別の写真を選んだら、前の結果は捨てる
+  - CSP の `img-src` に `blob:` が要る（9章）。ないと縮小に失敗して「大きすぎます」になる
+  - フォーム送信方式は対象外（ブラウザがフォームをそのまま送るので、写真を差し替えられない）
 - プレビューは出さない（HEIC は多くのブラウザで表示できないため）。ファイル名とサイズだけを出す
-- 証明書の画像は加工せず、そのまま `FormData` に入れて送る
+- 上限以下の証明書の画像は加工せず、そのまま `FormData` に入れて送る（縮めるのは上限を超えたときだけ）
 - **Android だけ、ボタンを2つに分ける**（`src/platform.ts` の `isAndroid`）
   - 理由: Android 14 以降の Chrome では、画像の `<input type="file">` を開くとフォトピッカー（写真の選択）だけが出て、カメラを選べない（Android 13 以前は、選択画面にカメラも出ていた）。iOS の Safari は、選択肢に「写真を撮る」が常に出るので分けない
   - 「画像を選ぶ」: 上と同じ `accept` の選択欄（`capture` なし。フォトピッカーが開く）
@@ -333,14 +343,17 @@ const TicketRouteSchema = z.object({ code: TicketCode, sig: Sig });   // SPA の
 ```ts
 // src/stores/ticket.ts（方式に共通。方式ごとの API の呼び出しは send に渡す）
 export const useTicketStore = defineStore('ticket', () => {
-  const file = ref<File | null>(null);
+  const file = shallowRef<File | null>(null);            // 選んだ写真
+  const shrunk = shallowRef<File | null>(null);          // 上限を超えた写真を縮めたもの（3章）
+  const shrinking = ref(false);                          // 縮めている間は送れない
   const status = ref<'idle' | 'sending' | 'granted' | 'failed'>('idle');
   const error = ref<string | null>(null);                // 画面に出すメッセージ（4.4）
+  // 送る写真は shrunk ?? file。file が変わったら、上限を超えていて対応する形式のときだけ shrinkToFit で縮める
 
   const fileProblem = computed(() => …);                  // 未選択・上限（maxImageBytes）超え・非対応の拡張子
   async function send<T>(request: (apiBaseUrl: string, file: File) => Promise<T>): Promise<T | undefined> { … }
   function reset() { … }
-  return { file, status, error, fileProblem, canSend, send, reset };
+  return { file, shrunk, shrinking, status, error, fileProblem, canSend, send, reset };
 });
 
 // 使い方（src/modes/page/GrantPage.vue）
@@ -374,8 +387,9 @@ st/web/
 │   ├── config.ts           # config.json の読み込みと検証（zod）
 │   ├── env.d.ts            # vite/client の型
 │   ├── platform.ts         # 端末の判定（isAndroid）
+│   ├── image/shrink.ts     # 共通: 上限を超えた写真を縮める（Compressor.js。3章）
 │   ├── api/client.ts       # 共通: postImage、ApiError、コードと署名のスキーマ（zod）
-│   ├── stores/ticket.ts    # 共通: 発行の状態（Pinia）、送る前の確認、エラーの文言
+│   ├── stores/ticket.ts    # 共通: 発行の状態（Pinia）、送る前の確認と縮小、エラーの文言
 │   ├── assets/banner.png   # 先頭のバナーの画像（501×146px。今は仮）
 │   ├── components/         # 共通の部品
 │   │   ├── AppBanner.vue       # 先頭のバナー（App.vue に1つ。全画面に出る）
@@ -452,17 +466,18 @@ API への経路は、環境ごとに2つから選ぶ（同じ `web.yaml` のパ
 
 ### セキュリティヘッダー（CloudFront の Response Headers Policy）
 
-直結の場合（統合では `{apiBaseUrl}` の部分がなくなり、`img-src 'self' data:; connect-src 'self'` になる。フォーム送信方式を使うなら `form-action 'self'`）:
+直結の場合（統合では `{apiBaseUrl}` の部分がなくなり、`img-src 'self' data: blob:; connect-src 'self'` になる。フォーム送信方式を使うなら `form-action 'self'`）:
 
 ```
 Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self';
-  img-src 'self' data: {apiBaseUrl}; connect-src 'self' {apiBaseUrl}; form-action 'none'; frame-ancestors 'none'
+  img-src 'self' data: blob: {apiBaseUrl}; connect-src 'self' {apiBaseUrl}; form-action 'none'; frame-ancestors 'none'
 Referrer-Policy: no-referrer
 X-Content-Type-Options: nosniff
 Strict-Transport-Security: max-age=31536000
 ```
 
 - `img-src {apiBaseUrl}` は画面遷移方式の QR（QR 画像 API）、`img-src data:` はその場表示方式の QR（data URL）のため。その場表示方式を使わない環境では `data:` を外してよい
+- `img-src blob:` と `data:` は、上限を超えた写真を縮めるため（Compressor.js が写真を `blob:` の URL、または JPEG の向きを直すときは `data:` の URL で読み込む。3章）。`blob:` がないと、縮小に失敗して「大きすぎます」になる
 - `connect-src 'self'` は、起動時に自分のオリジンの `config.json` を `fetch` するため（`fetch` は `default-src` ではなく `connect-src` で制限され、`connect-src` を書くと `default-src 'self'` は引き継がれない）
 - `connect-src {apiBaseUrl}` は、チケット付与 API と QR 同梱付与 API への `fetch` のため
 - `form-action` は `default-src` を引き継がないので、明示する。既定は `'none'`（SPA はフォーム送信をしない）。フォーム送信方式（`form`）を有効にする環境だけ `form-action {apiBaseUrl}` にする
@@ -483,6 +498,7 @@ Strict-Transport-Security: max-age=31536000
 | `config.ts`、`api/client.ts`・`modes/*/api.ts` のスキーマ | 正しい JSON・欠けた項目・形の違う値を zod で検証する単体テスト |
 | API クライアント | `fetch` を差し替えて、201 / 各エラー / 予期しない応答 / 通信エラーの扱い、画面遷移方式で `Accept: application/json` を付けることを確かめる |
 | SPA の発行画面（`test/modes/`） | 方式ごとに、その方式の部品だけが出ること。画面遷移方式はチケット画面へ移ること、その場表示方式は結果をその場に出すこと、フォーム送信方式はフォームの `action` と `enctype`。`test/modes/modes.test.ts` で、`GRANT_MODES` のすべてに `index.ts` と `/` のルートがあることを確かめる |
+| 画像の縮小 | `shrinkToFit` の試す順と諦める条件（圧縮の部分は差し替え）。ストアでは、上限以下はそのまま送ること、縮めている間は送れないこと、縮めた写真を送ること、縮められなければ「大きすぎます」、選び直したら前の結果を捨てること（`shrinkToFit` は差し替え）。実際の圧縮は happy-dom に canvas がないので、ブラウザで確かめる（2026-10-12 に Chrome で確認: 11.9MB → 3.4MB、約 0.5 秒。CSP に `blob:` がないと失敗することも確認） |
 | ストア | 送信前の確認（未選択、上限超え（`maxImageBytes`）、拡張子）、二重送信の防止、エラーメッセージの対応 |
 | SPA のチケット画面 | URL のパラメータの検証、`<img>` の読み込みエラー時の表示、コードと発行日時を画面に出さないこと |
 | 通しの確認（**保留中**） | E2E.md の Playwright で、ビルドしたサイト + API（ローカル）を使って、スマートフォン相当の画面幅で操作する。メインの画面遷移方式は必ず確かめ、SPA のチケット画面のリロードで再発行されないことも確かめる。オプションの方式は、その方式でビルドしたもので確かめる（今の E2E は画面遷移方式だけ） |
@@ -506,7 +522,7 @@ Strict-Transport-Security: max-age=31536000
 4. 画面の文言・デザインの指定（今はシンプルな2画面を想定）
 5. スタイルの方式。**2026-10-13: Tailwind CSS 3.4 に戻した（2章、2.4 の 4）**。もとの論点: Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書くか（Tailwind CSS 4 は iOS 13 に対応しない。2.4）。調査（2026-10-10）では 3.4（`v3-lts`、3.4.19）を推奨: [notes/tailwind-compat.md](notes/tailwind-compat.md)
 6. Android 9 で対応する Chrome の下限の版（Android 9 の Chrome は 138 で更新が止まっている。2.1）
-7. （優先度低）アップロードの進み具合を Android だけ Fetch Upload Streams で出すか（2.3）。出す場合は、API Gateway（execute-api）が HTTP/2 に対応しているかを確かめる（対応していなければ使えない）
-8. 証明書の画像をブラウザで圧縮してから送るか（今は「証明書の画像は加工せずに送る」方針）。**2026-10-12 の方針（案）: Compressor.js を入れ、上限（`maxImageBytes`）を超えた写真だけを圧縮する。上限以下の写真は今までどおりそのまま送る（notes/image-compression.md 7.1）**。圧縮するなら、ライブラリ（第一候補: Compressor.js）、長辺・画質、HEIC の扱い。比較は [notes/image-compression.md](notes/image-compression.md)（一時メモ）。圧縮する場合、7 の進み具合は要らなくなる可能性がある
+7. （**保留**。2026-10-12: 遅い環境には圧縮のほうが効くので、進み具合の優先度は低い）アップロードの進み具合を Android だけ Fetch Upload Streams で出すか（2.3。notes/upload-progress.md）。出す場合は、API Gateway（execute-api）が HTTP/2 に対応しているかを確かめる（対応していなければ使えない）
+8. 証明書の画像をブラウザで圧縮してから送るか。**2026-10-12 に実装: Compressor.js を入れ、上限（`maxImageBytes`）を超えた写真だけを縮める。上限以下の写真は今までどおりそのまま送る（3章、notes/image-compression.md 7.1）**。残り: 画像解析サーバーが縮めた写真で足りるかの確認、iPhone・Android の実機での確認。圧縮するなら、ライブラリ（第一候補: Compressor.js）、長辺・画質、HEIC の扱い。比較は [notes/image-compression.md](notes/image-compression.md)（一時メモ）。圧縮する場合、7 の進み具合は要らなくなる可能性がある
 9. （保留）Android の「PC 版サイトを表示」（Chrome・Samsung Internet・Firefox。大画面のタブレットの Chrome は既定でこの表示）では User-Agent から `Android` が消え、「カメラを起動」のボタンが出ない（1つの選択欄になる。3章「証明書の画像の選択」）。対策の案は、判定に `matchMedia('(pointer: coarse)')`（指で操作する端末）を足すこと。ただし iPhone・iPad にもボタンが2つ出る（iPad は Mac を名乗るので、iOS だけ除く判定は外れやすい）ため、影響が大きく保留。PC 版表示で `navigator.userAgentData.platform` と `navigator.platform` が何を返すかは、実機で確かめていない
 10. （保留。2026-10-13）画像の大きさのエラーの表示位置をそろえるか。今は、送る前の確認（「画像のサイズが大きすぎます（4MB まで）」）は画像の選択欄の下（`image-problem`）、送ったあとの API の 413（「画像のサイズが大きすぎます」。数字なし）はボタンの下のエラーの枠（`ErrorMessage`）に出る。どちらも同じ写真についてのエラーなので、同じ場所にそろえる案がある

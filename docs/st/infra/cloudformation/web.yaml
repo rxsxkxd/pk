@@ -83,6 +83,7 @@ Resources:
         SigningProtocol: sigv4
 
   # Security headers of the SPA (web/DESIGN.md 9). Unified: the API is the same origin, so 'self' covers it.
+  # img-src blob:: Compressor.js loads a photo over the limit through a blob: URL to shrink it.
   ResponseHeadersPolicy:
     Type: AWS::CloudFront::ResponseHeadersPolicy
     Properties:
@@ -92,8 +93,8 @@ Resources:
           ContentSecurityPolicy:
             ContentSecurityPolicy: !If
               - Unified
-              - !Sub "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action ${FormActionSource}; frame-ancestors 'none'"
-              - !Sub "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: ${ApiBaseUrl}; connect-src 'self' ${ApiBaseUrl}; form-action ${FormActionSource}; frame-ancestors 'none'"
+              - !Sub "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; form-action ${FormActionSource}; frame-ancestors 'none'"
+              - !Sub "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: ${ApiBaseUrl}; connect-src 'self' ${ApiBaseUrl}; form-action ${FormActionSource}; frame-ancestors 'none'"
             Override: true
           ContentTypeOptions:
             Override: true

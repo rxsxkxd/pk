@@ -1,10 +1,19 @@
+import { flushPromises } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { ApiError } from '../src/api/client.ts';
 import { MAX_IMAGE_BYTES } from '../src/config.ts';
+import { shrinkToFit } from '../src/image/shrink.ts';
 import { checkFile, messageFor, sizeLabel, useTicketStore } from '../src/stores/ticket.ts';
 import { API, config, photo, setupStore } from './helpers.ts';
 
-beforeEach(() => setupStore());
+// The real compression needs a canvas (not in happy-dom); its steps are tested in shrink.test.ts.
+vi.mock('../src/image/shrink.ts', () => ({ shrinkToFit: vi.fn() }));
+const shrink = vi.mocked(shrinkToFit);
+
+beforeEach(() => {
+  setupStore();
+  shrink.mockReset();
+});
 afterEach(() => vi.unstubAllGlobals());
 
 describe('checkFile (before sending)', () => {
@@ -47,14 +56,100 @@ describe('upload limit of the environment (config.json maxImageBytes)', () => {
     expect(sizeLabel(bytes)).toBe(label);
   });
 
-  test('the store uses the limit in config.json', () => {
+  test('the store uses the limit in config.json (a photo that cannot be shrunk is too large)', async () => {
+    shrink.mockResolvedValue(undefined);
     const store = useTicketStore();
     store.file = photo('a.jpg', 'image/jpeg', 2 << 20);
     expect(store.fileProblem).toBeUndefined();
+    expect(shrink).not.toHaveBeenCalled();
     setupStore({ ...config(), maxImageBytes: 1 << 20 });
     const limited = useTicketStore();
     limited.file = photo('a.jpg', 'image/jpeg', 2 << 20);
+    await flushPromises();
+    expect(shrink).toHaveBeenCalledWith(limited.file, 1 << 20);
     expect(limited.fileProblem).toBe('画像のサイズが大きすぎます（1MB まで）');
+  });
+});
+
+// notes/image-compression.md 7.1: only a photo over the limit is shrunk; one within it is sent as it is.
+describe('shrinking a photo over the limit', () => {
+  // A small limit keeps the dummy photos small (the tests compare File objects).
+  const LIMIT = 4096;
+  beforeEach(() => setupStore({ ...config(), maxImageBytes: LIMIT }));
+  const big = () => photo('IMG_0001.jpg', 'image/jpeg', LIMIT + 1);
+  const small = () => photo('IMG_0001.jpg', 'image/jpeg', 1024);
+
+  test('a photo within the limit is sent as it is, without shrinking', async () => {
+    const store = useTicketStore();
+    const file = small();
+    store.file = file;
+    await flushPromises();
+    expect(shrink).not.toHaveBeenCalled();
+    const request = vi.fn(async () => 'ok');
+    await store.send(request);
+    expect(request).toHaveBeenCalledWith(API, file);
+  });
+
+  test('while shrinking nothing can be sent; then the shrunk photo is sent', async () => {
+    let done!: (f: File) => void;
+    shrink.mockReturnValue(new Promise((r) => (done = r)));
+    const store = useTicketStore();
+    store.file = big();
+    expect([store.shrinking, store.canSend, store.fileProblem]).toEqual([true, false, undefined]);
+    const request = vi.fn(async () => 'ok');
+    expect(await store.send(request)).toBeUndefined();
+
+    const shrunk = photo('IMG_0001.jpg', 'image/jpeg', 2048);
+    done(shrunk);
+    await flushPromises();
+    expect([store.shrinking, store.canSend]).toEqual([false, true]);
+    expect(store.shrunk).toBe(shrunk);
+    await store.send(request);
+    expect(request).toHaveBeenCalledWith(API, shrunk);
+  });
+
+  test('a photo that cannot be shrunk below the limit (or fails) is too large, as before', async () => {
+    shrink.mockResolvedValue(undefined);
+    const store = useTicketStore();
+    store.file = big();
+    await flushPromises();
+    expect(store.shrinking).toBe(false);
+    expect(store.fileProblem).toBe('画像のサイズが大きすぎます（4KB まで）');
+    expect(store.canSend).toBe(false);
+  });
+
+  test('an unsupported format is not shrunk', async () => {
+    const store = useTicketStore();
+    store.file = photo('a.pdf', 'application/pdf', LIMIT + 1);
+    await flushPromises();
+    expect(shrink).not.toHaveBeenCalled();
+  });
+
+  test('choosing another photo while shrinking drops the old result', async () => {
+    let done!: (f: File) => void;
+    shrink.mockReturnValueOnce(new Promise((r) => (done = r)));
+    const store = useTicketStore();
+    store.file = big();
+    const second = small();
+    store.file = second;
+    done(photo('old.jpg', 'image/jpeg', 1024));
+    await flushPromises();
+    expect(store.shrinking).toBe(false);
+    expect(store.shrunk).toBeNull();
+    const request = vi.fn(async () => 'ok');
+    await store.send(request);
+    expect(request).toHaveBeenCalledWith(API, second);
+  });
+
+  test('reset clears the shrunk photo', async () => {
+    shrink.mockResolvedValue(photo('IMG_0001.jpg', 'image/jpeg', 1024));
+    const store = useTicketStore();
+    store.file = big();
+    await flushPromises();
+    store.reset();
+    expect(store.file).toBeNull();
+    expect(store.shrunk).toBeNull();
+    expect(store.shrinking).toBe(false);
   });
 });
 

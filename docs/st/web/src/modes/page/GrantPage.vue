@@ -22,7 +22,13 @@ async function grant(): Promise<void> {
   <main class="mx-auto max-w-sm space-y-6 px-4 py-8">
     <h1 class="text-xl font-bold">チケット発行</h1>
 
-    <CertificateImagePicker v-model="store.file" :problem="store.fileProblem" :disabled="sending" />
+    <CertificateImagePicker
+      v-model="store.file"
+      :problem="store.fileProblem"
+      :disabled="sending"
+      :shrinking="store.shrinking"
+      :shrunk-size="store.shrunk?.size"
+    />
 
     <button
       type="button"

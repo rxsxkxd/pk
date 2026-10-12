@@ -1,9 +1,12 @@
 // 画面遷移方式（src/modes/page/）: API、発行画面、SPA のチケット画面。
 import { flushPromises } from '@vue/test-utils';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { shrinkToFit } from '../../src/image/shrink.ts';
 import { grantForPage, qrUrl, TicketRouteSchema } from '../../src/modes/page/api.ts';
 import { routes } from '../../src/modes/page/index.ts';
-import { API, choosePhoto, CODE, json, mountAt, photo, SIG, stubFetch } from '../helpers.ts';
+import { API, choosePhoto, CODE, config, json, mountAt, photo, SIG, stubFetch } from '../helpers.ts';
+
+vi.mock('../../src/image/shrink.ts', () => ({ shrinkToFit: vi.fn() }));
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -92,6 +95,26 @@ describe('grant screen', () => {
     await flushPromises();
     expect(replace).toHaveBeenCalledWith({ path: `/tickets/${CODE}`, query: { sig: SIG } });
     expect(router.currentRoute.value.fullPath).toBe(`/tickets/${CODE}?sig=${SIG}`);
+  });
+
+  test('a photo over the limit is shrunk: "縮小しています" while working, then the sizes, and the shrunk photo is sent', async () => {
+    let done!: (f: File) => void;
+    vi.mocked(shrinkToFit).mockReturnValueOnce(new Promise((r) => (done = r)));
+    const fetch = stubFetch(json(201, pageTicket));
+    const { wrapper } = await mountAt(routes, '/', { ...config(), maxImageBytes: 1 << 20 });
+    await choosePhoto(wrapper, photo('IMG_0001.jpg', 'image/jpeg', 2 << 20));
+    expect(wrapper.get('[data-testid="image-shrinking"]').text()).toBe('画像を縮小しています…');
+    expect(wrapper.get('[data-testid="grant-page"]').attributes('disabled')).toBeDefined();
+
+    const shrunk = photo('IMG_0001.jpg', 'image/jpeg', 512 << 10);
+    done(shrunk);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="image-shrinking"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="image-shrunk"]').text()).toBe('縮小しました（2.0MB → 512KB）');
+    await wrapper.get('[data-testid="grant-page"]').trigger('click');
+    await flushPromises();
+    const sent = (fetch.mock.calls[0]![1]?.body as FormData).get('image') as File;
+    expect([sent.name, sent.size]).toEqual([shrunk.name, shrunk.size]);
   });
 
   // REJECT and RETRY from the image analysis server come back as separate codes with separate messages.

@@ -166,7 +166,7 @@ cat > $WORK/headers.json <<EOF
   "Name": "ticketqr-web-$IMPL-headers",
   "SecurityHeadersConfig": {
     "ContentSecurityPolicy": {
-      "ContentSecurityPolicy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: $API_URL; connect-src 'self' $API_URL; form-action 'none'; frame-ancestors 'none'",
+      "ContentSecurityPolicy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: $API_URL; connect-src 'self' $API_URL; form-action 'none'; frame-ancestors 'none'",
       "Override": true
     },
     "ContentTypeOptions": { "Override": true },
@@ -237,7 +237,7 @@ echo $WEB_URL
 
 上のコマンドの途中で、次のように変える。そのあと、3.2 の 3・4（API の `PUBLIC_BASE_URL` と `config.json`）を行う。
 
-- `headers.json` の CSP: `img-src 'self' data:; connect-src 'self'`（`$API_URL` を消す）。フォーム送信方式を使うなら `form-action 'self'`
+- `headers.json` の CSP: `img-src 'self' data: blob:; connect-src 'self'`（`$API_URL` を消す）。フォーム送信方式を使うなら `form-action 'self'`
 - `distribution.json`: `Origins` に API を足し、`/v1/*` の振る舞い（`CacheBehaviors`）を足す。`"Comment"` は `"ticketqr-web-$IMPL SPA + API"` にする
 
 ```sh
@@ -350,6 +350,7 @@ curl -sI $WEB_URL/ | grep -i '^content-security-policy'
 | 画像を送ると 403（WAF を付けた環境） | WAF の `SizeRestrictions_BODY` が画像（8KB 超）をブロックしている、または画像のバイト列がボディを検査するルールに誤って一致している（13.5） |
 | 開発者ツールに CSP のエラー | CSP の `connect-src` / `img-src` の API のオリジンが `$API_URL` と一致しているか（3章の `ApiBaseUrl`、4章の `headers.json`）。`config.json` が読めないときは、`connect-src` に `'self'` があるか |
 | 古い画面のまま | 6章の無効化（`create-invalidation`）をしたか |
+| 上限を超えた写真が「画像のサイズが大きすぎます」になり、縮小されない | CSP の `img-src` に `blob:` があるか（3章のテンプレートは入れてある。4章の手動の `headers.json` も確かめる）。開発者ツールに CSP のエラーが出る。HEIC をデコードできない端末（iOS 16 以前、Android の Chrome）では、HEIC の写真は縮められない（仕様） |
 
 ### 7.1 統合での API のエラーの応答
 

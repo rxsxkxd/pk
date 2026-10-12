@@ -32,10 +32,10 @@ export function checkFile(file: File | null, maxBytes = MAX_IMAGE_BYTES): string
 }
 
 // API のエラーを画面に出す文言にする（DESIGN.md 4.4）。
-export function messageFor(err: unknown, maxBytes = MAX_IMAGE_BYTES): string {
+export function messageFor(err: unknown): string {
   switch (err instanceof ApiError ? err.code : '') {
-    case 'PAYLOAD_TOO_LARGE':
-      return tooLarge(maxBytes);
+    case 'PAYLOAD_TOO_LARGE': // API の上限は SPA からは分からない（config.json とずれることもある）ので、数字は出さない
+      return '画像のサイズが大きすぎます';
     case 'UNSUPPORTED_MEDIA_TYPE':
       return 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）';
     case 'IMAGE_REJECTED': // 解析サーバーの判定が REJECT
@@ -72,7 +72,7 @@ export const useTicketStore = defineStore('ticket', () => {
       return result;
     } catch (err) {
       status.value = 'failed';
-      error.value = messageFor(err, config.maxImageBytes);
+      error.value = messageFor(err);
       return undefined;
     }
   }

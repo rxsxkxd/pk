@@ -36,7 +36,6 @@ describe('upload limit of the environment (config.json maxImageBytes)', () => {
       '画像のサイズが大きすぎます（1MB まで）',
     );
     expect(checkFile(photo('a.jpg', 'image/jpeg', 1 << 20), 1 << 20)).toBeUndefined();
-    expect(messageFor(new ApiError('PAYLOAD_TOO_LARGE', ''), 3 << 19)).toBe('画像のサイズが大きすぎます（1.5MB まで）');
   });
 
   test.each([
@@ -60,7 +59,7 @@ describe('upload limit of the environment (config.json maxImageBytes)', () => {
 });
 
 test.each([
-  ['PAYLOAD_TOO_LARGE', '画像のサイズが大きすぎます（4MB まで）'],
+  ['PAYLOAD_TOO_LARGE', '画像のサイズが大きすぎます'], // no number: the API's limit is not known to the SPA
   ['UNSUPPORTED_MEDIA_TYPE', 'この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）'],
   ['IMAGE_REJECTED', 'この証明書の画像ではチケットを発行できません'],
   ['IMAGE_RETRY', '画像をうまく確認できませんでした。明るい場所で、証明書全体が写るように撮り直してください'],

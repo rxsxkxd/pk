@@ -314,7 +314,7 @@ const TicketRouteSchema = z.object({ code: TicketCode, sig: Sig });   // SPA の
 
 | API のエラーコード | 画面の表示（案） |
 |---|---|
-| `PAYLOAD_TOO_LARGE`（413） | 画像のサイズが大きすぎます（4MB まで）。「4MB」は `maxImageBytes` から作る |
+| `PAYLOAD_TOO_LARGE`（413） | 画像のサイズが大きすぎます（数字は出さない。API の上限は SPA からは分からず、`config.json` の `maxImageBytes` とずれることもあるため）。送る前の確認（3章）では「画像のサイズが大きすぎます（4MB まで）」と出す（「4MB」は `maxImageBytes` から作る） |
 | `UNSUPPORTED_MEDIA_TYPE`（415） | この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP） |
 | `IMAGE_REJECTED`（422。解析サーバーの判定が `REJECT`） | この証明書の画像ではチケットを発行できません |
 | `IMAGE_RETRY`（422。解析サーバーの判定が `RETRY`） | 画像をうまく確認できませんでした。明るい場所で、証明書全体が写るように撮り直してください |
@@ -502,3 +502,4 @@ Strict-Transport-Security: max-age=31536000
 7. （優先度低）アップロードの進み具合を Android だけ Fetch Upload Streams で出すか（2.3）。出す場合は、API Gateway（execute-api）が HTTP/2 に対応しているかを確かめる（対応していなければ使えない）
 8. 証明書の画像をブラウザで圧縮してから送るか（今は「証明書の画像は加工せずに送る」方針）。**2026-10-12 の方針（案）: Compressor.js を入れ、上限（`maxImageBytes`）を超えた写真だけを圧縮する。上限以下の写真は今までどおりそのまま送る（notes/image-compression.md 7.1）**。圧縮するなら、ライブラリ（第一候補: Compressor.js）、長辺・画質、HEIC の扱い。比較は [notes/image-compression.md](notes/image-compression.md)（一時メモ）。圧縮する場合、7 の進み具合は要らなくなる可能性がある
 9. （保留）Android の「PC 版サイトを表示」（Chrome・Samsung Internet・Firefox。大画面のタブレットの Chrome は既定でこの表示）では User-Agent から `Android` が消え、「カメラを起動」のボタンが出ない（1つの選択欄になる。3章「証明書の画像の選択」）。対策の案は、判定に `matchMedia('(pointer: coarse)')`（指で操作する端末）を足すこと。ただし iPhone・iPad にもボタンが2つ出る（iPad は Mac を名乗るので、iOS だけ除く判定は外れやすい）ため、影響が大きく保留。PC 版表示で `navigator.userAgentData.platform` と `navigator.platform` が何を返すかは、実機で確かめていない
+10. （保留。2026-10-13）画像の大きさのエラーの表示位置をそろえるか。今は、送る前の確認（「画像のサイズが大きすぎます（4MB まで）」）は画像の選択欄の下（`image-problem`）、送ったあとの API の 413（「画像のサイズが大きすぎます」。数字なし）はボタンの下のエラーの枠（`ErrorMessage`）に出る。どちらも同じ写真についてのエラーなので、同じ場所にそろえる案がある

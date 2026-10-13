@@ -1,5 +1,7 @@
 # Tailwind CSS 4 の古いブラウザ向けフォールバックと、3.4 に戻すかの調査
 
+> **2026-10-13 に 3.4（3.4.19）に戻した**（4章の作業。クラスの変更は `has-disabled:` → `has-[:disabled]:` の2か所だけで、flex の `gap` はその前に使わなくなっていた）。ビルドの CSS に `@layer`・`oklch()`・`color-mix()`・`@property`・論理プロパティがないことを確かめた（`:where()` は Preflight の5つだけ）。
+>
 > 2026-10-10 調査。対象は今の SPA（Tailwind CSS 4.3.3、`@tailwindcss/vite`）と、対応ブラウザの要件（../DESIGN.md 2.1。iOS 13 / Android 9）。決めること: ../DESIGN.md 11章の 5。
 
 ## 1. 結論

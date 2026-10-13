@@ -1,6 +1,5 @@
 /// <reference types="vitest/config" />
 import { fileURLToPath } from 'node:url';
-import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
 import { GRANT_MODES, type GrantMode } from './src/modes/types.ts';
@@ -13,10 +12,13 @@ if (!GRANT_MODES.includes(grantMode)) {
 }
 
 export default defineConfig({
-  plugins: [vue(), tailwindcss()],
+  plugins: [vue()], // Tailwind CSS 3.4 runs through PostCSS (postcss.config.js)
   resolve: {
     alias: { '@mode': fileURLToPath(new URL(`./src/modes/${grantMode}/index.ts`, import.meta.url)) },
   },
+  // CSS for the supported browsers (DESIGN.md 2.1): the minifier must not turn it into newer syntax. The JS
+  // target (build.target) is a separate change (DESIGN.md 2.4).
+  build: { cssTarget: ['safari13', 'chrome80'] },
   // Local development: forward API calls to the local API (Go `make run` / Node `npm run dev`), so the SPA
   // and the API share one origin and no CORS is needed (DESIGN.md 8).
   server: { proxy: { '/v1': 'http://localhost:8080' } },

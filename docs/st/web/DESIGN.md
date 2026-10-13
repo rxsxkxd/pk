@@ -34,7 +34,7 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 | UI | **Vue 3.5**（Composition API、`<script setup lang="ts">`） | |
 | ルーティング | **vue-router** 5（hash モード） | SPA の発行画面と SPA のチケット画面の2つ。hash モードなので、S3 に直接置いてもリロードや直接アクセスで 404 にならない |
 | 状態管理 | **Pinia** 4 | 発行の状態（送信中、結果、エラー）を1つのストアにまとめる（5章） |
-| スタイル | **Tailwind CSS** 4（`@tailwindcss/vite`） | `src/style.css` に `@import "tailwindcss";` の1行だけ。設定ファイルは置かない。**iOS 13 に対応しないため見直す（2.4、11章）** |
+| スタイル | **Tailwind CSS 3.4**（3.4.19。`v3-lts`）+ PostCSS + autoprefixer | 2026-10-13 に 4 から戻した（4 は iOS 13〜15.3 でスタイルがまったく付かない。notes/tailwind-compat.md）。`tailwind.config.js`（`content` だけ）、`postcss.config.js`、`src/style.css` は `@tailwind` の3行。autoprefixer の対象は `package.json` の `browserslist`（`ios_saf >= 13`、`chrome >= 80`。Chrome の下限は仮。11章の 6） |
 | 検証 | **zod** 4 | 実行時設定（`config.json`）、API のレスポンス（成功・エラー）、チケット画面の URL パラメータを検証する |
 | 言語 | TypeScript **6** | 型チェックは `vue-tsc --noEmit`。vue-tsc が TypeScript 7（Go 製のコンパイラー）に対応していないため、Node 版（7）とは違い 6 系に固定する |
 | テスト | Vitest + `@vue/test-utils` + happy-dom | ストア、API クライアント、コンポーネント。ブラウザでの通しの確認は E2E（Playwright。E2E.md） |
@@ -129,7 +129,7 @@ const supportsRequestStreams = (() => {
 | 1 | Vite の `build.target` を iOS 13 / Android 9 の Chrome に合わせる（例: `['es2019', 'safari13']`） | Vite 8 の既定のターゲットは新しいブラウザ（Safari 16 以降など）向けで、`?.` や `??` をそのまま出力する |
 | 2 | `main.ts` のトップレベルの `await` をやめ、関数の中で `await` する | トップレベルの `await` は Safari 15 から。変換もできない（ビルドがエラーになる） |
 | 3 | `AbortSignal.timeout()` を、`AbortController` と `setTimeout` に置き換える（2.2） | Safari 16 から |
-| 4 | **Tailwind CSS 4 をやめる**（Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書く。11章で決める。調査では 3.4 を推奨: [notes/tailwind-compat.md](notes/tailwind-compat.md)） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
+| 4 | **済み（2026-10-13）**: Tailwind CSS 3.4 に戻した（[notes/tailwind-compat.md](notes/tailwind-compat.md)）。あわせて CSS の出力先を `build.cssTarget: ['safari13', 'chrome80']` にした（JS の `build.target` は 1 のまま未対応）。flex の `gap` は使っていない（grid の `gap` だけ。iOS 12 から使える） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
 | 5 | 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
 | 6 | （検討中・優先度低）Fetch Upload Streams の送信（2.3）と、Android での送信中の進み具合の表示 | 新しい機能。採用が決まってから行う |
 | 7 | 実機での確認: iOS 13 の端末（またはクラウドの実機サービス）と、Android 9 + Chrome 138 以下 | E2E の Playwright の WebKit は最新の WebKit で、Safari 13 の動きは再現しない |
@@ -359,7 +359,9 @@ const t = await store.send(grantForPage);   // 失敗なら undefined（error �
 st/web/
 ├── DESIGN.md
 ├── package.json            # scripts: dev / build / preview / typecheck / test / format
-├── vite.config.ts          # @vitejs/plugin-vue、@tailwindcss/vite、GRANT_MODE → 別名 @mode（4.1）、開発時のプロキシ（8章）
+├── vite.config.ts          # @vitejs/plugin-vue、GRANT_MODE → 別名 @mode（4.1）、CSS の対象ブラウザ（cssTarget）、開発時のプロキシ（8章）
+├── tailwind.config.js      # Tailwind CSS 3.4 の設定（content だけ）
+├── postcss.config.js       # tailwindcss、autoprefixer
 ├── tsconfig.json           # 型の確認用に @mode を src/modes/page に向ける（ほかの方式は ModeEntry で形を確かめる）
 ├── index.html
 ├── public/
@@ -368,7 +370,7 @@ st/web/
 │   ├── main.ts             # 設定を読み込み、Pinia と router（@mode のルート）を入れてマウント
 │   ├── App.vue             # <RouterView>
 │   ├── router.ts           # hash モード。方式のルートに、知らないパスを / に戻すルートを足す
-│   ├── style.css           # @import "tailwindcss";
+│   ├── style.css           # @tailwind base / components / utilities
 │   ├── config.ts           # config.json の読み込みと検証（zod）
 │   ├── env.d.ts            # vite/client の型
 │   ├── platform.ts         # 端末の判定（isAndroid）
@@ -502,7 +504,7 @@ Strict-Transport-Security: max-age=31536000
 2. 配置方式（推奨: CloudFront + 非公開 S3）と、独自ドメインを使うか
 3. 7章の API 側の変更（CORS、Origin の照合）を、フロントエンドの実装より先に行ってよいか
 4. 画面の文言・デザインの指定（今はシンプルな2画面を想定）
-5. スタイルの方式: Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書くか（Tailwind CSS 4 は iOS 13 に対応しない。2.4）。調査（2026-10-10）では 3.4（`v3-lts`、3.4.19）を推奨: [notes/tailwind-compat.md](notes/tailwind-compat.md)
+5. スタイルの方式。**2026-10-13: Tailwind CSS 3.4 に戻した（2章、2.4 の 4）**。もとの論点: Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書くか（Tailwind CSS 4 は iOS 13 に対応しない。2.4）。調査（2026-10-10）では 3.4（`v3-lts`、3.4.19）を推奨: [notes/tailwind-compat.md](notes/tailwind-compat.md)
 6. Android 9 で対応する Chrome の下限の版（Android 9 の Chrome は 138 で更新が止まっている。2.1）
 7. （優先度低）アップロードの進み具合を Android だけ Fetch Upload Streams で出すか（2.3）。出す場合は、API Gateway（execute-api）が HTTP/2 に対応しているかを確かめる（対応していなければ使えない）
 8. 証明書の画像をブラウザで圧縮してから送るか（今は「証明書の画像は加工せずに送る」方針）。**2026-10-12 の方針（案）: Compressor.js を入れ、上限（`maxImageBytes`）を超えた写真だけを圧縮する。上限以下の写真は今までどおりそのまま送る（notes/image-compression.md 7.1）**。圧縮するなら、ライブラリ（第一候補: Compressor.js）、長辺・画質、HEIC の扱い。比較は [notes/image-compression.md](notes/image-compression.md)（一時メモ）。圧縮する場合、7 の進み具合は要らなくなる可能性がある

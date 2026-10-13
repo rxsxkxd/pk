@@ -181,7 +181,7 @@ API 側は、3パターンすべてに対応する前提で、今の実装（QR 
 
 | 項目 | 内容 |
 |---|---|
-| 技術 | Vite 8、Vue 3.5、vue-router（hash モード）、Pinia、Tailwind CSS 4、zod |
+| 技術 | Vite 8、Vue 3.5、vue-router（hash モード）、Pinia、Tailwind CSS 3.4、zod |
 | 利用者 | スマートフォン（iPhone / Android）のブラウザが主 |
 | 証明書の画像 | 加工せず、そのまま `FormData` で送る。上限（`config.json` の `maxImageBytes`。既定 4MB）を超えるときは送る前に知らせる |
 

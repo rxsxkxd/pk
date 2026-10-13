@@ -37,6 +37,7 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 | スタイル | **Tailwind CSS 3.4**（3.4.19。`v3-lts`）+ PostCSS + autoprefixer | 2026-10-13 に 4 から戻した（4 は iOS 13〜15.3 でスタイルがまったく付かない。notes/tailwind-compat.md）。`tailwind.config.js`（`content` だけ）、`postcss.config.js`、`src/style.css` は `@tailwind` の3行。autoprefixer の対象は `package.json` の `browserslist`（`ios_saf >= 13`、`chrome >= 80`。Chrome の下限は仮。11章の 6） |
 | 検証 | **zod** 4 | 実行時設定（`config.json`）、API のレスポンス（成功・エラー）、チケット画面の URL パラメータを検証する |
 | 言語 | TypeScript **6** | 型チェックは `vue-tsc --noEmit`。vue-tsc が TypeScript 7（Go 製のコンパイラー）に対応していないため、Node 版（7）とは違い 6 系に固定する |
+| 古いブラウザ向けの補い | **core-js** 3.50.0（版は固定） | 対象のブラウザにない組み込みの関数を補う（今は `Object.hasOwn` だけ。2.4 の 5）。JS は gzip で約 4KB 増える。インストール時のスクリプト（`postinstall`。寄付のお願いを表示するだけ）は許可していない（npm が警告を出すが、動作には影響しない） |
 | 画像の縮小 | **Compressor.js** 1.4.0（`compressorjs`。版は固定） | 上限を超えた写真だけを縮めて JPEG にする（3章）。npm の依存は3つに見えるが、`is-blob`・`blueimp-canvas-to-blob` は実行時に使われない（説明は notes/image-compression.md 6.1） |
 | テスト | Vitest + `@vue/test-utils` + happy-dom | ストア、API クライアント、コンポーネント。ブラウザでの通しの確認は E2E（Playwright。E2E.md） |
 
@@ -123,17 +124,17 @@ const supportsRequestStreams = (() => {
 | リダイレクト | ストリームのボディは送り直せないので、リダイレクト（303 以外）されると失敗する。画面遷移方式は 201 の JSON を受け取るので、影響しない |
 | 対象 | 画面遷移方式（メイン）とその場表示方式の `fetch` だけ。フォーム送信方式は普通のフォームなので対象外 |
 
-### 2.4 古いブラウザに対応するための実装の変更（保留）
+### 2.4 古いブラウザに対応するための実装の変更（一部済み）
 
-今の実装は、2.1 の要件を満たしていない。必要な変更を次にまとめる（**実装は保留**）。
+今の実装は、2.1 の要件をまだ満たしていない。必要な変更を次にまとめる。2026-10-13 に 1〜4 と 5 の一部を行った。**残りは 5 の zod 4 の `BigInt`（保留）と、6（検討中）・7（実機での確認）**。
 
 | # | 変更 | 理由 |
 |---|---|---|
-| 1 | Vite の `build.target` を iOS 13 / Android 9 の Chrome に合わせる（例: `['es2019', 'safari13']`） | Vite 8 の既定のターゲットは新しいブラウザ（Safari 16 以降など）向けで、`?.` や `??` をそのまま出力する |
-| 2 | `main.ts` のトップレベルの `await` をやめ、関数の中で `await` する | トップレベルの `await` は Safari 15 から。変換もできない（ビルドがエラーになる） |
-| 3 | `AbortSignal.timeout()` を、`AbortController` と `setTimeout` に置き換える（2.2） | Safari 16 から |
+| 1 | **済み（2026-10-13）**: `vite.config.ts` の `build.target`（と `cssTarget`）を `['safari13', 'chrome80']` にした（Chrome の下限は仮。11章の 6）。`?.`・`??`・`??=`・クラスのフィールドが変換されることを、ビルドの解析で確かめた | Vite 8 の既定の出力先は新しいブラウザ向けで、新しい構文をそのまま出力する |
+| 2 | **済み（2026-10-13）**: `src/main.ts` の起動の処理を関数（`start()`）にし、トップレベルの `await` をやめた | トップレベルの `await` は Safari 15 から。変換もできない（ビルドがエラーになる） |
+| 3 | **済み（2026-10-13）**: `src/api/client.ts` のタイムアウトを `AbortController` と `setTimeout` にした（応答の読み終わりまでを 30 秒で打ち切り、終わったらタイマーを止める） | `AbortSignal.timeout()` は Safari 16 / Chrome 124 から |
 | 4 | **済み（2026-10-13）**: Tailwind CSS 3.4 に戻した（[notes/tailwind-compat.md](notes/tailwind-compat.md)）。あわせて CSS の出力先を `build.cssTarget: ['safari13', 'chrome80']` にした（JS の `build.target` は 1 のまま未対応）。`gap` は使っていない（Android の2つのボタンも、縦並びにしてからは `space-y` で間隔を空ける） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
-| 5 | **調査済み（2026-10-13。[notes/builtin-compat.md](notes/builtin-compat.md)）: zod 4 が読み込み時に `BigInt`（iOS 14 から）を使うため、iOS 13 では JS 全体が止まる。valibot（推奨）か zod 3 に替える。ほかの新しい機能は今のコードが通らない経路だけ。** もとの項目: 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
+| 5 | **一部済み（2026-10-13。[notes/builtin-compat.md](notes/builtin-compat.md)）: Pinia の `Object.hasOwn` は core-js（`src/main.ts` の先頭で `core-js/actual/object/has-own` だけを読み込む）で補った。Vue の `toSorted()` などは今のコードが呼ばない。残りは zod 4 の `BigInt`（iOS 14 から。読み込み時に使うため、iOS 13 では JS 全体が止まる）で、対応は保留（valibot か zod 3 に替える案）。** もとの項目: 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
 | 6 | （検討中・優先度低）Fetch Upload Streams の送信（2.3）と、Android での送信中の進み具合の表示 | 新しい機能。採用が決まってから行う |
 | 7 | 実機での確認: iOS 13 の端末（またはクラウドの実機サービス）と、Android 9 + Chrome 138 以下 | E2E の Playwright の WebKit は最新の WebKit で、Safari 13 の動きは再現しない |
 
@@ -302,7 +303,7 @@ export async function grantInline(apiBaseUrl: string, file: File): Promise<Inlin
 - フォーム送信方式は `fetch` を使わないので、`src/modes/form/api.ts` は送信先の URL（`grantFormAction`。`{apiBaseUrl}/v1/tickets`）を作るだけ
 - `grantForPage` と `grantInline` は、どちらも `FormData` で送る。Content-Type はブラウザが boundary 付きで付ける
 - `fetch` の `FormData` 送信は CORS の「単純リクエスト」で、`Accept` ヘッダーを付けても変わらない。そのためプリフライトは発生しない。ただし、レスポンスを読むには API が `Access-Control-Allow-Origin` を返す必要がある（7章）
-- タイムアウト: 30秒（API Gateway の上限 29 秒より少し長く）。`AbortController` と `setTimeout` で作る（2.2。今の実装の `AbortSignal.timeout()` は iOS 13 で使えないので置き換える）。タイムアウトや通信エラーは「通信できませんでした」として扱う
+- タイムアウト: 30秒（API Gateway の上限 29 秒より少し長く）。`AbortController` と `setTimeout` で作る（2.2。2026-10-13 に `AbortSignal.timeout()` から置き換えた）。タイムアウトや通信エラーは「通信できませんでした」として扱う
 - （検討中・優先度低）Android（Fetch Upload Streams に対応するブラウザ）だけ、証明書の画像をストリームで送って進み具合を出す案がある。非対応や失敗のときは `FormData` で送る（2.3）
 - チケット画面の QR は、`grantForPage` の結果の `qrUrl` ではなく、URL のパラメータから `qrUrl()` で組み立てる（リロード後も同じ方法で描画するため）
 

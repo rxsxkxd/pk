@@ -18,7 +18,7 @@ export default defineConfig({
   },
   // Output for the supported browsers (DESIGN.md 2.1, 2.4): newer syntax (?. ?? ??= class fields) is converted
   // and the CSS minifier keeps old syntax. Android's Chrome floor is not decided yet: 80 is provisional (as in
-  // package.json "browserslist"). Built-in functions are not converted (src/polyfills.ts).
+  // package.json "browserslist"). Built-in functions are not converted (core-js in src/main.ts).
   build: { target: ['safari13', 'chrome80'], cssTarget: ['safari13', 'chrome80'] },
   // Local development: forward API calls to the local API (Go `make run` / Node `npm run dev`), so the SPA
   // and the API share one origin and no CORS is needed (DESIGN.md 8).

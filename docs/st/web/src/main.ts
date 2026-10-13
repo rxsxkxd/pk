@@ -1,6 +1,8 @@
 // 設定（config.json）を読み込み、Pinia と router を入れてマウントする。設定が読めなければ起動しない。
 // 発行方式はビルド時に決まる（'@mode' = src/modes/$GRANT_MODE。vite.config.ts）。
-import './polyfills.ts'; // first: before the libraries run
+// 対象のブラウザ（iOS 13 / Android 9）にない組み込みの関数を、ライブラリが使う前に補う（core-js。必要な機能だけ）。
+// Object.hasOwn: iOS 15.4 / Chrome 93 から。Pinia が $patch（オブジェクトを渡したとき）で使う（notes/builtin-compat.md）。
+import 'core-js/actual/object/has-own';
 import { routes } from '@mode';
 import { createPinia } from 'pinia';
 import { createApp } from 'vue';

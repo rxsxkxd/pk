@@ -5,7 +5,7 @@
 | 項目 | 現状 |
 |---|---|
 | 実装言語 | API は Go 1.27 で、Lambda（`provided.al2023`、arm64）で動かす。画面は Vue 3.5 + TypeScript の SPA。 |
-| 対応 OS | 仕様は iOS 13 以上 / Android 9 以上で、CSS は対応済み（Tailwind CSS 3.4）だが、**JS はまだ満たしていない**（iOS 13 では zod が読み込み時に `BigInt` を使って画面が真っ白になる。トップレベルの `await`、`AbortSignal.timeout()` なども残り、実機での確認もしていない）。 |
+| 対応 OS | 仕様は iOS 13 以上 / Android 9 以上で、CSS は対応済み（Tailwind CSS 3.4）だが、JS も、構文の変換・トップレベルの `await`・`AbortSignal.timeout()`・`Object.hasOwn` は対応済みだが、**iOS 13 では zod が読み込み時に `BigInt` を使って画面が真っ白になる**（対応は保留）。実機での確認もしていない。 |
 | 画像サイズ上限 | 4MiB（4,194,304 バイト）。 |
 | 画像圧縮 | 上限を超えた写真だけ、SPA が Compressor.js で JPEG に縮めてから送る（上限以下はそのまま送り、API 側は加工しない）。 |
 | 経路 | 画面は CloudFront → S3、発行と QR はブラウザ → API Gateway → Lambda。 |
@@ -28,5 +28,5 @@
 
 | 項目 | 違い | 合わせるには |
 |---|---|---|
-| 対応 OS | CSS は対応済み（Tailwind CSS 3.4）だが、JS は要件を満たしていない | JS の対応（web/DESIGN.md 2.4 の 1〜3・5。ビルドの出力先、トップレベルの `await`、`AbortSignal.timeout()`、zod を valibot か zod 3 に替える（web/notes/builtin-compat.md））、実機での確認 |
+| 対応 OS | CSS と JS の大半は対応済みだが、zod 4 の `BigInt` で iOS 13 は動かない | zod を valibot か zod 3 に替える（web/DESIGN.md 2.4 の 5、web/notes/builtin-compat.md。保留中）、実機での確認 |
 | セキュリティグループ | 送信先が 0.0.0.0/0。NAT 経由で Parameter Store にも 443 で出るため。解析サーバーの CIDR（`AnalyzerCidr`）で絞れるのは、ポートが 443 以外のときだけ | Parameter Store 用の VPC エンドポイントを置き、443 の宛先を `AnalyzerCidr` にする（`infra/cloudformation/tickets-network-*.yaml` の変更） |

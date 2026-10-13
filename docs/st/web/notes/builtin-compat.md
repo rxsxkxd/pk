@@ -46,6 +46,8 @@
 
 ## 4. 合わせて直すもの（2.4 のほかの項目）
 
+> 2026-10-13: zod の `BigInt` 以外は対応した（下の 1〜3 と、5 の Pinia の `Object.hasOwn`。`Object.hasOwn` は core-js 3.50.0 の `core-js/actual/object/has-own` だけを `src/main.ts` の先頭で読み込んで補う。JS は gzip で約 4KB 増。自前で補う案・補わない案と比べて、説明のしやすさで core-js にした）。対応後のビルドを同じ方法で解析し、残る新しい機能が zod の `BigInt` と、通らない経路のもの（Vue の `toSorted()` など、zod の `Error.captureStackTrace`）だけになったことを確かめた
+
 - 1: ビルドの出力先（`build.target`）を iOS 13 / Chrome（下限は未定）に合わせる。`?.`・`??`・`??=`・クラスのフィールドが変換される
 - 2: `src/main.ts` のトップレベルの `await` をやめる（変換できず、ビルドがエラーになる）
 - 3: `AbortSignal.timeout()` を `AbortController` と `setTimeout` にする

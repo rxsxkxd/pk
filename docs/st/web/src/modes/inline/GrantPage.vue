@@ -3,6 +3,7 @@
 // （閉じたり再読み込みしたりすると消える）。
 import { computed, ref } from 'vue';
 import CertificateImagePicker from '../../components/CertificateImagePicker.vue';
+import GrantDescription from '../../components/GrantDescription.vue';
 import ErrorMessage from '../../components/ErrorMessage.vue';
 import TicketCard from '../../components/TicketCard.vue';
 import { useTicketStore } from '../../stores/ticket.ts';
@@ -22,6 +23,7 @@ async function grant(): Promise<void> {
 <template>
   <main class="mx-auto max-w-sm space-y-6 px-4 py-8">
     <h1 class="text-xl font-bold">チケット発行</h1>
+    <GrantDescription />
 
     <CertificateImagePicker
       v-model="store.file"

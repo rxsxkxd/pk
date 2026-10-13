@@ -22,9 +22,9 @@ function formatSize(bytes: number): string {
 
 <template>
   <div class="space-y-2">
-    <div v-if="android" class="grid grid-cols-2 gap-3" data-testid="image-buttons">
+    <div v-if="android" class="space-y-3" data-testid="image-buttons">
       <label
-        class="cursor-pointer rounded-md bg-slate-800 px-4 py-2 text-center text-sm text-white has-[:disabled]:cursor-default has-[:disabled]:opacity-40"
+        class="block cursor-pointer rounded-md bg-slate-800 px-4 py-3 text-center text-sm text-white has-[:disabled]:cursor-default has-[:disabled]:opacity-40"
       >
         画像を選ぶ
         <input
@@ -37,7 +37,7 @@ function formatSize(bytes: number): string {
         />
       </label>
       <label
-        class="cursor-pointer rounded-md bg-slate-800 px-4 py-2 text-center text-sm text-white has-[:disabled]:cursor-default has-[:disabled]:opacity-40"
+        class="block cursor-pointer rounded-md bg-slate-800 px-4 py-3 text-center text-sm text-white has-[:disabled]:cursor-default has-[:disabled]:opacity-40"
       >
         カメラを起動
         <!-- capture は accept が画像のときだけ効く。カメラの撮影結果は JPEG なので image/* で足りる -->

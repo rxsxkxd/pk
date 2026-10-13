@@ -144,6 +144,11 @@ describe('ticket screen (drawn from the URL only)', () => {
     expect(wrapper.get('[data-ticket-code]').attributes('data-ticket-code')).toBe(CODE);
     expect(wrapper.text()).not.toContain(CODE);
     expect(wrapper.text()).not.toContain('発行:');
+    // how to use the ticket, between the QR and the link (the wording may be replaced later: not checked)
+    const html = wrapper.html();
+    expect(wrapper.get('[data-testid="ticket-usage"]').text().trim()).not.toBe('');
+    expect(html.indexOf('data-ticket-code')).toBeLessThan(html.indexOf('data-testid="ticket-usage"'));
+    expect(html.indexOf('data-testid="ticket-usage"')).toBeLessThan(html.indexOf('別の証明書の画像で発行する'));
     expect(fetch).not.toHaveBeenCalled(); // no re-grant on reload
   });
 
@@ -155,6 +160,7 @@ describe('ticket screen (drawn from the URL only)', () => {
     const { wrapper } = await mountAt(routes, path);
     expect(wrapper.get('[data-testid="error"]').text()).toBe('無効なチケット URL です');
     expect(wrapper.find('[data-ticket-code] img').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="ticket-usage"]').exists()).toBe(false);
   });
 
   test('a QR that fails to load (403 for a wrong sig) shows the invalid URL message', async () => {

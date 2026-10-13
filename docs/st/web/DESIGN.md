@@ -132,7 +132,7 @@ const supportsRequestStreams = (() => {
 | 1 | Vite の `build.target` を iOS 13 / Android 9 の Chrome に合わせる（例: `['es2019', 'safari13']`） | Vite 8 の既定のターゲットは新しいブラウザ（Safari 16 以降など）向けで、`?.` や `??` をそのまま出力する |
 | 2 | `main.ts` のトップレベルの `await` をやめ、関数の中で `await` する | トップレベルの `await` は Safari 15 から。変換もできない（ビルドがエラーになる） |
 | 3 | `AbortSignal.timeout()` を、`AbortController` と `setTimeout` に置き換える（2.2） | Safari 16 から |
-| 4 | **済み（2026-10-13）**: Tailwind CSS 3.4 に戻した（[notes/tailwind-compat.md](notes/tailwind-compat.md)）。あわせて CSS の出力先を `build.cssTarget: ['safari13', 'chrome80']` にした（JS の `build.target` は 1 のまま未対応）。flex の `gap` は使っていない（grid の `gap` だけ。iOS 12 から使える） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
+| 4 | **済み（2026-10-13）**: Tailwind CSS 3.4 に戻した（[notes/tailwind-compat.md](notes/tailwind-compat.md)）。あわせて CSS の出力先を `build.cssTarget: ['safari13', 'chrome80']` にした（JS の `build.target` は 1 のまま未対応）。`gap` は使っていない（Android の2つのボタンも、縦並びにしてからは `space-y` で間隔を空ける） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
 | 5 | 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
 | 6 | （検討中・優先度低）Fetch Upload Streams の送信（2.3）と、Android での送信中の進み具合の表示 | 新しい機能。採用が決まってから行う |
 | 7 | 実機での確認: iOS 13 の端末（またはクラウドの実機サービス）と、Android 9 + Chrome 138 以下 | E2E の Playwright の WebKit は最新の WebKit で、Safari 13 の動きは再現しない |
@@ -155,9 +155,11 @@ SPA の発行画面 #/（画面遷移方式）           SPA のチケット画�
 ┌──────────────────────────────┐       ┌──────────────────────────────┐
 │ [ バナー 501×146 ]             │       │ [ バナー 501×146 ]             │
 │ チケット発行                   │       │ チケット                       │
+│ （説明文 約 100 文字）           │       │                              │
 │ [ 証明書の画像を選ぶ ]         │       │        ┌────────┐            │
-│   ※Android は                 │       │        │   QR   │ ← <img>    │
-│   [ 画像を選ぶ ][ カメラを起動 ] │       │        └────────┘（QR 画像 API）│
+│   ※Android は縦に2つ           │       │        │   QR   │ ← <img>    │
+│   [ 画像を選ぶ     ]           │       │        └────────┘（QR 画像 API）│
+│   [ カメラを起動   ]           │       │ （チケットの使い方 約 90 文字）  │
 │  IMG_0001.HEIC  2.1MB         │       │ [ 別の証明書の画像で発行する ]  │
 │ [ 発行する ]                   │       └──────────────────────────────┘
 │ ── エラー ──                   │       コードと発行日時は出さない（2026-10-13）
@@ -180,6 +182,7 @@ SPA の発行画面 #/（画面遷移方式）           SPA のチケット画�
 - 上限以下の証明書の画像は加工せず、そのまま `FormData` に入れて送る（縮めるのは上限を超えたときだけ）
 - **Android だけ、ボタンを2つに分ける**（`src/platform.ts` の `isAndroid`）
   - 理由: Android 14 以降の Chrome では、画像の `<input type="file">` を開くとフォトピッカー（写真の選択）だけが出て、カメラを選べない（Android 13 以前は、選択画面にカメラも出ていた）。iOS の Safari は、選択肢に「写真を撮る」が常に出るので分けない
+  - 2つのボタンは縦に並べる（2026-10-13。画面の幅いっぱいのボタンを上下に。「発行する」と同じ高さ）
   - 「画像を選ぶ」: 上と同じ `accept` の選択欄（`capture` なし。フォトピッカーが開く）
   - 「カメラを起動」: `accept="image/*" capture="environment"`（背面のカメラが直接起動する）。`accept` の中に `capture=camera` を書く方法（`accept="image/*;capture=camera"`）は HTML の仕様にない書き方なので使わない
   - 判定: User-Agent Client Hints の `navigator.userAgentData.platform === 'Android'`、または User-Agent に `Android` を含む（どちらかで Android）。`userAgentData.brands` はブラウザの名前（Chromium など）で OS は入っていないので、判定に使わない
@@ -393,6 +396,7 @@ st/web/
 │   ├── assets/banner.png   # 先頭のバナーの画像（501×146px。今は仮）
 │   ├── components/         # 共通の部品
 │   │   ├── AppBanner.vue       # 先頭のバナー（App.vue に1つ。全画面に出る）
+│   │   ├── GrantDescription.vue  # 発行画面の説明文（見出しと画像の選択の間。3つの発行方式で共通）
 │   │   ├── CertificateImagePicker.vue  # 証明書の画像のファイル選択と送信前の確認（Android は「画像を選ぶ」「カメラを起動」の2つ）
 │   │   ├── TicketCard.vue      # QR の表示（画面遷移方式・その場表示方式で共用。コードと発行日時は出さない）
 │   │   └── ErrorMessage.vue
@@ -502,6 +506,8 @@ Strict-Transport-Security: max-age=31536000
 | ストア | 送信前の確認（未選択、上限超え（`maxImageBytes`）、拡張子）、二重送信の防止、エラーメッセージの対応 |
 | SPA のチケット画面 | URL のパラメータの検証、`<img>` の読み込みエラー時の表示、コードと発行日時を画面に出さないこと |
 | 通しの確認（**保留中**） | E2E.md の Playwright で、ビルドしたサイト + API（ローカル）を使って、スマートフォン相当の画面幅で操作する。メインの画面遷移方式は必ず確かめ、SPA のチケット画面のリロードで再発行されないことも確かめる。オプションの方式は、その方式でビルドしたもので確かめる（今の E2E は画面遷移方式だけ） |
+
+- 画面の説明文（発行画面の説明文、チケット画面の使い方）は、あとで文言を入れ替える前提なので、テストでは文言の中身は確かめない。置き場所（前後の要素との順番）と、空でないことだけを確かめる
 
 ## 11. 決めておきたいこと
 

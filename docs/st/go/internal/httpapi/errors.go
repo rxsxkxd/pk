@@ -7,7 +7,7 @@ import (
 	"ticketqr/internal/ticket"
 )
 
-// apiError is an error response of the API: the HTTP status, the error code and the message.
+// apiError は API のエラーレスポンス: HTTP ステータス、エラーコード、メッセージ。
 type apiError struct {
 	Status  int
 	Code    string
@@ -40,8 +40,8 @@ func internalError() *apiError {
 	return &apiError{http.StatusInternalServerError, "INTERNAL_ERROR", "internal error"}
 }
 
-// toAPIError turns any error into an error response: errors of this package as they are, the business
-// errors of package ticket by the table below, and anything else as INTERNAL_ERROR.
+// toAPIError はあらゆるエラーをエラーレスポンスに変換する: このパッケージのエラーはそのまま、package ticket の
+// ビジネスエラーは下の表で、それ以外は INTERNAL_ERROR とする。
 func toAPIError(err error) *apiError {
 	var e *apiError
 	switch {
@@ -51,9 +51,9 @@ func toAPIError(err error) *apiError {
 		return badRequest(ticket.ErrEmptyImage.Error())
 	case errors.Is(err, ticket.ErrUnsupportedImage):
 		return unsupportedMediaType(ticket.ErrUnsupportedImage.Error())
-	case errors.Is(err, ticket.ErrCertificateRejected): // result REJECT
+	case errors.Is(err, ticket.ErrCertificateRejected): // 結果 REJECT
 		return &apiError{http.StatusUnprocessableEntity, "IMAGE_REJECTED", ticket.ErrCertificateRejected.Error()}
-	case errors.Is(err, ticket.ErrCertificateRetry): // result RETRY
+	case errors.Is(err, ticket.ErrCertificateRetry): // 結果 RETRY
 		return &apiError{http.StatusUnprocessableEntity, "IMAGE_RETRY", ticket.ErrCertificateRetry.Error()}
 	case errors.Is(err, ticket.ErrVerifierTimeout):
 		return &apiError{http.StatusGatewayTimeout, "ANALYSIS_TIMEOUT", "image analysis timed out"}

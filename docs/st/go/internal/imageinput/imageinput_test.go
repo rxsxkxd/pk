@@ -6,7 +6,7 @@ import (
 )
 
 func TestDetectSharedImages(t *testing.T) {
-	// Real 32x32 images in each format phones upload, shared with the Node version.
+	// スマートフォンがアップロードする各形式の実際の 32x32 画像。Node 版と共有している。
 	for file, want := range map[string]string{
 		"photo.jpg":       "image/jpeg",
 		"photo.png":       "image/png",

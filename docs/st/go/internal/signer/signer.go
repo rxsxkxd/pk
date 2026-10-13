@@ -1,5 +1,5 @@
-// Package signer signs ticket codes so the view / QR endpoints only serve URLs this API created.
-// Clean architecture: an application rule used by the HTTP layer (separate from the issuing flow).
+// Package signer はチケットコードに署名し、view / QR エンドポイントがこの API の発行した URL だけを返すようにする。
+// クリーンアーキテクチャ: HTTP 層が使うアプリケーションルール(発行フローとは別)。
 package signer
 
 import (
@@ -12,10 +12,10 @@ import (
 const sigLength = 22
 
 type Signer struct {
-	keys [][]byte // keys[0] signs; all keys verify (rotation)
+	keys [][]byte // keys[0] で署名し、すべてのキーで検証する(ローテーション)
 }
 
-// New takes the current salt and, during rotation, the previous one.
+// New は現在のソルトと、ローテーション中は以前のソルトを受け取る。
 func New(current, previous string) (*Signer, error) {
 	if current == "" {
 		return nil, errors.New("signing salt is empty")

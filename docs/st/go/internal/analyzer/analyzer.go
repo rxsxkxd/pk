@@ -1,9 +1,9 @@
-// Package analyzer is the client for the external image analysis server: it implements
-// ticket.Verifier (clean architecture: an outbound adapter).
+// Package analyzer は外部の画像解析サーバのクライアント: ticket.Verifier を実装する
+// (クリーンアーキテクチャ: アウトバウンドアダプタ)。
 //
-// Request format is fixed: POST with Content-Type application/octet-stream and the raw image
-// bytes (ticket.CertificateImage.Data) as the body. ANALYZER_MODE=mock answers PASS in-process; ANALYZER_MODE=http
-// posts to the server (http.go; analyzer-stub/DESIGN.md 3). The API reads only "result" of the response.
+// リクエスト形式は固定: Content-Type application/octet-stream で、生の画像バイト列
+// (ticket.CertificateImage.Data)をボディとして POST する。ANALYZER_MODE=mock はプロセス内で PASS を返し、ANALYZER_MODE=http
+// はサーバに POST する(http.go、analyzer-stub/DESIGN.md 3)。API はレスポンスの "result" だけを読む。
 package analyzer
 
 import (
@@ -13,7 +13,7 @@ import (
 	"ticketqr/internal/ticket"
 )
 
-// New returns the analyzer selected by ANALYZER_MODE. httpCfg is used only for "http".
+// New は ANALYZER_MODE で選ばれた解析器を返す。httpCfg は "http" のときだけ使う。
 func New(mode string, httpCfg HTTPConfig) (ticket.Verifier, error) {
 	switch mode {
 	case "mock":
@@ -25,7 +25,7 @@ func New(mode string, httpCfg HTTPConfig) (ticket.Verifier, error) {
 	}
 }
 
-// AlwaysPass is the in-process mock (ANALYZER_MODE=mock): every image passes.
+// AlwaysPass はプロセス内のモック(ANALYZER_MODE=mock): すべての画像が合格する。
 type AlwaysPass struct{}
 
 func (AlwaysPass) Verify(context.Context, ticket.CertificateImage) (ticket.Verdict, error) {

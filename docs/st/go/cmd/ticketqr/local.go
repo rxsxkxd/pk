@@ -11,7 +11,7 @@ import (
 	"ticketqr/internal/localhttp"
 )
 
-// runLocal serves the handler over plain HTTP for local development (see localhttp).
+// runLocal はローカル開発用にハンドラを素の HTTP で提供する(localhttp を参照)。
 func runLocal() {
 	addr := flag.String("addr", ":8080", "listen address")
 	flag.Parse()
@@ -24,7 +24,7 @@ func runLocal() {
 
 	h := mustNewHandlers()
 	mux := http.NewServeMux()
-	// API Gateway route keys are valid ServeMux patterns, so both route identically.
+	// API Gateway のルートキーはそのまま ServeMux のパターンとして有効なので、どちらも同じようにルーティングされる。
 	for _, key := range httpapi.RouteKeys {
 		mux.Handle(key, localhttp.Adapt(key, h.Route))
 	}
@@ -40,7 +40,7 @@ func setDefault(key, value string) {
 	}
 }
 
-// uploadForm stands in for the client page that calls patterns A and B-1. It exists only locally.
+// uploadForm はパターン A と B-1 を呼ぶクライアントページの代わり。ローカルにのみ存在する。
 func uploadForm(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	io.WriteString(w, `<!doctype html>

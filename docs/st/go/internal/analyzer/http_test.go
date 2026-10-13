@@ -16,7 +16,7 @@ import (
 	"ticketqr/internal/ticket"
 )
 
-// reply scripts one response of the test server.
+// reply はテストサーバの応答 1 つ分の台本。
 type reply func(w http.ResponseWriter, r *http.Request)
 
 func status(code int, body string) reply {
@@ -27,8 +27,8 @@ func status(code int, body string) reply {
 	}
 }
 
-// hang never answers until the client gives up (the server above has already read the body, so it
-// notices the disconnect); the cap keeps a broken test from hanging.
+// hang はクライアントが諦めるまで決して応答しない(上のサーバはすでにボディを読んでいるので、
+// 切断に気づく)。上限は壊れたテストがハングし続けるのを防ぐ。
 var hang reply = func(_ http.ResponseWriter, r *http.Request) {
 	select {
 	case <-r.Context().Done():
@@ -41,7 +41,7 @@ type received struct {
 	body   []byte
 }
 
-// server answers with the scripted replies in order and records every request it receives.
+// server は台本どおりの応答を順に返し、受け取ったリクエストをすべて記録する。
 func server(t *testing.T, script ...reply) (*HTTP, *[]received) {
 	t.Helper()
 	var mu sync.Mutex
@@ -92,7 +92,7 @@ func TestHTTPPostsImageUnchanged(t *testing.T) {
 	}
 }
 
-// REJECT and RETRY are results, not errors of the client; only "result" is read.
+// REJECT と RETRY は結果であってクライアントのエラーではない。読むのは "result" だけ。
 func TestHTTPRejectAndRetryAreResults(t *testing.T) {
 	for _, want := range []ticket.Result{ticket.ResultReject, ticket.ResultRetry} {
 		a, _ := server(t, status(200, `{"confidence":0.5,"detected":"x","reason":"y","result":"`+string(want)+`","status":200}`))
@@ -141,7 +141,7 @@ func TestHTTPRetries(t *testing.T) {
 func TestHTTPConnectionRefusedIsUpstream(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL
-	srv.Close() // nothing listens there any more
+	srv.Close() // もうそこでは何も待ち受けていない
 	a := NewHTTP(HTTPConfig{URL: url, APIKey: "k", Timeout: time.Second})
 	if _, err := a.Verify(context.Background(), ticket.CertificateImage{Data: jpeg}); !errors.Is(err, ticket.ErrVerifierUpstream) {
 		t.Errorf("err = %v, want ticket.ErrVerifierUpstream", err)
@@ -160,7 +160,7 @@ func TestNewModes(t *testing.T) {
 	}
 }
 
-// Every response body is logged as it came: not parsed, for 2xx and other statuses alike.
+// レスポンスボディはすべて届いたままログに記録される: パースせず、2xx でもそれ以外のステータスでも同様。
 func TestHTTPLogsTheRawResponseBody(t *testing.T) {
 	pass := `{"confidence":0.97,"detected":"certificate","reason":"ok","result":"PASS","status":200}`
 	tests := []struct {

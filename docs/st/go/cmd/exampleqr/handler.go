@@ -1,7 +1,7 @@
 package main
 
-// The handler: a fixed QR code for https://example.com. It is deployed separately from the ticket
-// endpoints and needs no configuration or secrets.
+// ハンドラ: https://example.com を指す固定の QR コード。チケットのエンドポイントとは別にデプロイされ、
+// 設定もシークレットも必要としない。
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 
 const (
 	routeKey = "GET /v1/example/qr"
-	// Includes the scheme so QR readers open it as a link instead of plain text.
+	// QR リーダーがプレーンテキストではなくリンクとして開くよう、スキームを含める。
 	content = "https://example.com"
 )
 

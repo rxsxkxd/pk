@@ -1,5 +1,5 @@
-// Package config reads runtime settings: environment variables (config.go) and secrets from Parameter
-// Store (secret.go). Clean architecture: a framework / driver used only by the wiring in cmd/ticketqr.
+// Package config は実行時の設定を読み込む: 環境変数(config.go)と Parameter Store のシークレット
+// (secret.go)。クリーンアーキテクチャ: cmd/ticketqr の配線からのみ使われるフレームワーク / ドライバ。
 package config
 
 import (
@@ -12,14 +12,14 @@ import (
 )
 
 type Config struct {
-	PublicBaseURL string // absolute, no trailing slash
-	PublicOrigin  string // scheme://host[:port], for CSP
+	PublicBaseURL string // 絶対 URL、末尾スラッシュなし
+	PublicOrigin  string // scheme://host[:port]、CSP 用
 
 	AnalyzerMode    string        // mock | http
-	AnalyzerURL     string        // http only
-	AnalyzerTimeout time.Duration // http only, per attempt
+	AnalyzerURL     string        // http のみ
+	AnalyzerTimeout time.Duration // http のみ、1 回の試行あたり
 
-	MaxImageBytes int // MAX_IMAGE_BYTES; 0 = unset (the runtime ceiling imageinput.MaxBytes)
+	MaxImageBytes int // MAX_IMAGE_BYTES。0 = 未設定(ランタイムの上限 imageinput.MaxBytes)
 }
 
 const (

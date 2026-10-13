@@ -2,9 +2,9 @@ package ticket
 
 import "errors"
 
-// Business errors of VerifyAndGrant. The HTTP layer maps them to responses (package httpapi); the
-// verifier errors (ErrVerifierUpstream, ErrVerifierTimeout) are returned wrapped as well. The messages
-// are part of the API responses, so they stay as they were.
+// VerifyAndGrant のビジネスエラー。HTTP 層がこれらをレスポンスに対応付ける(package httpapi)。
+// 検証器のエラー(ErrVerifierUpstream、ErrVerifierTimeout)もラップして返される。メッセージは
+// API レスポンスの一部なので、元のまま変えない。
 var (
 	ErrEmptyImage          = errors.New("image is empty")
 	ErrUnsupportedImage    = errors.New("image must be JPEG, PNG, HEIC/HEIF, AVIF or WebP")

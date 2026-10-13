@@ -1,12 +1,12 @@
-// Command apigw-local plays the role of API Gateway (HTTP API) in the E2E environment (E2E.md 2.3): it
-// turns HTTP requests into payload v2 events for the routes of api.yaml, invokes the function running on
-// the Lambda Runtime Interface Emulator (RIE) and applies the CORS configuration. Not deployed.
+// Command apigw-local は E2E 環境(E2E.md 2.3)で API Gateway(HTTP API)の役割を担う: HTTP リクエストを
+// api.yaml のルートに対応する payload v2 イベントに変換し、Lambda Runtime Interface Emulator(RIE)上で動く
+// 関数を呼び出し、CORS 設定を適用する。デプロイはしない。
 //
-// Environment:
+// 環境変数:
 //
-//	LISTEN_ADDR         default :3000
-//	RIE_URL             default http://127.0.0.1:8080/2015-03-31/functions/function/invocations
-//	CORS_ALLOW_ORIGINS  comma-separated origins allowed by CORS (AllowOrigins of the HTTP API)
+//	LISTEN_ADDR         デフォルト :3000
+//	RIE_URL             デフォルト http://127.0.0.1:8080/2015-03-31/functions/function/invocations
+//	CORS_ALLOW_ORIGINS  CORS で許可するオリジンのカンマ区切り(HTTP API の AllowOrigins)
 package main
 
 import (
@@ -27,7 +27,7 @@ import (
 	"ticketqr/internal/localhttp"
 )
 
-// Same routes as infra/cloudformation/api.yaml (one function serves them all, as the zip does).
+// infra/cloudformation/api.yaml と同じルート(zip と同様に、1 つの関数ですべてを処理する)。
 var routes = []string{httpapi.RouteGrantInline, httpapi.RouteGrant, httpapi.RouteGetView, httpapi.RouteGetQR}
 
 func main() {
@@ -39,7 +39,7 @@ func main() {
 	for _, rk := range routes {
 		mux.Handle(rk, localhttp.Adapt(rk, invoke))
 	}
-	// API Gateway answers unmatched routes itself.
+	// マッチしないルートには API Gateway 自身が応答する。
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusNotFound, `{"message":"Not Found"}`)
 	})
@@ -51,8 +51,8 @@ func main() {
 	}
 }
 
-// rieInvoker sends the event to the RIE and decodes the function's response. A function error (the RIE
-// answers with errorMessage/errorType) becomes API Gateway's 500, as in production.
+// rieInvoker はイベントを RIE に送り、関数のレスポンスをデコードする。関数エラー(RIE が errorMessage/errorType で
+// 応答する)は本番と同様に API Gateway の 500 になる。
 func rieInvoker(url string) localhttp.HandlerFunc {
 	client := &http.Client{Timeout: 30 * time.Second}
 	return func(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -88,9 +88,9 @@ func rieInvoker(url string) localhttp.HandlerFunc {
 	}
 }
 
-// cors applies the HTTP API's CORS configuration: preflight requests from allowed origins are answered by
-// the gateway, and responses to allowed origins get Access-Control-Allow-Origin. Requests from other
-// origins are still forwarded (CORS only controls what the browser lets the page read).
+// cors は HTTP API の CORS 設定を適用する: 許可されたオリジンからのプリフライトリクエストにはゲートウェイが応答し、
+// 許可されたオリジンへのレスポンスには Access-Control-Allow-Origin を付ける。それ以外のオリジンからの
+// リクエストも転送はする(CORS はブラウザがページに何を読ませるかを制御するだけ)。
 func cors(origins []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -109,8 +109,7 @@ func cors(origins []string, next http.Handler) http.Handler {
 	})
 }
 
-// corsWriter adds the CORS headers when the status is written, after the function's own headers (which
-// may set Vary as well).
+// corsWriter はステータス書き込み時に、関数自身のヘッダ(Vary を設定することもある)の後で CORS ヘッダを追加する。
 type corsWriter struct {
 	http.ResponseWriter
 	origin  string

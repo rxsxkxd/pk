@@ -1,6 +1,6 @@
-// Package localhttp runs Lambda handlers behind net/http for local development.
-// Each request becomes an API Gateway HTTP API (v2) event carrying the matching routeKey. Clean
-// architecture: a driver used by the local servers and the E2E gateway (cmd/*), never deployed.
+// Package localhttp はローカル開発用に Lambda ハンドラを net/http の背後で動かす。
+// 各リクエストは、一致する routeKey を持つ API Gateway HTTP API(v2)イベントに変換される。クリーン
+// アーキテクチャ: ローカルサーバと E2E ゲートウェイ(cmd/*)が使うドライバで、デプロイはしない。
 package localhttp
 
 import (
@@ -18,8 +18,8 @@ import (
 
 type HandlerFunc func(context.Context, events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error)
 
-// Adapt serves fn for routeKey. API Gateway route keys ("GET /v1/x/{id}") are valid ServeMux
-// patterns, so register the handler with mux.Handle(routeKey, Adapt(routeKey, fn)).
+// Adapt は routeKey に対して fn を提供する。API Gateway のルートキー("GET /v1/x/{id}")はそのまま ServeMux の
+// パターンとして有効なので、mux.Handle(routeKey, Adapt(routeKey, fn)) で登録する。
 func Adapt(routeKey string, fn HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)

@@ -1,7 +1,7 @@
 package config
 
-// Values from Parameter Store: the signing salts and the analyzer API key (SecureString), and the ticket
-// code's fixed suffix (String).
+// Parameter Store の値: 署名用ソルトと解析サーバの API キー(SecureString)、およびチケット
+// コードの固定サフィックス(String)。
 
 import (
 	"context"
@@ -20,9 +20,9 @@ type Salts struct {
 	Previous string `json:"previous"`
 }
 
-// LoadSalts reads the SecureString parameter named by SIGNING_SALT_PARAMETER_NAME from Parameter Store
-// ({"current": "...", "previous": "..."}). For local development only (APP_ENV=local), SIGNING_SALT may
-// hold the salt in plain text.
+// LoadSalts は SIGNING_SALT_PARAMETER_NAME で指定された SecureString パラメータを Parameter Store から読み込む
+// ({"current": "...", "previous": "..."})。ローカル開発時のみ(APP_ENV=local)、SIGNING_SALT に
+// ソルトを平文で持たせてもよい。
 func LoadSalts(ctx context.Context) (Salts, error) {
 	if name := os.Getenv("SIGNING_SALT_PARAMETER_NAME"); name != "" {
 		value, err := getParameter(ctx, name)
@@ -43,9 +43,9 @@ func LoadSalts(ctx context.Context) (Salts, error) {
 	return Salts{}, errors.New("SIGNING_SALT_PARAMETER_NAME is not set")
 }
 
-// LoadTicketCodeSuffix reads the fixed suffix of ticket codes (DESIGN.md 4) from the String parameter named
-// by TICKET_CODE_SUFFIX_PARAMETER_NAME. Not a secret, so TICKET_CODE_SUFFIX may also hold it directly (local
-// runs and E2E). The value is checked by ticket.NewGenerator.
+// LoadTicketCodeSuffix は TICKET_CODE_SUFFIX_PARAMETER_NAME で指定された String パラメータから
+// チケットコードの固定サフィックス(DESIGN.md 4)を読み込む。シークレットではないので、TICKET_CODE_SUFFIX に
+// 直接持たせてもよい(ローカル実行と E2E)。値は ticket.NewGenerator が検査する。
 func LoadTicketCodeSuffix(ctx context.Context) (string, error) {
 	if name := os.Getenv("TICKET_CODE_SUFFIX_PARAMETER_NAME"); name != "" {
 		value, err := getParameter(ctx, name)
@@ -60,10 +60,10 @@ func LoadTicketCodeSuffix(ctx context.Context) (string, error) {
 	return "", errors.New("TICKET_CODE_SUFFIX_PARAMETER_NAME is not set")
 }
 
-// LoadAnalyzerAPIKey reads the image analysis server's API key from the SecureString parameter named by
-// ANALYZER_API_KEY_PARAMETER_NAME. For local development only (APP_ENV=local), ANALYZER_API_KEY may hold
-// it in plain text. The key is optional: with neither set it returns "" and requests carry no x-api-key
-// (e.g. a server that only admits the Lambda's security group in the VPC).
+// LoadAnalyzerAPIKey は ANALYZER_API_KEY_PARAMETER_NAME で指定された SecureString パラメータから画像解析サーバの
+// API キーを読み込む。ローカル開発時のみ(APP_ENV=local)、ANALYZER_API_KEY に平文で持たせてもよい。
+// キーは任意: どちらも設定されていなければ "" を返し、リクエストに x-api-key は付かない
+// (例: VPC 内で Lambda のセキュリティグループだけを受け入れるサーバ)。
 func LoadAnalyzerAPIKey(ctx context.Context) (string, error) {
 	if name := os.Getenv("ANALYZER_API_KEY_PARAMETER_NAME"); name != "" {
 		key, err := getParameter(ctx, name)
@@ -80,7 +80,7 @@ func LoadAnalyzerAPIKey(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-// getParameter reads and decrypts one Parameter Store value.
+// getParameter は Parameter Store の値を 1 つ読み込んで復号する。
 func getParameter(ctx context.Context, name string) (string, error) {
 	cfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {

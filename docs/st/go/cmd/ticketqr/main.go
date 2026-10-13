@@ -1,7 +1,7 @@
-// Command ticketqr is the single entrypoint for every endpoint.
+// Command ticketqr はすべてのエンドポイントに共通の単一エントリポイント。
 //
-// On Lambda (AWS_LAMBDA_RUNTIME_API is set by the runtime) it serves API Gateway HTTP API events;
-// elsewhere it starts a local HTTP server that feeds the same handler.
+// Lambda 上(ランタイムが AWS_LAMBDA_RUNTIME_API を設定する)では API Gateway HTTP API のイベントを処理し、
+// それ以外では同じハンドラに渡すローカル HTTP サーバを起動する。
 package main
 
 import (

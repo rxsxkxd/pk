@@ -1,6 +1,6 @@
-// Package imageinput detects the format of an uploaded image. This is a technical concern of the HTTP
-// layer (clean architecture: part of the inbound adapter, used by package httpapi); which formats are
-// accepted is a business rule decided in package ticket. Its heavy dependencies stay in this package.
+// Package imageinput はアップロードされた画像の形式を判別する。これは HTTP 層の技術的な関心事
+// (クリーンアーキテクチャ: インバウンドアダプタの一部で、package httpapi が使う)。どの形式を
+// 受け付けるかはビジネスルールで、package ticket が決める。重い依存はこのパッケージ内に留める。
 package imageinput
 
 import (
@@ -16,12 +16,12 @@ import (
 	"golang.org/x/image/webp"
 )
 
-// MaxBytes is the upload ceiling set by the runtime: a Lambda request is at most 6MB and API Gateway
-// base64-encodes binary bodies (×4/3). A deployment can lower it with MAX_IMAGE_BYTES (DESIGN.md 5).
+// MaxBytes はランタイムが定めるアップロードの上限: Lambda のリクエストは最大 6MB で、API Gateway は
+// バイナリのボディを base64 エンコードする(×4/3)。デプロイごとに MAX_IMAGE_BYTES で下げられる(DESIGN.md 5)。
 const MaxBytes = 4 << 20
 
-// validators confirm that data of a detected type really is that image, by parsing its header up to the
-// image size. Types without a validator (including HEIF image sequences) are not recognized.
+// validators は、判別された形式のデータが本当にその画像であることを、画像サイズまでヘッダを
+// パースして確認する。validator のない形式(HEIF の画像シーケンスを含む)は認識しない。
 var validators = map[string]func([]byte) error{
 	"image/jpeg": config(jpeg.DecodeConfig),
 	"image/png":  config(png.DecodeConfig),
@@ -31,9 +31,9 @@ var validators = map[string]func([]byte) error{
 	"image/avif": heifSize,
 }
 
-// Detect returns the MIME type of data, or "" when it is not a recognizable image. mimetype tells the
-// format from the leading bytes; the format's own parser then reads up to the image size, so bytes that
-// only start like an image are rejected (as image-size does in the Node version).
+// Detect は data の MIME タイプを返す。認識できる画像でなければ "" を返す。mimetype が先頭バイトから
+// 形式を判別し、その形式自身のパーサが画像サイズまで読むので、先頭だけ画像に見えるバイト列は
+// 拒否される(Node 版の image-size と同様)。
 func Detect(data []byte) string {
 	mt := mimetype.Detect(data).String()
 	if validate, ok := validators[mt]; ok && validate(data) == nil {
@@ -42,7 +42,7 @@ func Detect(data []byte) string {
 	return ""
 }
 
-// config adapts an image.DecodeConfig function to a validator.
+// config は image.DecodeConfig 関数を validator に適合させる。
 func config(decode func(io.Reader) (image.Config, error)) func([]byte) error {
 	return func(data []byte) error {
 		_, err := decode(bytes.NewReader(data))
@@ -52,8 +52,8 @@ func config(decode func(io.Reader) (image.Config, error)) func([]byte) error {
 
 var errNoSize = errors.New("heif: no image size")
 
-// heifSize requires the HEIF container's primary item to have its size (ispe). Only the metadata boxes
-// are read; the image itself is not decoded.
+// heifSize は HEIF コンテナのプライマリアイテムがサイズ(ispe)を持つことを要求する。読むのはメタデータの
+// ボックスだけで、画像そのものはデコードしない。
 func heifSize(data []byte) error {
 	item, err := heif.Open(bytes.NewReader(data)).PrimaryItem()
 	if err != nil {

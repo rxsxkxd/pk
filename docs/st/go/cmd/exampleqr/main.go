@@ -1,5 +1,5 @@
-// Command exampleqr serves the example.com QR endpoint. It is a separate deployment package
-// from cmd/ticketqr: on Lambda it handles API Gateway events, elsewhere it starts a local server.
+// Command exampleqr は example.com の QR エンドポイントを提供する。cmd/ticketqr とは別のデプロイパッケージで、
+// Lambda 上では API Gateway のイベントを処理し、それ以外ではローカルサーバを起動する。
 package main
 
 import (

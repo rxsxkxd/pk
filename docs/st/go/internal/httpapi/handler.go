@@ -1,6 +1,6 @@
-// Package httpapi is the HTTP layer of the ticket QR API (clean architecture: an inbound adapter). It
-// converts API Gateway HTTP API (payload v2) events to calls of package ticket and back: routing, upload
-// reading, signed URLs, error responses (errors.go maps the business errors of ticket) and the HTML views.
+// Package httpapi はチケット QR API の HTTP 層(クリーンアーキテクチャ: インバウンドアダプタ)。
+// API Gateway HTTP API(payload v2)のイベントを package ticket の呼び出しに変換し、結果を戻す: ルーティング、
+// アップロードの読み込み、署名付き URL、エラーレスポンス(errors.go が ticket のビジネスエラーを対応付ける)、HTML ビュー。
 package httpapi
 
 import (
@@ -40,12 +40,12 @@ type Handlers struct {
 	Signer        *signer.Signer
 	View          *view.Renderer
 	Logger        *slog.Logger
-	// MaxImageBytes is the upload limit of this deployment (MAX_IMAGE_BYTES), at most imageinput.MaxBytes.
-	// 0 = imageinput.MaxBytes.
+	// MaxImageBytes はこのデプロイのアップロード上限(MAX_IMAGE_BYTES)で、最大でも imageinput.MaxBytes。
+	// 0 = imageinput.MaxBytes。
 	MaxImageBytes int
 }
 
-// GrantInline is pattern A (the QR inline grant API): POST /v1/tickets/qr-inline (multipart image in, JSON with base64 QR out).
+// GrantInline はパターン A(QR インライン付与 API): POST /v1/tickets/qr-inline(multipart の画像を受け取り、base64 の QR を含む JSON を返す)。
 func (h *Handlers) GrantInline(ctx context.Context, req Request) (Response, error) {
 	return h.run(ctx, req, "grant-inline", h.jsonError, func() (Response, error) {
 		img, err := readUpload(req, h.maxImageBytes())
@@ -77,9 +77,9 @@ func (h *Handlers) GrantInline(ctx context.Context, req Request) (Response, erro
 	})
 }
 
-// Grant is pattern B-1 (the ticket grant API): POST /v1/tickets (multipart image). The reply depends on Accept:
-//   - a browser form (no application/json) gets 303 to the view (B-3), errors as HTML;
-//   - a client asking for application/json (the SPA) gets 201 JSON with the signed QR URL, errors as JSON.
+// Grant はパターン B-1(チケット付与 API): POST /v1/tickets(multipart の画像)。応答は Accept によって変わる:
+//   - ブラウザのフォーム(application/json なし)はビュー(B-3)への 303 を受け取り、エラーは HTML;
+//   - application/json を求めるクライアント(SPA)は署名付き QR URL を含む 201 の JSON を受け取り、エラーは JSON。
 func (h *Handlers) Grant(ctx context.Context, req Request) (Response, error) {
 	asJSON := acceptsJSON(req)
 	onError := h.htmlError
@@ -116,7 +116,7 @@ func (h *Handlers) Grant(ctx context.Context, req Request) (Response, error) {
 	})
 }
 
-// GetView is pattern B-3: GET /v1/tickets/{ticketCode}/view?sig=...
+// GetView はパターン B-3: GET /v1/tickets/{ticketCode}/view?sig=...
 func (h *Handlers) GetView(ctx context.Context, req Request) (Response, error) {
 	return h.run(ctx, req, "get-view", h.htmlError, func() (Response, error) {
 		code, err := h.verified(req)
@@ -131,7 +131,7 @@ func (h *Handlers) GetView(ctx context.Context, req Request) (Response, error) {
 	})
 }
 
-// GetQR is pattern B-2: GET /v1/tickets/{ticketCode}/qr?sig=...
+// GetQR はパターン B-2: GET /v1/tickets/{ticketCode}/qr?sig=...
 func (h *Handlers) GetQR(ctx context.Context, req Request) (Response, error) {
 	return h.run(ctx, req, "get-qr", h.jsonError, func() (Response, error) {
 		code, err := h.verified(req)
@@ -151,8 +151,8 @@ func (h *Handlers) GetQR(ctx context.Context, req Request) (Response, error) {
 	})
 }
 
-// run logs the request and turns any error into the endpoint's error format.
-// It never returns a Go error, so API Gateway always receives our response.
+// run はリクエストをログに記録し、あらゆるエラーをエンドポイントのエラー形式に変換する。
+// Go のエラーは決して返さないので、API Gateway は常にこちらのレスポンスを受け取る。
 func (h *Handlers) run(ctx context.Context, req Request, endpoint string,
 	onError func(*apiError) Response, fn func() (Response, error)) (Response, error) {
 	start := time.Now()
@@ -174,12 +174,12 @@ func (h *Handlers) run(ctx context.Context, req Request, endpoint string,
 	return res, nil
 }
 
-// clientEndpoints receive images from browsers. Their completion log also records what the browser says
-// about itself, so browser and OS versions can be counted in CloudWatch Logs (DESIGN.md 10).
+// clientEndpoints はブラウザから画像を受け取る。完了ログにはブラウザの自己申告も記録し、
+// CloudWatch Logs でブラウザと OS のバージョンを集計できるようにする(DESIGN.md 10)。
 var clientEndpoints = map[string]bool{"grant-inline": true, "grant": true}
 
-// clientHeaders maps log keys to the request headers logged as-is: the User-Agent and the User-Agent
-// Client Hints (low-entropy ones are sent by Chromium by default; the platform version only when asked).
+// clientHeaders はログのキーを、そのまま記録するリクエストヘッダに対応付ける: User-Agent と User-Agent
+// Client Hints(低エントロピーのものは Chromium がデフォルトで送る。プラットフォームのバージョンは要求時のみ)。
 var clientHeaders = [][2]string{
 	{"userAgent", "User-Agent"},
 	{"secChUa", "Sec-CH-UA"},
@@ -188,10 +188,10 @@ var clientHeaders = [][2]string{
 	{"secChUaPlatformVersion", "Sec-CH-UA-Platform-Version"},
 }
 
-// maxClientHeaderLen bounds each logged header value (they are client-controlled).
+// maxClientHeaderLen はログに出す各ヘッダ値の長さの上限(クライアントが制御できる値のため)。
 const maxClientHeaderLen = 512
 
-// clientAttr returns the "client" log group with the headers present in req (an empty group is omitted).
+// clientAttr は req に存在するヘッダからなる "client" ロググループを返す(空のグループは省かれる)。
 func clientAttr(req Request) slog.Attr {
 	var attrs []any
 	for _, h := range clientHeaders {
@@ -276,12 +276,12 @@ func requestBody(req Request) ([]byte, error) {
 	return b, nil
 }
 
-// acceptsJSON reports whether the client asked for a JSON reply (Accept contains application/json).
+// acceptsJSON はクライアントが JSON の応答を求めたか(Accept に application/json を含むか)を返す。
 func acceptsJSON(req Request) bool {
 	return strings.Contains(strings.ToLower(header(req, "Accept")), "application/json")
 }
 
-// header looks up a header case-insensitively (API Gateway v2 lowercases names, local adapter may not).
+// header はヘッダを大文字小文字を区別せずに探す(API Gateway v2 は名前を小文字化するが、ローカルアダプタはしないことがある)。
 func header(req Request, name string) string {
 	for k, v := range req.Headers {
 		if strings.EqualFold(k, name) {
@@ -298,9 +298,9 @@ func (h *Handlers) maxImageBytes() int {
 	return imageinput.MaxBytes
 }
 
-// readUpload reads the certificate image from the multipart "image" field, enforces the size limit
-// (maxBytes) and detects the format.
-// Whether the format is accepted is decided by ticket.VerifyAndGrant.
+// readUpload は multipart の "image" フィールドから証明書画像を読み込み、サイズ上限(maxBytes)を
+// 適用して形式を判別する。
+// その形式を受け付けるかどうかは ticket.VerifyAndGrant が決める。
 func readUpload(req Request, maxBytes int) (ticket.CertificateImage, error) {
 	data, err := readFormImage(req, maxBytes)
 	if err != nil {
@@ -312,10 +312,10 @@ func readUpload(req Request, maxBytes int) (ticket.CertificateImage, error) {
 	return ticket.CertificateImage{Data: data, MimeType: imageinput.Detect(data)}, nil
 }
 
-// readFormImage returns the raw bytes of the multipart "image" field (the first one). The part's own
-// Content-Type is ignored; the format is detected from magic bytes later. The whole body must be valid
-// multipart, as in the Node version: the body is already in memory on Lambda, so there is nothing to
-// gain from stopping at the image part.
+// readFormImage は multipart の "image" フィールド(最初のもの)の生バイトを返す。パート自身の
+// Content-Type は無視し、形式は後でマジックバイトから判別する。Node 版と同様、ボディ全体が正しい
+// multipart でなければならない: Lambda ではボディはすでにメモリ上にあるので、画像パートで
+// 読み取りを止めても得るものはない。
 func readFormImage(req Request, maxBytes int) ([]byte, error) {
 	mt, params, err := mime.ParseMediaType(header(req, "Content-Type"))
 	if err != nil || mt != "multipart/form-data" || params["boundary"] == "" {

@@ -1,7 +1,7 @@
 package main
 
-// Wiring (clean architecture: the composition root): reads the configuration and secrets, picks the
-// verifier (package analyzer), and assembles the HTTP handlers around package ticket.
+// 配線(クリーンアーキテクチャのコンポジションルート): 設定とシークレットを読み込み、検証器(package analyzer)を選び、
+// package ticket を中心に HTTP ハンドラを組み立てる。
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"ticketqr/internal/view"
 )
 
-// newHandlers builds the handlers from the environment (and Parameter Store on Lambda).
+// newHandlers は環境変数(Lambda 上では Parameter Store も)からハンドラを組み立てる。
 func newHandlers(ctx context.Context) (*httpapi.Handlers, error) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -26,7 +26,7 @@ func newHandlers(ctx context.Context) (*httpapi.Handlers, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The runtime ceiling (Lambda's 6MB request, base64 by API Gateway) cannot be raised by configuration.
+	// ランタイムの上限(Lambda のリクエストは 6MB、API Gateway が base64 化する)は設定では引き上げられない。
 	if cfg.MaxImageBytes > imageinput.MaxBytes {
 		return nil, fmt.Errorf("MAX_IMAGE_BYTES must be %d or less, got %d", imageinput.MaxBytes, cfg.MaxImageBytes)
 	}
@@ -78,7 +78,7 @@ func newHandlers(ctx context.Context) (*httpapi.Handlers, error) {
 	}, nil
 }
 
-// mustNewHandlers exits when initialization fails: a Lambda that cannot initialize should fail its init phase.
+// mustNewHandlers は初期化に失敗したら終了する: 初期化できない Lambda は init フェーズで失敗させるべきため。
 func mustNewHandlers() *httpapi.Handlers {
 	h, err := newHandlers(context.Background())
 	if err != nil {

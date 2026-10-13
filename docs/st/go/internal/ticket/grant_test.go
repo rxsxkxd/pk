@@ -25,7 +25,7 @@ func ports(v Verifier) Ports {
 	return Ports{Verifier: v, Generator: g, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
 
-// TestVerifyAndGrantErrors: only business errors come back (the HTTP layer maps them).
+// TestVerifyAndGrantErrors: 返ってくるのはビジネスエラーだけ(HTTP 層がそれを対応付ける)。
 func TestVerifyAndGrantErrors(t *testing.T) {
 	jpeg := CertificateImage{Data: []byte{1}, MimeType: "image/jpeg"}
 	tests := []struct {

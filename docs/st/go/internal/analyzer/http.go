@@ -14,17 +14,17 @@ import (
 	"ticketqr/internal/ticket"
 )
 
-// HTTPConfig configures the client for ANALYZER_MODE=http.
+// HTTPConfig は ANALYZER_MODE=http 用のクライアント設定。
 type HTTPConfig struct {
 	URL     string
-	APIKey  string        // optional: sent as x-api-key only when set
-	Timeout time.Duration // per attempt
-	Logger  *slog.Logger  // logs every response body as-is (nil: slog.Default())
+	APIKey  string        // 任意: 設定されているときだけ x-api-key として送る
+	Timeout time.Duration // 1 回の試行あたり
+	Logger  *slog.Logger  // すべてのレスポンスボディをそのままログに出す(nil なら slog.Default())
 }
 
-// HTTP posts the image as-is (application/octet-stream, x-api-key when set) to the analysis server. It retries
-// once on 5xx, timeout or a transport error; 4xx and malformed responses are not retried. Every response body is
-// logged as-is ("analyzer response": status and the raw body), then only its "result" is read.
+// HTTP は画像をそのまま(application/octet-stream、設定されていれば x-api-key 付きで)解析サーバに POST する。
+// 5xx、タイムアウト、通信エラーのときは 1 回だけリトライし、4xx と不正なレスポンスはリトライしない。
+// レスポンスボディはすべてそのままログに出し("analyzer response": ステータスと生のボディ)、その後 "result" だけを読む。
 type HTTP struct {
 	cfg    HTTPConfig
 	client *http.Client
@@ -47,7 +47,7 @@ func (h *HTTP) Verify(ctx context.Context, img ticket.CertificateImage) (ticket.
 	return res, err
 }
 
-// attempt sends one request. The bool reports whether a failure is worth retrying.
+// attempt はリクエストを 1 回送る。bool は失敗がリトライに値するかを返す。
 func (h *HTTP) attempt(ctx context.Context, img ticket.CertificateImage) (ticket.Verdict, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, h.cfg.Timeout)
 	defer cancel()
@@ -70,7 +70,7 @@ func (h *HTTP) attempt(ctx context.Context, img ticket.CertificateImage) (ticket
 	if err != nil {
 		return ticket.Verdict{}, true, transportError(ctx, err)
 	}
-	// The response body goes to the log as it came (not parsed), for 2xx and every other status alike.
+	// レスポンスボディは届いたまま(パースせず)ログに出す。2xx でもそれ以外のどのステータスでも同様。
 	level := slog.LevelInfo
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		level = slog.LevelWarn
@@ -86,7 +86,7 @@ func (h *HTTP) attempt(ctx context.Context, img ticket.CertificateImage) (ticket
 	return res, false, nil
 }
 
-// transportError wraps a failed send or body read as ticket.ErrVerifierTimeout when the deadline passed, else ticket.ErrVerifierUpstream.
+// transportError は送信またはボディ読み込みの失敗を、期限切れなら ticket.ErrVerifierTimeout、それ以外なら ticket.ErrVerifierUpstream でラップする。
 func transportError(ctx context.Context, err error) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("%w: %v", ticket.ErrVerifierTimeout, err)
@@ -94,9 +94,9 @@ func transportError(ctx context.Context, err error) error {
 	return fmt.Errorf("%w: %v", ticket.ErrVerifierUpstream, err)
 }
 
-// parseResponse reads the analysis server's response {"confidence", "detected", "reason", "result",
-// "status"} (analyzer-stub/DESIGN.md 3.2). The API looks at "result" only: PASS, REJECT or RETRY; anything
-// else is a malformed response.
+// parseResponse は解析サーバのレスポンス {"confidence", "detected", "reason", "result", "status"}
+// (analyzer-stub/DESIGN.md 3.2)を読む。API が見るのは "result" だけ: PASS、REJECT、RETRY のいずれかで、
+// それ以外は不正なレスポンスとする。
 func parseResponse(body []byte) (ticket.Verdict, error) {
 	var out struct {
 		Result ticket.Result `json:"result"`

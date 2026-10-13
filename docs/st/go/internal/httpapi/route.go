@@ -4,7 +4,7 @@ import (
 	"context"
 )
 
-// Route keys exactly as configured on API Gateway HTTP API. The local server registers the same strings.
+// API Gateway HTTP API に設定したとおりのルートキー。ローカルサーバも同じ文字列を登録する。
 const (
 	RouteGrantInline = "POST /v1/tickets/qr-inline"
 	RouteGrant       = "POST /v1/tickets"
@@ -14,8 +14,8 @@ const (
 
 var RouteKeys = []string{RouteGrantInline, RouteGrant, RouteGetView, RouteGetQR}
 
-// Route dispatches on the event's routeKey, so one deployment package serves every endpoint
-// whether API Gateway points all routes at one function or at several.
+// Route はイベントの routeKey で振り分けるので、API Gateway がすべてのルートを 1 つの関数に向けても
+// 複数の関数に向けても、1 つのデプロイパッケージですべてのエンドポイントを処理できる。
 func (h *Handlers) Route(ctx context.Context, req Request) (Response, error) {
 	switch req.RouteKey {
 	case RouteGrantInline:

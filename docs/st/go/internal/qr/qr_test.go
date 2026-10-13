@@ -16,7 +16,7 @@ func TestPNGDecodesToContent(t *testing.T) {
 	for _, content := range []string{
 		"202610011943003f2b9c1e8a4d4f6b8e0c7a1d2b3c4d5eTQR",
 		"20261231235959ffffffffffff4fffbfffffffffffffffSTAGEFIXEDSUFFIX0123456789abcdef",
-		strings.Repeat("x", 120), // larger version, smaller modules
+		strings.Repeat("x", 120), // より大きいバージョン、より小さいモジュール
 	} {
 		t.Run(content, func(t *testing.T) {
 			data, err := PNG(content)
@@ -53,7 +53,7 @@ func TestPNGDecodesToContent(t *testing.T) {
 }
 
 func TestPNGTooLong(t *testing.T) {
-	if _, err := PNG(strings.Repeat("x", 3000)); err == nil { // exceeds QR capacity at level M
+	if _, err := PNG(strings.Repeat("x", 3000)); err == nil { // レベル M での QR の容量を超える
 		t.Fatal("expected error for content beyond QR capacity")
 	}
 }

@@ -25,8 +25,8 @@ import (
 	"ticketqr/internal/view"
 )
 
-// Real 32x32 images (../../../testdata/images, shared with the Node version): the format check parses
-// headers, so bytes that only start like an image are not accepted.
+// 実際の 32x32 画像(../../../testdata/images、Node 版と共有): 形式の検査はヘッダをパースするので、
+// 先頭だけ画像に見えるバイト列は受け付けられない。
 var (
 	jpeg     = mustRead("photo.jpg")
 	png      = mustRead("photo.png")
@@ -45,7 +45,7 @@ func mustRead(name string) []byte {
 type stubVerifier struct {
 	res ticket.Verdict
 	err error
-	got *ticket.CertificateImage // when set, records what the analyzer was given
+	got *ticket.CertificateImage // 設定されていれば、解析器に渡されたものを記録する
 }
 
 func (s stubVerifier) Verify(_ context.Context, img ticket.CertificateImage) (ticket.Verdict, error) {
@@ -97,7 +97,7 @@ func formRequest(t *testing.T, field string, data []byte) Request {
 	}
 }
 
-// withContentType rewrites the Content-Type of a form request; format gets the request's boundary (%s).
+// withContentType はフォームリクエストの Content-Type を書き換える。format にはリクエストの boundary(%s)が入る。
 func withContentType(t *testing.T, req Request, format string) Request {
 	t.Helper()
 	_, params, err := mime.ParseMediaType(req.Headers["content-type"])
@@ -108,7 +108,7 @@ func withContentType(t *testing.T, req Request, format string) Request {
 	return req
 }
 
-// brokenAfterImage is a valid image part followed by a part whose headers never end.
+// brokenAfterImage は、正しい画像パートの後に、ヘッダが終わらないパートが続くもの。
 func brokenAfterImage(t *testing.T) Request {
 	t.Helper()
 	req := formRequest(t, "image", jpeg)
@@ -225,7 +225,7 @@ func TestGrantInlineErrors(t *testing.T) {
 	}
 }
 
-// TestMaxImageBytes: a deployment can lower the upload limit (MAX_IMAGE_BYTES); the runtime ceiling stays.
+// TestMaxImageBytes: デプロイごとにアップロード上限(MAX_IMAGE_BYTES)を下げられる。ランタイムの上限は変わらない。
 func TestMaxImageBytes(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -250,8 +250,8 @@ func TestMaxImageBytes(t *testing.T) {
 	}
 }
 
-// TestContentTypeVariants: valid spellings of a multipart Content-Type. The Node tests have the same cases
-// except spaces around "=", a known difference (NODE.md 10).
+// TestContentTypeVariants: multipart の Content-Type の有効な書き方。Node のテストにも同じケースがあるが、
+// "=" の前後の空白だけは既知の差異(NODE.md 10)。
 func TestContentTypeVariants(t *testing.T) {
 	for _, format := range []string{
 		`multipart/form-data; boundary="%s"`,
@@ -270,7 +270,7 @@ func TestContentTypeVariants(t *testing.T) {
 	}
 }
 
-// TestPatternBFlow follows the browser: POST form → 303 → view HTML → img src → PNG.
+// TestPatternBFlow はブラウザの動きをたどる: フォームの POST → 303 → ビューの HTML → img の src → PNG。
 func TestPatternBFlow(t *testing.T) {
 	h := newHandlers(t, analyzer.AlwaysPass{})
 	ctx := context.Background()
@@ -368,7 +368,7 @@ func TestSignatureRequired(t *testing.T) {
 }
 
 func TestViewEscapesTicketCode(t *testing.T) {
-	// The code is not format-checked, so a signed but hostile value must still be escaped.
+	// コードは形式を検査しないので、署名済みでも悪意のある値は必ずエスケープされなければならない。
 	h := newHandlers(t, analyzer.AlwaysPass{})
 	code := `"><script>alert(1)</script>`
 	res, _ := h.GetView(context.Background(), signedGet(h, code, h.Signer.Sign(code)))
@@ -380,13 +380,13 @@ func TestViewEscapesTicketCode(t *testing.T) {
 	}
 }
 
-// answer replies with a fixed analysis server response body.
+// answer は解析サーバの固定のレスポンスボディを返す。
 func answer(body string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, body) }
 }
 
-// TestGrantInlineWithHTTPAnalyzer checks the real HTTP client end to end: the analysis server's answer
-// (its "result") or failure becomes 201 / 422 IMAGE_REJECTED / 422 IMAGE_RETRY / 502 / 504.
+// TestGrantInlineWithHTTPAnalyzer は実際の HTTP クライアントをエンドツーエンドで確認する: 解析サーバの応答
+// (その "result")または失敗が 201 / 422 IMAGE_REJECTED / 422 IMAGE_RETRY / 502 / 504 になる。
 func TestGrantInlineWithHTTPAnalyzer(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -419,8 +419,8 @@ func TestGrantInlineWithHTTPAnalyzer(t *testing.T) {
 	}
 }
 
-// hang never answers. It reads the body first: the server only notices the client giving up (and
-// cancels r.Context()) once the body has been consumed; the cap keeps a broken test from hanging.
+// hang は決して応答しない。先にボディを読むのは、ボディを読み終えて初めてサーバがクライアントの断念に
+// 気づく(r.Context() をキャンセルする)ため。上限は壊れたテストがハングし続けるのを防ぐ。
 func hang(_ http.ResponseWriter, r *http.Request) {
 	io.Copy(io.Discard, r.Body)
 	select {
@@ -429,8 +429,8 @@ func hang(_ http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// TestUploadFormats checks the split of responsibilities: the handler detects the format, VerifyAndGrant
-// accepts only the formats phones upload, and the bytes reach the analyzer unchanged.
+// TestUploadFormats は責務の分担を確認する: ハンドラが形式を判別し、VerifyAndGrant はスマートフォンが
+// アップロードする形式だけを受け付け、バイト列は変更されずに解析器へ届く。
 func TestUploadFormats(t *testing.T) {
 	for file, want := range map[string]string{
 		"photo.jpg": "image/jpeg", "photo.png": "image/png", "photo.heic": "image/heic",
@@ -459,8 +459,8 @@ func TestUploadFormats(t *testing.T) {
 	}
 }
 
-// TestGrantAcceptJSON checks the SPA path of B-1: Accept: application/json gets the signed QR URL as JSON
-// (and JSON errors) instead of a redirect.
+// TestGrantAcceptJSON は B-1 の SPA 経路を確認する: Accept: application/json ならリダイレクトではなく、
+// 署名付き QR URL を JSON で(エラーも JSON で)受け取る。
 func TestGrantAcceptJSON(t *testing.T) {
 	h := newHandlers(t, analyzer.AlwaysPass{})
 	req := formRequest(t, "image", jpeg)
@@ -484,13 +484,13 @@ func TestGrantAcceptJSON(t *testing.T) {
 		t.Errorf("qrUrl = %q, want %q", body.QRURL, want)
 	}
 
-	// The returned URL serves the QR (B-2), so the SPA can render <img src=qrUrl>.
+	// 返された URL は QR を返す(B-2)ので、SPA は <img src=qrUrl> で描画できる。
 	res, _ = h.GetQR(context.Background(), signedGet(h, body.TicketCode, body.Sig))
 	if res.StatusCode != http.StatusOK || res.Headers["Content-Type"] != "image/png" {
 		t.Errorf("qr status = %d", res.StatusCode)
 	}
 
-	// Errors are JSON too.
+	// エラーも JSON になる。
 	bad := formRequest(t, "image", []byte("hello"))
 	bad.Headers["accept"] = "application/json"
 	res, _ = h.Grant(context.Background(), bad)
@@ -498,7 +498,7 @@ func TestGrantAcceptJSON(t *testing.T) {
 		t.Errorf("error: status = %d, body = %s", res.StatusCode, res.Body)
 	}
 
-	// A browser form (Accept: text/html,...) still gets the redirect.
+	// ブラウザのフォーム(Accept: text/html,...)は引き続きリダイレクトを受け取る。
 	form := formRequest(t, "image", jpeg)
 	form.Headers["accept"] = "text/html,application/xhtml+xml,*/*;q=0.8"
 	if res, _ = h.Grant(context.Background(), form); res.StatusCode != http.StatusSeeOther {
@@ -506,7 +506,7 @@ func TestGrantAcceptJSON(t *testing.T) {
 	}
 }
 
-// completedLogs runs fn with a JSON logger and returns the "request completed" entries.
+// completedLogs は JSON ロガーで fn を実行し、"request completed" のエントリを返す。
 func completedLogs(t *testing.T, h *Handlers, fn func()) []map[string]any {
 	t.Helper()
 	var buf bytes.Buffer
@@ -525,8 +525,8 @@ func completedLogs(t *testing.T, h *Handlers, fn func()) []map[string]any {
 	return out
 }
 
-// TestClientLog: the image upload endpoints log the browser's User-Agent and Client Hints (same keys as
-// the Node version), other endpoints do not.
+// TestClientLog: 画像アップロードのエンドポイントはブラウザの User-Agent と Client Hints をログに記録し(キーは
+// Node 版と同じ)、他のエンドポイントは記録しない。
 func TestClientLog(t *testing.T) {
 	const iOS13 = "Mozilla/5.0 (iPhone; CPU iPhone OS 13_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.4 Mobile/15E148 Safari/604.1"
 	h := newHandlers(t, analyzer.AlwaysPass{})
@@ -541,7 +541,7 @@ func TestClientLog(t *testing.T) {
 	}
 	logs := completedLogs(t, h, func() {
 		h.GrantInline(ctx, withClient(formRequest(t, "image", jpeg)))
-		h.Grant(ctx, withClient(formRequest(t, "image", []byte("not an image")))) // errors are logged too
+		h.Grant(ctx, withClient(formRequest(t, "image", []byte("not an image")))) // エラーもログに記録される
 		h.GetQR(ctx, Request{Headers: map[string]string{"user-agent": iOS13}})
 	})
 	if len(logs) != 3 {
@@ -582,7 +582,7 @@ func TestClientLogLimits(t *testing.T) {
 		req := formRequest(t, "image", jpeg)
 		req.Headers["user-agent"] = long
 		h.GrantInline(context.Background(), req)
-		h.GrantInline(context.Background(), formRequest(t, "image", jpeg)) // no client headers
+		h.GrantInline(context.Background(), formRequest(t, "image", jpeg)) // クライアントヘッダなし
 	})
 	if ua := logs[0]["client"].(map[string]any)["userAgent"].(string); len(ua) != 512 {
 		t.Errorf("userAgent length = %d, want 512", len(ua))

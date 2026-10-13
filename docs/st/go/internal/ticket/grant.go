@@ -8,31 +8,31 @@ import (
 	"time"
 )
 
-// CertificateImage is the uploaded image of a certificate, exactly as received, with the format the
-// HTTP layer detected from its content ("" if unknown). It is sent to the verifier unchanged.
+// CertificateImage はアップロードされた証明書の画像で、受け取ったままのデータと、HTTP 層がその内容から
+// 判別した形式(不明なら "")を持つ。検証器にはそのまま送られる。
 type CertificateImage struct {
 	Data     []byte
 	MimeType string
 }
 
-// Ports are what VerifyAndGrant needs from outside: the verifier, the ticket code generator and a logger.
+// Ports は VerifyAndGrant が外部に求めるもの: 検証器、チケットコード生成器、ロガー。
 type Ports struct {
 	Verifier  Verifier
 	Generator *Generator
 	Logger    *slog.Logger
 }
 
-// acceptedTypes are the formats iPhone and major Android phones produce as-is (business rule).
+// acceptedTypes は iPhone と主要な Android 端末がそのまま生成する形式(ビジネスルール)。
 var acceptedTypes = map[string]bool{
 	"image/jpeg": true, "image/png": true, "image/heic": true, "image/heif": true,
 	"image/avif": true, "image/webp": true,
 }
 
-// VerifyAndGrant verifies a certificate image and grants a new ticket only when it passes: the image
-// must be non-empty and in an accepted format, then the verifier's result must be PASS. Otherwise it
-// returns a business error (ErrEmptyImage, ErrUnsupportedImage, ErrCertificateRejected for REJECT,
-// ErrCertificateRetry for RETRY, or a wrapped ErrVerifierTimeout / ErrVerifierUpstream). Shared by the QR
-// inline grant API and the ticket grant API.
+// VerifyAndGrant は証明書画像を検証し、合格したときだけ新しいチケットを付与する: 画像が空でなく
+// 受け付ける形式であること、そのうえで検証器の結果が PASS であることが条件。そうでなければ
+// ビジネスエラー(ErrEmptyImage、ErrUnsupportedImage、REJECT なら ErrCertificateRejected、
+// RETRY なら ErrCertificateRetry、またはラップされた ErrVerifierTimeout / ErrVerifierUpstream)を返す。
+// QR インライン付与 API とチケット付与 API で共有する。
 func VerifyAndGrant(ctx context.Context, p Ports, img CertificateImage) (Ticket, error) {
 	if len(img.Data) == 0 {
 		return Ticket{}, ErrEmptyImage
@@ -60,7 +60,7 @@ func VerifyAndGrant(ctx context.Context, p Ports, img CertificateImage) (Ticket,
 	case ResultRetry:
 		p.Logger.InfoContext(ctx, "image to be taken again", "result", v.Result)
 		return Ticket{}, ErrCertificateRetry
-	default: // a Verifier returns only the three results; anything else is its bug
+	default: // Verifier が返すのは 3 つの結果だけ。それ以外はその実装のバグ
 		p.Logger.ErrorContext(ctx, "image analysis failed", "error", "unknown result", "result", v.Result)
 		return Ticket{}, fmt.Errorf("%w: unknown result %q", ErrVerifierUpstream, v.Result)
 	}

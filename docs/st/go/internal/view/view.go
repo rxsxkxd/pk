@@ -1,6 +1,6 @@
-// Package view renders the HTML views of the Go version (templates/*.html, embedded in the binary). The
-// Node version builds the same pages with hono/html; the files are not shared (NODE.md 5.3).
-// Clean architecture: part of the inbound adapter (presentation), used by package httpapi.
+// Package view は Go 版の HTML ビュー(templates/*.html、バイナリに埋め込み)を描画する。
+// Node 版は同じページを hono/html で組み立てる。ファイルは共有しない(NODE.md 5.3)。
+// クリーンアーキテクチャ: インバウンドアダプタ(プレゼンテーション)の一部で、package httpapi が使う。
 package view
 
 import (

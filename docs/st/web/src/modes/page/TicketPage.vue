@@ -36,7 +36,12 @@ const qrFailed = ref(false); // QR 画像 API の 403（署名の不一致）や
       を保存しておくと、あとで同じ QR コードを表示できます。
     </p>
 
-    <RouterLink to="/" class="mt-4 inline-block text-sm underline" @click="store.reset()"
+    <!-- 画面を移る操作なのでリンクのまま、見た目は発行画面の「発行する」ボタンと同じにする -->
+    <RouterLink
+      to="/"
+      class="mt-4 block w-full rounded-md bg-slate-800 px-4 py-3 text-white"
+      data-testid="grant-again"
+      @click="store.reset()"
       >別の証明書の画像で発行する</RouterLink
     >
   </main>

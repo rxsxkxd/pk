@@ -26,7 +26,6 @@ async function grant(): Promise<void> {
 
     <CertificateImagePicker
       v-model="store.file"
-      :problem="store.fileProblem"
       :disabled="sending"
       :shrinking="store.shrinking"
       :shrunk-size="store.shrunk?.size"
@@ -42,6 +41,6 @@ async function grant(): Promise<void> {
       {{ sending ? '送信中…' : '発行する' }}
     </button>
 
-    <ErrorMessage v-if="store.error" :message="store.error" />
+    <ErrorMessage v-if="store.errorMessage" :message="store.errorMessage" />
   </main>
 </template>

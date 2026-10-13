@@ -167,6 +167,38 @@ test.each([
 });
 
 // send() is what every grant mode uses (src/modes/<mode>/); the request is the mode's API call.
+// One error box under the button: the chosen photo's problem first, otherwise the API's error.
+describe('errorMessage (the error box under the button)', () => {
+  const reject = async () => {
+    throw new ApiError('IMAGE_REJECTED', 'image was rejected', 422);
+  };
+
+  test('nothing before a photo is chosen', () => {
+    expect(useTicketStore().errorMessage).toBeUndefined();
+  });
+
+  test("the photo's problem (e.g. an unsupported format)", () => {
+    const store = useTicketStore();
+    store.file = photo('a.pdf', 'application/pdf');
+    expect(store.errorMessage).toBe('この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）');
+  });
+
+  test("the API's error after sending", async () => {
+    const store = useTicketStore();
+    store.file = photo();
+    await store.send(reject);
+    expect(store.errorMessage).toBe('この証明書の画像ではチケットを発行できません');
+  });
+
+  test('choosing another photo clears the previous API error', async () => {
+    const store = useTicketStore();
+    store.file = photo();
+    await store.send(reject);
+    store.file = photo('b.jpg', 'image/jpeg');
+    expect(store.errorMessage).toBeUndefined();
+  });
+});
+
 describe('sending', () => {
   test('passes the API base URL and the chosen photo to the request and returns its result', async () => {
     const store = useTicketStore();

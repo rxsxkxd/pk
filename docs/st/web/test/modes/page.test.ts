@@ -81,7 +81,11 @@ describe('grant screen', () => {
     const button = wrapper.get('[data-testid="grant-page"]');
     expect(button.attributes('disabled')).toBeDefined();
     await choosePhoto(wrapper, photo('a.pdf', 'application/pdf'));
-    expect(wrapper.get('[data-testid="image-problem"]').text()).toContain('対応していません');
+    // the photo's problem is shown in the error box under the button, like API errors
+    expect(wrapper.find('[data-testid="image-problem"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="error"]').text()).toContain('対応していません');
+    const html = wrapper.html();
+    expect(html.indexOf('data-testid="grant-page"')).toBeLessThan(html.indexOf('data-testid="error"'));
     expect(button.attributes('disabled')).toBeDefined();
     await choosePhoto(wrapper);
     expect(button.attributes('disabled')).toBeUndefined();

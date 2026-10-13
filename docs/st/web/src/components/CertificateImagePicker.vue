@@ -7,7 +7,8 @@ import { ACCEPT } from '../stores/ticket.ts';
 
 const file = defineModel<File | null>({ required: true });
 // shrinking / shrunkSize: 上限を超えた写真を縮めている最中か、縮めた後の大きさ（stores/ticket.ts）。
-defineProps<{ problem?: string; disabled?: boolean; shrinking?: boolean; shrunkSize?: number }>();
+// 選んだ写真の問題（大きすぎるなど）は、ここではなくボタンの下のエラーの枠に出す（発行画面）。
+defineProps<{ disabled?: boolean; shrinking?: boolean; shrunkSize?: number }>();
 
 const android = isAndroid();
 
@@ -70,6 +71,5 @@ function formatSize(bytes: number): string {
     <p v-if="file && shrunkSize !== undefined" class="text-sm text-slate-600" data-testid="image-shrunk">
       縮小しました（{{ formatSize(file.size) }} → {{ formatSize(shrunkSize) }}）
     </p>
-    <p v-if="file && problem" class="text-sm text-red-700" data-testid="image-problem">{{ problem }}</p>
   </div>
 </template>

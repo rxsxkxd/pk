@@ -71,14 +71,19 @@ export const useTicketStore = defineStore('ticket', () => {
   const upload = computed(() => shrunk.value ?? file.value);
   const fileProblem = computed(() => (shrinking.value ? undefined : checkFile(upload.value, config.maxImageBytes)));
   const canSend = computed(() => !shrinking.value && !fileProblem.value && status.value !== 'sending');
+  // ボタンの下のエラーの枠に出す文言（1か所にまとめる）。選んだ写真の問題（大きすぎる、形式が違う）を先に、
+  // なければ API のエラー。写真を選ぶ前は「選んでください」を出さない（ボタンが押せないことで分かる）。
+  const errorMessage = computed(() => (file.value ? fileProblem.value : undefined) ?? error.value ?? undefined);
 
-  // 写真を選んだら、上限を超えていて対応する形式のときだけ縮める。縮めている間に別の写真を選んだら、
-  // 前の結果は捨てる。sync: 選んだ直後から shrinking にして、その間に送れないようにする。
+  // 写真を選んだら、前の API のエラーを消す（新しい写真には関係ないため）。上限を超えていて対応する形式の
+  // ときだけ縮める。縮めている間に別の写真を選んだら、前の結果は捨てる。sync: 選んだ直後から shrinking に
+  // して、その間に送れないようにする。
   let selection = 0;
   watch(
     file,
     async (chosen) => {
       const current = ++selection;
+      error.value = null;
       shrunk.value = null;
       shrinking.value = false;
       if (!chosen || chosen.size <= config.maxImageBytes || !isAcceptedImage(chosen)) return;
@@ -114,5 +119,5 @@ export const useTicketStore = defineStore('ticket', () => {
     error.value = null;
   }
 
-  return { file, shrunk, shrinking, status, error, fileProblem, canSend, send, reset };
+  return { file, shrunk, shrinking, status, error, fileProblem, canSend, errorMessage, send, reset };
 });

@@ -35,13 +35,22 @@ export async function postImage<T>(
   const body = new FormData();
   body.append('image', file); // Content-Type (with the boundary) is set by the browser.
 
+  // AbortSignal.timeout() is not used: iOS 16 / Chrome 124 and later only (DESIGN.md 2.4). The timer covers
+  // the whole exchange, reading the response body included.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   let res: Response;
+  let json: unknown;
   try {
-    res = await fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
-  } catch {
-    throw new ApiError('NETWORK', 'request failed');
+    try {
+      res = await fetch(url, { method: 'POST', body, headers, signal: controller.signal });
+    } catch {
+      throw new ApiError('NETWORK', 'request failed');
+    }
+    json = await res.json().catch(() => undefined);
+  } finally {
+    clearTimeout(timer);
   }
-  const json: unknown = await res.json().catch(() => undefined);
 
   if (res.status === 201) {
     const ok = schema.safeParse(json);

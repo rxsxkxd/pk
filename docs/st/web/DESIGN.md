@@ -133,7 +133,7 @@ const supportsRequestStreams = (() => {
 | 2 | `main.ts` のトップレベルの `await` をやめ、関数の中で `await` する | トップレベルの `await` は Safari 15 から。変換もできない（ビルドがエラーになる） |
 | 3 | `AbortSignal.timeout()` を、`AbortController` と `setTimeout` に置き換える（2.2） | Safari 16 から |
 | 4 | **済み（2026-10-13）**: Tailwind CSS 3.4 に戻した（[notes/tailwind-compat.md](notes/tailwind-compat.md)）。あわせて CSS の出力先を `build.cssTarget: ['safari13', 'chrome80']` にした（JS の `build.target` は 1 のまま未対応）。`gap` は使っていない（Android の2つのボタンも、縦並びにしてからは `space-y` で間隔を空ける） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
-| 5 | 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
+| 5 | **調査済み（2026-10-13。[notes/builtin-compat.md](notes/builtin-compat.md)）: zod 4 が読み込み時に `BigInt`（iOS 14 から）を使うため、iOS 13 では JS 全体が止まる。valibot（推奨）か zod 3 に替える。ほかの新しい機能は今のコードが通らない経路だけ。** もとの項目: 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
 | 6 | （検討中・優先度低）Fetch Upload Streams の送信（2.3）と、Android での送信中の進み具合の表示 | 新しい機能。採用が決まってから行う |
 | 7 | 実機での確認: iOS 13 の端末（またはクラウドの実機サービス）と、Android 9 + Chrome 138 以下 | E2E の Playwright の WebKit は最新の WebKit で、Safari 13 の動きは再現しない |
 

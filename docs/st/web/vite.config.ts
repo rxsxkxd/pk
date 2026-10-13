@@ -16,9 +16,10 @@ export default defineConfig({
   resolve: {
     alias: { '@mode': fileURLToPath(new URL(`./src/modes/${grantMode}/index.ts`, import.meta.url)) },
   },
-  // CSS for the supported browsers (DESIGN.md 2.1): the minifier must not turn it into newer syntax. The JS
-  // target (build.target) is a separate change (DESIGN.md 2.4).
-  build: { cssTarget: ['safari13', 'chrome80'] },
+  // Output for the supported browsers (DESIGN.md 2.1, 2.4): newer syntax (?. ?? ??= class fields) is converted
+  // and the CSS minifier keeps old syntax. Android's Chrome floor is not decided yet: 80 is provisional (as in
+  // package.json "browserslist"). Built-in functions are not converted (src/polyfills.ts).
+  build: { target: ['safari13', 'chrome80'], cssTarget: ['safari13', 'chrome80'] },
   // Local development: forward API calls to the local API (Go `make run` / Node `npm run dev`), so the SPA
   // and the API share one origin and no CORS is needed (DESIGN.md 8).
   server: { proxy: { '/v1': 'http://localhost:8080' } },

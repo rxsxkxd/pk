@@ -1,7 +1,7 @@
 // The shared API client (src/api/client.ts). Each mode's endpoints are tested in test/modes/.
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { z } from 'zod';
-import { ApiError, postImage, Sig, TicketCode } from '../src/api/client.ts';
+import { ApiError, postImage, Sig, TicketCode, TIMEOUT_MS } from '../src/api/client.ts';
 import { API, json, photo, SIG, stubFetch } from './helpers.ts';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -34,6 +34,36 @@ describe('postImage', () => {
   test('a non-JSON error (e.g. a proxy page) is UNEXPECTED', async () => {
     stubFetch(new Response('<html>Bad Gateway</html>', { status: 502 }));
     await expect(postImage(API, photo(), Ok)).rejects.toMatchObject({ code: 'UNEXPECTED', status: 502 });
+  });
+
+  test('a request still unanswered after TIMEOUT_MS is aborted as NETWORK (no AbortSignal.timeout)', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) =>
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+          ),
+      );
+      vi.stubGlobal('fetch', fetch);
+      const pending = postImage(API, photo(), Ok).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(TIMEOUT_MS);
+      expect(await pending).toMatchObject({ code: 'NETWORK' });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test('the timer is cleared once the response is read', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch(json(201, { ok: true }));
+      await postImage(API, photo(), Ok);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test('network failures and timeouts are NETWORK', async () => {

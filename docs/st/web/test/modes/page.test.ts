@@ -117,7 +117,7 @@ describe('ticket screen (drawn from the URL only)', () => {
   test('shows the QR from the QR image API, the code and the granted time (issuedAt) from the code', async () => {
     const fetch = stubFetch();
     const { wrapper } = await mountAt(routes, `/tickets/${CODE}?sig=${SIG}`);
-    expect(wrapper.get('img').attributes('src')).toBe(`${API}/v1/tickets/${CODE}/qr?sig=${SIG}`);
+    expect(wrapper.get('[data-ticket-code] img').attributes('src')).toBe(`${API}/v1/tickets/${CODE}/qr?sig=${SIG}`);
     expect(wrapper.get('[data-testid="ticket-code"]').text()).toBe(CODE);
     expect(wrapper.get('[data-testid="issued-at"]').text()).toBe('発行: 2026-10-05 13:50:54');
     expect(fetch).not.toHaveBeenCalled(); // no re-grant on reload
@@ -130,12 +130,12 @@ describe('ticket screen (drawn from the URL only)', () => {
   ])('%s: invalid URL message without calling the API', async (_name, path) => {
     const { wrapper } = await mountAt(routes, path);
     expect(wrapper.get('[data-testid="error"]').text()).toBe('無効なチケット URL です');
-    expect(wrapper.find('img').exists()).toBe(false);
+    expect(wrapper.find('[data-ticket-code] img').exists()).toBe(false);
   });
 
   test('a QR that fails to load (403 for a wrong sig) shows the invalid URL message', async () => {
     const { wrapper } = await mountAt(routes, `/tickets/${CODE}?sig=${SIG}`);
-    await wrapper.get('img').trigger('error');
+    await wrapper.get('[data-ticket-code] img').trigger('error');
     expect(wrapper.get('[data-testid="error"]').text()).toBe('無効なチケット URL です');
   });
 });

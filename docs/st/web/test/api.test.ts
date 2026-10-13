@@ -1,12 +1,12 @@
 // The shared API client (src/api/client.ts). Each mode's endpoints are tested in test/modes/.
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { z } from 'zod';
+import * as v from 'valibot';
 import { ApiError, postImage, Sig, TicketCode, TIMEOUT_MS } from '../src/api/client.ts';
 import { API, json, photo, SIG, stubFetch } from './helpers.ts';
 
 afterEach(() => vi.unstubAllGlobals());
 
-const Ok = z.object({ ok: z.literal(true) });
+const Ok = v.object({ ok: v.literal(true) });
 
 describe('postImage', () => {
   test('posts the photo as-is as the multipart "image" field, with the given headers', async () => {
@@ -84,11 +84,11 @@ describe('ticket code format', () => {
     ['20261005135054-3f2b9c1e-8a4d-4f6b-8e0c-7a1d2b3c4d5eTQR', false], // hyphens
     ['20261005135054-4BV81K5V', false], // the former format
   ])('%s → %s', (code, ok) => {
-    expect(TicketCode.safeParse(code).success).toBe(ok);
+    expect(v.safeParse(TicketCode, code).success).toBe(ok);
   });
 
   test('sig is 22 base64url characters', () => {
-    expect(Sig.safeParse(SIG).success).toBe(true);
-    expect(Sig.safeParse('short').success).toBe(false);
+    expect(v.safeParse(Sig, SIG).success).toBe(true);
+    expect(v.safeParse(Sig, 'short').success).toBe(false);
   });
 });

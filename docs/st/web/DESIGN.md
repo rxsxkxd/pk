@@ -35,7 +35,7 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 | ルーティング | **vue-router** 5（hash モード） | SPA の発行画面と SPA のチケット画面の2つ。hash モードなので、S3 に直接置いてもリロードや直接アクセスで 404 にならない |
 | 状態管理 | **Pinia** 4 | 発行の状態（送信中、結果、エラー）を1つのストアにまとめる（5章） |
 | スタイル | **Tailwind CSS 3.4**（3.4.19。`v3-lts`）+ PostCSS + autoprefixer | 2026-10-13 に 4 から戻した（4 は iOS 13〜15.3 でスタイルがまったく付かない。notes/tailwind-compat.md）。`tailwind.config.js`（`content` だけ）、`postcss.config.js`、`src/style.css` は `@tailwind` の3行。autoprefixer の対象は `package.json` の `browserslist`（`ios_saf >= 13`、`chrome >= 80`。Chrome の下限は仮。11章の 6） |
-| 検証 | **zod** 4 | 実行時設定（`config.json`）、API のレスポンス（成功・エラー）、チケット画面の URL パラメータを検証する |
+| 検証 | **valibot** 1.5.0（版は固定） | 実行時設定（`config.json`）、API のレスポンス（成功・エラー）、チケット画面の URL パラメータを検証する。2026-10-13 に zod 4 から替えた（zod 4 は読み込み時に `BigInt` を使い、iOS 13 で動かないため。2.4 の 5）。使う関数だけがビルドに入るので小さい（約 7KB） |
 | 言語 | TypeScript **6** | 型チェックは `vue-tsc --noEmit`。vue-tsc が TypeScript 7（Go 製のコンパイラー）に対応していないため、Node 版（7）とは違い 6 系に固定する |
 | 古いブラウザ向けの補い | **core-js** 3.50.0（版は固定） | 対象のブラウザにない組み込みの関数を補う（今は `Object.hasOwn` だけ。2.4 の 5）。JS は gzip で約 4KB 増える。インストール時のスクリプト（`postinstall`。寄付のお願いを表示するだけ）は許可していない（npm が警告を出すが、動作には影響しない） |
 | 画像の縮小 | **Compressor.js** 1.4.0（`compressorjs`。版は固定） | 上限を超えた写真だけを縮めて JPEG にする（3章）。npm の依存は3つに見えるが、`is-blob`・`blueimp-canvas-to-blob` は実行時に使われない（説明は notes/image-compression.md 6.1） |
@@ -124,9 +124,9 @@ const supportsRequestStreams = (() => {
 | リダイレクト | ストリームのボディは送り直せないので、リダイレクト（303 以外）されると失敗する。画面遷移方式は 201 の JSON を受け取るので、影響しない |
 | 対象 | 画面遷移方式（メイン）とその場表示方式の `fetch` だけ。フォーム送信方式は普通のフォームなので対象外 |
 
-### 2.4 古いブラウザに対応するための実装の変更（一部済み）
+### 2.4 古いブラウザに対応するための実装の変更（1〜5 済み）
 
-今の実装は、2.1 の要件をまだ満たしていない。必要な変更を次にまとめる。2026-10-13 に 1〜4 と 5 の一部を行った。**残りは 5 の zod 4 の `BigInt`（保留）と、6（検討中）・7（実機での確認）**。
+必要な変更を次にまとめる。2026-10-13 に 1〜5 を行った。**残りは 6（検討中）と 7（実機での確認）**。
 
 | # | 変更 | 理由 |
 |---|---|---|
@@ -134,7 +134,7 @@ const supportsRequestStreams = (() => {
 | 2 | **済み（2026-10-13）**: `src/main.ts` の起動の処理を関数（`start()`）にし、トップレベルの `await` をやめた | トップレベルの `await` は Safari 15 から。変換もできない（ビルドがエラーになる） |
 | 3 | **済み（2026-10-13）**: `src/api/client.ts` のタイムアウトを `AbortController` と `setTimeout` にした（応答の読み終わりまでを 30 秒で打ち切り、終わったらタイマーを止める） | `AbortSignal.timeout()` は Safari 16 / Chrome 124 から |
 | 4 | **済み（2026-10-13）**: Tailwind CSS 3.4 に戻した（[notes/tailwind-compat.md](notes/tailwind-compat.md)）。あわせて CSS の出力先を `build.cssTarget: ['safari13', 'chrome80']` にした（JS の `build.target` は 1 のまま未対応）。`gap` は使っていない（Android の2つのボタンも、縦並びにしてからは `space-y` で間隔を空ける） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
-| 5 | **一部済み（2026-10-13。[notes/builtin-compat.md](notes/builtin-compat.md)）: Pinia の `Object.hasOwn` は core-js（`src/main.ts` の先頭で `core-js/actual/object/has-own` だけを読み込む）で補った。Vue の `toSorted()` などは今のコードが呼ばない。残りは zod 4 の `BigInt`（iOS 14 から。読み込み時に使うため、iOS 13 では JS 全体が止まる）で、対応は保留（valibot か zod 3 に替える案）。** もとの項目: 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
+| 5 | **済み（2026-10-13。[notes/builtin-compat.md](notes/builtin-compat.md)）: zod 4（読み込み時に `BigInt` を使い、iOS 13 で JS 全体が止まる）を valibot に替えた。Pinia の `Object.hasOwn` は core-js（`src/main.ts` の先頭で `core-js/actual/object/has-own` だけを読み込む）で補った。Vue の `toSorted()` などは今のコードが呼ばない。ビルドの解析で、ほかに iOS 13 にない機能がないことを確かめた。** もとの項目: 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
 | 6 | （検討中・優先度低）Fetch Upload Streams の送信（2.3）と、Android での送信中の進み具合の表示 | 新しい機能。採用が決まってから行う |
 | 7 | 実機での確認: iOS 13 の端末（またはクラウドの実機サービス）と、Android 9 + Chrome 138 以下 | E2E の Playwright の WebKit は最新の WebKit で、Safari 13 の動きは再現しない |
 
@@ -267,9 +267,9 @@ API の URL などは**ビルドに埋め込まず**、起動時に `/config.jso
 
 ```ts
 // src/config.ts
-const ConfigSchema = z.object({
-  apiBaseUrl: z.string().transform((u) => u.replace(/\/+$/, '')),   // 空文字 = 同じオリジン（統合の構成、開発時のプロキシ。8・9章）
-  maxImageBytes: z.number().int().min(1).max(MAX_IMAGE_BYTES).default(MAX_IMAGE_BYTES),  // MAX_IMAGE_BYTES = 4MB
+const ConfigSchema = v.object({
+  apiBaseUrl: v.pipe(v.union([v.literal(''), v.pipe(v.string(), v.url(), /* http(s) だけ */)]), v.transform((u) => u.replace(/\/+$/, ''))),   // 空文字 = 同じオリジン（統合の構成、開発時のプロキシ。8・9章）
+  maxImageBytes: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(MAX_IMAGE_BYTES)), MAX_IMAGE_BYTES),  // MAX_IMAGE_BYTES = 4MB
 });
 ```
 
@@ -286,7 +286,7 @@ const ConfigSchema = z.object({
 
 ```ts
 // src/api/client.ts（共通）: 画像を FormData の image として POST し、201 を schema で解釈する（失敗は ApiError）。
-export async function postImage<T>(url: string, file: File, schema: z.ZodType<T>, headers?: Record<string, string>): Promise<T> { … }
+export async function postImage<T>(url: string, file: File, schema: v.GenericSchema<unknown, T>, headers?: Record<string, string>): Promise<T> { … }
 
 // src/modes/page/api.ts
 // 画面遷移方式（メイン）: チケット付与 API に画像をそのまま送り、署名付きの QR の URL を返す（Accept: application/json。失敗は ApiError）。
@@ -307,26 +307,29 @@ export async function grantInline(apiBaseUrl: string, file: File): Promise<Inlin
 - （検討中・優先度低）Android（Fetch Upload Streams に対応するブラウザ）だけ、証明書の画像をストリームで送って進み具合を出す案がある。非対応や失敗のときは `FormData` で送る（2.3）
 - チケット画面の QR は、`grantForPage` の結果の `qrUrl` ではなく、URL のパラメータから `qrUrl()` で組み立てる（リロード後も同じ方法で描画するため）
 
-### 4.3 検証（zod）
+### 4.3 検証（valibot）
 
 ```ts
-const TicketCode = z.string().regex(/^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$/); // ../DESIGN.md 4章
-const Sig = z.string().regex(/^[A-Za-z0-9_-]{22}$/);
-const ApiErrorSchema = z.object({ error: z.object({ code: z.string(), message: z.string() }) });   // ここまで共通（src/api/client.ts）
+import * as v from 'valibot';
+const TicketCode = v.pipe(v.string(), v.regex(/^\d{14}[0-9a-f]{32}[A-Za-z0-9]{1,32}$/)); // ../DESIGN.md 4章
+const Sig = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{22}$/));
+const IssuedAt = v.pipe(v.string(), v.isoTimestamp());   // RFC 3339（API は +09:00 を付ける）
+const ApiErrorSchema = v.object({ error: v.object({ code: v.string(), message: v.string() }) });   // ここまで共通（src/api/client.ts）
 
 // 方式ごと（src/modes/inline/api.ts・src/modes/page/api.ts）
-const InlineTicketSchema = z.object({
+const InlineTicketSchema = v.object({
   ticketCode: TicketCode,
-  issuedAt: z.iso.datetime({ offset: true }),
-  qr: z.object({ mimeType: z.literal('image/png'), data: z.base64() }),
+  issuedAt: IssuedAt,
+  qr: v.object({ mimeType: v.literal('image/png'), data: v.pipe(v.string(), v.base64()) }),
 });
-const PageTicketSchema = z.object({ ticketCode: TicketCode, issuedAt: z.iso.datetime({ offset: true }), sig: Sig, qrUrl: z.url() });
-const TicketRouteSchema = z.object({ code: TicketCode, sig: Sig });   // SPA のチケット画面の URL パラメータ
+const PageTicketSchema = v.object({ ticketCode: TicketCode, issuedAt: IssuedAt, sig: Sig, qrUrl: v.pipe(v.string(), v.url()) });
+const TicketRouteSchema = v.object({ code: TicketCode, sig: Sig });   // SPA のチケット画面の URL パラメータ
 ```
 
 - 成功（201）は各スキーマ、それ以外は `ApiErrorSchema` で解釈する。どちらにも合わなければ「予期しない応答」として扱う
 - SPA のチケット画面は、URL のパラメータが `TicketRouteSchema` に合わなければ、API を呼ばずに「無効なチケット URL です」と表示する
-- スキーマから型を作る（`z.infer`）ので、画面のコードは検証済みの値だけを扱う
+- スキーマから型を作る（`v.InferOutput`）ので、画面のコードは検証済みの値だけを扱う
+- 検証は `v.parse(schema, 値)`（形が違えば例外）か `v.safeParse(schema, 値)`（結果の `success` と `output`）で行う
 
 ### 4.4 エラーの表示
 
@@ -388,11 +391,11 @@ st/web/
 │   ├── App.vue             # <RouterView>
 │   ├── router.ts           # hash モード。方式のルートに、知らないパスを / に戻すルートを足す
 │   ├── style.css           # @tailwind base / components / utilities
-│   ├── config.ts           # config.json の読み込みと検証（zod）
+│   ├── config.ts           # config.json の読み込みと検証（valibot）
 │   ├── env.d.ts            # vite/client の型
 │   ├── platform.ts         # 端末の判定（isAndroid）
 │   ├── image/shrink.ts     # 共通: 上限を超えた写真を縮める（Compressor.js。3章）
-│   ├── api/client.ts       # 共通: postImage、ApiError、コードと署名のスキーマ（zod）
+│   ├── api/client.ts       # 共通: postImage、ApiError、コードと署名のスキーマ（valibot）
 │   ├── stores/ticket.ts    # 共通: 発行の状態（Pinia）、送る前の確認と縮小、エラーの文言
 │   ├── assets/banner.png   # 先頭のバナーの画像（501×146px。今は仮）
 │   ├── components/         # 共通の部品
@@ -500,7 +503,7 @@ Strict-Transport-Security: max-age=31536000
 
 | 対象 | 方法 |
 |---|---|
-| `config.ts`、`api/client.ts`・`modes/*/api.ts` のスキーマ | 正しい JSON・欠けた項目・形の違う値を zod で検証する単体テスト |
+| `config.ts`、`api/client.ts`・`modes/*/api.ts` のスキーマ | 正しい JSON・欠けた項目・形の違う値を valibot で検証する単体テスト |
 | API クライアント | `fetch` を差し替えて、201 / 各エラー / 予期しない応答 / 通信エラーの扱い、画面遷移方式で `Accept: application/json` を付けることを確かめる |
 | SPA の発行画面（`test/modes/`） | 方式ごとに、その方式の部品だけが出ること。画面遷移方式はチケット画面へ移ること、その場表示方式は結果をその場に出すこと、フォーム送信方式はフォームの `action` と `enctype`。`test/modes/modes.test.ts` で、`GRANT_MODES` のすべてに `index.ts` と `/` のルートがあることを確かめる |
 | 画像の縮小 | `shrinkToFit` の試す順と諦める条件（圧縮の部分は差し替え）。ストアでは、上限以下はそのまま送ること、縮めている間は送れないこと、縮めた写真を送ること、縮められなければ「大きすぎます」、選び直したら前の結果を捨てること（`shrinkToFit` は差し替え）。実際の圧縮は happy-dom に canvas がないので、ブラウザで確かめる（2026-10-12 に Chrome で確認: 11.9MB → 3.4MB、約 0.5 秒。CSP に `blob:` がないと失敗することも確認） |

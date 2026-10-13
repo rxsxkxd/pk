@@ -3,19 +3,33 @@
 // build time (GRANT_MODE, src/modes/types.ts), not here.
 
 import type { InjectionKey } from 'vue';
-import { z } from 'zod';
+import * as v from 'valibot';
 
 // Upload ceiling of the API (Lambda's 6MB request, base64 by API Gateway). An environment can only lower it.
 export const MAX_IMAGE_BYTES = 4 << 20;
 
-export const ConfigSchema = z.object({
+// v.object drops unknown keys (e.g. a leftover "modes").
+export const ConfigSchema = v.object({
   // "" = same origin (the Vite proxy in development); otherwise the API's http(s) origin, without a trailing slash.
-  apiBaseUrl: z.union([z.literal(''), z.url({ protocol: /^https?$/ })]).transform((u) => u.replace(/\/+$/, '')),
+  apiBaseUrl: v.pipe(
+    v.union([
+      v.literal(''),
+      v.pipe(
+        v.string(),
+        v.url(),
+        v.check((u) => /^https?:\/\//.test(u), 'must be an http(s) URL'),
+      ),
+    ]),
+    v.transform((u) => u.replace(/\/+$/, '')),
+  ),
   // Upload limit of this environment: the same value as the API's MAX_IMAGE_BYTES (it may differ by the
   // path to the API, ../DESIGN.md 5). Checked before sending; the API makes the final decision.
-  maxImageBytes: z.number().int().min(1).max(MAX_IMAGE_BYTES).default(MAX_IMAGE_BYTES),
+  maxImageBytes: v.optional(
+    v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(MAX_IMAGE_BYTES)),
+    MAX_IMAGE_BYTES,
+  ),
 });
-export type AppConfig = z.infer<typeof ConfigSchema>;
+export type AppConfig = v.InferOutput<typeof ConfigSchema>;
 
 export const configKey: InjectionKey<AppConfig> = Symbol('config');
 
@@ -23,5 +37,5 @@ export const configKey: InjectionKey<AppConfig> = Symbol('config');
 export async function loadConfig(url = `${import.meta.env.BASE_URL}config.json`): Promise<AppConfig> {
   const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(`config.json: HTTP ${res.status}`);
-  return ConfigSchema.parse(await res.json());
+  return v.parse(ConfigSchema, await res.json());
 }

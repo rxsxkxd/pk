@@ -1,15 +1,20 @@
 // 画面遷移方式（メイン）の API: チケット発行 API（JSON）と、SPA のチケット画面が使う QR 画像 API の URL。
 
-import { z } from 'zod';
+import * as v from 'valibot';
 import { IssuedAt, postImage, Sig, TicketCode } from '../../api/client.ts';
 
 // チケット発行 API（Accept: application/json）の 201。
-export const PageTicketSchema = z.object({ ticketCode: TicketCode, issuedAt: IssuedAt, sig: Sig, qrUrl: z.url() });
-export type PageTicket = z.infer<typeof PageTicketSchema>;
+export const PageTicketSchema = v.object({
+  ticketCode: TicketCode,
+  issuedAt: IssuedAt,
+  sig: Sig,
+  qrUrl: v.pipe(v.string(), v.url()),
+});
+export type PageTicket = v.InferOutput<typeof PageTicketSchema>;
 
 // SPA のチケット画面の URL パラメータ（#/tickets/{code}?sig=…）。
-export const TicketRouteSchema = z.object({ code: TicketCode, sig: Sig });
-export type TicketRoute = z.infer<typeof TicketRouteSchema>;
+export const TicketRouteSchema = v.object({ code: TicketCode, sig: Sig });
+export type TicketRoute = v.InferOutput<typeof TicketRouteSchema>;
 
 // チケット発行 API に画像をそのまま送り、署名付きの QR の URL を受け取る。
 export function grantForPage(apiBaseUrl: string, file: File): Promise<PageTicket> {

@@ -1,4 +1,5 @@
 // 画面遷移方式（src/modes/page/）: API、発行画面、SPA のチケット画面。
+import * as v from 'valibot';
 import { flushPromises } from '@vue/test-utils';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { shrinkToFit } from '../../src/image/shrink.ts';
@@ -37,8 +38,8 @@ describe('API', () => {
   });
 
   test('the ticket screen URL needs a ticket code and a sig', () => {
-    expect(TicketRouteSchema.safeParse({ code: CODE, sig: SIG }).success).toBe(true);
-    expect(TicketRouteSchema.safeParse({ code: CODE }).success).toBe(false);
+    expect(v.safeParse(TicketRouteSchema, { code: CODE, sig: SIG }).success).toBe(true);
+    expect(v.safeParse(TicketRouteSchema, { code: CODE }).success).toBe(false);
   });
 });
 

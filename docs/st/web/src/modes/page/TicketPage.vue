@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // SPA のチケット画面（画面遷移方式）。URL のパラメータ（code と sig）だけから描画するので、リロードや
 // 共有をしても同じ画面が出る。API の呼び出しは QR 画像 API だけで、再発行はしない。
+import * as v from 'valibot';
 import { computed, inject, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import ErrorMessage from '../../components/ErrorMessage.vue';
@@ -13,7 +14,10 @@ const config = inject(configKey)!;
 const route = useRoute();
 const store = useTicketStore();
 
-const ticket = computed(() => TicketRouteSchema.safeParse({ code: route.params.code, sig: route.query.sig }).data);
+const ticket = computed(() => {
+  const r = v.safeParse(TicketRouteSchema, { code: route.params.code, sig: route.query.sig });
+  return r.success ? r.output : undefined;
+});
 const qrFailed = ref(false); // QR 画像 API の 403（署名の不一致）や通信エラー。<img> からは区別できない
 </script>
 

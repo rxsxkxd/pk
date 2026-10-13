@@ -6,7 +6,6 @@ import { useRoute } from 'vue-router';
 import ErrorMessage from '../../components/ErrorMessage.vue';
 import TicketCard from '../../components/TicketCard.vue';
 import { configKey } from '../../config.ts';
-import { issuedAtFromCode } from '../../issuedAt.ts';
 import { useTicketStore } from '../../stores/ticket.ts';
 import { qrUrl, TicketRouteSchema } from './api.ts';
 
@@ -27,7 +26,6 @@ const qrFailed = ref(false); // QR 画像 API の 403（署名の不一致）や
       v-else
       :qr-src="qrUrl(config.apiBaseUrl, ticket.code, ticket.sig)"
       :ticket-code="ticket.code"
-      :issued-at="issuedAtFromCode(ticket.code)"
       @qr-error="qrFailed = true"
     />
 

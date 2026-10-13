@@ -28,7 +28,8 @@ test('page mode: grant, move to the SPA ticket screen and show the QR', async ({
 
   // The SPA moves to its ticket screen, drawn from the URL only.
   await expect(page).toHaveURL(new RegExp(`#/tickets/${ticket.ticketCode}\\?sig=${ticket.sig}$`));
-  await expect(page.getByTestId('ticket-code')).toHaveText(ticket.ticketCode);
+  // The code is not shown on the screen; the QR carries it in data-ticket-code.
+  await expect(page.locator(`[data-ticket-code="${ticket.ticketCode}"]`)).toBeVisible();
 
   // The QR comes from the QR image API as a PNG and is displayed.
   const qrRes = await qr;

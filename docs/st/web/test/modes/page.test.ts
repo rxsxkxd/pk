@@ -114,12 +114,13 @@ describe('grant screen', () => {
 });
 
 describe('ticket screen (drawn from the URL only)', () => {
-  test('shows the QR from the QR image API, the code and the granted time (issuedAt) from the code', async () => {
+  test('shows only the QR from the QR image API (no code or granted time on screen)', async () => {
     const fetch = stubFetch();
     const { wrapper } = await mountAt(routes, `/tickets/${CODE}?sig=${SIG}`);
     expect(wrapper.get('[data-ticket-code] img').attributes('src')).toBe(`${API}/v1/tickets/${CODE}/qr?sig=${SIG}`);
-    expect(wrapper.get('[data-testid="ticket-code"]').text()).toBe(CODE);
-    expect(wrapper.get('[data-testid="issued-at"]').text()).toBe('発行: 2026-10-05 13:50:54');
+    expect(wrapper.get('[data-ticket-code]').attributes('data-ticket-code')).toBe(CODE);
+    expect(wrapper.text()).not.toContain(CODE);
+    expect(wrapper.text()).not.toContain('発行:');
     expect(fetch).not.toHaveBeenCalled(); // no re-grant on reload
   });
 

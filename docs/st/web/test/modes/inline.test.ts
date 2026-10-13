@@ -38,8 +38,9 @@ describe('grant screen', () => {
     await flushPromises();
     const result = wrapper.get('[data-testid="inline-result"]');
     expect(result.get('img').attributes('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
-    expect(result.get('[data-testid="ticket-code"]').text()).toBe(CODE);
-    expect(result.get('[data-testid="issued-at"]').text()).toBe('発行: 2026-10-05 13:50:54');
+    expect(result.get('[data-ticket-code]').attributes('data-ticket-code')).toBe(CODE);
+    expect(result.text()).not.toContain(CODE); // the code and the granted time are not shown
+    expect(result.text()).not.toContain('発行:');
   });
 
   test('a failed retry clears the previous QR and shows the message', async () => {

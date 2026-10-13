@@ -5,7 +5,6 @@ import { computed, ref } from 'vue';
 import CertificateImagePicker from '../../components/CertificateImagePicker.vue';
 import ErrorMessage from '../../components/ErrorMessage.vue';
 import TicketCard from '../../components/TicketCard.vue';
-import { formatIssuedAt } from '../../issuedAt.ts';
 import { useTicketStore } from '../../stores/ticket.ts';
 import { grantInline, type InlineTicket } from './api.ts';
 
@@ -39,11 +38,7 @@ async function grant(): Promise<void> {
     <ErrorMessage v-if="store.error" :message="store.error" />
 
     <section v-if="ticket" class="space-y-2" data-testid="inline-result">
-      <TicketCard
-        :qr-src="`data:${ticket.qr.mimeType};base64,${ticket.qr.data}`"
-        :ticket-code="ticket.ticketCode"
-        :issued-at="formatIssuedAt(ticket.issuedAt)"
-      />
+      <TicketCard :qr-src="`data:${ticket.qr.mimeType};base64,${ticket.qr.data}`" :ticket-code="ticket.ticketCode" />
       <p class="text-center text-xs text-slate-500">この画面を閉じたり再読み込みしたりすると、表示は消えます。</p>
     </section>
   </main>

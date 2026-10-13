@@ -6,31 +6,37 @@ Description: >-
   PrivateSubnetIds and SecurityGroupId outputs. NAT gateways and Elastic IPs are billed by the hour.
 
 Parameters:
+  # 新しく作る VPC の CIDR（あとで解析サーバーと私的につなぐ可能性のあるネットワークと重ねない）
   VpcCidr:
     Type: String
     Default: 10.50.0.0/24
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: CIDR of the new VPC. Keep it apart from networks the analysis server may be reached through privately later.
+  # NAT ゲートウェイを置く公開サブネットの CIDR（AZ A）
   PublicSubnetCidrA:
     Type: String
     Default: 10.50.0.0/27
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: Public subnet for the NAT gateway in AZ A.
+  # NAT ゲートウェイを置く公開サブネットの CIDR（AZ B。NatPerAz=true のときだけ作る）
   PublicSubnetCidrB:
     Type: String
     Default: 10.50.0.32/27
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: Public subnet for the NAT gateway in AZ B (made only when NatPerAz=true).
+  # tickets 関数を置くプライベートサブネットの CIDR（AZ A）
   PrivateSubnetCidrA:
     Type: String
     Default: 10.50.0.64/26
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: Private subnet for the tickets function in AZ A.
+  # tickets 関数を置くプライベートサブネットの CIDR（AZ B）
   PrivateSubnetCidrB:
     Type: String
     Default: 10.50.0.128/26
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: Private subnet for the tickets function in AZ B.
+  # false = NAT ゲートウェイは AZ A に1つ（安い）、true = AZ ごとに1つ（解析サーバーに登録する IP が2つ、時間料金も2倍）
   NatPerAz:
     Type: String
     AllowedValues: ["true", "false"]
@@ -38,17 +44,20 @@ Parameters:
     Description: >-
       false = one NAT gateway in AZ A for both private subnets (cheaper; AZ B goes across AZs and depends on AZ A).
       true = a NAT gateway in each AZ (two Elastic IPs to register with the analysis server; twice the hourly cost).
+  # 画像解析サーバーのポート（443 は Parameter Store 用にすでに許可している）
   AnalyzerPort:
     Type: Number
     Default: 443
     MinValue: 1
     MaxValue: 65535
     Description: TCP port of the image analysis server. 443 is already allowed for Parameter Store.
+  # 画像解析サーバーの宛先の CIDR（AnalyzerPort が 443 以外のとき）。分かるまでは 0.0.0.0/0
   AnalyzerCidr:
     Type: String
     Default: 0.0.0.0/0
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: Destination CIDR of the analysis server for AnalyzerPort (when it is not 443). 0.0.0.0/0 until the server's address is known.
+  # Name タグの接頭辞
   NamePrefix:
     Type: String
     Default: ticketqr

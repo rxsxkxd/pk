@@ -6,43 +6,53 @@ Description: >-
   SecurityGroupId outputs.
 
 Parameters:
+  # 既存の VPC
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: Existing VPC.
+  # 1つ目のプライベートサブネットの CIDR（VPC の中の空いている範囲。例: /26）
   PrivateSubnetCidrA:
     Type: String
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: Free CIDR in the VPC for the first private subnet (e.g. a /26).
+  # 2つ目のプライベートサブネットの CIDR（別の AZ）
   PrivateSubnetCidrB:
     Type: String
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: Free CIDR in the VPC for the second private subnet (another AZ).
+  # 1つ目のサブネットの AZ（できれば NatGatewayIdA と同じ AZ）
   AvailabilityZoneA:
     Type: AWS::EC2::AvailabilityZone::Name
     Description: AZ of the first private subnet (same AZ as NatGatewayIdA if possible).
+  # 2つ目のサブネットの AZ（AvailabilityZoneA と別）
   AvailabilityZoneB:
     Type: AWS::EC2::AvailabilityZone::Name
     Description: AZ of the second private subnet (different from AvailabilityZoneA).
+  # 1つ目のサブネットの外向き（0.0.0.0/0）に使う既存の NAT ゲートウェイ
   NatGatewayIdA:
     Type: String
     AllowedPattern: ^nat-[0-9a-f]+$
     Description: Existing NAT gateway for the first subnet's 0.0.0.0/0 (preferably in AvailabilityZoneA).
+  # 2つ目のサブネットに使う既存の NAT ゲートウェイ（任意。空なら NatGatewayIdA を共用）
   NatGatewayIdB:
     Type: String
     Default: ""
     AllowedPattern: ^(nat-[0-9a-f]+)?$
     Description: Existing NAT gateway for the second subnet (preferably in AvailabilityZoneB). Empty = NatGatewayIdA (one NAT for both).
+  # 画像解析サーバーのポート（443 は Parameter Store 用にすでに許可している）
   AnalyzerPort:
     Type: Number
     Default: 443
     MinValue: 1
     MaxValue: 65535
     Description: TCP port of the image analysis server. 443 is already allowed for Parameter Store.
+  # 画像解析サーバーの宛先の CIDR（AnalyzerPort が 443 以外のとき）。分かるまでは 0.0.0.0/0
   AnalyzerCidr:
     Type: String
     Default: 0.0.0.0/0
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: Destination CIDR of the analysis server for AnalyzerPort (when it is not 443). 0.0.0.0/0 until the server's address is known.
+  # Name タグの接頭辞
   NamePrefix:
     Type: String
     Default: ticketqr

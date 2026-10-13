@@ -7,26 +7,31 @@ Description: >-
   billed by the hour. The stub itself (image, ECS) is the CDK app in cdk/. See docs/st/DEPLOY.md 3.4.
 
 Parameters:
+  # スタブ用の VPC の CIDR
   VpcCidr:
     Type: String
     Default: 10.99.0.0/24
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: CIDR of the stub VPC.
+  # 公開サブネットの CIDR（VpcCidr の中）
   PublicSubnetCidr:
     Type: String
     Default: 10.99.0.0/26
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: CIDR of the public subnet (inside VpcCidr).
+  # 公開サブネットの AZ。空ならリージョンの最初の AZ
   AvailabilityZone:
     Type: String
     Default: ""
     Description: AZ of the public subnet. Empty = the first AZ of the region.
+  # スタブ（TCP 8090）を呼べる送信元。例: チケット API の NAT ゲートウェイの固定 IP（x.x.x.x/32）。0.0.0.0/0 は全公開
   AllowedSourceCidr:
     Type: String
     AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
     Description: >-
       Sources allowed to call the stub on TCP 8090, e.g. the fixed public IP of the ticket API's NAT gateway
       (x.x.x.x/32). 0.0.0.0/0 opens the stub (no API key) to the whole internet.
+  # 2つ目の許可する送信元（任意。例: 確認する人の事務所の IP）
   AllowedSourceCidrB:
     Type: String
     Default: ""

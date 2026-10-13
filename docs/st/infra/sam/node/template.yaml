@@ -8,40 +8,49 @@ Description: >-
   which is kept for comparison. See docs/st/infra/sam/README.md.
 
 Parameters:
+  # tickets 関数を置くプライベートサブネット（必須。ネットワークのスタックの出力 PrivateSubnetIds）
   VpcSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Private subnets for the tickets function (PrivateSubnetIds output of the network stack).
+  # tickets 関数に付けるセキュリティグループ（必須。ネットワークのスタックの出力 SecurityGroupId）
   VpcSecurityGroupIds:
     Type: List<AWS::EC2::SecurityGroup::Id>
     Description: Security group for the tickets function (SecurityGroupId output of the network stack).
+  # 署名用 salt の Parameter Store（SecureString）の名前。スタックの外で作る
   SigningSaltParameterName:
     Type: String
     AllowedPattern: ^/.+
     Description: Parameter Store SecureString {"current":"...","previous":"..."}, e.g. /ticketqr/node/signing-salt (created outside this stack).
+  # 画像解析の呼び方。mock = 呼ばずに常に PASS、http = AnalyzerUrl に画像を POST
   AnalyzerMode:
     Type: String
     Default: mock
     AllowedValues: [mock, http]
     Description: mock = in-process, always PASS. http = POST to AnalyzerUrl.
+  # 画像解析サーバーの URL（AnalyzerMode=http のとき）
   AnalyzerUrl:
     Type: String
     Default: ""
     Description: Image analysis endpoint for AnalyzerMode=http.
+  # 画像解析サーバーの API キー（x-api-key）の Parameter Store の名前（任意。空なら送らない）
   AnalyzerApiKeyParameterName:
     Type: String
     Default: ""
     AllowedPattern: ^(/.+)?$
     Description: Optional. Parameter Store SecureString holding the analysis server's x-api-key. Empty sends no x-api-key.
+  # チケットコードの末尾の固定文字列（英数字1〜32文字）の Parameter Store（String）の名前。スタックの外で作る
   TicketCodeSuffixParameterName:
     Type: String
     AllowedPattern: ^/.+
     Description: Parameter Store String holding the fixed suffix of ticket codes (1-32 letters or digits), e.g. /ticketqr/node/ticket-code-suffix (created outside this stack).
+  # 公開する API の URL。独自ドメイン、または統合の構成での CloudFront の URL。空なら execute-api の URL
   PublicBaseUrl:
     Type: String
     Default: ""
     Description: >-
       Public API URL: a custom domain, or the CloudFront URL (web.yaml WebUrl) when CloudFront forwards /v1/* to
       this API (unified layout). Empty uses the execute-api default URL.
+  # 証明書の画像の上限（バイト。最大 4MB）。SPA の config.json の maxImageBytes と同じ値にする
   MaxImageBytes:
     Type: Number
     Default: 4194304
@@ -51,20 +60,27 @@ Parameters:
       Upload limit of the certificate image in bytes (MAX_IMAGE_BYTES). 4194304 (4MB) is the ceiling (Lambda's
       6MB request, base64 by API Gateway); lower it when the path to the API has a smaller limit. Keep the SPA's
       config.json maxImageBytes the same (DESIGN.md 5).
+  # 全ルート共通のスロットリング（1秒あたりの定常のリクエスト数）
   ThrottlingRateLimit:
     Type: Number
     Default: 50
+    Description: Steady-state requests per second for every route.
+  # 全ルート共通のスロットリング（一時的に受けられるリクエスト数の上限）
   ThrottlingBurstLimit:
     Type: Number
     Default: 100
+    Description: Maximum burst of requests for every route (API Gateway throttling).
+  # tickets 関数の予約同時実行数（画像解析サーバーを守るため）。-1 = 設定しない
   GrantReservedConcurrency:
     Type: Number
     Default: -1
     Description: Reserved concurrency for the tickets function (protects the analysis server). -1 = not set.
+  # ログ（Lambda と API のアクセスログ）の保持日数
   LogRetentionDays:
     Type: Number
     Default: 30
     AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 180, 365]
+    Description: Days to keep the Lambda and API access logs.
 
 Conditions:
   UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]

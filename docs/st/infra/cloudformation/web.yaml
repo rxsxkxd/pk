@@ -6,6 +6,7 @@ Description: >-
   from the API stacks. See docs/st/web/DEPLOY.md.
 
 Parameters:
+  # 統合の構成だけ: /v1/* を振り分ける API のドメイン（API のスタックの出力 ApiDomain）。空なら直結の構成
   ApiOriginDomain:
     Type: String
     Default: ""
@@ -13,6 +14,7 @@ Parameters:
     Description: >-
       Unified layout only. Domain of the ticket API to forward /v1/* to (the ApiDomain output of the API stack),
       e.g. xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com. Empty = direct layout (S3 only).
+  # 直結の構成だけ（必須）: API のオリジン（CSP に入れる）。統合の構成では使わない
   ApiBaseUrl:
     Type: String
     Default: ""
@@ -20,12 +22,14 @@ Parameters:
     Description: >-
       Direct layout only (required there). Origin of the ticket API (the SPA's apiBaseUrl), e.g.
       https://xxxxxxxxxx.execute-api.ap-northeast-1.amazonaws.com. Used in the CSP. Ignored in the unified layout.
+  # CSP の form-action。フォーム送信方式の環境だけ、直結は API のオリジン、統合は 'self' にする
   FormActionSource:
     Type: String
     Default: "'none'"
     Description: >-
       CSP form-action. Keep 'none' unless the SPA's form mode is enabled in config.json; then set it to the API
       origin (direct) or 'self' (unified).
+  # CloudFront に付ける WAF の Web ACL の ARN（任意。us-east-1 で作る。web/DEPLOY.md 13章）
   WebAclArn:
     Type: String
     Default: ""
@@ -33,6 +37,7 @@ Parameters:
       Optional. ARN of an AWS WAF web ACL (scope CLOUDFRONT, made in us-east-1) to attach. In the unified layout it
       also covers the API. Image uploads are larger than 8 KB: exclude the managed rule SizeRestrictions_BODY for
       /v1/tickets (DESIGN.md 5). Empty = no WAF.
+  # CloudFront の配信地域（PriceClass_200 は日本を含む）
   PriceClass:
     Type: String
     Default: PriceClass_200

@@ -49,9 +49,11 @@ Parameters:
   ThrottlingRateLimit:
     Type: Number
     Default: 50
+    Description: Steady-state requests per second for every route.
   ThrottlingBurstLimit:
     Type: Number
     Default: 100
+    Description: Maximum burst of requests for every route (API Gateway throttling).
   GrantReservedConcurrency:
     Type: Number
     Default: -1
@@ -70,6 +72,7 @@ Parameters:
       - 90
       - 180
       - 365
+    Description: Days to keep the Lambda and API access logs.
 Conditions:
   UseDefaultUrl: !Equals
     - !Ref 'PublicBaseUrl'

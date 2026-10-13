@@ -2,27 +2,36 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: example.com QR endpoint (GET /v1/example/qr) — exampleqr package on its own Lambda and HTTP API, unrelated to the ticket API. See docs/st/go/DEPLOY.md or docs/st/node/DEPLOY.md (7).
 
 Parameters:
+  # 実装（go / node）。実装ごとに1スタック
   Impl:
     Type: String
     AllowedValues: [go, node]
     Default: go
     Description: Implementation to deploy. One stack per implementation.
+  # exampleqr.zip を置いた S3 バケット
   ArtifactBucket:
     Type: String
     Description: S3 bucket holding exampleqr.zip.
+  # zip のキーの接頭辞。デプロイのたびに変える（変えないと Lambda のコードが更新されない）
   ArtifactPrefix:
     Type: String
     Description: Key prefix of exampleqr.zip, e.g. ticketqr/go/<git-sha>. Change it on every deploy so Lambda picks up new code.
+  # 全ルート共通のスロットリング（1秒あたりの定常のリクエスト数）
   ThrottlingRateLimit:
     Type: Number
     Default: 10
+    Description: Steady-state requests per second for every route.
+  # 全ルート共通のスロットリング（一時的に受けられるリクエスト数の上限）
   ThrottlingBurstLimit:
     Type: Number
     Default: 20
+    Description: Maximum burst of requests for every route (API Gateway throttling).
+  # ログ（Lambda と API のアクセスログ）の保持日数
   LogRetentionDays:
     Type: Number
     Default: 30
     AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 180, 365]
+    Description: Days to keep the Lambda and API access logs of this stack.
 
 Mappings:
   ImplMap:

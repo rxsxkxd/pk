@@ -4,6 +4,7 @@
 import { computed, ref } from 'vue';
 import CertificateImagePicker from '../../components/CertificateImagePicker.vue';
 import GrantDescription from '../../components/GrantDescription.vue';
+import GrantNotes from '../../components/GrantNotes.vue';
 import ErrorMessage from '../../components/ErrorMessage.vue';
 import TicketCard from '../../components/TicketCard.vue';
 import { useTicketStore } from '../../stores/ticket.ts';
@@ -43,6 +44,7 @@ async function grant(): Promise<void> {
     </button>
 
     <ErrorMessage v-if="store.errorMessage" :message="store.errorMessage" />
+    <GrantNotes />
 
     <section v-if="ticket" class="space-y-2" data-testid="inline-result">
       <TicketCard :qr-src="`data:${ticket.qr.mimeType};base64,${ticket.qr.data}`" :ticket-code="ticket.ticketCode" />

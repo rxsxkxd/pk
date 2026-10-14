@@ -59,7 +59,7 @@
 | 画像解析サーバー | 置き場所・経路・許可の方式、接続先（URL・ポート・HTTP / HTTPS）、送るヘッダー、**縮めた写真（長辺 2048〜4096 の JPEG）で足りるか** | DESIGN.md 7章、notes/tickets-network.md 6章、web/notes/image-compression.md 7.2 |
 | ネットワーク | 既存の VPC を使う（N1）か、すべて新しく作る（N2）か。Parameter Store への経路（NAT のままか、エンドポイントを足すか） | notes/tickets-network.md 6章 |
 | Android の Chrome の下限 | 今は仮に 80（`browserslist` とビルドの出力先） | web/DESIGN.md 11章の 6 |
-| 画面の文言・デザイン | バナーの画像は仮、発行画面の説明文とチケットの使い方の文言も仮 | web/DESIGN.md 3章・11章の 4 |
+| 画面の文言・デザイン | バナーの画像は仮、発行画面の説明文・補足事項とチケットの使い方の文言も仮 | web/DESIGN.md 3章・11章の 4 |
 | その場表示方式の結果の保持 | リロードしても残すか（今は残さない） | web/DESIGN.md 11章の 1 |
 | 独自ドメイン | Web と API に独自ドメインを付けるか | web/DESIGN.md 11章の 2、DEPLOY.md 4章 |
 | 画像の圧縮の細かい点 | 上限以下の写真の EXIF も消すか、圧縮する条件を下げるか（例: 2MB 超） | web/notes/image-compression.md 7.2 |

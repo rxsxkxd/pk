@@ -4,6 +4,7 @@
 // CSP の form-action に送信先を入れておく（web/DEPLOY.md 3.3 の FormActionSource）。
 import { inject } from 'vue';
 import GrantDescription from '../../components/GrantDescription.vue';
+import GrantNotes from '../../components/GrantNotes.vue';
 import { configKey } from '../../config.ts';
 import { ACCEPT } from '../../stores/ticket.ts';
 import { grantFormAction } from './api.ts';
@@ -26,5 +27,8 @@ const config = inject(configKey)!;
       <input type="file" name="image" :accept="ACCEPT" required class="block w-full text-sm" />
       <button type="submit" class="w-full rounded-md bg-slate-800 px-4 py-3 text-white">発行する</button>
     </form>
+
+    <!-- フォーム送信方式にはエラーの枠がない（エラーは API のページに出る）ので、ボタンの後 -->
+    <GrantNotes />
   </main>
 </template>

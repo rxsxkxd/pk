@@ -21,7 +21,7 @@
 
 | 順 | 事項 | 今のテスト | 足りない確かめ方 |
 |---|---|---|---|
-| 1 | 発行画面の並び（バナー、見出し、説明文、画像の選択、ボタン）、画像を選ぶまで押せない | 単体（web: `banner`、`grant-description`、`page` の "disabled until a usable photo"）、E2E（見出し） | 実機（見た目） |
+| 1 | 発行画面の並び（バナー、見出し、説明文、画像の選択、ボタン、エラーの枠、補足事項）、画像を選ぶまで押せない | 単体（web: `banner`、`grant-description`、`grant-notes`、`page` の "disabled until a usable photo"）、E2E（見出し） | 実機（見た目） |
 | 2 | iOS は選択欄 1 つ、Android は 2 つのボタン（縦並び）、ファイル名と大きさ | 単体（web: `page` の non-Android / Android、`platform`） | 実機（iOS のメニュー、Android 14 以降のカメラ、縦並びの見た目） |
 | 3 | 4MB 超の縮小（縮小中は押せない、結果の表示、縮められないときの文言） | 単体（web: `shrink`、`store` の shrinking、`page` の "shrunk"） | 実機（処理時間、写真の向き、HEIC、高画素の JPEG のメモリ） |
 | 4 | 対応していない形式の文言、押せない | 単体（web: `store` の checkFile・errorMessage） | — |

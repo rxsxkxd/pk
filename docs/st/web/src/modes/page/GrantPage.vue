@@ -4,6 +4,7 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import CertificateImagePicker from '../../components/CertificateImagePicker.vue';
 import GrantDescription from '../../components/GrantDescription.vue';
+import GrantNotes from '../../components/GrantNotes.vue';
 import ErrorMessage from '../../components/ErrorMessage.vue';
 import { useTicketStore } from '../../stores/ticket.ts';
 import { grantForPage } from './api.ts';
@@ -42,5 +43,6 @@ async function grant(): Promise<void> {
     </button>
 
     <ErrorMessage v-if="store.errorMessage" :message="store.errorMessage" />
+    <GrantNotes />
   </main>
 </template>

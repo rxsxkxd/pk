@@ -71,13 +71,14 @@ jobs:
       - run: npm --prefix web run format:check
       - run: npm --prefix web test
       # The grant mode is chosen at build time (web/DESIGN.md 4.1): one build per mode. E2E uses page.
+      # The optional modes' folders may be removed; a mode is built only when its folder is there.
       - run: npm --prefix web run build # vue-tsc + vite build → web/dist (GRANT_MODE unset = page)
-      - run: npm --prefix web run build -- --outDir dist-inline
-        env:
-          GRANT_MODE: inline
-      - run: npm --prefix web run build -- --outDir dist-form
-        env:
-          GRANT_MODE: form
+      - run: |
+          for mode in inline form; do
+            if [ -d "web/src/modes/$mode" ]; then
+              GRANT_MODE=$mode npm --prefix web run build -- --outDir "dist-$mode"
+            fi
+          done
       - uses: actions/upload-artifact@v7
         with:
           name: web-dist-page

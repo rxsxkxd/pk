@@ -256,6 +256,12 @@ npm run build                       # page
 GRANT_MODE=inline npm run build     # inline（ローカルの開発も GRANT_MODE=inline npm run dev）
 ```
 
+**ビルドしない方式のフォルダは、あってもなくてもよい**（2026-10-15）。`src/modes/inline/`・`src/modes/form/` を消しても、`npm run build`（型チェックとビルド）と `npm test` は通る。`page`（既定）は消さない。
+
+- 方式ごとのテストは、その方式のフォルダの中（`src/modes/<方式>/<方式>.test.ts`）に置く。フォルダを消せば、テストも一緒に消える
+- 全方式に共通の部品のテスト（バナー、説明文、補足事項）は、あるフォルダの方式だけを確かめる（`test/helpers.ts` の `MODES`。`import.meta.glob` で `src/modes/*/index.ts` を集める）。方式のフォルダを直接 `import` しない
+- 消したフォルダの方式を `GRANT_MODE` で選ぶと、ビルドは「`src/modes/<方式>/ is not here`」で止まる（`vite.config.ts`）
+
 - `vite.config.ts` が、別名 `@mode` を `src/modes/$GRANT_MODE/index.ts` に向ける。`main.ts` はそこから画面（ルート）を受け取る。選ばれなかった方式のファイルは、ビルドに入らない（最適化で消えるのを期待するのではなく、そもそも読み込まれない）
 - 3つ以外の値はビルドのエラー
 - 方式を変えるには、ビルドし直す。CI は3方式ともビルドし（`web-dist-{page,inline,form}`）、デプロイは環境の方式のものを置く（`GRANT_MODE`。CI.md 4章）
@@ -415,16 +421,19 @@ st/web/
 │       │   ├── index.ts            # ルート: / と /tickets/:code
 │       │   ├── api.ts              # grantForPage、qrUrl、PageTicketSchema、TicketRouteSchema
 │       │   ├── GrantPage.vue       # 発行画面（成功したらチケット画面へ）
-│       │   └── TicketPage.vue      # SPA のチケット画面（URL から描画。QR の読み込みエラーの表示）
+│       │   ├── TicketPage.vue      # SPA のチケット画面（URL から描画。QR の読み込みエラーの表示）
+│       │   └── page.test.ts        # この方式のテスト（方式のフォルダに置く。4.1）
 │       ├── inline/             # その場表示方式（オプション）
 │       │   ├── index.ts            # ルート: / だけ
 │       │   ├── api.ts              # grantInline、InlineTicketSchema
-│       │   └── GrantPage.vue       # 発行画面（結果の QR をこの画面に出す）
+│       │   ├── GrantPage.vue       # 発行画面（結果の QR をこの画面に出す）
+│       │   └── inline.test.ts      # この方式のテスト
 │       └── form/               # フォーム送信方式（オプション）
 │           ├── index.ts            # ルート: / だけ
 │           ├── api.ts              # grantFormAction（フォームの送信先）
-│           └── GrantPage.vue       # 発行画面（fetch を使わない普通のフォーム）
-└── test/                   # Vitest + happy-dom。共通（config / api / store / platform）と、test/modes/（方式ごと。3方式とも1回で流す）
+│           ├── GrantPage.vue       # 発行画面（fetch を使わない普通のフォーム）
+│           └── form.test.ts        # この方式のテスト
+└── test/                   # Vitest + happy-dom。共通（config / api / store / platform、全方式に共通の部品）。方式ごとのテストは src/modes/<方式>/ にある。あるフォルダの方式を1回で流す
 ```
 
 - レビューは、共通の部分（`api/client.ts`・`stores/ticket.ts`・`components/`）と、その環境の方式のディレクトリ（`modes/<方式>/`）だけを読めば済む
@@ -510,7 +519,7 @@ Strict-Transport-Security: max-age=31536000
 |---|---|
 | `config.ts`、`api/client.ts`・`modes/*/api.ts` のスキーマ | 正しい JSON・欠けた項目・形の違う値を valibot で検証する単体テスト |
 | API クライアント | `fetch` を差し替えて、201 / 各エラー / 予期しない応答 / 通信エラーの扱い、画面遷移方式で `Accept: application/json` を付けることを確かめる |
-| SPA の発行画面（`test/modes/`） | 方式ごとに、その方式の部品だけが出ること。画面遷移方式はチケット画面へ移ること、その場表示方式は結果をその場に出すこと、フォーム送信方式はフォームの `action` と `enctype`。`test/modes/modes.test.ts` で、`GRANT_MODES` のすべてに `index.ts` と `/` のルートがあることを確かめる |
+| SPA の発行画面（`src/modes/<方式>/<方式>.test.ts`） | 方式ごとに、その方式の部品だけが出ること。画面遷移方式はチケット画面へ移ること、その場表示方式は結果をその場に出すこと、フォーム送信方式はフォームの `action` と `enctype`。`test/modes/modes.test.ts` で、`page` があること、あるフォルダの方式がフォルダの名前を名乗り、`GRANT_MODES` の1つで、`/` のルートを持つことを確かめる |
 | 画像の縮小 | `shrinkToFit` の試す順と諦める条件（圧縮の部分は差し替え）。ストアでは、上限以下はそのまま送ること、縮めている間は送れないこと、縮めた写真を送ること、縮められなければ「大きすぎます」、選び直したら前の結果を捨てること（`shrinkToFit` は差し替え）。実際の圧縮は happy-dom に canvas がないので、ブラウザで確かめる（2026-10-12 に Chrome で確認: 11.9MB → 3.4MB、約 0.5 秒。CSP に `blob:` がないと失敗することも確認） |
 | ストア | 送信前の確認（未選択、上限超え（`maxImageBytes`）、拡張子）、二重送信の防止、エラーメッセージの対応 |
 | SPA のチケット画面 | URL のパラメータの検証、`<img>` の読み込みエラー時の表示、コードと発行日時を画面に出さないこと |

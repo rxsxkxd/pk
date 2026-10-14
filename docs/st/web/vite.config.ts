@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
@@ -10,11 +11,16 @@ const grantMode = (process.env.GRANT_MODE || 'page') as GrantMode;
 if (!GRANT_MODES.includes(grantMode)) {
   throw new Error(`GRANT_MODE must be one of ${GRANT_MODES.join(', ')}, got "${grantMode}"`);
 }
+// Only the built mode's folder is needed: the other modes' folders may be removed.
+const modeEntry = fileURLToPath(new URL(`./src/modes/${grantMode}/index.ts`, import.meta.url));
+if (!existsSync(modeEntry)) {
+  throw new Error(`GRANT_MODE=${grantMode}: src/modes/${grantMode}/ is not here (removed?)`);
+}
 
 export default defineConfig({
   plugins: [vue()], // Tailwind CSS 3.4 runs through PostCSS (postcss.config.js)
   resolve: {
-    alias: { '@mode': fileURLToPath(new URL(`./src/modes/${grantMode}/index.ts`, import.meta.url)) },
+    alias: { '@mode': modeEntry },
   },
   // Output for the supported browsers (DESIGN.md 2.1, 2.4): newer syntax (?. ?? ??= class fields) is converted
   // and the CSS minifier keeps old syntax. Android's Chrome floor is not decided yet: 80 is provisional (as in

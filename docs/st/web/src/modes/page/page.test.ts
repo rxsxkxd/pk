@@ -2,13 +2,13 @@
 import * as v from 'valibot';
 import { flushPromises } from '@vue/test-utils';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { shrinkToFit } from '../../src/image/shrink.ts';
-import { grantForPage, qrUrl, TicketRouteSchema } from '../../src/modes/page/api.ts';
-import { routes } from '../../src/modes/page/index.ts';
-import { useTicketStore } from '../../src/stores/ticket.ts';
-import { API, choosePhoto, CODE, config, json, mountAt, photo, SIG, stubFetch } from '../helpers.ts';
+import { shrinkToFit } from '../../image/shrink.ts';
+import { grantForPage, qrUrl, TicketRouteSchema } from './api.ts';
+import { routes } from './index.ts';
+import { useTicketStore } from '../../stores/ticket.ts';
+import { API, choosePhoto, CODE, config, json, mountAt, photo, SIG, stubFetch } from '../../../test/helpers.ts';
 
-vi.mock('../../src/image/shrink.ts', () => ({ shrinkToFit: vi.fn() }));
+vi.mock('../../image/shrink.ts', () => ({ shrinkToFit: vi.fn() }));
 
 afterEach(() => vi.unstubAllGlobals());
 

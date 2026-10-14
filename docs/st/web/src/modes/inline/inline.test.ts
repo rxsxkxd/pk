@@ -1,9 +1,9 @@
 // その場表示方式（src/modes/inline/）: API と、発行画面の中の QR の表示。
 import { flushPromises } from '@vue/test-utils';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { grantInline } from '../../src/modes/inline/api.ts';
-import { routes } from '../../src/modes/inline/index.ts';
-import { API, choosePhoto, CODE, json, mountAt, photo, stubFetch } from '../helpers.ts';
+import { grantInline } from './api.ts';
+import { routes } from './index.ts';
+import { API, choosePhoto, CODE, json, mountAt, photo, stubFetch } from '../../../test/helpers.ts';
 
 afterEach(() => vi.unstubAllGlobals());
 

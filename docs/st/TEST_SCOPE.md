@@ -7,7 +7,7 @@
 | 順 | 区分 | 中身 | どこで動くか |
 |---|---|---|---|
 | 1 | 単体（Go） | `go/internal/**/*_test.go` | 手元・CI |
-| 2 | 単体（web） | `web/test/**/*.test.ts`（Vitest。画面は jsdom でマウント） | 手元・CI |
+| 2 | 単体（web） | `web/test/**/*.test.ts` と、方式ごとの `web/src/modes/<方式>/<方式>.test.ts`（Vitest。画面は happy-dom でマウント） | 手元・CI |
 | 3 | E2E | `e2e/tests/page-mode.spec.ts`（`compose.e2e.yaml`。Lambda RIE + apigw-local + Playwright の Chromium）。**CloudFront・S3・本物の API Gateway は使わず、画面と API は別オリジン（直接の構成）** | 手元（[E2E_RUN.md](E2E_RUN.md)） |
 | 4 | スモーク | `deploy.yml` のデプロイ後の確認（`curl` で画面・`config.json`・発行・QR） | GitHub Actions（AWS 上で未実行） |
 | 5 | AWS | 本物の AWS 環境でしか確かめられないもの。今は手順もテストもない（5章で検討） | AWS |
@@ -85,7 +85,7 @@
 ## 4. この一覧を作るときに足したテスト
 
 - Go: 発行の JSON（201・エラー）と QR（200・403）でも `Cache-Control: no-store` などの共通のヘッダーを確かめる（`go/internal/httpapi/handler_test.go`）
-- web: 「別の証明書の画像で発行する」を押すと、選んだ画像が消えることを確かめる（`web/test/modes/page.test.ts`）
+- web: 「別の証明書の画像で発行する」を押すと、選んだ画像が消えることを確かめる（`web/src/modes/page/page.test.ts`）
 
 ほかの足りない事項は、AWS 上か実機でしか確かめられない。
 

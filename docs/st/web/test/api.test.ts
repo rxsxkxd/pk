@@ -1,4 +1,4 @@
-// The shared API client (src/api/client.ts). Each mode's endpoints are tested in test/modes/.
+// The shared API client (src/api/client.ts). Each mode's endpoints are tested in src/modes/<mode>/<mode>.test.ts.
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import * as v from 'valibot';
 import { ApiError, postImage, Sig, TicketCode, TIMEOUT_MS } from '../src/api/client.ts';

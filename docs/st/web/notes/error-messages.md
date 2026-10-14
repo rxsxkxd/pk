@@ -63,7 +63,7 @@ src/components/ErrorMessage.vue
 ### 3.1 枠ごと別の場所に動かす（例: ボタンの上、画像の選択の下）
 
 1. `src/modes/page/GrantPage.vue` と `src/modes/inline/GrantPage.vue` の `<ErrorMessage v-if="store.errorMessage" … />` の行を、テンプレートの中で動かす（2 ファイルとも）
-2. テストの並びの確認を直す（`test/modes/page.test.ts` の「ボタンの後に `error` がある」確認）
+2. テストの並びの確認を直す（`src/modes/page/page.test.ts` の「ボタンの後に `error` がある」確認）
 3. ../SCREENS.md（Android 版・iOS 版の表の順番）と ../DESIGN.md 3章の画面の図を直す
 
 ストアと `ErrorMessage.vue` は変えなくてよい。
@@ -89,5 +89,5 @@ src/components/ErrorMessage.vue
 
 - 送る前の確認の文言: `src/stores/ticket.ts` の `checkFile`・`tooLarge`
 - API の結果の文言: `src/stores/ticket.ts` の `messageFor`（エラーコードごと）
-- 文言の中身をテストで確かめているもの: `test/store.test.ts`（`checkFile`・`messageFor` の表）、`test/modes/page.test.ts`（REJECT・RETRY）。エラーの文言は、エラーコードとの対応を確かめる意味があるので、中身まで確かめている（説明文とは扱いが違う。../DESIGN.md 10章）。文言を変えたら、ここも直す
+- 文言の中身をテストで確かめているもの: `test/store.test.ts`（`checkFile`・`messageFor` の表）、`src/modes/page/page.test.ts`（REJECT・RETRY）。エラーの文言は、エラーコードとの対応を確かめる意味があるので、中身まで確かめている（説明文とは扱いが違う。../DESIGN.md 10章）。文言を変えたら、ここも直す
 - ../DESIGN.md 4.4 の表も直す

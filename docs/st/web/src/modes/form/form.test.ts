@@ -1,8 +1,8 @@
 // フォーム送信方式（src/modes/form/）: fetch を使わない普通のフォーム。
 import { describe, expect, test } from 'vitest';
-import { grantFormAction } from '../../src/modes/form/api.ts';
-import { routes } from '../../src/modes/form/index.ts';
-import { API, config, mountAt } from '../helpers.ts';
+import { grantFormAction } from './api.ts';
+import { routes } from './index.ts';
+import { API, config, mountAt } from '../../../test/helpers.ts';
 
 test('the form posts to the ticket grant API', () => {
   expect(grantFormAction(API)).toBe(`${API}/v1/tickets`);

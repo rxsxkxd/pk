@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { shrinkToFit } from '../../src/image/shrink.ts';
 import { grantForPage, qrUrl, TicketRouteSchema } from '../../src/modes/page/api.ts';
 import { routes } from '../../src/modes/page/index.ts';
+import { useTicketStore } from '../../src/stores/ticket.ts';
 import { API, choosePhoto, CODE, config, json, mountAt, photo, SIG, stubFetch } from '../helpers.ts';
 
 vi.mock('../../src/image/shrink.ts', () => ({ shrinkToFit: vi.fn() }));
@@ -168,14 +169,17 @@ describe('ticket screen (drawn from the URL only)', () => {
     expect(wrapper.find('[data-testid="ticket-usage"]').exists()).toBe(false);
   });
 
-  test('"別の証明書の画像で発行する" is a button-styled link back to the grant screen', async () => {
+  test('"別の証明書の画像で発行する" is a button-styled link back to the grant screen, clearing the photo', async () => {
     const { wrapper, router } = await mountAt(routes, `/tickets/${CODE}?sig=${SIG}`);
+    const store = useTicketStore();
+    store.file = photo('a.jpg', 'image/jpeg');
     const again = wrapper.get('[data-testid="grant-again"]');
     expect(again.element.tagName).toBe('A');
     expect(again.classes()).toEqual(expect.arrayContaining(['w-full', 'rounded-md', 'bg-slate-800', 'text-white']));
     await again.trigger('click');
     await flushPromises();
     expect(router.currentRoute.value.path).toBe('/');
+    expect(store.file).toBeNull();
   });
 
   test('a QR that fails to load (403 for a wrong sig) shows the invalid URL message', async () => {

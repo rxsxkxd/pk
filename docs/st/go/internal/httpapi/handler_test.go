@@ -363,6 +363,7 @@ func TestSignatureRequired(t *testing.T) {
 			if res.StatusCode != http.StatusForbidden || errorCode(t, res) != "FORBIDDEN" {
 				t.Errorf("qr: status = %d body = %q", res.StatusCode, res.Body)
 			}
+			assertCommonHeaders(t, res)
 		})
 	}
 }
@@ -470,6 +471,7 @@ func TestGrantAcceptJSON(t *testing.T) {
 	if res.StatusCode != http.StatusCreated || !strings.HasPrefix(res.Headers["Content-Type"], "application/json") {
 		t.Fatalf("status = %d, content-type = %q, body = %s", res.StatusCode, res.Headers["Content-Type"], res.Body)
 	}
+	assertCommonHeaders(t, res)
 	if res.Headers["Location"] != "" || res.Headers["Vary"] != "Accept" {
 		t.Errorf("Location = %q, Vary = %q", res.Headers["Location"], res.Headers["Vary"])
 	}
@@ -489,6 +491,7 @@ func TestGrantAcceptJSON(t *testing.T) {
 	if res.StatusCode != http.StatusOK || res.Headers["Content-Type"] != "image/png" {
 		t.Errorf("qr status = %d", res.StatusCode)
 	}
+	assertCommonHeaders(t, res)
 
 	// エラーも JSON になる。
 	bad := formRequest(t, "image", []byte("hello"))
@@ -497,6 +500,7 @@ func TestGrantAcceptJSON(t *testing.T) {
 	if res.StatusCode != http.StatusUnsupportedMediaType || errorCode(t, res) != "UNSUPPORTED_MEDIA_TYPE" {
 		t.Errorf("error: status = %d, body = %s", res.StatusCode, res.Body)
 	}
+	assertCommonHeaders(t, res)
 
 	// ブラウザのフォーム(Accept: text/html,...)は引き続きリダイレクトを受け取る。
 	form := formRequest(t, "image", jpeg)

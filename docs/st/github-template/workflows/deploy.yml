@@ -18,7 +18,7 @@ on:
         description: Path from the SPA to the API (web/DEPLOY.md)
         type: choice
         options: [direct, unified]
-        default: direct
+        default: unified # production layout, decided 2026-10-14 (web/DEPLOY.md)
       environment:
         description: GitHub environment (holds the AWS settings and the approval rule)
         type: environment
@@ -136,6 +136,20 @@ jobs:
             echo "DIST_ID=$(out DistributionId)"
             echo "WEB_URL=$(out WebUrl)"
           } >> "$GITHUB_ENV"
+
+      # infra/RATE_LIMITING.md: hourly / daily caps on ticket grants (stops the grant routes while over a cap).
+      - name: Deploy the grant caps (quota guard)
+        run: |
+          API_ID=$(aws cloudformation describe-stacks --stack-name "ticketqr-$IMPL" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiId'].OutputValue" --output text)
+          aws cloudformation deploy \
+            --stack-name "ticketqr-quota-$IMPL" \
+            --template-file infra/cloudformation/quota-guard.yaml \
+            --capabilities CAPABILITY_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              ApiId="$API_ID" \
+              TicketsFunctionName="ticketqr-$IMPL-tickets"
 
       # web/DEPLOY.md 3.2 step 3: the first unified deploy (or a switch from direct) tells the API its public URL.
       - name: Point the API at CloudFront (unified)

@@ -8,8 +8,8 @@ API（チケット発行・QR 生成）への経路は、環境ごとに次の2�
 
 | 構成 | API への経路 | `ApiOriginDomain` | SPA の `apiBaseUrl` | API の `PublicBaseUrl` | CORS | CSP の API の分 |
 |---|---|---|---|---|---|---|
-| **直結** | ブラウザ → API Gateway（execute-api の URL）。SPA とはオリジンが別 | 空 | `$API_URL` | 空（execute-api の URL） | 必要（5章） | `connect-src`・`img-src` に `$API_URL` |
-| **統合** | ブラウザ → CloudFront（`/v1/*`）→ API Gateway。SPA と同じオリジン | `$API_DOMAIN` | `""`（同じオリジン） | `$WEB_URL`（CloudFront の URL） | 不要 | `'self'` だけ |
+| 直結（テスト・開発用に残す） | ブラウザ → API Gateway（execute-api の URL）。SPA とはオリジンが別 | 空 | `$API_URL` | 空（execute-api の URL） | 必要（5章） | `connect-src`・`img-src` に `$API_URL` |
+| **統合（本番。2026-10-14 に確定）** | ブラウザ → CloudFront（`/v1/*`）→ API Gateway。SPA と同じオリジン | `$API_DOMAIN` | `""`（同じオリジン） | `$WEB_URL`（CloudFront の URL） | 不要 | `'self'` だけ |
 
 ```
 直結:
@@ -60,7 +60,7 @@ export API_DOMAIN=$(aws cloudformation describe-stacks --stack-name ticketqr-$IM
 ```sh
 npm --prefix web ci
 npm --prefix web test
-export GRANT_MODE=page          # この環境の発行方式: page（画面遷移方式。既定）/ inline（その場表示方式）/ form（フォーム送信方式）
+export GRANT_MODE=page          # この環境の発行方式: page（画面遷移方式。既定）/ inline（その場表示方式）/ form（フォーム送信方式。採用は例外。DESIGN.md 1章）
 npm --prefix web run build      # 型チェック（vue-tsc）とビルド → web/dist/（GRANT_MODE の方式だけが入る）
 ls web/dist                     # index.html、assets/、config.json（ローカル開発用。アップロードしない）
 ```

@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Network for the tickets function, pattern N3: only the function's security group, in an existing VPC whose
+  existing private subnets already reach the outside (e.g. through a NAT gateway). No subnet, route table or NAT
+  gateway is created or changed. The ticket API stack (SAM) takes the PrivateSubnetIds (passed through as given)
+  and SecurityGroupId outputs, as with N1 and N2.
+
+Parameters:
+  # 既存の VPC
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing VPC.
+  # tickets 関数を置く既存のプライベートサブネット（2 AZ 以上。外に出る経路（NAT など）があるもの）。出力にそのまま渡す
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Existing private subnets for the tickets function (2 AZs or more, with a route out, e.g. a NAT gateway). Passed through to the outputs.
+  # 画像解析サーバーのポート（443 は Parameter Store 用にすでに許可している）
+  AnalyzerPort:
+    Type: Number
+    Default: 443
+    MinValue: 1
+    MaxValue: 65535
+    Description: TCP port of the image analysis server. 443 is already allowed for Parameter Store.
+  # 画像解析サーバーの宛先の CIDR（AnalyzerPort が 443 以外のとき）。分かるまでは 0.0.0.0/0
+  AnalyzerCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    Description: Destination CIDR of the analysis server for AnalyzerPort (when it is not 443). 0.0.0.0/0 until the server's address is known.
+  # Name タグの接頭辞
+  NamePrefix:
+    Type: String
+    Default: ticketqr
+    AllowedPattern: ^[a-z0-9-]+$
+    Description: Prefix of the Name tags.
+
+Conditions:
+  AnalyzerPortIsNot443: !Not [!Equals [!Ref AnalyzerPort, 443]]
+
+Resources:
+  # ---------- The tickets function's security group (new) ----------
+  TicketsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ticketqr tickets function (no inbound; outbound HTTPS and the analysis server)
+      VpcId: !Ref VpcId
+      # Replaces the default allow-all egress. No inbound: the function is invoked by API Gateway, not over the VPC.
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Parameter Store and the analysis server over HTTPS (through the subnets' route out)
+      Tags: [{ Key: Name, Value: !Sub "${NamePrefix}-tickets" }]
+  AnalyzerEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: AnalyzerPortIsNot443
+    Properties:
+      GroupId: !Ref TicketsSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref AnalyzerPort
+      ToPort: !Ref AnalyzerPort
+      CidrIp: !Ref AnalyzerCidr
+      Description: the image analysis server
+
+Outputs:
+  PrivateSubnetIds:
+    Description: Subnets for the tickets function (VpcSubnetIds of the ticket API stack), as given.
+    Value: !Join [",", !Ref PrivateSubnetIds]
+  SecurityGroupId:
+    Description: Security group for the tickets function (VpcSecurityGroupIds of the ticket API stack).
+    Value: !Ref TicketsSecurityGroup

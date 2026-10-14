@@ -1,8 +1,8 @@
 # CloudFormation のテンプレートの一覧
 
-`docs/st` にある CloudFormation の YAML の定義は 12 ファイル（2026-10-14 時点）。手で書いたものが 10（CloudFormation 7、SAM 3）、自動で作ったものが 2。パスは `docs/st` からの相対パス。
+`docs/st` にある CloudFormation の YAML の定義は 13 ファイル（2026-10-14 時点）。手で書いたものが 11（CloudFormation 8、SAM 3）、自動で作ったものが 2。パスは `docs/st` からの相対パス。
 
-## CloudFormation（そのまま書いたもの）: 7
+## CloudFormation（そのまま書いたもの）: 8
 
 | ファイル | 中身 | 手順書 |
 |---|---|---|
@@ -12,6 +12,7 @@
 | `infra/cloudformation/web.yaml` | Web（S3 と CloudFront。直結・統合の2構成） | web/DEPLOY.md 3章 |
 | `infra/cloudformation/tickets-network-existing-vpc.yaml` | `tickets` 用のネットワーク（既存の VPC に作る） | notes/tickets-network.md |
 | `infra/cloudformation/tickets-network-new-vpc.yaml` | `tickets` 用のネットワーク（VPC から新しく作る） | notes/tickets-network.md |
+| `infra/cloudformation/tickets-network-sg-only.yaml` | `tickets` 用のネットワーク（既存のプライベートサブネットを使い、SG だけ作る。N3） | infra/PROD_DEPLOY.md 1.3 |
 | `analyzer-stub/network.yaml` | 画像解析のスタブ（Fargate）用の VPC・サブネット・SG | DEPLOY.md 3.4 |
 
 ## SAM（CloudFormation の拡張）: 3
@@ -31,7 +32,7 @@
 
 ## パラメータの書き方
 
-- 手で書いた 10 ファイルのパラメータには、すべて英語の `Description` と、その上の行に日本語の説明のコメント（`# …`）を付ける（2026-10-14 時点で 90 個）
+- 手で書いた 11 ファイルのパラメータには、すべて英語の `Description` と、その上の行に日本語の説明のコメント（`# …`）を付ける（2026-10-14 時点で 95 個）
 - 自動で作る 2 ファイル（`infra/sam/generated/`）には、SAM の `Description` は写るが、コメントは写らない（変換でコメントは消える）
 
 ## YAML 以外
@@ -42,7 +43,7 @@
 
 ```sh
 cd docs/st
-# 手で書いた 10 ファイル
+# 手で書いた 11 ファイル
 uvx cfn-lint==1.57.1 --regions=ap-northeast-1 -- infra/cloudformation/*.yaml infra/sam/*/template.yaml analyzer-stub/network.yaml analyzer-stub/template.yaml
 # 自動で作った 2 ファイル（E1161: 仮の S3 バケット名）
 uvx cfn-lint==1.57.1 --regions=ap-northeast-1 --ignore-checks E1161 -- infra/sam/generated/*.cfn.yaml

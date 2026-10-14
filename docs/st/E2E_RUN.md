@@ -99,3 +99,35 @@ docker compose -f compose.e2e.yaml logs e2e
 | API のイメージだけ作り直す | `docker compose -f compose.e2e.yaml build api`（Node 版は先頭に `API_IMPL=node`） |
 | ビルドのキャッシュを使わずに作り直す | `docker compose -f compose.e2e.yaml build --no-cache` |
 | テストを絞って流す | `docker compose -f compose.e2e.yaml run --rm e2e npx playwright test -g "page mode"`（`storage` と `api` は `depends_on` で起動する。終わったら 2.5 の `down`） |
+
+## 5. 実行の記録
+
+### 5.1 2026-10-14（Claude が実行）
+
+`go` ブランチ（コミット `b77633f`。`master` に Go のコメントの日本語化を足したもの）で、2章の手順をそのまま行った。
+
+| 順 | 行ったこと | 結果 |
+|---|---|---|
+| 0 | ローカルで起動していたスタブ・API・Web の開発サーバーを止めた。Docker Desktop が止まっていたので起動した（Docker Engine 29.8.2、Docker Compose v5.5.1） | - |
+| 1 | 2.1: `web/` で `npm ci` と `npm run build`（画面遷移方式。Tailwind CSS 3.4・valibot・core-js・画像の縮小・バナー・説明文を含む） | `web/dist/index.html` ができた |
+| 2 | 2.2: Go 版で `docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` | **成功**（`exit: 0`。イメージのビルドを含めて約 100 秒） |
+| 3 | 2.4: Node 版で同じコマンド（`API_IMPL=node`） | **成功**（`exit: 0`。約 230 秒） |
+| 4 | 2.5: `docker compose -f compose.e2e.yaml down` | コンテナとネットワークを削除（残り 0） |
+
+確かめた出力（2.6 のとおり。Go 版・Node 版で同じ）:
+
+- `e2e` のログ: `deployed 5 files + config.json to web, evil`
+- `✓ 1 tests/page-mode.spec.ts:11:1 › page mode: grant, move to the SPA ticket screen and show the QR`、`1 passed`（約 6 秒）
+- `e2e-1 exited with code 0` のあと、`api-1`・`storage-1` も終了コード 0 で止まった
+- `api` のログに `exec '/var/runtime/bootstrap'`: ビルドした Lambda 用のバイナリが、Lambda のエミュレーター（RIE）の中で実際に動いた（Go 版は `go` ブランチのコードからイメージを作り直している）
+
+分かったこと:
+
+- `go` ブランチの変更（Go のコメントだけ）は、Lambda 用のバイナリの動作に影響しない（事前に、変更した 28 ファイルをコメントを除いた構文で比べ、コードの違いが 0 件であることも確かめた）
+- 2026-10-13〜14 の SPA の変更（Tailwind CSS 3.4、valibot、core-js、画像の縮小、バナー、説明文、チケット画面のボタン、エラーの表示位置）は、E2E のケース1（画面遷移方式）を壊していない
+
+この実行で確かめていないこと:
+
+- E2E が通すのはケース1（画面遷移方式で発行し、チケット画面に QR が出る）だけ。ほかのケース（その場表示方式、CSRF など）は未実装（E2E.md 7章）
+- 画像の縮小（4MB を超える写真）は、E2E のケースに入っていない（Chrome での確認は、web/notes/image-compression.md 7.1）
+- Playwright のブラウザ（Chromium）は最新の版で、古い iOS・Android の動きは再現しない

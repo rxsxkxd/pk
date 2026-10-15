@@ -151,6 +151,7 @@ const supportsRequestStreams = (() => {
   - 画像は 501×146px（`src/assets/banner.png`。**今は仮の画像**）。画面の幅に合わせて縦横比を保ったまま縮める（スマートフォンでは 約 350px 幅）。`width` / `height` を書いてあるので、読み込み前から場所が決まり、画面がずれない
   - ビルドで `assets/banner-<ハッシュ>.png` になり、ほかの `assets/*` と同じく長くキャッシュされる。差し替えは、同じ名前・同じ大きさの画像に置き換えてビルドし直す（`alt` の文言も直す）
   - フォーム送信方式のチケットの画面は、API のチケット表示ページ（SPA ではない）なので、バナーは出ない
+- **アイコン（favicon）**（2026-10-15）: `src/assets/favicon.png`（32×32px。**今は仮の画像**）を `index.html` の `<link rel="icon">` から参照する。ビルドで `assets/favicon-<ハッシュ>.png` になる。差し替えは、同じ名前の PNG に置き換えてビルドし直す（DEPLOY.md 6.1）
 
 ```
 SPA の発行画面 #/（画面遷移方式）           SPA のチケット画面 #/tickets/{code}?sig=…
@@ -408,6 +409,7 @@ st/web/
 │   ├── api/client.ts       # 共通: postImage、ApiError、コードと署名のスキーマ（valibot）
 │   ├── stores/ticket.ts    # 共通: 発行の状態（Pinia）、送る前の確認と縮小、エラーの文言
 │   ├── assets/banner.png   # 先頭のバナーの画像（501×146px。今は仮）
+│   ├── assets/favicon.png  # アイコン（32×32px。今は仮。index.html から参照）
 │   ├── components/         # 共通の部品
 │   │   ├── AppBanner.vue       # 先頭のバナー（App.vue に1つ。全画面に出る）
 │   │   ├── GrantDescription.vue  # 発行画面の説明文（見出しと画像の選択の間。3つの発行方式で共通）

@@ -313,6 +313,18 @@ aws cloudfront create-invalidation --distribution-id $DIST_ID --paths /index.htm
 - 画像の上限を 4MB より下げた環境（API の `MaxImageBytes`）では、`config.json` に同じ値の `"maxImageBytes": 2097152` などを足す（省略すると 4MB。4MB より大きい値は、SPA が設定の読み込みのエラーにする）。SPA は送る前にこの値で確かめ、「画像のサイズが大きすぎます（2MB まで）」のように出す
 - 以前の `modes`（実行時に方式を選んでいたときのキー）は、書いてあっても無視される
 
+### 6.1 アイコン（favicon）の差し替え
+
+アイコンはビルドに含める（`web/src/assets/favicon.png`。**今は仮の画像**、32×32px）。`index.html` の `<link rel="icon">` から参照していて、ビルドで `assets/favicon-<ハッシュ>.png` になる。
+
+1. 用意したアイコンを、同じ名前の PNG で置き換える（`web/src/assets/favicon.png`。32×32px 以上の正方形。例: 32×32 / 48×48）
+2. 2章のビルドと、6章のアップロード（無効化を含む）を行う。デプロイのワークフロー（`deploy.yml`）でも同じ（ビルドしてアップロードする）
+
+- 名前にハッシュが入るので、ほかの `assets/*` と同じく長くキャッシュしてよい。新しい `index.html`（毎回取り直させる）が新しい名前を指すので、無効化は 6章の `/index.html` だけで足りる
+- `web/public/` には置かない。`public/` のファイルは名前が変わらないまま、6章の `sync` で 1 年キャッシュされ、差し替えが利用者に届かない
+- PNG 以外（`.ico`・`.svg`）にするときは、ファイルを置き換えたうえで、`index.html` の `href` と `type`（`image/x-icon`・`image/svg+xml`）と、`web/test/favicon.test.ts` を直す
+- ホーム画面に追加したときのアイコン（`apple-touch-icon`。180×180px）は、今は置いていない。要るなら同じように `src/assets/` に置き、`index.html` に `<link rel="apple-touch-icon" href="/src/assets/…">` を足す
+
 ## 7. 動作確認
 
 ```sh

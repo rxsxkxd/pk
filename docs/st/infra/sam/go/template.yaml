@@ -81,11 +81,19 @@ Parameters:
     Default: 30
     AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 180, 365]
     Description: Days to keep the Lambda and API access logs.
+  # 関数・API・ロググループの名前の先頭（例: ticketqr-go → ticketqr-go-tickets、/aws/lambda/ticketqr-go-tickets）。
+  # 空ならスタック名を使う。関数の名前は 64 文字までなので、57 文字まで
+  NamePrefix:
+    Type: String
+    Default: ""
+    AllowedPattern: ^([A-Za-z0-9][A-Za-z0-9_-]{0,56})?$
+    Description: Prefix of the function, API and log group names (e.g. ticketqr-go gives ticketqr-go-tickets). Empty = the stack name.
 
 Conditions:
   UseDefaultUrl: !Equals [!Ref PublicBaseUrl, ""]
   HasGrantReservedConcurrency: !Not [!Equals [!Ref GrantReservedConcurrency, -1]]
   HasAnalyzerApiKey: !Not [!Equals [!Ref AnalyzerApiKeyParameterName, ""]]
+  HasNamePrefix: !Not [!Equals [!Ref NamePrefix, ""]]
 
 Globals:
   Function:
@@ -105,7 +113,9 @@ Resources:
   ApiAccessLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/apigateway/ticketqr-go
+      LogGroupName: !Sub
+        - /aws/apigateway/${Prefix}
+        - Prefix: !If [HasNamePrefix, !Ref NamePrefix, !Ref AWS::StackName]
       RetentionInDays: !Ref LogRetentionDays
 
   # Plain API Gateway resources, as in infra/cloudformation/api.yaml. (AWS::Serverless::HttpApi with function
@@ -114,7 +124,7 @@ Resources:
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: ticketqr-go
+      Name: !If [HasNamePrefix, !Ref NamePrefix, !Ref AWS::StackName]
       ProtocolType: HTTP
 
   DefaultStage:
@@ -134,7 +144,9 @@ Resources:
   TicketsLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/lambda/ticketqr-go-tickets
+      LogGroupName: !Sub
+        - /aws/lambda/${Prefix}-tickets
+        - Prefix: !If [HasNamePrefix, !Ref NamePrefix, !Ref AWS::StackName]
       RetentionInDays: !Ref LogRetentionDays
   TicketsFunction:
     Type: AWS::Serverless::Function
@@ -143,7 +155,9 @@ Resources:
     Metadata:
       BuildMethod: makefile
     Properties:
-      FunctionName: ticketqr-go-tickets
+      FunctionName: !Sub
+        - ${Prefix}-tickets
+        - Prefix: !If [HasNamePrefix, !Ref NamePrefix, !Ref AWS::StackName]
       CodeUri: ../../../go
       Runtime: provided.al2023
       Handler: bootstrap
@@ -210,7 +224,9 @@ Resources:
   GetQRLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/lambda/ticketqr-go-get-qr
+      LogGroupName: !Sub
+        - /aws/lambda/${Prefix}-get-qr
+        - Prefix: !If [HasNamePrefix, !Ref NamePrefix, !Ref AWS::StackName]
       RetentionInDays: !Ref LogRetentionDays
   GetQRFunction:
     Type: AWS::Serverless::Function
@@ -219,7 +235,9 @@ Resources:
     Metadata:
       BuildMethod: makefile
     Properties:
-      FunctionName: ticketqr-go-get-qr
+      FunctionName: !Sub
+        - ${Prefix}-get-qr
+        - Prefix: !If [HasNamePrefix, !Ref NamePrefix, !Ref AWS::StackName]
       CodeUri: ../../../go
       Runtime: provided.al2023
       Handler: bootstrap

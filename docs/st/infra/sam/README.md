@@ -23,7 +23,7 @@
 | `tickets` の VPC の設定 | **必須**（`VpcSubnetIds`・`VpcSecurityGroupIds`。ネットワークのスタックの出力 `PrivateSubnetIds`・`SecurityGroupId`） | 任意（空なら VPC の外） |
 | 実行ロール | 関数ごとに SAM が作る（`TicketsFunctionRole`・`GetQRFunctionRole`）。`tickets` のロールにだけ `AWSLambdaVPCAccessExecutionRole` が付く | 2つの関数で1つのロール（VPC のときは両方に VPC の権限が付く） |
 | API Gateway（HTTP API、`$default` ステージ、スロットリング、アクセスログ、統合、ルート、呼び出し権限） | `api.yaml` と同じリソース（`AWS::ApiGatewayV2::*`）をそのまま書く | 同左 |
-| 名前 | 関数・API・ロググループの名前は `api.yaml`（`Impl=go` / `node`）と同じ | - |
+| 名前 | 関数・API・ロググループの名前の先頭を、デプロイのときに `NamePrefix` で決める（空ならスタック名。3章） | `ticketqr-{Impl}` で決まっている |
 
 API Gateway を SAM の `AWS::Serverless::HttpApi` と関数の `Events` で書かない理由: そうすると、API の定義に関数の ARN が入り、関数の環境変数 `PUBLIC_BASE_URL` が API を参照するため、**循環参照**になってデプロイできない（変換結果の cfn-lint で `E3004 Circular Dependencies` が出る）。`api.yaml` と同じく、統合とルートを別のリソースにして避けている。
 
@@ -59,6 +59,7 @@ sam deploy --template-file infra/sam/$IMPL/.aws-sam/build/template.yaml \
     VpcSecurityGroupIds=$TICKETS_SG \
     SigningSaltParameterName=$SALT_PARAM \
     TicketCodeSuffixParameterName=$CODE_SUFFIX_PARAM
+    # 名前の先頭を変えるときだけ: NamePrefix=…（省略するとスタック名）
 
 export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-sam-$IMPL \
   --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
@@ -67,7 +68,18 @@ export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-sam-$I
 - 外の解析サーバーにつなぐときは、`--parameter-overrides` に `AnalyzerMode=http AnalyzerUrl=…`（API キーを使うなら `AnalyzerApiKeyParameterName=…`）を足す
 - CloudFront で SPA と API をまとめる構成（統合。../../web/DEPLOY.md 3.2）では、Web のスタックを作ったあとで `PublicBaseUrl=$WEB_URL` を足してもう一度デプロイする。Web のスタックには出力 `ApiDomain` を渡す
 - 画像の上限を下げるときは `MaxImageBytes=…`（既定 4194304。../../DESIGN.md 5章）
-- スタック名を `ticketqr-sam-$IMPL` にしているのは、`api.yaml` のスタック（`ticketqr-$IMPL`）と並べて試せるようにするため。ただし、関数・API・ロググループの**名前は `api.yaml` と同じ**なので、同じアカウント・リージョンに両方を同時に作ることはできない（どちらかを消してから作る）
+- **関数・API・ロググループの名前**（2026-10-15）: 先頭は `NamePrefix` で決まり、空（既定）ならスタック名になる。上の例（スタック名 `ticketqr-sam-go`）では次のとおり。`sam build` は名前に関わらない（パラメータはデプロイのときに渡すため）
+
+  | 対象 | 名前 |
+  |---|---|
+  | 関数 | `ticketqr-sam-go-tickets`、`ticketqr-sam-go-get-qr` |
+  | ロググループ | `/aws/lambda/ticketqr-sam-go-tickets`、`/aws/lambda/ticketqr-sam-go-get-qr`、`/aws/apigateway/ticketqr-sam-go` |
+  | API | `ticketqr-sam-go` |
+
+  - `NamePrefix` は英数字・`-`・`_` の 57 文字まで（関数の名前の上限 64 文字から `-get-qr` の分を引いた長さ）。スタック名を使うときも、スタック名が 57 文字を超えるとデプロイで失敗する
+  - `api.yaml` のスタック（`ticketqr-$IMPL`）と同じ名前にしたいときは `NamePrefix=ticketqr-$IMPL`。ただし、そのときは同じアカウント・リージョンに両方を同時には作れない（名前がぶつかる）。既定（スタック名）なら、並べて作れる
+  - 作った後に名前の先頭を変えると、関数とロググループは作り直しになる（古いログは消える）
+  - 発行の上限（`quota-guard.yaml`）を付けるときは、`TicketsFunctionName` に `{名前の先頭}-tickets` を渡す
 - 変更内容を先に見たいときは、`sam deploy` に `--no-execute-changeset` を付ける
 - 削除: `sam delete --stack-name ticketqr-sam-$IMPL --no-prompts`（ネットワークのスタックは、これを消した後に消す。Lambda の ENI が残っているとサブネットを消せない）
 

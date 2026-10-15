@@ -73,6 +73,11 @@ Parameters:
       - 180
       - 365
     Description: Days to keep the Lambda and API access logs.
+  NamePrefix:
+    Type: String
+    Default: ''
+    AllowedPattern: ^([A-Za-z0-9][A-Za-z0-9_-]{0,56})?$
+    Description: Prefix of the function, API and log group names (e.g. ticketqr-node gives ticketqr-node-tickets). Empty = the stack name.
 Conditions:
   UseDefaultUrl: !Equals
     - !Ref 'PublicBaseUrl'
@@ -85,16 +90,28 @@ Conditions:
     - !Equals
       - !Ref 'AnalyzerApiKeyParameterName'
       - ''
+  HasNamePrefix: !Not
+    - !Equals
+      - !Ref 'NamePrefix'
+      - ''
 Resources:
   ApiAccessLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/apigateway/ticketqr-node
+      LogGroupName: !Sub
+        - /aws/apigateway/${Prefix}
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
       RetentionInDays: !Ref 'LogRetentionDays'
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
-      Name: ticketqr-node
+      Name: !If
+        - HasNamePrefix
+        - !Ref 'NamePrefix'
+        - !Ref 'AWS::StackName'
       ProtocolType: HTTP
   DefaultStage:
     Type: AWS::ApiGatewayV2::Stage
@@ -112,7 +129,12 @@ Resources:
   TicketsLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/lambda/ticketqr-node-tickets
+      LogGroupName: !Sub
+        - /aws/lambda/${Prefix}-tickets
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
       RetentionInDays: !Ref 'LogRetentionDays'
   TicketsIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -150,7 +172,12 @@ Resources:
   GetQRLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /aws/lambda/ticketqr-node-get-qr
+      LogGroupName: !Sub
+        - /aws/lambda/${Prefix}-get-qr
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
       RetentionInDays: !Ref 'LogRetentionDays'
   GetQRIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -192,7 +219,12 @@ Resources:
       Code:
         S3Bucket: ARTIFACT_BUCKET
         S3Key: sam-placeholder/TicketsFunction.zip
-      FunctionName: ticketqr-node-tickets
+      FunctionName: !Sub
+        - ${Prefix}-tickets
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
       Handler: ticketqr.handler
       MemorySize: 256
       Role: !GetAtt 'TicketsFunctionRole.Arn'
@@ -280,7 +312,12 @@ Resources:
       Code:
         S3Bucket: ARTIFACT_BUCKET
         S3Key: sam-placeholder/GetQRFunction.zip
-      FunctionName: ticketqr-node-get-qr
+      FunctionName: !Sub
+        - ${Prefix}-get-qr
+        - Prefix: !If
+            - HasNamePrefix
+            - !Ref 'NamePrefix'
+            - !Ref 'AWS::StackName'
       Handler: ticketqr.handler
       MemorySize: 256
       Role: !GetAtt 'GetQRFunctionRole.Arn'

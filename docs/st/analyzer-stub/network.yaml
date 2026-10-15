@@ -105,7 +105,7 @@ Resources:
           FromPort: 8090
           ToPort: 8090
           CidrIp: !Ref AllowedSourceCidr
-          Description: callers of the stub (e.g. the ticket API's NAT IP)
+          Description: callers of the stub (e.g. the NAT IP of the ticket API)
       # Replaces the default allow-all egress: HTTPS only (ECR, S3 and CloudWatch Logs through the internet
       # gateway). Replies to callers need no egress rule (security groups are stateful).
       SecurityGroupEgress:

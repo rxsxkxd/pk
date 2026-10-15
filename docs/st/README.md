@@ -62,7 +62,7 @@
 | その場表示方式の結果の保持 | リロードしても残すか（今は残さない） | web/DESIGN.md 11章の 1 |
 | 独自ドメイン | Web と API に独自ドメインを付けるか | web/DESIGN.md 11章の 2、DEPLOY.md 4章 |
 | 画像の圧縮の細かい点 | 上限以下の写真の EXIF も消すか、圧縮する条件を下げるか（例: 2MB 超） | web/notes/image-compression.md 7.2 |
-| CI / CD の進め方 | CodePipeline の構成パターン、E2E をどこで流すか、本番のアカウント、承認者など | CD_CI.md 11章 |
+| CI / CD の進め方 | CodePipeline の構成パターン、E2E をどこで流すか、本番のアカウント、承認者など。CD を Lambda の zip と SPA のファイルの更新だけにするか（構築と分けるか） | CD_CI.md 11章、CD_UPDATE_ONLY.md 9章 |
 
 ### 保留にしていること
 

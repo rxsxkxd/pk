@@ -124,6 +124,8 @@ pull request / master への push
 ## 4. デプロイ（チケット QR API の `deploy.yml`）
 
 > **見直し中**: デプロイを CodePipeline / CodeBuild に移す案がある（[CD_CI.md](CD_CI.md)）。採用したら、この章と `deploy.yml` は廃止する。
+>
+> 別の案: CloudFormation による構築と、Lambda の zip・SPA のファイルの更新を分け、CD は更新だけにする（[CD_UPDATE_ONLY.md](CD_UPDATE_ONLY.md)）。今のこの章は、デプロイのたびにスタックの作成・更新も行う形。
 
 > 未検証。4.2 の準備をしてから、`dev` で試す。
 

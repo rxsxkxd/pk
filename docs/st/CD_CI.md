@@ -3,6 +3,8 @@
 > **状態**: 構成案（未実装）。CI は今の CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。CI.md 4章、未検証）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[node/DEPLOY.md](node/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
 >
 > どの構成パターンを採るかは未決定（0章で比較）。1〜9章は、そのうちパターン P1 の詳細。P3 を採る場合の差分は 0.4 にまとめた。
+>
+> この文書のデプロイは、毎回スタックの作成・更新も行う形。CD を Lambda の zip と SPA のファイルの更新だけにする別の案は [CD_UPDATE_ONLY.md](CD_UPDATE_ONLY.md)（どちらのパターンとも組み合わせられる。8章）。
 
 ## 0. 目的と構成パターンの評価
 

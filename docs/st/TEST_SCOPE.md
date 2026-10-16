@@ -43,8 +43,8 @@
 
 | 順 | 確認事項と期待結果 | specによるテスト | spec以外の確認事項 | 実施日 | 結果 | 実施者 | 備考 |
 |---|---|---|---|---|---|---|---|
-| 1 | `POST /v1/tickets` → 201 `{ ticketCode, issuedAt, sig, qrUrl }` | 単体（Go: `TestGrantAcceptJSON`） | スモーク（curl）・AWS（CloudFront 経由） |  |  |  |  |
-| 2 | エラー 413 / 415 / 422 / 502 / 504 の JSON | 単体（Go: `TestGrantInlineErrors`、`TestGrantInlineWithHTTPAnalyzer`） | スモーク（curl）・AWS（約 4.5MB 超で Lambda に届かないときの API Gateway の応答） |  |  |  |  |
+| 1 | `POST /v1/tickets` → 201 `{ ticketCode, issuedAt, sig, qrUrl }`: 判定が通る画像を送ると発行され、コード・発行日時・sig・QR 画像の URL が JSON で返ること | 単体（Go: `TestGrantAcceptJSON`） | スモーク（curl）・AWS（CloudFront 経由） |  |  |  |  |
+| 2 | エラー 413 / 415 / 422 / 502 / 504 の JSON: 発行できないとき（大きすぎる・形式が違う・判定が REJECT / RETRY・解析サーバーの失敗・時間切れ）に、理由ごとのステータスとエラーコードが JSON で返ること（画面はこのコードで文言を選ぶ） | 単体（Go: `TestGrantInlineErrors`、`TestGrantInlineWithHTTPAnalyzer`） | スモーク（curl）・AWS（約 4.5MB 超で Lambda に届かないときの API Gateway の応答） |  |  |  |  |
 | 3 | 画像の形式の判別、4MiB の上限 | 単体（Go: `imageinput`、`TestMaxImageBytes`、`TestUploadFormats`） | スモーク（curl）・AWS（CloudFront 経由） |  |  |  |  |
 | 4 | チケットコードの形（日本時間、UUIDv4、固定文字列） | 単体（Go: `code_test`） | 実機 |  |  |  |  |
 | 5 | sig（HMAC、salt の入れ替え中は新旧） | 単体（Go: `signer_test`） | AWS（Parameter Store の salt を入れ替える手順） |  |  |  |  |

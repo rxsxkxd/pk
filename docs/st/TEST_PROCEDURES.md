@@ -1,20 +1,21 @@
 # 未実施のテストの確認手順
 
-[TEST_RESULT.md](TEST_RESULT.md) で、まだ実施していない項目（実施日が空の 11 項目）を、どう確かめるかをまとめる。項目の番号は TEST_RESULT.md のもの（[TEST_SCOPE.md](TEST_SCOPE.md) では 2.x）。結果は TEST_RESULT.md の実施日・結果・実施者・備考に書く。
+[TEST_RESULT.md](TEST_RESULT.md) で、まだ実施していない項目（実施日が空の 11 項目）を、どう確かめるかをまとめる。確かめたものは「状態」を対応済みにする（2026-10-16 時点で 7 項目）。項目の番号は TEST_RESULT.md のもの（[TEST_SCOPE.md](TEST_SCOPE.md) では 2.x）。結果は TEST_RESULT.md の実施日・結果・実施者・備考に書く。
 
-| TEST_RESULT.md | 項目 | 環境 | 本書 |
-|---|---|---|---|
-| 3.1-3 | 4MB 超の縮小 | 実機（手元 か AWS） | 2.1 |
-| 3.2-1 | 画像の大きさ超過のエラー文言 | 実機（手元 か AWS） | 2.2 |
-| 3.2-5 | 30 秒のタイムアウト、通信の失敗 | 実機（手元） | 2.3 |
-| 3.3-2 | エラー 413 / 415 / 422 / 502 / 504 の JSON | curl（手元）と AWS | 2.4 |
-| 3.3-3 | 画像の形式の判別、4MiB の上限 | curl（手元 か AWS） | 2.5 |
-| 3.3-7 | ブラウザと OS の情報のログ | 実機と AWS（CloudWatch） | 2.6 |
-| 3.3-8 | `Cache-Control: no-store` | curl か デベロッパーツール | 2.7 |
-| 3.4-2 | 再読み込み・後で開く（再発行しない） | 実機と AWS（CloudWatch） | 2.8 |
-| 3.4-4 | QR 画像 API（200 PNG、sig 違いは 403） | curl か デベロッパーツール | 2.9 |
-| 3.5-2 | ルートの振り分け（発行・QR） | curl・デベロッパーツール と AWS | 2.10 |
-| 3.5-7 | CSP | AWS（CloudFront） | 2.11 |
+| TEST_RESULT.md | 項目 | 環境 | 本書 | 状態 |
+|---|---|---|---|---|
+| 3.1-3 | 4MB 超の縮小 | 実機（手元 か AWS） | 2.1 | ☑ 対応済み（確認済み） |
+| 3.2-1 | 画像の大きさ超過のエラー文言 | 実機（手元 か AWS） | 2.2 | ☑ 対応済み（確認済み） |
+| 3.2-5 | 30 秒のタイムアウト、通信の失敗 | 実機（手元） | 2.3 | 未実施。本番環境向けの手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md) |
+| 3.3-2 | エラー 413 / 415 / 422 / 502 / 504 の JSON | curl（手元）と AWS | 2.4 | 未実施。本番環境向けの手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md) |
+| 3.3-3 | 画像の形式の判別、4MiB の上限 | curl（手元 か AWS） | 2.5 | 未実施。本番環境向けの手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md) |
+| 3.3-7 | ブラウザと OS の情報のログ | 実機と AWS（CloudWatch） | 2.6 | ☑ 対応済み（確認済み） |
+| 3.3-8 | `Cache-Control: no-store` | curl か デベロッパーツール | 2.7 | 未実施。本番環境向けの手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md) |
+| 3.3-9 | 解析サーバーのタイムアウト（約 10 秒で 504） | AWS（検証環境。ダミーの解析サーバー） | - | 未実施。手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md) 5章 |
+| 3.4-2 | 再読み込み・後で開く（再発行しない） | 実機と AWS（CloudWatch） | 2.8 | ☑ 対応済み（確認済み） |
+| 3.4-4 | QR 画像 API（200 PNG、sig 違いは 403） | curl か デベロッパーツール | 2.9 | ☑ 対応済み（確認済み） |
+| 3.5-2 | ルートの振り分け（発行・QR） | curl・デベロッパーツール と AWS | 2.10 | ☑ 対応済み（確認済み） |
+| 3.5-7 | CSP | AWS（CloudFront） | 2.11 | ☑ 対応済み（確認済み） |
 
 > **注意（3.2 の期待結果の文言）**: TEST_RESULT.md の 3.2-3〜3.2-5 の期待結果（「判定ができませんでした。再度お試しください」「画像の送付に失敗しました。少し待ってから再度お試しください」）は、今の実装の文言（[CHANGES.md](CHANGES.md) 1-3）と違う。文言を変えるか、期待結果を直すかを決めてから確かめる。本書の手順は、どちらの文言でも同じ。
 
@@ -110,7 +111,7 @@ export BASE=$WEB_URL
 
 ## 2. 各項目の手順
 
-### 2.1 4MB 超の縮小（3.1-3）
+### 2.1 4MB 超の縮小（3.1-3） ☑ 対応済み
 
 環境: 実機。手元（1.1）でも AWS でもよい。写った画像の向きまで見るなら、手元で解析サーバーの代わり（1.2。`PASS`）につなぐ。
 
@@ -124,7 +125,7 @@ export BASE=$WEB_URL
 - 処理時間: 選んでから「縮小しました」が出るまでを、端末ごとに計って備考に書く（目安がないので記録だけ）
 - 高画素の JPEG（数千万画素〜）で、縮小が終わらない・画面が落ちる（メモリ不足）ことがないか
 
-### 2.2 画像の大きさ超過のエラー文言（3.2-1）
+### 2.2 画像の大きさ超過のエラー文言（3.2-1） ☑ 対応済み
 
 画面は送る前に `config.json` の `maxImageBytes` で大きさを確かめるので、普段は API の 413 まで届かない（画面だけで「画像のサイズが大きすぎます（4MB まで）」になる）。API の 413 の文言を出すには、**API の上限を画面の上限より小さくする**。
 
@@ -143,6 +144,8 @@ MAX_IMAGE_BYTES=1048576 make -C go run
 あわせて、画面の確認で出る文言も見る: 4MB を超え、縮められない写真（2.1 の 3 行目）で「画像のサイズが大きすぎます（4MB まで）」。
 
 ### 2.3 30 秒のタイムアウト、通信の失敗（3.2-5）
+
+> 本番環境（AWS）で確かめる手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md)。ここは手元での手順。
 
 環境: 手元（1.1・1.2）。実機でも PC のブラウザでもよい。
 
@@ -171,6 +174,8 @@ ANALYZER_MODE=http ANALYZER_URL=http://127.0.0.1:9000/v1/analyze ANALYZER_TIMEOU
 
 ### 2.4 エラー 413 / 415 / 422 / 502 / 504 の JSON（3.3-2）
 
+> 本番環境（AWS）で確かめる手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md)。ここは手元での手順。
+
 環境: 手元（1.1・1.2）。413・415 は AWS でも確かめられる。422・502・504 は、AWS の解析サーバー（スタブ）が判定を切り替えられないので手元で確かめる。
 
 ```sh
@@ -195,6 +200,8 @@ send http://localhost:8080 testdata/images/photo.jpg              # 解析サー
 
 ### 2.5 画像の形式の判別、4MiB の上限（3.3-3）
 
+> 本番環境（AWS）で確かめる手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md)。ここは手元での手順。
+
 環境: 手元（1.1。`http://localhost:8080`）か AWS（`$BASE`）。
 
 ```sh
@@ -216,7 +223,7 @@ send $BASE $WORK/over.bin   # 4MiB + 1 バイト
 
 - 拡張子を変えただけのファイル（例: `not-image.txt` を `x.jpg` にしたもの）も 415 になる（形式は中身で判別する）
 
-### 2.6 ブラウザと OS の情報のログ（3.3-7）
+### 2.6 ブラウザと OS の情報のログ（3.3-7） ☑ 対応済み
 
 環境: 実機と AWS（Client Hints は HTTPS でしか届かないので、AWS の画面を使う）。
 
@@ -235,6 +242,8 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 15m --filter-pattern '"
 - 手元でも、`make -C go run` の端末に出るログで `client` の `userAgent` までは確かめられる
 
 ### 2.7 `Cache-Control: no-store`（3.3-8）
+
+> 本番環境（AWS）で確かめる手順は [PROD_VERIFICATION.md](PROD_VERIFICATION.md)。ここは手元での手順。
 
 環境: 手元（`http://localhost:8080`）か AWS（`$BASE`）。
 
@@ -257,7 +266,7 @@ curl -s -D - -o /dev/null "${QR%sig=*}sig=xxxxxxxxxxxxxxxxxxxxxx" | hdr
 
 - ブラウザで確かめるときは、デベロッパーツールのネットワークのタブで、`/v1/tickets` と `…/qr?sig=…` の要求を選び、応答のヘッダーを見る
 
-### 2.8 再読み込み・後で開く（3.4-2）
+### 2.8 再読み込み・後で開く（3.4-2） ☑ 対応済み
 
 環境: 実機（手元か AWS）。発行しないことの確認は、手元ではサーバーのログ、AWS では CloudWatch で行う。
 
@@ -277,7 +286,7 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-get-qr --since 15m --filter-pattern '"r
 - 手元では、`make -C go run` の端末で、`"msg":"ticket issued"` が 1 行だけで、再読み込みのたびに `"endpoint":"get-qr"` だけが増えることを見る
 - PC のブラウザでは、デベロッパーツールのネットワークのタブで、再読み込みのときに `POST /v1/tickets` がなく、`GET …/qr?sig=…` だけがあることも見られる
 
-### 2.9 QR 画像 API（3.4-4）
+### 2.9 QR 画像 API（3.4-4） ☑ 対応済み
 
 環境: 手元か AWS。2.7 の続き（`$QR` に発行で返った `qrUrl` が入っている状態）。
 
@@ -295,7 +304,7 @@ curl -s -w ' %{http_code}\n' "${QR%/v1/tickets/*}/v1/tickets/$OTHER/qr?${QR#*\?}
 
 期待結果: 1 つ目は 200・`image/png`・256×256 の PNG で、読み取るとコード（`ticketCode`）になる。2〜4 つ目は 403 で、本文が `FORBIDDEN` の JSON。
 
-### 2.10 ルートの振り分け（3.5-2）
+### 2.10 ルートの振り分け（3.5-2） ☑ 対応済み
 
 環境: 手元か AWS。どの関数に届いたかは、AWS ではそれぞれのロググループで見る。
 
@@ -314,7 +323,7 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-get-qr --since 10m --filter-pattern '"r
 - 統合の構成で `/v1/unknown` を CloudFront 経由で送ると、API Gateway の 404 がそのまま返る（CloudFront がエラーを置き換えない）
 - 実機・PC のブラウザでは、発行してチケット画面に QR が出れば、両方のルートが動いている。デベロッパーツールのネットワークのタブで、`POST /v1/tickets`（201）と `GET …/qr`（200）を見る
 
-### 2.11 CSP（3.5-7）
+### 2.11 CSP（3.5-7） ☑ 対応済み
 
 環境: AWS（CSP は CloudFront が付ける。手元の開発サーバーには付かない）。
 

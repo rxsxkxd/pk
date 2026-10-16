@@ -51,6 +51,7 @@
 | 6 | 解析サーバーへの送信（そのまま送る、5 秒、1 回のやり直し、応答のログ） | 単体（Go: `analyzer/http_test`） | AWS（本物の解析サーバー。接続先は未決） |  |  |  |  |
 | 7 | ブラウザと OS の情報のログ | 単体（Go: `TestClientLog`） | AWS（CloudWatch） |  |  |  |  |
 | 8 | `Cache-Control: no-store`: API のすべての応答（発行の 201 とエラー、QR 画像の 200 と 403）に、応答のヘッダー `Cache-Control: no-store` と `X-Content-Type-Options: nosniff` が付いていること。ブラウザや途中のキャッシュに、発行の結果や QR 画像が保存されない | 単体（Go: 発行の JSON の 201・エラー、QR の 200・403） | スモーク（curl）・ブラウザのデベロッパーツール |  |  |  |  |
+| 9 | 解析サーバーのタイムアウト: 解析サーバーの応答が遅いとき、1 回 5 秒で打ち切り、1 回だけやり直し、約 10 秒で 504 `ANALYSIS_TIMEOUT` の JSON が返ること。5 秒以内に応答があれば発行されること | 単体（Go: `analyzer/http_test` の時間切れとやり直し） | AWS（検証環境。応答の遅いダミーの解析サーバー。PROD_VERIFICATION.md 5章） |  |  |  |  |
 
 ### 2.4 QR 表示
 

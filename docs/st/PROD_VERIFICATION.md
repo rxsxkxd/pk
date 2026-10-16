@@ -5,7 +5,7 @@
 | TEST_RESULT.md | 項目 | 本番で確かめられること | 検証環境が要ること | 本書 |
 |---|---|---|---|---|
 | 3.3-3 | 画像の形式の判別、4MiB の上限 | すべて | - | 2章 |
-| 3.3-2 | エラー 413 / 415 / 422 / 502 / 504 の JSON | 413、415、422（REJECT）、Lambda に届かない大きさの応答 | 502、504（解析サーバーへの接続を壊す必要がある）。RETRY（解析サーバーの判定を選べない場合） | 3章 |
+| 3.3-2 | エラー 413 / 415 / 422 / 502 / 504 の JSON | 413、415、422（REJECT）、Lambda に届かない大きさの応答 | REJECT・RETRY・502・504 を選んで起こす（ダミーの解析サーバー。dummy-analyzer/） | 3章 |
 | 3.2-5 | 30 秒のタイムアウト、通信の失敗 | すべて（実機を機内モードにする） | - | 4章 |
 | 3.3-9 | 解析サーバーのタイムアウト（1 回 5 秒、やり直し 1 回、約 10 秒で 504） | - | すべて（応答の遅いダミーの解析サーバーにつなぐ） | 5章 |
 | 3.3-8 | `Cache-Control: no-store` | すべて | - | 6章 |
@@ -189,39 +189,54 @@ aws logs tail $TICKETS_LOG --since 10m --filter-pattern '"request completed"' --
 
 記録すること: ステータス、`content-type`、本文の先頭、`apigw-requestid` の有無、アクセスログの `integrationError`。結果は web/DEPLOY.md 12.3 の表にも書く。画面で出る文言（JSON でない応答は「発行できませんでした…」の扱い）も、あわせて決める。
 
-### 3.3 検証環境で行うもの（502・504）
+### 3.3 検証環境で行うもの（REJECT・RETRY・502・504）
 
-解析サーバーにつながらない状態を作るため、**本番では行わない**。検証環境の API のスタックで、解析サーバーの接続先（`AnalyzerUrl`）だけを一時的に変える。
+解析サーバーの判定や失敗を選んで起こすため、**本番では行わない**。検証環境の API を、ダミーの解析サーバー（[dummy-analyzer/](dummy-analyzer/README.md)。SAM でデプロイする Python の Lambda）につなぎ、ダミーの設定を変えながら送る。
 
-| 起こすもの | 接続先 | 期待 | 起きる理由 |
-|---|---|---|---|
-| 502 `ANALYSIS_UPSTREAM_ERROR` | `https://127.0.0.1:9/v1/analyze`（Lambda の中で、すぐに接続を断られる） | 数百 ms で 502 | 接続できない（1 回やり直しても同じ） |
-| 504 `ANALYSIS_TIMEOUT` | `https://192.0.2.1/v1/analyze`（例示用のアドレス。どこにも届かず、応答がない） | 約 10 秒で 504 | 5 秒で打ち切り、1 回やり直して、また 5 秒で打ち切る |
+**1. ダミーをデプロイして、API をつなぐ（最初に 1 回）**
 
 ```sh
-# 検証環境のスタック名（例）。今のパラメータは、変えるもの以外そのまま使う（UsePreviousValue）
+# ダミーをデプロイ（dummy-analyzer/README.md 3章）
+export DUMMY_STACK=ticketqr-stg-dummy-analyzer
+sam build --template-file dummy-analyzer/template.yaml --build-dir dummy-analyzer/.aws-sam/build
+sam deploy --template-file dummy-analyzer/.aws-sam/build/template.yaml --stack-name $DUMMY_STACK --resolve-s3 --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
+  --parameter-overrides Result=PASS Delay=0 Status=200 Body=json
+export DUMMY_URL=$(aws cloudformation describe-stacks --stack-name $DUMMY_STACK \
+  --query "Stacks[0].Outputs[?OutputKey=='AnalyzeUrl'].OutputValue" --output text)
+
+# 検証環境の API のスタック。元のパラメータを控えてから、AnalyzerMode と AnalyzerUrl だけを変える（ほかは前の値のまま）
 export STACK=ticketqr-stg-$IMPL
 aws cloudformation describe-stacks --stack-name $STACK --query 'Stacks[0].Parameters' --output table   # 元の値を控える
-
-# 1. 接続先を 502 用に変える（ほかのパラメータは前の値のまま）
 PARAMS=$(aws cloudformation describe-stacks --stack-name $STACK --query 'Stacks[0].Parameters[].ParameterKey' --output text \
-  | tr '\t' '\n' | grep -v '^AnalyzerUrl$' | sed 's/.*/ParameterKey=&,UsePreviousValue=true/')
+  | tr '\t' '\n' | grep -vE '^(AnalyzerMode|AnalyzerUrl)$' | sed 's/.*/ParameterKey=&,UsePreviousValue=true/')
 aws cloudformation update-stack --stack-name $STACK --use-previous-template --capabilities CAPABILITY_IAM \
-  --parameters $PARAMS ParameterKey=AnalyzerUrl,ParameterValue=https://127.0.0.1:9/v1/analyze
+  --parameters $PARAMS ParameterKey=AnalyzerMode,ParameterValue=http ParameterKey=AnalyzerUrl,ParameterValue=$DUMMY_URL
 aws cloudformation wait stack-update-complete --stack-name $STACK
-curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: application/json' -F "image=@$WORK/cert.jpg" "$BASE/v1/tickets" | tee -a $WORK/record.txt   # → 502
-
-# 2. 504 用に変えて送る（1. と同じコマンドで、ParameterValue=https://192.0.2.1/v1/analyze）
-curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: application/json' -F "image=@$WORK/cert.jpg" "$BASE/v1/tickets" | tee -a $WORK/record.txt   # → 504
-
-# 3. 元の接続先に戻し、201 に戻ることを確かめる（ParameterValue=<控えた元の値>）
-curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: application/json' -F "image=@$WORK/cert.jpg" "$BASE/v1/tickets" | tee -a $WORK/record.txt   # → 201
+curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: application/json' -F "image=@$WORK/cert.jpg" "$BASE/v1/tickets" | tee -a $WORK/record.txt   # → 201（ダミーの既定は PASS）
 ```
 
-- `AnalyzerMode` が `http` の環境で行う（`mock` は解析サーバーを呼ばない）
-- 応答しない解析サーバーでの時間切れ（504）を、時間も含めて確かめるのは 5章（ダミーの解析サーバー）
-- 1.4 のログで、`analyzer response` が出ていない（解析サーバーから応答がない）こと、502 では `image analysis failed` のログが出ていること、`request completed` の `status` が 502・504 であることを確かめる
-- 判定を選べるスタブ（analyzer-stub/DESIGN.md 4章の案。未実装）ができれば、検証環境で REJECT・RETRY・502・504 を、接続先を変えずに起こせる
+**2. ダミーの設定を変えて送る（API のスタックは変えない）**
+
+| ダミーの設定（`--parameter-overrides`） | 期待 | 時間の目安 |
+|---|---|---|
+| `Result=REJECT Delay=0 Status=200 Body=json` | 422 `IMAGE_REJECTED` | すぐ |
+| `Result=RETRY Delay=0 Status=200 Body=json` | 422 `IMAGE_RETRY` | すぐ |
+| `Result=PASS Delay=0 Status=500 Body=json` | 502 `ANALYSIS_UPSTREAM_ERROR`（5xx は 1 回やり直す。ダミーは 2 回呼ばれる） | すぐ |
+| `Result=PASS Delay=0 Status=200 Body=garbage` | 502 `ANALYSIS_UPSTREAM_ERROR`（JSON でない応答） | すぐ |
+| `Result=PASS Delay=7 Status=200 Body=json` | 504 `ANALYSIS_TIMEOUT` | 約 10 秒（5章） |
+
+```sh
+# 例: REJECT
+sam deploy --template-file dummy-analyzer/.aws-sam/build/template.yaml --stack-name $DUMMY_STACK --resolve-s3 --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
+  --parameter-overrides Result=REJECT Delay=0 Status=200 Body=json
+curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: application/json' -F "image=@$WORK/cert.jpg" "$BASE/v1/tickets" | tee -a $WORK/record.txt   # → 422 IMAGE_REJECTED
+```
+
+**3. 元に戻す（最後に 1 回）**: API のスタックの `AnalyzerMode`・`AnalyzerUrl` を、控えた元の値に戻し（1. の `update-stack` と同じ形）、201 に戻ることを確かめてから、ダミーを消す（`sam delete --stack-name $DUMMY_STACK --no-prompts`）。
+
+- どの場合も、本文が `{"error":{"code":…}}` の JSON で、CloudFront が置き換えていないことを見る（3.1 と同じ）
+- 1.4 のログで照らし合わせる: 発行の関数の `analyzer response`（ダミーが返したステータスと本文。時間切れでは出ない）と `request completed` の `status`。ダミーのログ（`/aws/lambda/$DUMMY_STACK`）の `"dummy analyzer called"` の行の数で、やり直しの回数が分かる
+- 解析サーバーそのものに届かない場合（接続を断られる・どこにも届かない）は、ダミーでは作れない。必要なら、`AnalyzerUrl` を `https://127.0.0.1:9/v1/analyze`（すぐに断られる → 502）や `https://192.0.2.1/v1/analyze`（応答がない → 約 10 秒で 504）にして確かめる
 
 ## 4. 30 秒のタイムアウト、通信の失敗（3.2-5）
 
@@ -240,86 +255,30 @@ curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: applicat
 
 ## 5. 解析サーバーのタイムアウト（3.3-9。検証環境）
 
-API は解析サーバーの応答を 1 回 5 秒（`ANALYZER_TIMEOUT_MS`。既定 5000）待ち、時間切れなら 1 回だけやり直す。2 回とも時間切れなら、約 10 秒で 504 `ANALYSIS_TIMEOUT` を返す。これを、**応答を指定の秒数だけ遅らせるダミーの解析サーバー**につないで確かめる。解析サーバーの接続先を変えるので、検証環境で行う。
+API は解析サーバーの応答を 1 回 5 秒（`ANALYZER_TIMEOUT_MS`。既定 5000）待ち、時間切れなら 1 回だけやり直す。2 回とも時間切れなら、約 10 秒で 504 `ANALYSIS_TIMEOUT` を返す。これを、3.3 のダミーの解析サーバーの待ち時間（`Delay`）を変えて確かめる。3.3 の 1.（ダミーをデプロイして API をつなぐ）を済ませておく。
 
-### 5.1 ダミーの解析サーバーを作る
-
-Lambda の関数 URL（認証なし。インターネットから呼べる）で作る。クエリの `delay` の秒数だけ待ってから `{"result":"PASS"}` を返す。
-
-```sh
-export DUMMY=ticketqr-stg-dummy-analyzer
-cat > $WORK/dummy.py <<'EOF'
-import json, time
-
-def handler(event, context):
-    delay = float((event.get("queryStringParameters") or {}).get("delay", "0"))
-    print(json.dumps({"msg": "dummy analyzer called", "delay": delay}))
-    time.sleep(delay)
-    return {"statusCode": 200, "headers": {"Content-Type": "application/json"}, "body": json.dumps({"result": "PASS"})}
-EOF
-(cd $WORK && zip -q dummy.zip dummy.py)
-
-# 実行ロール（ログを書くだけ）
-aws iam create-role --role-name $DUMMY --assume-role-policy-document \
-  '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-aws iam attach-role-policy --role-name $DUMMY \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-sleep 10   # ロールが使えるようになるまで待つ
-
-aws lambda create-function --function-name $DUMMY --runtime python3.13 --architectures arm64 \
-  --handler dummy.handler --zip-file fileb://$WORK/dummy.zip --timeout 60 \
-  --role $(aws iam get-role --role-name $DUMMY --query Role.Arn --output text)
-aws lambda wait function-active-v2 --function-name $DUMMY
-aws lambda create-function-url-config --function-name $DUMMY --auth-type NONE
-aws lambda add-permission --function-name $DUMMY --statement-id public-url \
-  --action lambda:InvokeFunctionUrl --principal '*' --function-url-auth-type NONE
-export DUMMY_URL=$(aws lambda get-function-url-config --function-name $DUMMY --query FunctionUrl --output text)
-
-# ダミーだけで動きを確かめる（3 秒待って PASS が返る）
-curl -s -w ' %{http_code} %{time_total}s\n' -X POST "${DUMMY_URL}?delay=3"
-```
-
-- ダミーは画像を読まずに `PASS` を返す。`x-api-key` も見ない
-- 発行の関数は NAT から外に出るので、関数 URL（インターネットの HTTPS）に届く
-
-### 5.2 確かめる
-
-3.3 と同じ方法で、検証環境の API のスタックの `AnalyzerUrl` を、ダミーの URL（`delay` を付けたもの）に変えてから送る。
-
-| `AnalyzerUrl` | 期待 | 時間（`time=`） | ダミーが呼ばれた回数 |
+| ダミーの `Delay` | 期待 | 時間（`time=`） | ダミーが呼ばれた回数 |
 |---|---|---|---|
-| `${DUMMY_URL}?delay=3` | 201（5 秒以内に応答があれば発行される） | 約 3 秒 | 1 回 |
-| `${DUMMY_URL}?delay=7` | 504 `ANALYSIS_TIMEOUT` | 約 10 秒 | 2 回（やり直しを含む） |
-| `${DUMMY_URL}?delay=30` | 504 `ANALYSIS_TIMEOUT` | 約 10 秒（30 秒待たない） | 2 回 |
+| `3` | 201（5 秒以内に応答があれば発行される） | 約 3 秒 | 1 回 |
+| `7` | 504 `ANALYSIS_TIMEOUT` | 約 10 秒 | 2 回（やり直しを含む） |
+| `30` | 504 `ANALYSIS_TIMEOUT` | 約 10 秒（30 秒待たない） | 2 回 |
 
 ```sh
-# 例: delay=7。PARAMS は 3.3 と同じ（AnalyzerUrl 以外は前の値のまま）
-aws cloudformation update-stack --stack-name $STACK --use-previous-template --capabilities CAPABILITY_IAM \
-  --parameters $PARAMS "ParameterKey=AnalyzerUrl,ParameterValue=${DUMMY_URL}?delay=7"
-aws cloudformation wait stack-update-complete --stack-name $STACK
+# 例: Delay=7
+sam deploy --template-file dummy-analyzer/.aws-sam/build/template.yaml --stack-name $DUMMY_STACK --resolve-s3 --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset \
+  --parameter-overrides Result=PASS Delay=7 Status=200 Body=json
 curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: application/json' -F "image=@$WORK/cert.jpg" "$BASE/v1/tickets" | tee -a $WORK/record.txt   # → 504、time=約 10 秒
 
 # ダミーが呼ばれた回数（"dummy analyzer called" の行の数）
-aws logs tail /aws/lambda/$DUMMY --since 5m --filter-pattern '"dummy analyzer called"' --format short
+aws logs tail /aws/lambda/$DUMMY_STACK --since 5m --filter-pattern '"dummy analyzer called"' --format short
 # 発行の関数: status 504、durationMs が約 10000
 aws logs tail $TICKETS_LOG --since 5m --filter-pattern '"request completed"' --format short
 ```
 
-- 時間は、解析サーバーを待つ時間（5 秒 × 2 回）に、ダミーの起動などの時間が少し加わる。ダミーを初めて呼ぶときは起動の分だけ遅くなるので、先に 5.1 の確認で一度呼んでおく
+- 時間は、解析サーバーを待つ時間（5 秒 × 2 回）に、ダミーの起動などの時間が少し加わる。ダミーを初めて呼ぶときは起動の分だけ遅くなるので、先に `Delay=0` で一度送っておく
 - `ANALYZER_TIMEOUT_MS` を変えた環境では、5 秒をその値に読み替える
-- 画面からも確かめる場合は、`delay=7` の状態で発行し、約 10 秒後にエラーの枠に「混み合っています」の扱いの文言が出ることを見る
-
-### 5.3 後片付け
-
-```sh
-# 解析サーバーの接続先を元に戻し、201 に戻ることを確かめる（3.3 の 3.）
-aws lambda delete-function-url-config --function-name $DUMMY
-aws lambda delete-function --function-name $DUMMY
-aws iam detach-role-policy --role-name $DUMMY \
-  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-aws iam delete-role --role-name $DUMMY
-aws logs delete-log-group --log-group-name /aws/lambda/$DUMMY
-```
+- 画面からも確かめる場合は、`Delay=7` の状態で発行し、約 10 秒後にエラーの枠に「混み合っています」の扱いの文言が出ることを見る
+- 終わったら、3.3 の 3.（元に戻す）を行う
 
 ## 6. `Cache-Control: no-store`（3.3-8）
 

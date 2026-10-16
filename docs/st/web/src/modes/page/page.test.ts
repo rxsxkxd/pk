@@ -150,7 +150,10 @@ describe('ticket screen (drawn from the URL only)', () => {
     expect(wrapper.get('[data-ticket-code]').attributes('data-ticket-code')).toBe(CODE);
     expect(wrapper.text()).not.toContain(CODE);
     expect(wrapper.text()).not.toContain('発行:');
-    // how to use the ticket, between the QR and the link (the wording may be replaced later: not checked)
+    // how to use the ticket, between the QR and the link (the wording may be replaced later: not checked). It
+    // appears once the QR has loaded, not while it is loading.
+    expect(wrapper.find('[data-testid="ticket-usage"]').exists()).toBe(false);
+    await wrapper.get('[data-ticket-code] img').trigger('load');
     const html = wrapper.html();
     expect(wrapper.get('[data-testid="ticket-usage"]').text().trim()).not.toBe('');
     expect(html.indexOf('data-ticket-code')).toBeLessThan(html.indexOf('data-testid="ticket-usage"'));
@@ -182,9 +185,32 @@ describe('ticket screen (drawn from the URL only)', () => {
     expect(store.file).toBeNull();
   });
 
-  test('a QR that fails to load (403 for a wrong sig) shows the invalid URL message', async () => {
+  test('a QR that fails to load (403 for a wrong sig) shows the invalid URL message, never the usage', async () => {
     const { wrapper } = await mountAt(routes, `/tickets/${CODE}?sig=${SIG}`);
+    expect(wrapper.find('[data-testid="ticket-usage"]').exists()).toBe(false); // not while the QR is loading
     await wrapper.get('[data-ticket-code] img').trigger('error');
     expect(wrapper.get('[data-testid="error"]').text()).toBe('無効なチケット URL です');
+    expect(wrapper.find('[data-testid="ticket-usage"]').exists()).toBe(false);
+  });
+
+  test('changing the URL on the same screen starts over (no state from the previous ticket)', async () => {
+    const { wrapper, router } = await mountAt(routes, `/tickets/${CODE}?sig=${SIG}`);
+    await wrapper.get('[data-ticket-code] img').trigger('load');
+    expect(wrapper.find('[data-testid="ticket-usage"]').exists()).toBe(true);
+
+    // a loaded ticket → another sig: the usage goes away until the new QR loads, and a 403 shows the message
+    const other = 'B'.repeat(22);
+    await router.push(`/tickets/${CODE}?sig=${other}`);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="ticket-usage"]').exists()).toBe(false);
+    await wrapper.get('[data-ticket-code] img').trigger('error');
+    expect(wrapper.get('[data-testid="error"]').text()).toBe('無効なチケット URL です');
+
+    // a failed ticket → a good one: the QR is tried again
+    await router.push(`/tickets/${CODE}?sig=${SIG}`);
+    await flushPromises();
+    expect(wrapper.find('[data-testid="error"]').exists()).toBe(false);
+    await wrapper.get('[data-ticket-code] img').trigger('load');
+    expect(wrapper.find('[data-testid="ticket-usage"]').exists()).toBe(true);
   });
 });

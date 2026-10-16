@@ -55,7 +55,7 @@
 | API のエラーの形 | 本文は JSON の `{ "error": { "code", "message" } }`。すべての応答に `Cache-Control: no-store` と `X-Content-Type-Options: nosniff` |
 | 発行画面で発行できなかった | ボタンの下のエラーの枠（1 か所）に文言を出し、もう一度押せる。選んだ画像の問題があればそちらを先に出す。別の画像を選ぶと API のエラーは消える |
 | 発行画面で発行できた | チケット画面（`#/tickets/{コード}?sig={sig}`）に移る。戻るボタンで発行の直後に戻らないよう、履歴を置き換える |
-| チケット画面を開く | 上から、バナー、見出し「チケット」、QR コード、チケットの使い方の説明文、「別の証明書の画像で発行する」ボタンが出る。QR は URL のコードと sig から QR 画像 API の URL を作って読み込む。コード文字列と発行日時は画面に出さない |
+| チケット画面を開く | 上から、バナー、見出し「チケット」、QR コード、チケットの使い方の説明文、「別の証明書の画像で発行する」ボタンが出る。QR は URL のコードと sig から QR 画像 API の URL を作って読み込む。使い方の説明文は、QR が読み込めてから出す（読み込み中や、読み込めなかったときは出さない）。コード文字列と発行日時は画面に出さない |
 | QR 画像 API が要求を受けた | `GET /v1/tickets/{コード}/qr?sig={sig}`。sig が合えば `200 image/png`（256×256px、誤り訂正レベル M、周りに余白）。sig がない・合わない・コードがないときは 403 `FORBIDDEN`（JSON）。`Cache-Control: no-store` |
 | チケット画面を再読み込みする・URL を保存して後で開く | 同じ QR が出る（URL だけから描くので、再発行はされない。チケット付与 API は呼ばない） |
 | チケット画面の URL の形が違う（sig がない、コード・sig の形が違う） | QR の代わりに「無効なチケット URL です」を出す（使い方の説明文は出さない）。API は呼ばない |
@@ -146,7 +146,7 @@
 
 | No. | ファイル | 内容 |
 |---|---|---|
-| 1 | `modes/page/TicketPage.vue` | チケット画面。URL の `code`（パス）と `sig`（クエリ）を `TicketRouteSchema` で確かめ、合えば QR・使い方の説明文（`data-testid="ticket-usage"`）・ボタンを出す。形が違う、または QR の読み込みに失敗した（`qrFailed`）ときは「無効なチケット URL です」 |
+| 1 | `modes/page/TicketPage.vue` | チケット画面。URL の `code`（パス）と `sig`（クエリ）を `TicketRouteSchema` で確かめ、合えば QR・使い方の説明文（`data-testid="ticket-usage"`。QR の読み込みの状態 `qrState` が `loaded` になってから出す。URL が変わったら `loading` に戻す）・ボタンを出す。形が違う、または QR の読み込みに失敗した（`qrFailed`）ときは「無効なチケット URL です」 |
 | 2 | `modes/page/api.ts` | QR 画像 API の URL の組み立て `qrUrl`（`{apiBaseUrl}/v1/tickets/{code}/qr?sig={sig}`。コードと sig は URL エンコード）と、URL のパラメータの形 `TicketRouteSchema` |
 | 3 | `components/TicketCard.vue` | QR の表示（`<img>`、256×256、`alt="チケットQRコード"`）。読み込みに失敗したら `qrError` を出す。コード文字列は画面に出さず、属性 `data-ticket-code` にだけ持つ |
 | 4 | `components/AppBanner.vue` | 先頭のバナー（発行画面と同じ） |

@@ -89,6 +89,12 @@ Resources:
     Properties:
       ResponseHeadersPolicyConfig:
         Name: !Sub "${AWS::StackName}-headers"
+        # Keep the site out of search results; anyone with the link may still view it (infra/NOINDEX.md).
+        CustomHeadersConfig:
+          Items:
+            - Header: X-Robots-Tag
+              Value: noindex, nofollow, noarchive
+              Override: true
         SecurityHeadersConfig:
           ContentSecurityPolicy:
             ContentSecurityPolicy: !If

@@ -118,6 +118,7 @@ const stub =
 function assertCommonHeaders(res: Result) {
   assert.equal(header(res, 'Cache-Control'), 'no-store');
   assert.equal(header(res, 'X-Content-Type-Options'), 'nosniff');
+  assert.equal(header(res, 'X-Robots-Tag'), 'noindex, nofollow, noarchive');
 }
 
 // PNG IHDR width/height are big-endian uint32 at bytes 16 and 20.

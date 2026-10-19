@@ -149,6 +149,9 @@ func assertCommonHeaders(t *testing.T, res Response) {
 	if res.Headers["X-Content-Type-Options"] != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %q", res.Headers["X-Content-Type-Options"])
 	}
+	if res.Headers["X-Robots-Tag"] != "noindex, nofollow, noarchive" {
+		t.Errorf("X-Robots-Tag = %q", res.Headers["X-Robots-Tag"])
+	}
 }
 
 func TestGrantInline(t *testing.T) {

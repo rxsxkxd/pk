@@ -52,7 +52,7 @@
 | API に届いた画像の形式が違う（`multipart/form-data` でない、画像でない、対応しない形式） | API: 415 `UNSUPPORTED_MEDIA_TYPE`。発行画面のエラーの枠: 「この形式の画像には対応していません（JPEG / PNG / HEIC / HEIF / AVIF / WebP）」 |
 | API に届いた要求が壊れている（`image` がない・空、`multipart` の本文が壊れている） | API: 400 `BAD_REQUEST`。発行画面のエラーの枠: 「発行できませんでした。もう一度お試しください」 |
 | 通信の失敗、30 秒のタイムアウト、予期しない応答（JSON でない、形が違う）、そのほかの API のエラー | 発行画面のエラーの枠: 「発行できませんでした。もう一度お試しください」 |
-| API のエラーの形 | 本文は JSON の `{ "error": { "code", "message" } }`。すべての応答に `Cache-Control: no-store` と `X-Content-Type-Options: nosniff` |
+| API のエラーの形 | 本文は JSON の `{ "error": { "code", "message" } }`。すべての応答に `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`X-Robots-Tag: noindex, nofollow, noarchive`（検索結果に載せない。画面の応答には CloudFront が同じヘッダーを付け、`index.html` にも `meta name="robots"` を入れる） |
 | 発行画面で発行できなかった | ボタンの下のエラーの枠（1 か所）に文言を出し、もう一度押せる。選んだ画像の問題があればそちらを先に出す。別の画像を選ぶと API のエラーは消える |
 | 発行画面で発行できた | チケット画面（`#/tickets/{コード}?sig={sig}`）に移る。戻るボタンで発行の直後に戻らないよう、履歴を置き換える |
 | チケット画面を開く | 上から、バナー、見出し「チケット」、QR コード、チケットの使い方の説明文、「別の証明書の画像で発行する」ボタンが出る。QR は URL のコードと sig から QR 画像 API の URL を作って読み込む。使い方の説明文は、QR が読み込めてから出す（読み込み中や、読み込めなかったときは出さない）。コード文字列と発行日時は画面に出さない |

@@ -35,6 +35,7 @@
 | 画像の圧縮の実機での動き | iPhone・Android での処理時間、写真の向き、HEIC。Android の高画素の JPEG（数千万〜2 億画素）がメモリ不足で縮められないことがあるか | web/notes/image-compression.md 7.1 |
 | iPhone が HEIC のまま渡すか | 選択欄に `image/heic` を入れているので HEIC のまま渡ると見込んでいる。iPhone 14 Pro（iOS 16）の保存画素数も | web/notes/image-compression.md 4.1・4.1.1 |
 | 発行の上限（1時間・1日）の動き | ルートのスロットリングを 0 にしたときに 429 になること、時間の枠の区切り方（1日は日本時間 9 時で区切られるか）、止めてから戻るまでの時間 | infra/RATE_LIMITING.md 7章 |
+| 検索エンジンに載せない設定 | `X-Robots-Tag: noindex, nofollow, noarchive`（CloudFront のヘッダーポリシーと API）と `index.html` の `meta` は実装済み。CloudFront が付けるヘッダーを AWS 上で確かめていない | infra/NOINDEX.md 4章 |
 | 上限を超えた画像への API Gateway の応答 | Lambda まで届かない大きさ（約 4.5MB 超）のときのステータスと本文 | web/DEPLOY.md 12章 |
 | AWS 上へのデプロイ | SAM のテンプレート（API・スタブ）、ネットワークのテンプレート、CloudFront の統合の構成、WAF の Web ACL、デプロイのワークフロー（`deploy.yml`）を AWS 上で動かしていない | infra/sam/README.md、notes/tickets-network.md 4.1、web/DEPLOY.md 3.2・13章、CI.md 4章 |
 | テストの網羅 | テスト仕様書の前提として、事項ごとの今のテストと足りない確かめ方を一覧にした。AWS 上でしか確かめられない事項のテストは検討だけ | TEST_SCOPE.md |

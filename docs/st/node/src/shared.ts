@@ -5,7 +5,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { correction, generate } from 'lean-qr';
 import { toPngBuffer } from 'lean-qr/extras/node_export';
 
-// すべてのレスポンスに共通ヘッダー（キャッシュ禁止・nosniff・Referrer-Policy、指定があれば CSP）を付ける。
+// すべてのレスポンスに共通ヘッダー（キャッシュ禁止・nosniff・Referrer-Policy・検索結果に載せない指定、指定があれば CSP）を付ける。
 export const commonHeaders =
   (csp?: string): MiddlewareHandler =>
   async (c, next) => {
@@ -13,6 +13,7 @@ export const commonHeaders =
     c.header('Cache-Control', 'no-store');
     c.header('X-Content-Type-Options', 'nosniff');
     c.header('Referrer-Policy', 'no-referrer');
+    c.header('X-Robots-Tag', 'noindex, nofollow, noarchive'); // infra/NOINDEX.md
     if (csp) c.header('Content-Security-Policy', csp);
   };
 

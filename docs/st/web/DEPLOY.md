@@ -164,6 +164,10 @@ OAC_ID=$(aws cloudfront create-origin-access-control \
 cat > $WORK/headers.json <<EOF
 {
   "Name": "ticketqr-web-$IMPL-headers",
+  "CustomHeadersConfig": {
+    "Quantity": 1,
+    "Items": [{ "Header": "X-Robots-Tag", "Value": "noindex, nofollow, noarchive", "Override": true }]
+  },
   "SecurityHeadersConfig": {
     "ContentSecurityPolicy": {
       "ContentSecurityPolicy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: $API_URL; connect-src 'self' $API_URL; form-action 'none'; frame-ancestors 'none'",

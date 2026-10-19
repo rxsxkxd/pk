@@ -262,6 +262,7 @@ func jsonResponse(status int, body []byte) Response {
 func withCommon(h map[string]string) map[string]string {
 	h["Cache-Control"] = "no-store"
 	h["X-Content-Type-Options"] = "nosniff"
+	h["X-Robots-Tag"] = "noindex, nofollow, noarchive" // 検索結果に載せない(infra/NOINDEX.md)
 	return h
 }
 

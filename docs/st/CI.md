@@ -2,7 +2,7 @@
 
 > **状態**: CI（ビルド・単体テスト・E2E）は定義済みで、ローカルの act（GitHub Actions のローカル実行ツール）で全ジョブ（go、node、web、infra、e2e の go / node）の成功を確認済み（成果物のアクションだけ、act の制約で v4 に置き換えて実行。5章）。GitHub 上ではまだ動かしていない（リポジトリへの push 前）。画像解析サーバーのスタブの CI（2026-10-08 にチケット API の CI から分けた）は、actionlint と、各ステップと同じコマンドの手元での実行で確認した（act では未確認）。
 >
-> **ワークフローの置き場所（2026-10-08）**: 実運用では、チケット QR API とスタブをそれぞれ専用のリポジトリに置いて CI / CD を動かす。そのため、ワークフローは `.github/` ではなくテンプレートとして置く: チケット QR API は `github-template/workflows/`（`ci.yml`・`deploy.yml`）、スタブは `analyzer-stub/github-template/workflows/ci.yml`。各リポジトリでは、それぞれの `github-template/` の中身を `.github/` にコピーして使う（各 `github-template/README.md`）。ワークフローは、リポジトリのルートを今の `docs/st`（スタブは `analyzer-stub`）として書いてある。このモノレポでは動かない。デプロイ（4章）は定義だけで、未検証（AWS 側と GitHub 側の準備が必要。4.2）。
+> **ワークフローの置き場所（2026-10-08）**: 実運用では、チケット QR API とスタブをそれぞれ専用のリポジトリに置いて CI / CD を動かす。そのため、ワークフローは `.github/` ではなくテンプレートとして置く: チケット QR API は `github-template/workflows/`（`ci.yml`・`deploy.yml`）、スタブは `analyzer-stub/github-template/workflows/ci.yml`。各リポジトリでは、それぞれの `github-template/` の中身を `.github/` にコピーして使う（各 `github-template/README.md`）。ワークフローは、リポジトリのルートを今の作業ディレクトリ（スタブは `analyzer-stub`）として書いてある。このモノレポでは動かない。デプロイ（4章）は定義だけで、未検証（AWS 側と GitHub 側の準備が必要。4.2）。
 
 関連: デプロイの手順は [DEPLOY.md](DEPLOY.md)（全体と共通の準備）・[go/DEPLOY.md](go/DEPLOY.md)・[node/DEPLOY.md](node/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)、E2E の構成は [E2E.md](E2E.md)。
 
@@ -44,7 +44,7 @@ pull request / master への push
 | `github-template/workflows/deploy.yml` | `.github/workflows/deploy.yml` | AWS へのデプロイ（手動実行）。未検証 |
 | `analyzer-stub/github-template/workflows/ci.yml` | スタブのリポジトリの `.github/workflows/ci.yml` | 画像解析サーバーのスタブのテスト・ビルド（3.5）。デプロイのワークフローはない（スタブは手順書で手動でデプロイする。DEPLOY.md 3章） |
 
-ワークフローのファイルは、GitHub の決まりでリポジトリのルートの `.github/workflows/` に置く。テンプレートは、各リポジトリのルート（チケット QR API は今の `docs/st`、スタブは今の `analyzer-stub`）で動く前提で書いてあり、`working-directory` の指定はない。
+ワークフローのファイルは、GitHub の決まりでリポジトリのルートの `.github/workflows/` に置く。テンプレートは、各リポジトリのルート（チケット QR API は今の作業ディレクトリ、スタブは今の `analyzer-stub`）で動く前提で書いてあり、`working-directory` の指定はない。
 
 ## 2. 方針
 
@@ -218,7 +218,7 @@ pull request / master への push
 ワークフローを GitHub に push する前に、手元で確かめる。テンプレートは `.github/` の外にあるので、専用のリポジトリと同じ形（ルートに `.github/workflows/`）のコピーを作って確かめる。
 
 ```sh
-# チケット QR API: docs/st の内容（analyzer-stub/ と node_modules を除く）を作業用のディレクトリにコピーし、
+# チケット QR API: 作業ディレクトリの内容（analyzer-stub/ と node_modules を除く）を作業用のディレクトリにコピーし、
 # テンプレートを .github/ に置く（スタブも同じ要領で、analyzer-stub の内容と analyzer-stub/github-template/）
 WORK=$(mktemp -d)
 rsync -a --exclude analyzer-stub --exclude node_modules ./ "$WORK/"

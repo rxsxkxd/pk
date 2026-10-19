@@ -1,6 +1,6 @@
 # CloudFormation のテンプレートの一覧
 
-`docs/st` にある CloudFormation の YAML の定義は 14 ファイル（2026-10-16 時点）。手で書いたものが 12（CloudFormation 8、SAM 4）、自動で作ったものが 2。パスは `docs/st` からの相対パス。
+CloudFormation の YAML の定義は 14 ファイル（2026-10-16 時点）。手で書いたものが 12（CloudFormation 8、SAM 4）、自動で作ったものが 2。パスは作業ディレクトリからの相対パス。
 
 ## CloudFormation（そのまま書いたもの）: 8
 

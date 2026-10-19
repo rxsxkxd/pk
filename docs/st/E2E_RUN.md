@@ -2,8 +2,6 @@
 
 ローカルの Docker Compose で E2E（3つのコンテナ: `storage`・`api`・`e2e`）を手で流すための手順。構成と設計の理由は [E2E.md](E2E.md)、GitHub Actions での実行は [CI.md](CI.md) を参照。
 
-コマンドはすべて `docs/st` で実行する。
-
 ## 1. 前提
 
 | 項目 | 内容 |

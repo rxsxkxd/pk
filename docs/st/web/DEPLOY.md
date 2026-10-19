@@ -40,7 +40,7 @@ SPA の JS ──fetch / <img>──▶ チケット API（execute-api の URL�
 ## 1. 前提
 
 - チケット API をデプロイ済みで、`$API_URL` が分かっていること（[../go/DEPLOY.md](../go/DEPLOY.md) または [../node/DEPLOY.md](../node/DEPLOY.md)）
-- 作業ディレクトリは `docs/st`。`AWS_REGION`・`ACCOUNT_ID`・`IMPL`（使う API の実装。`go` / `node`）を設定しておく（../DEPLOY.md 1章）
+- `AWS_REGION`・`ACCOUNT_ID`・`IMPL`（使う API の実装。`go` / `node`）を設定しておく（../DEPLOY.md 1章）
 - Node.js 24（SPA のビルド）、手動で削除する場合は `jq`
 - デプロイする人の権限: ../DEPLOY.md 1章のものに加えて、`s3:CreateBucket` / `PutBucketPolicy` / `PutObject` / `DeleteObject` / `ListBucket`、`cloudfront:*`（ディストリビューション、OAC、Response Headers Policy、無効化）
 

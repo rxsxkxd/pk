@@ -24,7 +24,6 @@ Parameter Store（SecureString）: /ticketqr/go/signing-salt（スタックの�
 
 - [../DEPLOY.md](../DEPLOY.md) の 1章（AWS CLI と環境変数）と 2章（成果物バケット。CloudFormation の場合）を済ませておく
 - Go（`go/go.mod` のバージョン）、`make`、`zip`、`openssl`
-- 作業ディレクトリは `docs/st`（テンプレートとテスト画像を相対パスで参照するため）
 
 ```sh
 export AWS_REGION=ap-northeast-1

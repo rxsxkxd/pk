@@ -33,9 +33,9 @@
 |---|---|---|
 | 起動時に `config.json` を読めない・形が違う | 設定を読み込めませんでした。時間をおいて再読み込みしてください。 | 画面全体をこの1文に置き換える（`src/main.ts`） |
 | チケット画面の URL が正しくない・QR を読み込めない | 無効なチケット URL です | チケット画面の QR の場所（`src/modes/page/TicketPage.vue`） |
-| フォーム送信方式で、API がエラーを返した | 見出し「チケットを表示できません」と、API のエラーの説明（英語。例: `image was rejected`） | API のエラーページ（SPA の外。Go: `go/internal/view/templates/error.html`、Node: `node/src/app.ts` の `errorView`） |
+| フォーム送信方式で、API がエラーを返した | 見出し「チケットを表示できません」と、API のエラーの説明（英語。例: `image was rejected`） | API のエラーページ（SPA の外。`go/internal/view/templates/error.html`） |
 
-- フォーム送信方式のエラーページの説明は、API の英語の `message` をそのまま出している。日本語にするなら、API 側（Go・Node）の変更になる
+- フォーム送信方式のエラーページの説明は、API の英語の `message` をそのまま出している。日本語にするなら、API 側の変更になる
 
 ## 2. 今の表示の仕組み
 

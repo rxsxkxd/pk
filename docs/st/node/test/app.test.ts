@@ -412,7 +412,7 @@ describe('valid spellings of a multipart Content-Type (same as the Go tests, min
 });
 
 // Unusual spellings that browsers never send, where Node (WHATWG rules, like formData()) differs from
-// Go (mime.ParseMediaType). Known differences, NODE.md 10.
+// Go (mime.ParseMediaType). Known differences, node/README.md 10.
 describe('Content-Type spellings that differ from Go (known differences)', () => {
   const cases: Array<[string, number]> = [
     ['multipart/form-data; BOUNDARY = %s', 415], // Go: 201 (spaces around "=")

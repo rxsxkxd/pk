@@ -2,18 +2,15 @@
 
 ネットワークは事前に CloudFormation で作り（`infra/cloudformation/tickets-network-existing-vpc.yaml` か `tickets-network-new-vpc.yaml`。[../../notes/tickets-network.md](../../notes/tickets-network.md)）、**Lambda のビルドと登録（と API Gateway）だけを AWS SAM で行う**ための定義。既存の CloudFormation の定義（`infra/cloudformation/api.yaml`）はそのまま残してあり、SAM から生成した CloudFormation と見比べられるようにしている（4章）。
 
-> 2026-10-08 作成。`sam build`（Go・Node）、`sam validate --lint`、cfn-lint、CloudFormation への変換と、変換結果の cfn-lint までを確認。AWS 上への `sam deploy` は未検証。
+> 2026-10-08 作成。`sam build`、`sam validate --lint`、cfn-lint、CloudFormation への変換と、変換結果の cfn-lint までを確認。AWS 上への `sam deploy` は未検証。
 
 ## 1. ファイル
 
 | ファイル | 内容 |
 |---|---|
-| `go/template.yaml` | Go 版。`sam build` が `go/Makefile` の `build-TicketsFunction` / `build-GetQRFunction`（`make -C go build` と同じフラグ。arm64 の `bootstrap`）を実行する |
-| `node/template.yaml` | Node 版。`sam build` が esbuild で `node/src/ticketqr.ts` をまとめる（`npm run build:ticketqr` と同じオプション。`ticketqr.mjs`、ハンドラーは `ticketqr.handler`） |
+| `go/template.yaml` | `sam build` が `go/Makefile` の `build-TicketsFunction` / `build-GetQRFunction`（`make -C go build` と同じフラグ。arm64 の `bootstrap`）を実行する |
 | `translate.py` | SAM の定義を、`sam deploy` が作るのと同じ CloudFormation に変換する（オフライン。AWS の認証は要らない） |
-| `generated/go.cfn.yaml` / `generated/node.cfn.yaml` | `translate.py` の出力（見比べ用。`api.yaml` と同じ YAML の短い書き方（`!Sub`・`!Ref` など）。Lambda のコードの場所だけ、仮の S3 の場所 `s3://ARTIFACT_BUCKET/sam-placeholder/…`）。出力ファイルの拡張子を `.json` にすると JSON で出る |
-
-実装（Go / Node）ごとにテンプレートを分けている。SAM はビルドの対象（`CodeUri`）と方法をパラメータで切り替えられないため（`api.yaml` は `Impl` で切り替える）。
+| `generated/go.cfn.yaml` | `translate.py` の出力（見比べ用。`api.yaml` と同じ YAML の短い書き方（`!Sub`・`!Ref` など）。Lambda のコードの場所だけ、仮の S3 の場所 `s3://ARTIFACT_BUCKET/sam-placeholder/…`）。出力ファイルの拡張子を `.json` にすると JSON で出る |
 
 ## 2. 中身（`api.yaml` との対応）
 
@@ -29,12 +26,12 @@ API Gateway を SAM の `AWS::Serverless::HttpApi` と関数の `Events` で書�
 
 ## 3. ビルドとデプロイ
 
-前提: SAM CLI（例: `uvx --from aws-sam-cli sam …`、またはインストール）、Go（Go 版）、Node.js 24 と `npm --prefix node ci` 済みの `node/node_modules`（Node 版）、署名の salt（go/node DEPLOY.md 3章）、ネットワークのスタック。
+前提: SAM CLI（例: `uvx --from aws-sam-cli sam …`、またはインストール）、Go、署名の salt（go/DEPLOY.md 3章）、ネットワークのスタック。
 
 ```sh
-export IMPL=go                                      # go / node
+export IMPL=go
 export SALT_PARAM=/ticketqr/$IMPL/signing-salt
-export CODE_SUFFIX_PARAM=/ticketqr/$IMPL/ticket-code-suffix   # String（チケットコードの末尾の固定文字列。go/node DEPLOY.md 3章）
+export CODE_SUFFIX_PARAM=/ticketqr/$IMPL/ticket-code-suffix   # String（チケットコードの末尾の固定文字列。go/DEPLOY.md 3章）
 
 # ネットワークのスタック（tickets-network-*.yaml）の出力
 export TICKETS_SUBNETS=$(aws cloudformation describe-stacks --stack-name ticketqr-tickets-network \
@@ -42,11 +39,8 @@ export TICKETS_SUBNETS=$(aws cloudformation describe-stacks --stack-name ticketq
 export TICKETS_SG=$(aws cloudformation describe-stacks --stack-name ticketqr-tickets-network \
   --query "Stacks[0].Outputs[?OutputKey=='SecurityGroupId'].OutputValue" --output text)
 
-# ビルド（Go 版）
+# ビルド
 sam build --template-file infra/sam/go/template.yaml --build-dir infra/sam/go/.aws-sam/build
-# ビルド（Node 版。SAM は本番用の依存しか入れないので、esbuild を PATH に置く）
-PATH="$PWD/node/node_modules/.bin:$PATH" \
-  sam build --template-file infra/sam/node/template.yaml --build-dir infra/sam/node/.aws-sam/build
 
 # デプロイ（作成と更新は同じコマンド）
 sam deploy --template-file infra/sam/$IMPL/.aws-sam/build/template.yaml \
@@ -87,8 +81,7 @@ export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-sam-$I
 ```sh
 cd infra/sam
 uvx --with aws-sam-translator==1.113.0 --with pyyaml --with cfn-flip==1.3.0 python translate.py go/template.yaml generated/go.cfn.yaml
-uvx --with aws-sam-translator==1.113.0 --with pyyaml --with cfn-flip==1.3.0 python translate.py node/template.yaml generated/node.cfn.yaml
-uvx cfn-lint==1.57.1 --regions=ap-northeast-1 --ignore-checks E1161 -- generated/*.cfn.yaml   # E1161: 仮の S3 バケット名
+uvx cfn-lint==1.57.1 --regions=ap-northeast-1 --ignore-checks E1161 -- generated/go.cfn.yaml   # E1161: 仮の S3 バケット名
 ```
 
 - 出力の形式は拡張子で決まる（`.yaml` は YAML の短い書き方、`.json` は JSON）。SAM の変換そのものは形式に関係しない（SAM CLI 自体には、変換結果をファイルに書き出すコマンドはない）

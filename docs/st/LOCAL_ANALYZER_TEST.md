@@ -1,8 +1,8 @@
 # ローカル PC からテスト用の解析 API につないで確かめる手順
 
-ローカル PC で、チケット QR API（Go 版か Node 版）と SPA を動かし、**インターネット上にあるテスト用の画像解析 API** に実際に画像を送って確かめる。AWS にはデプロイしない。
+ローカル PC で、チケット QR API と SPA を動かし、**インターネット上にあるテスト用の画像解析 API** に実際に画像を送って確かめる。AWS にはデプロイしない。
 
-関連: 解析 API との取り決めは [DESIGN.md](DESIGN.md) 7章、API のエラーコードは同 6章、画面の文言は [web/DESIGN.md](web/DESIGN.md) 4.4、ローカルでの API の動かし方は [go/README.md](go/README.md)・[NODE.md](NODE.md)、SPA の開発は [web/DESIGN.md](web/DESIGN.md) 8章。
+関連: 解析 API との取り決めは [DESIGN.md](DESIGN.md) 7章、API のエラーコードは同 6章、画面の文言は [web/DESIGN.md](web/DESIGN.md) 4.4、ローカルでの API の動かし方は [go/README.md](go/README.md)、SPA の開発は [web/DESIGN.md](web/DESIGN.md) 8章。
 
 ## 1. 全体の構成
 
@@ -10,7 +10,7 @@
 flowchart LR
   subgraph PC["ローカル PC"]
     BR["ブラウザ<br/>http://localhost:5173"] --> VITE["SPA（Vite の開発サーバー :5173）<br/>/v1 を :8080 へ転送"]
-    VITE --> API["チケット QR API（:8080）<br/>Go: make -C go run / Node: npm run dev<br/>ANALYZER_MODE=http"]
+    VITE --> API["チケット QR API（:8080）<br/>make -C go run<br/>ANALYZER_MODE=http"]
     CURL["curl"] --> API
     CURL -.->|"手順 1（直接）"| TA
   end
@@ -87,25 +87,16 @@ curl -sS -i -X POST "$TEST_ANALYZER_URL" \
 
 ## 5. 手順 2: ローカルの API を、テスト用の解析 API につないで起動する
 
-Go 版か Node 版のどちらか（両方確かめる場合は、片方ずつ）。ローカルでは `APP_ENV=local` のときだけ、API キーを平文の環境変数（`ANALYZER_API_KEY`）で渡せる。
+ローカルでは `APP_ENV=local` のときだけ、API キーを平文の環境変数（`ANALYZER_API_KEY`）で渡せる。
 
 ```sh
-# Go 版（:8080）
+# API（:8080）
 APP_ENV=local \
 ANALYZER_MODE=http \
 ANALYZER_URL="$TEST_ANALYZER_URL" \
 ANALYZER_API_KEY="$TEST_ANALYZER_KEY" \
 ANALYZER_TIMEOUT_MS=5000 \
 make -C go run
-
-# Node 版（:8080）
-npm --prefix node ci   # 初回だけ
-APP_ENV=local \
-ANALYZER_MODE=http \
-ANALYZER_URL="$TEST_ANALYZER_URL" \
-ANALYZER_API_KEY="$TEST_ANALYZER_KEY" \
-ANALYZER_TIMEOUT_MS=5000 \
-npm --prefix node run dev
 ```
 
 - `ANALYZER_API_KEY` が空なら、`x-api-key` を付けずに送る
@@ -208,7 +199,7 @@ npm --prefix web run dev -- --host
 | 手順 1 で 401 / 403 | API キーの値、ヘッダー名（今の API は `x-api-key` だけを付けられる）、送信元 IP の許可 |
 | 手順 3 で 502 `ANALYSIS_UPSTREAM_ERROR` | API のログの `"analyzer response"` の行（解析 API のステータスと本文）と、`"image analysis failed"` の行（原因）。`result` がない・想定外の値（`pass` など大文字小文字の違いを含む）も 502 になる |
 | 手順 3 で 504 `ANALYSIS_TIMEOUT` | 解析に時間がかかっている。`ANALYZER_TIMEOUT_MS` を延ばして API を起動し直す（手順 1 の `time_total` を目安に） |
-| 手順 1 は通るのに、手順 3 で 502 / 504（接続できない） | API のプロセスがプロキシを通っていない。Go 版は `HTTPS_PROXY` の環境変数を使う（API の起動コマンドの前に付ける）。Node 版の `fetch` は、既定ではプロキシの環境変数を使わない（Node の版によっては `NODE_USE_ENV_PROXY=1` で使える。要確認） |
+| 手順 1 は通るのに、手順 3 で 502 / 504（接続できない） | API のプロセスがプロキシを通っていない。`HTTPS_PROXY` の環境変数を使う（API の起動コマンドの前に付ける） |
 | 手順 3 で 413 / 415 | 画像が 4MB を超えている / 対応していない形式（API が先に弾くので、解析 API には送られない） |
 | SPA で「発行できませんでした」 | ブラウザの開発者ツールのネットワークで、`/v1/tickets` の応答を見る。API が起動していない（Vite の転送先 `:8080` に届かない）ことが多い |
 

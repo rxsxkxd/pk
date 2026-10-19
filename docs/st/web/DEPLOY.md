@@ -4,7 +4,7 @@ SPA（`web/`。[DESIGN.md](DESIGN.md)）を、非公開の S3 バケットに置
 
 API（チケット発行・QR 生成）への経路は、環境ごとに次の2つから選ぶ。どちらも同じテンプレート・同じ SPA のビルドで、`web.yaml` のパラメータ `ApiOriginDomain` と `config.json` で切り替える。
 
-全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、API のデプロイは [../go/DEPLOY.md](../go/DEPLOY.md) / [../node/DEPLOY.md](../node/DEPLOY.md)。GitHub Actions からのデプロイは [../CI.md](../CI.md) 4章。
+全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、API のデプロイは [../go/DEPLOY.md](../go/DEPLOY.md)。GitHub Actions からのデプロイは [../CI.md](../CI.md) 4章。
 
 | 構成 | API への経路 | `ApiOriginDomain` | SPA の `apiBaseUrl` | API の `PublicBaseUrl` | CORS | CSP の API の分 |
 |---|---|---|---|---|---|---|
@@ -39,7 +39,7 @@ SPA の JS ──fetch / <img>──▶ チケット API（execute-api の URL�
 
 ## 1. 前提
 
-- チケット API をデプロイ済みで、`$API_URL` が分かっていること（[../go/DEPLOY.md](../go/DEPLOY.md) または [../node/DEPLOY.md](../node/DEPLOY.md)）
+- チケット API をデプロイ済みで、`$API_URL` が分かっていること（[../go/DEPLOY.md](../go/DEPLOY.md)）
 - `AWS_REGION`・`ACCOUNT_ID`・`IMPL`（使う API の実装。`go` / `node`）を設定しておく（../DEPLOY.md 1章）
 - Node.js 24（SPA のビルド）、手動で削除する場合は `jq`
 - デプロイする人の権限: ../DEPLOY.md 1章のものに加えて、`s3:CreateBucket` / `PutBucketPolicy` / `PutObject` / `DeleteObject` / `ListBucket`、`cloudfront:*`（ディストリビューション、OAC、Response Headers Policy、無効化）
@@ -97,7 +97,7 @@ echo $WEB_URL   # https://dxxxxxxxxxxxxx.cloudfront.net
 
 API と CloudFront が互いの URL を使う（CloudFront は API のドメイン、API は `PublicBaseUrl` に CloudFront の URL）ので、初回は次の順番にする。独自ドメインを使う場合は URL が先に決まるので、API を最初から `PublicBaseUrl` 付きで作れば、1 回で済む。
 
-1. API をデプロイする（`PublicBaseUrl` は空のまま。../go/DEPLOY.md / ../node/DEPLOY.md 4-A）。1章で `$API_DOMAIN` を取り出す
+1. API をデプロイする（`PublicBaseUrl` は空のまま。../go/DEPLOY.md 4-A）。1章で `$API_DOMAIN` を取り出す
 2. Web のスタックを作る（下のコマンド）。`$WEB_URL` などを 3.1 の末尾のコマンドで取り出す
 3. API をもう一度デプロイする。4-A.1 の `aws cloudformation deploy` に `PublicBaseUrl=$WEB_URL` を足す（QR 画像の URL・チケット表示ページへのリダイレクト先・API の表示ページの CSP が、CloudFront のオリジンになる）。以後の API のデプロイでも毎回付ける
 4. `config.json` を `apiBaseUrl: ""` で作ってアップロードする（6章）。CORS の設定（5章）は要らない
@@ -482,7 +482,7 @@ aws apigatewayv2 delete-cors-configuration --api-id $API_ID
 
 | 方法 | 内容 | 作業 |
 |---|---|---|
-| 秘密のヘッダー | CloudFront がオリジン（API）へのリクエストに秘密の値のヘッダー（例: `X-Origin-Verify`）を付け、API がそれを確かめる（なければ 403） | `web.yaml` の API のオリジンに `OriginCustomHeaders`、API（Go・Node）にヘッダーの照合、秘密の値の保存（Parameter Store）と入れ替えの手順 |
+| 秘密のヘッダー | CloudFront がオリジン（API）へのリクエストに秘密の値のヘッダー（例: `X-Origin-Verify`）を付け、API がそれを確かめる（なければ 403） | `web.yaml` の API のオリジンに `OriginCustomHeaders`、API にヘッダーの照合、秘密の値の保存（Parameter Store）と入れ替えの手順 |
 | 独自ドメイン + `DisableExecuteApiEndpoint` | API Gateway に独自ドメインを付け、execute-api の既定の URL を無効にする。CloudFront のオリジンは独自ドメインにする | 独自ドメインと証明書（ACM）、`api.yaml` の変更。独自ドメインも直接呼べるので、これだけでは迂回は防げない（秘密のヘッダーと組み合わせる） |
 
 ## 12. 上限を超えた画像を送ったときの応答の確認

@@ -1,14 +1,14 @@
 # 【構成案】Lambda を既存の VPC に置き、画像解析サーバーにセキュリティグループで接続する
 
-> **2026-10-08: 方針を更新**。`tickets` はプライベートサブネットに置き、NAT ゲートウェイ経由で外の解析サーバー（置き場所・経路は未確定）につなぐことに決めた。ネットワークの2パターン（既存の VPC・新規のサブネット・既存の NAT / すべて新規）は [tickets-network.md](tickets-network.md)。このファイルの「解析サーバーが VPC 内で SG の参照で許可する」前提の部分は、経緯として残す。`api.yaml` の VPC のパラメータ（5章）とデプロイの手順（go/node DEPLOY.md 4-A.4）は、そのまま使う。
+> **2026-10-08: 方針を更新**。`tickets` はプライベートサブネットに置き、NAT ゲートウェイ経由で外の解析サーバー（置き場所・経路は未確定）につなぐことに決めた。ネットワークの2パターン（既存の VPC・新規のサブネット・既存の NAT / すべて新規）は [tickets-network.md](tickets-network.md)。このファイルの「解析サーバーが VPC 内で SG の参照で許可する」前提の部分は、経緯として残す。`api.yaml` の VPC のパラメータ（5章）とデプロイの手順（go/DEPLOY.md 4-A.4）は、そのまま使う。
 
-> 2026-10-07。`api.yaml` に実装済み（パラメータ `VpcSubnetIds`・`VpcSecurityGroupIds`。同じテンプレートで、すべて VPC の外と、`tickets` だけ VPC 内の両方に対応）。デプロイ手順は [../go/DEPLOY.md](../go/DEPLOY.md)・[../node/DEPLOY.md](../node/DEPLOY.md) 4-A.4（手動は 4-B.4）。AWS 上では未検証。未確定事項（8章）が決まったら、内容を [../DESIGN.md](../DESIGN.md) 7章に移し、このファイルは削除する。
+> 2026-10-07。`api.yaml` に実装済み（パラメータ `VpcSubnetIds`・`VpcSecurityGroupIds`。同じテンプレートで、すべて VPC の外と、`tickets` だけ VPC 内の両方に対応）。デプロイ手順は [../go/DEPLOY.md](../go/DEPLOY.md) 4-A.4（手動は 4-B.4）。AWS 上では未検証。未確定事項（8章）が決まったら、内容を [../DESIGN.md](../DESIGN.md) 7章に移し、このファイルは削除する。
 
 ## 1. 前提
 
 - 本番の画像解析サーバーは、AWS 上の既存の VPC にあり、**特定のセキュリティグループからのアクセスだけを許可する**
 - その代わり、解析サーバーへの許可トークン（`x-api-key`）は使わない想定
-- API 側は対応済み: API キーは任意になった。`ANALYZER_API_KEY_PARAMETER_NAME`（CloudFormation の `AnalyzerApiKeyParameterName`）が空なら、`x-api-key` を付けずに送る（Go・Node とも）
+- API 側は対応済み: API キーは任意になった。`ANALYZER_API_KEY_PARAMETER_NAME`（CloudFormation の `AnalyzerApiKeyParameterName`）が空なら、`x-api-key` を付けずに送る
 - **VPC・サブネット・セキュリティグループは既存のもので、このスタックでは持たない**
   - VPC 内の既存の EC2・ECS からは、解析サーバーへの経路が既に運用されている
   - Lambda を置くサブネットと、Lambda に付けるセキュリティグループは、利用者が用意し、**デプロイのコマンドで ID を指定する**
@@ -171,7 +171,7 @@ aws cloudformation deploy \
 
 | 部品 | 動かし方 | VPC | 状態 |
 |---|---|---|---|
-| チケット API の `tickets` | Lambda | VPC 内（`VpcSubnetIds`・`VpcSecurityGroupIds` を指定したとき） | 実装済み（go/node DEPLOY.md 4-A.4 / 4-B.4） |
+| チケット API の `tickets` | Lambda | VPC 内（`VpcSubnetIds`・`VpcSecurityGroupIds` を指定したとき） | 実装済み（go/DEPLOY.md 4-A.4 / 4-B.4） |
 | チケット API の `get-qr` | Lambda | VPC の外のまま | 実装済み |
 | スタブ（Function URL 版） | Lambda | VPC の外（インターネットに公開。API キーで制限） | 実装済み（../DEPLOY.md 3.1〜3.3） |
 | スタブ（VPC 版） | ECS Fargate（コンテナ） | VPC 内（テスト用にはスタブ用の VPC のパブリックサブネット。プライベートサブネット + VPC エンドポイントか NAT も可） | 実装済み（../DEPLOY.md 3.4。ネットワークは `analyzer-stub/network.yaml`、スタブは AWS CDK `analyzer-stub/cdk/`） |
@@ -222,7 +222,7 @@ flowchart LR
 | スタブ（Fargate）とその外向きの経路 | スタブ用の VPC | ../DEPLOY.md 3.4.2〜3.4.4 |
 | ピアリングとルート（両方向とも、サブネットの CIDR だけ） | 両方の VPC | ../DEPLOY.md 3.4.2（`network.yaml` が作る） |
 | スタブの SG の送信元に `tickets` の SG | スタブのスタック | ../DEPLOY.md 3.4.3（`AllowedSourceSecurityGroupId`） |
-| `tickets` の `AnalyzerUrl` をスタブの IP に | API のスタック | go/node DEPLOY.md 4-A.4（タスクを起動するたび） |
+| `tickets` の `AnalyzerUrl` をスタブの IP に | API のスタック | go/DEPLOY.md 4-A.4（タスクを起動するたび） |
 
 - スタブ用の VPC（3.4.2 で新規に作るもの）はパブリックサブネットだけで、Lambda はそこでは外に出られない（パブリック IP を持てない）ので、`tickets` はそこに置かない。`tickets` は Parameter Store に届く既存の VPC に置き、ピアリングでつなぐ
 

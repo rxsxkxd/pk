@@ -6,8 +6,8 @@ CloudFormation の YAML の定義は 14 ファイル（2026-10-16 時点）。�
 
 | ファイル | 中身 | 手順書 |
 |---|---|---|
-| `infra/cloudformation/api.yaml` | チケット QR API（HTTP API と Lambda 2つ。Go / Node を `Impl` で切り替え） | go/DEPLOY.md・node/DEPLOY.md 4-A |
-| `infra/cloudformation/example.yaml` | example.com の QR の API（別スタック） | go/DEPLOY.md・node/DEPLOY.md 6-A |
+| `infra/cloudformation/api.yaml` | チケット QR API（HTTP API と Lambda 2つ） | go/DEPLOY.md 4-A |
+| `infra/cloudformation/example.yaml` | example.com の QR の API（別スタック） | go/DEPLOY.md 6-A |
 | `infra/cloudformation/quota-guard.yaml` | 発行の上限（1時間 1 万件・1日 10 万件）。超えたら発行のルートを止める（API のスタックとは別） | infra/RATE_LIMITING.md 7章 |
 | `infra/cloudformation/web.yaml` | Web（S3 と CloudFront。直結・統合の2構成） | web/DEPLOY.md 3章 |
 | `infra/cloudformation/tickets-network-existing-vpc.yaml` | `tickets` 用のネットワーク（既存の VPC に作る） | notes/tickets-network.md |
@@ -19,8 +19,8 @@ CloudFormation の YAML の定義は 14 ファイル（2026-10-16 時点）。�
 
 | ファイル | 中身 | 手順書 |
 |---|---|---|
-| `infra/sam/go/template.yaml` | チケット QR API の Go 版（`api.yaml` と同じ内容を SAM で書いたもの） | infra/sam/README.md |
-| `infra/sam/node/template.yaml` | 同じく Node 版 | infra/sam/README.md |
+| `infra/sam/go/template.yaml` | チケット QR API（`api.yaml` と同じ内容を SAM で書いたもの） | infra/sam/README.md |
+| `infra/sam/node/template.yaml` | 同じく Node 版（ビルドできる状態で残している） | node/README.md 付録 A.7 |
 | `analyzer-stub/template.yaml` | 画像解析のスタブ（Lambda + Function URL） | DEPLOY.md 3.2 |
 | `dummy-analyzer/template.yaml` | 検証環境用のダミーの画像解析（判定・待ち時間・失敗を選べる。Lambda + Function URL）。本番では使わない | dummy-analyzer/README.md、PROD_VERIFICATION.md 3.3・5章 |
 

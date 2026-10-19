@@ -5,6 +5,7 @@
 | 項目 | 現状 |
 |---|---|
 | 実装言語 | API は Go 1.27 で、Lambda（`provided.al2023`、arm64）で動かす。画面は Vue 3.5 + TypeScript の SPA。 |
+| API の Node.js 実装 | 比較用に Node.js（TypeScript）版の API もある（採用は Go。説明はすべて [node/](node/README.md) にまとめた）。 |
 | 対応 OS | iOS 13 以上 / Android 9 以上（**実機での確認はまだ**）。 |
 | 画像サイズ上限 | 4MiB（4,194,304 バイト）。 |
 | 画像圧縮 | 上限を超えた写真だけ、SPA が Compressor.js で JPEG に縮めてから送る（上限以下はそのまま送り、API 側は加工しない）。 |

@@ -1,5 +1,4 @@
-// Package view は Go 版の HTML ビュー(templates/*.html、バイナリに埋め込み)を描画する。
-// Node 版は同じページを hono/html で組み立てる。ファイルは共有しない(NODE.md 5.3)。
+// Package view は HTML ビュー(templates/*.html、バイナリに埋め込み)を描画する。
 // クリーンアーキテクチャ: インバウンドアダプタ(プレゼンテーション)の一部で、package httpapi が使う。
 package view
 

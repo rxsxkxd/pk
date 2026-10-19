@@ -1,6 +1,6 @@
 // HTTP layer of the ticket QR API (Hono): route table, endpoints, error handling and middleware, plus
 // wiring of the business logic (domain.ts) with its implementations (infra.ts). Same API as the Go
-// version (spec: ../../DESIGN.md, Node-specific decisions: ../../NODE.md).
+// version (spec: ../../DESIGN.md, Node-specific decisions: ../README.md).
 
 import { randomUUID } from 'node:crypto';
 import { MIMEType } from 'node:util';

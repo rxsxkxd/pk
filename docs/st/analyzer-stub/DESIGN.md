@@ -2,7 +2,7 @@
 
 API の設計は [../DESIGN.md](../DESIGN.md)（7章 画像解析サーバー連携）を参照。
 
-> **実装状況**: スタブは Node 版（`node/`、5章）と Rust 版（`rust/`、6章）の両方が実装済み。API 側の HTTP クライアントは Go 版・Node 版とも実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、各実装の DEPLOY.md 4-A.3・4-B.3（API の切り替え）。
+> **実装状況**: スタブは Node 版（`node/`、5章）と Rust 版（`rust/`、6章）の両方が実装済み。API 側の HTTP クライアントは実装済み（8章）。デプロイ手順は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、[../go/DEPLOY.md](../go/DEPLOY.md) 4-A.3・4-B.3（API の切り替え）。
 
 ## 1. 目的
 
@@ -37,7 +37,7 @@ flowchart LR
 | 項目 | 採用 | 理由 |
 |---|---|---|
 | 実行環境 | Lambda（arm64、128MB、タイムアウト10秒） | API と同じ AWS アカウント・リージョンに置ける。使わないときの費用はほぼゼロ |
-| 実装 | **Node 版**（`nodejs24.x`、依存なしの `index.mjs` と `analyzer.mjs`）、**Rust 版**（`provided.al2023`、`bootstrap`）、**Python 版**（`python3.13`、依存なしの `index.py` と `analyzer.py`。付録） | 同じ仕様で実装し、API と同様に比較できるようにする |
+| 実装 | **Node 版**（`nodejs24.x`、依存なしの `index.mjs` と `analyzer.mjs`）、**Rust 版**（`provided.al2023`、`bootstrap`）、**Python 版**（`python3.13`、依存なしの `index.py` と `analyzer.py`。付録） | 同じ仕様で実装し、比較できるようにする |
 | 公開方法 | **Lambda Function URL**（`AuthType: NONE`） | API Gateway を作らずに HTTPS のエンドポイントが手に入る。アクセス制限は API キーで行う（3.3） |
 | デプロイ | 共通の AWS SAM テンプレート `template.yaml`（2026-10-08 に CloudFormation から移行。AWS 上では未検証）。選んだ実装の zip を `dist/analyzer-stub.zip` に置いて `sam deploy`。`Impl=node|python|rust` でランタイムを切り替え、実装ごとに別スタックにする。Lambda 版は今後使わない可能性が高い（VPC 版。付録 B） | API のスタックとは別に作成・削除できる。zip は API と同じ成果物バケットに置く |
 
@@ -75,7 +75,7 @@ x-api-key: {API キー}
 
 - キーの順序は、3つの実装で同じ（上のとおり）。Node 版だけ `confidence` を `1` と書く（JavaScript の `JSON.stringify` が `1.0` を `1` にするため。JSON としては同じ値）。テストは、文字列ではなく読み込んだ値で比べる
 - `confidence`・`detected` の範囲と値の一覧、`status` の意味、`RETRY` の扱い、失敗したときの本物の応答の形は、解析側に確認中。分かったら、ここと API 側の解釈を合わせる
-- API 側の解析クライアント（Go・Node）は、この形式の **`result` だけ**を読む（2026-10-08 に対応済み）。`PASS` → 発行、`REJECT` → 422 `IMAGE_REJECTED`、`RETRY` → 422 `IMAGE_RETRY`、それ以外の値や `result` がないとき → 502 `ANALYSIS_UPSTREAM_ERROR`（../DESIGN.md 7章）
+- API 側の解析クライアントは、この形式の **`result` だけ**を読む（2026-10-08 に対応済み）。`PASS` → 発行、`REJECT` → 422 `IMAGE_REJECTED`、`RETRY` → 422 `IMAGE_RETRY`、それ以外の値や `result` がないとき → 502 `ANALYSIS_UPSTREAM_ERROR`（../DESIGN.md 7章）
 
 | ステータス | 本文 | 条件 | API 側の扱い（DESIGN.md 5.6） |
 |---|---|---|---|
@@ -221,7 +221,7 @@ cd analyzer-stub/rust
 
 ## 7. デプロイと削除
 
-手順の詳細は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、[../go/DEPLOY.md](../go/DEPLOY.md)・[../node/DEPLOY.md](../node/DEPLOY.md) 4-A.3・4-B.3（API の切り替え）。要点は次のとおり。
+手順の詳細は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、[../go/DEPLOY.md](../go/DEPLOY.md) 4-A.3・4-B.3（API の切り替え）。要点は次のとおり。
 
 ```sh
 export STUB_IMPL=node                                        # python / rust も可
@@ -256,33 +256,23 @@ aws ssm delete-parameter --name $ANALYZER_KEY_PARAM
 - 予約同時実行数は 5（パラメータ `ReservedConcurrency`）。URL が漏れても、使える量を抑えるため
 - Function URL を `AuthType: NONE` で公開するには、`lambda:InvokeFunctionUrl` と `lambda:InvokeFunction`（`InvokedViaFunctionUrl: true`）の両方の権限が必要。テンプレートに両方を入れている
 
-## 8. API 側の変更（Go 版・Node 版とも実装済み）
+## 8. API 側の変更（実装済み）
 
 | 対象 | 内容 |
 |---|---|
 | 画像解析クライアント | `ANALYZER_MODE=http` を追加する。`ANALYZER_URL` に POST する（octet-stream、`x-api-key` 付き）。接続1秒・全体5秒でタイムアウトし、5xx とタイムアウトのときだけ1回リトライする（DESIGN.md 7章） |
 | 設定 | `ANALYZER_URL`、`ANALYZER_API_KEY_PARAMETER_NAME` を追加する |
-| エラーの変換 | タイムアウト → `ANALYSIS_TIMEOUT`（504）、それ以外の失敗 → 502、`result` が `REJECT` / `RETRY` → 422（`IMAGE_REJECTED` / `IMAGE_RETRY`）。すでに `AnalyzerError`（Node）と `ErrUpstream` / `ErrTimeout`（Go）で用意してある |
+| エラーの変換 | タイムアウト → `ANALYSIS_TIMEOUT`（504）、それ以外の失敗 → 502、`result` が `REJECT` / `RETRY` → 422（`IMAGE_REJECTED` / `IMAGE_RETRY`）。`ErrVerifierUpstream` / `ErrVerifierTimeout` で用意してある |
 | CloudFormation（`infra/cloudformation/api.yaml`） | パラメータ `AnalyzerUrl`、`AnalyzerApiKeyParameterName` を追加する。Lambda の環境変数と、パラメータの読み取り権限を追加する |
 | テスト | API のテストでは、ローカルの HTTP サーバー（このスタブの `local.mjs` など）を立てて、クライアントの挙動（タイムアウト、リトライ、エラーの変換）を確かめる |
 
 レスポンスの形式（3.2）は仮のものなので、クライアント側では解釈部分を1か所にまとめ、本物の仕様が決まったらそこだけを差し替える。
-
-Node 版の実装（`node/src/infra.ts`）:
-
-| 項目 | 内容 |
-|---|---|
-| `newAnalyzer(env)` | `ANALYZER_MODE=mock` → プロセス内のモック、`http` → `httpAnalyzer`。`http` のときは `ANALYZER_URL`（必須）、`ANALYZER_API_KEY_PARAMETER_NAME`（Lambda 上。ローカルは `APP_ENV=local` + `ANALYZER_API_KEY`）、`ANALYZER_TIMEOUT_MS`（既定 5000）を読む |
-| `httpAnalyzer` | 標準の `fetch` で POST する（依存なし）。1回ごとに `AbortSignal.timeout` で打ち切る。5xx・タイムアウト・通信エラーのときだけ1回リトライし、4xx と形式の崩れたレスポンスはリトライしない |
-| `parseAnalyzerResponse` | 解析サーバーの応答から `result`（`PASS` / `REJECT` / `RETRY`）だけを読む。それ以外の値はエラー（502） |
-| テスト | `node/test/app.test.ts` の `http analyzer client`。ローカルの HTTP サーバーを立てて、送ったバイト列とヘッダー、リトライの回数、タイムアウト、API のエラー（422 / 502 / 504）への変換を確認する |
 
 ローカルでの通し確認（スタブの `npm run dev` + API の `ANALYZER_MODE=http`）: 発行（201 / 303）が通り、スタブのログの SHA-256 が送った画像と一致した。スタブを止めたとき・API キーが違うときは 502 になった。
 
 ## 9. 決めておきたいこと
 
 1. 仮のレスポンス形式（3.2）と認証（3.3）を、この内容で進めてよいか
-2. Go 版の HTTP クライアントに着手する時期（Node 版は実装済み）
 
 ## CI
 

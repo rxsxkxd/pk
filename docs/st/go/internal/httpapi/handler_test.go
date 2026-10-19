@@ -254,7 +254,7 @@ func TestMaxImageBytes(t *testing.T) {
 }
 
 // TestContentTypeVariants: multipart の Content-Type の有効な書き方。Node のテストにも同じケースがあるが、
-// "=" の前後の空白だけは既知の差異(NODE.md 10)。
+// "=" の前後の空白だけは既知の差異(node/README.md 10)。
 func TestContentTypeVariants(t *testing.T) {
 	for _, format := range []string{
 		`multipart/form-data; boundary="%s"`,

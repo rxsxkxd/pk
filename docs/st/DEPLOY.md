@@ -5,7 +5,6 @@
 | 手順書 | デプロイするもの | スタック |
 |---|---|---|
 | [go/DEPLOY.md](go/DEPLOY.md) | チケット API の Go 版（と、example.com の QR） | `ticketqr-go`、`ticketqr-go-example` |
-| [node/DEPLOY.md](node/DEPLOY.md) | チケット API の Node 版（と、example.com の QR） | `ticketqr-node`、`ticketqr-node-example` |
 | [web/DEPLOY.md](web/DEPLOY.md) | Web フロントエンド（SPA。S3 + CloudFront）と、API への経路（直結: CORS の設定、統合: CloudFront の `/v1/*`） | `ticketqr-web-{impl}` |
 | この文書 | 共通の準備（1・2章）、画像解析サーバーのスタブ（3章） | `ticketqr-analyzer-stub-{stub}` |
 | [CI.md](CI.md) | GitHub Actions からのデプロイ（上の手順を自動で実行する） | - |
@@ -17,7 +16,7 @@
 Web フロントエンド: CloudFront（OAC）+ 非公開の S3（web.yaml・ticketqr-web-{impl}）                web/DEPLOY.md
   ├─ 直結: SPA の JS が API の URL を fetch / <img> で呼ぶ（CORS で SPA のオリジンを許可）
   └─ 統合: 同じ CloudFront の /v1/* を API に振り分ける（同じオリジン。CORS 不要。API の PublicBaseUrl は CloudFront の URL）
-チケット API: API Gateway HTTP API ticketqr-{impl}（api.yaml）                                   go/DEPLOY.md・node/DEPLOY.md
+チケット API: API Gateway HTTP API ticketqr-{impl}（api.yaml）                                   go/DEPLOY.md
  ├─ POST /v1/tickets/qr-inline        ┐  QR 同梱付与 API
  ├─ POST /v1/tickets                  ├→ Lambda ticketqr-{impl}-tickets  チケット付与 API
  ├─ GET  /v1/tickets/{ticketCode}/view ┘                                   チケット表示ページ
@@ -34,12 +33,12 @@ S3（スタックの外で管理）: 成果物バケット ticketqr-artifacts-{a
 順番:
 
 1. この文書の 1章（前提）と 2章（成果物バケット）
-2. チケット API: [go/DEPLOY.md](go/DEPLOY.md) か [node/DEPLOY.md](node/DEPLOY.md)（`$API_URL` が決まる）
+2. チケット API: [go/DEPLOY.md](go/DEPLOY.md)（`$API_URL` が決まる）
 3. Web フロントエンド: [web/DEPLOY.md](web/DEPLOY.md)（`$API_URL` を使い、API の CORS に SPA のオリジンを入れる）
 4. 必要なら: 画像解析サーバーのスタブ（この文書の 3章）をデプロイし、API を `http` モードに切り替える（各実装の DEPLOY.md 4-A.3。手動は 4-B.3）
    - 外部の解析サーバー（送信元の IP で許可、API キーなし）に近い形で確かめる場合は、Fargate のスタブ（3.4。パブリックサブネットに置き、許可した IP からだけ呼べる）を使う。API からスタブまでの経路（`tickets` を VPC に置くか、NAT など）は未確定
 
-> 現在の実装の状態: Go 版・Node 版とも実装済み（同じテンプレートでデプロイでき、`Impl` パラメータで切り替える）。画像解析は `mock`（プロセス内で常に valid）と `http`（画像解析サーバーに POST）から選ぶ。`ALLOWED_ORIGINS`（Origin の照合）は未実装（E2E.md 4章）。
+> 現在の実装の状態: 実装済み。画像解析は `mock`（プロセス内で常に valid）と `http`（画像解析サーバーに POST）から選ぶ。`ALLOWED_ORIGINS`（Origin の照合）は未実装（E2E.md 4章）。
 
 ## 1. 前提（共通）
 
@@ -55,14 +54,14 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 | 対象 | 権限 |
 |---|---|
-| API（go / node） | `iam:CreateRole` / `PassRole` / `PutRolePolicy` / `AttachRolePolicy`、`lambda:*`、`apigateway:*`（`/apis*`）、`logs:CreateLogGroup` / `PutRetentionPolicy`、`ssm:PutParameter` / `GetParameter`、`s3:PutObject`（成果物バケット）、`cloudformation:*`（CloudFormation の場合） |
+| API | `iam:CreateRole` / `PassRole` / `PutRolePolicy` / `AttachRolePolicy`、`lambda:*`、`apigateway:*`（`/apis*`）、`logs:CreateLogGroup` / `PutRetentionPolicy`、`ssm:PutParameter` / `GetParameter`、`s3:PutObject`（成果物バケット）、`cloudformation:*`（CloudFormation の場合） |
 | Web | `s3:CreateBucket` / `PutBucketPolicy` / `PutObject` / `DeleteObject` / `ListBucket`、`cloudfront:*`（ディストリビューション、OAC、Response Headers Policy、無効化）、`apigateway:*`（CORS の設定） |
 
 GitHub Actions から OIDC でデプロイするときのロールの権限は、CI.md 4.2。
 
 ## 2. 成果物バケットの作成（初回だけ）
 
-Lambda の zip を置く S3 バケット。CloudFormation でデプロイするときに使う（Go 版・Node 版・スタブで共通）。
+Lambda の zip を置く S3 バケット。CloudFormation でデプロイするときに使う（API とスタブで共通）。
 
 ```sh
 export ARTIFACT_BUCKET=ticketqr-artifacts-$ACCOUNT_ID-$AWS_REGION
@@ -75,7 +74,7 @@ aws s3api put-bucket-versioning --bucket $ARTIFACT_BUCKET --versioning-configura
 
 各スタックは、zip をデプロイごとに別の接頭辞（例: `ticketqr/go/<git sha>`）で置く。古い zip は、ロールバックのために消さずに残す。
 
-## 3. 画像解析サーバーのスタブ（任意。Go 版・Node 版で共通）
+## 3. 画像解析サーバーのスタブ（任意）
 
 本物の画像解析サーバーができるまで、API の `http` モードの接続先に使う（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md)。解析はせず常に valid を返す）。スタブと API キーをここで用意し、API の切り替えは各実装の DEPLOY.md 4-A.3（手動は 4-B.3）で行う。
 
@@ -124,7 +123,7 @@ echo $ANALYZER_URL
 
 スタブを直接 curl で叩くときは、`aws ssm get-parameter --name $ANALYZER_KEY_PARAM --with-decryption --query Parameter.Value --output text` で API キーの値を取り出す。
 
-この後、API を `http` モードに切り替える: [go/DEPLOY.md](go/DEPLOY.md) / [node/DEPLOY.md](node/DEPLOY.md) の 4-A.3（手動は 4-B.3。`ANALYZER_URL`・`ANALYZER_KEY_PARAM`・`STUB_IMPL` を使う）。
+この後、API を `http` モードに切り替える: [go/DEPLOY.md](go/DEPLOY.md) の 4-A.3（手動は 4-B.3。`ANALYZER_URL`・`ANALYZER_KEY_PARAM`・`STUB_IMPL` を使う）。
 
 ### 3.3 スタブを削除する
 
@@ -241,7 +240,7 @@ echo $ANALYZER_URL
 | VPC の外（今の既定） | Lambda の共有の IP（固定できない） | 固定の IP では絞れない（`0.0.0.0/0` などの広い範囲になる） |
 | VPC のプライベートサブネット + NAT ゲートウェイ（固定の Elastic IP） | NAT の固定 IP | その IP の `/32`（本物の解析サーバーが「利用側の NAT の固定 IP で許可」している場合と同じ形） |
 
-  API を `http` モードにして、`ANALYZER_URL` をスタブに向ける手順は、go/node DEPLOY.md の 4-A.3（API キーは指定しない）。`tickets` を VPC に置く場合は 4-A.4
+  API を `http` モードにして、`ANALYZER_URL` をスタブに向ける手順は、go/DEPLOY.md の 4-A.3（API キーは指定しない）。`tickets` を VPC に置く場合は 4-A.4
 
 #### 3.4.5 確認する
 
@@ -284,10 +283,10 @@ aws cloudformation wait stack-delete-complete --stack-name ticketqr-analyzer-stu
 
 | 項目 | 状態 |
 |---|---|
-| `ALLOWED_ORIGINS`（Origin の照合） | 未実装（E2E.md 4.2）。実装したら、API の Lambda の環境変数を追加する（go / node） |
+| `ALLOWED_ORIGINS`（Origin の照合） | 未実装（E2E.md 4.2）。実装したら、API の Lambda の環境変数を追加する |
 | HTTP API の CORS 設定のテンプレート化 | 今は web/DEPLOY.md 5章の `update-api` で設定する（スタックの外からの変更）。`api.yaml` に `AllowedOrigins` パラメータと `CorsConfiguration` を追加する |
 | Web フロントエンドの独自ドメイン | CloudFront の代替ドメイン名と、us-east-1 の ACM 証明書を `web.yaml` に追加する。そのときは、直結では CORS の `AllowOrigins`、統合では API の `PublicBaseUrl` も独自ドメインにする |
 | API の独自ドメイン | `PublicBaseUrl` パラメータだけ用意してある。ACM 証明書と `AWS::ApiGatewayV2::DomainName`、`ApiMapping` は別途追加する |
-| 本物の画像解析サーバーへの接続 | HTTP クライアントは Go 版・Node 版とも、仮のプロトコル（analyzer-stub/DESIGN.md 3）で実装済み。本物の仕様が決まったら、レスポンスの解釈部分（Go: `parseResponse`、Node: `parseAnalyzerResponse`）を差し替える。VPC の設定が必要になる可能性がある |
+| 本物の画像解析サーバーへの接続 | HTTP クライアントは、仮のプロトコル（analyzer-stub/DESIGN.md 3）で実装済み。本物の仕様が決まったら、レスポンスの解釈部分（`parseResponse`）を差し替える。VPC の設定が必要になる可能性がある |
 | WAF | HTTP API に直接は付けられない。統合の構成（web/DEPLOY.md 3.2）なら、CloudFront に付けて API も守れる（`web.yaml` の `WebAclArn`。Web ACL はテンプレートに含めていない。ルールの案と AWS CLI で作る手順は web/DEPLOY.md 13章。未検証）。画像のアップロードを通すため、マネージドルールの `SizeRestrictions_BODY` を除外する（DESIGN.md 5章）。execute-api の URL を直接呼ばれると迂回される（web/DEPLOY.md 11章） |
 | GitHub Actions からのデプロイ | `github-template/workflows/deploy.yml` を定義済み（専用のリポジトリの `.github/` にコピーして使うテンプレート。未検証）。OIDC で IAM ロールを引き受け、各手順書の CloudFormation の手順を実行する。準備と流れは [CI.md](CI.md) 4章 |

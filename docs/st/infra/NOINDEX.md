@@ -12,7 +12,7 @@
 
 | 順 | 設定 | 場所 | 役割 |
 |---|---|---|---|
-| 1 | すべての応答に、ヘッダー `X-Robots-Tag: noindex, nofollow, noarchive` を付ける | 画面: CloudFront のレスポンスヘッダーポリシー<br>API: API（Go・Node）の共通のヘッダー | **主の対策**。クローラーが来ても、索引に載せない・リンクをたどらない・保存版（キャッシュ）を出さない |
+| 1 | すべての応答に、ヘッダー `X-Robots-Tag: noindex, nofollow, noarchive` を付ける | 画面: CloudFront のレスポンスヘッダーポリシー<br>API: API の共通のヘッダー | **主の対策**。クローラーが来ても、索引に載せない・リンクをたどらない・保存版（キャッシュ）を出さない |
 | 2 | `index.html` に `<meta name="robots" content="noindex, nofollow">` を入れる | `web/index.html` | 1 の予備。ヘッダーの設定が漏れた環境でも効く |
 | 3 | `robots.txt` で全体のクロールを禁止（`Disallow: /`）**しない** | `robots.txt` は置かない | 2.2 |
 
@@ -59,16 +59,15 @@
 - 手動（AWS CLI）で作った環境では、`headers.json` に同じ項目を足して、`update-response-headers-policy` で更新する（web/DEPLOY.md 4章・8章）
 - `index.html`・`config.json`・`assets/*`（画像・アイコンを含む）のすべてに付く
 
-### 3.2 API（API の応答）: Go・Node
+### 3.2 API（API の応答）
 
 すべての応答に付けている共通のヘッダーに足す。
 
-| 実装 | 場所 | 足すもの |
-|---|---|---|
-| Go | `go/internal/httpapi/handler.go` の `withCommon` | `h["X-Robots-Tag"] = "noindex, nofollow, noarchive"` |
-| Node | `node/src/shared.ts`（`Cache-Control: no-store` を付けている所） | `c.header('X-Robots-Tag', 'noindex, nofollow, noarchive')` |
+| 場所 | 足すもの |
+|---|---|
+| `go/internal/httpapi/handler.go` の `withCommon` | `h["X-Robots-Tag"] = "noindex, nofollow, noarchive"` |
 
-- 単体テストの共通のヘッダーの確認（Go の `assertCommonHeaders` など）にも足す
+- 単体テストの共通のヘッダーの確認（`assertCommonHeaders`）にも足す
 - 発行（201・エラー）、QR 画像（200・403）、チケット表示ページのすべてに付く
 
 ### 3.3 画面: `web/index.html`

@@ -89,7 +89,7 @@ const png = toPngBuffer(code, { on: [0, 0, 0], off: [255, 255, 255], pad: 4, sca
 | 背景 | 白 | 白。**`off` を明示的に指定する**（既定値は透明） |
 | PNG の形式 | 1bit のパレット形式 | 1bit のパレット形式 |
 
-- 両実装の一致は「QR を読み取った結果が同じであること」で確認する（画像のバイト一致は求めない。DESIGN.md 11章と同じ）
+- 両実装の一致は「QR を読み取った結果が同じであること」で確認する（画像のバイト一致は求めない。付録 A.4）
 - HTML は `<img width="256" height="256">` で表示するので、232px でも表示上の大きさは変わらない
 - 画像サイズの違い（Go 256px / Node 232px）は**許容することで決定済み**
 - 256px ちょうどにしたい場合は、余白のピクセル数を自分で計算して画像を組み立てる必要がある。Go の yeqown 版で同じことをして複雑になったため、採用しない
@@ -303,7 +303,7 @@ npm run build        # dist/ticketqr.zip、dist/exampleqr.zip
 | `ANALYZER_TIMEOUT_MS` | 1回の呼び出しのタイムアウト（既定 5000） |
 | `PORT` / `EXAMPLE_PORT` | `npm run dev` の待ち受けポート（既定値 8080 / 8081） |
 
-デプロイは [node/DEPLOY.md](node/DEPLOY.md) を参照（`Impl=node` を指定し、`node/dist/*.zip` をアップロードする）。
+デプロイは [DEPLOY.md](DEPLOY.md) を参照（`Impl=node` を指定し、`node/dist/*.zip` をアップロードする）。
 
 ## 10. Go 版との突き合わせ結果
 
@@ -346,5 +346,122 @@ ANALYZER_MODE=http ANALYZER_URL=http://localhost:8090/v1/analyze ANALYZER_API_KE
 
 - 依存は増やさない（標準の `fetch` と `AbortSignal.timeout` を使う）
 - 1回5秒でタイムアウトし、5xx・タイムアウト・通信エラーのときだけ1回リトライする。失敗は `AnalyzerError`（`timeout` / `upstream`）として `domain.ts` に返し、API のエラー（504 / 502）になる。`result` が `REJECT` / `RETRY` は 422（`IMAGE_REJECTED` / `IMAGE_RETRY`）
-- AWS へのデプロイは node/DEPLOY.md 4-A.3（手動は 4-B.3。`AnalyzerMode=http`、`AnalyzerUrl`、`AnalyzerApiKeyParameterName`）。スタブの用意は DEPLOY.md 3章
+- AWS へのデプロイは DEPLOY.md 4-A.3（手動は 4-B.3。`AnalyzerMode=http`、`AnalyzerUrl`、`AnalyzerApiKeyParameterName`）。スタブの用意は DEPLOY.md 3章
 
+
+## 付録. ほかのドキュメントから移した Node 版の記述（2026-10-19）
+
+API の Node 版についての記述は、`node/` の外のドキュメントからなるべく外し、ここにまとめた。ほかのドキュメントは Go 版を前提に書いてある。
+
+### A.1 Go 版との並行運用（元: ../DESIGN.md 2章）
+
+同一の API 契約を持つスタックを `Impl=go` / `Impl=node` のパラメータで2つデプロイする（ベース URL は別）。同じ契約テスト・負荷テストを両方に流して比較する。Go 版・Node 版で、同じ共通のテストベクタ（`testdata/ticketcode.json`・`testdata/signature.json`）を流し、同じコード・同じ署名になることを確かめる。
+
+### A.2 技術スタックの対応（元: ../DESIGN.md 9章）
+
+| 項目 | Go | Node.js |
+|---|---|---|
+| ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs24.x`（arm64、`index.handler`） |
+| Lambda アダプタ | `aws-lambda-go` | Hono + `@hono/aws-lambda`（5.1） |
+| AWS SDK | aws-sdk-go-v2（SSM のみ） | AWS SDK for JavaScript v3（SSM のみ。Lambda ランタイム同梱） |
+| QR ライブラリ | `github.com/skip2/go-qrcode` | `lean-qr`（3章） |
+| multipart 解析 | 標準 `mime/multipart` | Hono の `c.req.formData()`（5.2） |
+| HTML テンプレート | `html/template` + `embed` | `hono/html` のタグ付きテンプレート（コード内） |
+| ビルド | `GOOS=linux GOARCH=arm64 go build` | esbuild でバンドル（tree-shaking） |
+
+QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256px、余白4モジュール、PNG。解析サーバーの応答の解釈は、Go の `parseResponse` に当たるのが `parseAnalyzerResponse`。ブラウザと OS の情報のログ（`client`）は、Go 版と同じキーにそろえている（Node のログには Lambda が行頭に時刻とリクエスト ID を付けるが、集計のスクリプト `scripts/client_log_summary.py` は読み飛ばす）。
+
+### A.3 API が返す HTML（元: ../DESIGN.md 5章・../PAGES.md 5.2・5.3）
+
+Go と Node は、同じ内容の HTML をそれぞれ別の方法で作る。テンプレートファイルは共有しない。
+
+| | Go | Node |
+|---|---|---|
+| テンプレート | `go/internal/view/templates/ticket.html`、`error.html`（`html/template` の構文） | `node/src/app.ts` の `ticketView` / `errorView`（`hono/html` の `html` タグ付きテンプレート） |
+| 同梱の方法 | `go/internal/view/view.go` の `//go:embed templates/*.html` でバイナリに埋め込む | コードそのものなので esbuild がバンドルに含める |
+| 描画 | `view.Renderer`（起動時に1回だけテンプレートを解析） | 関数を呼ぶだけ |
+| スタイル | 各 HTML の `<style>` に直接書く | 文字列定数 `STYLE` を `raw()` で埋め込む（example 用のバンドルに残さないため） |
+| エスケープ | `html/template` が文脈に応じて自動で行う | `hono/html` が自動で行う |
+
+- そろえていること: 文言、`data-*` 属性、`<img>` の属性、スタイル。セキュリティヘッダー（CSP は Go は handler、Node は `commonHeaders` が付ける。`Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`X-Robots-Tag`）
+- そろえていないこと: 空白・インデント、`<meta ... />` の書き方、エスケープの表記（Go は `&#34;`、Node は `&quot;`）。表示と意味は同じ
+- 出力の同等性: 同一入力に対し、`data-*` 属性・`<img src>`・文言が同じであることを契約テストで確認する（HTML のバイト単位の一致は求めない）
+- 文言やデザイン、API のエラーの文言を変えるときは、Go と Node の両方を直す
+- 共有をやめた経緯: 以前はテンプレートを Go と Node で共有する想定で `st/templates/` に置いていた。Node が `hono/html` で自前の HTML を作ると決めてから、テンプレートを `go/internal/view/templates/` に移し、`go.mod` も `go/` に移した
+- ローカル試験フォーム（`http://localhost:8080/`）も、Go（`go/cmd/ticketqr/local.go`）と Node（`node/src/local.ts`）でそれぞれ別に書いている
+
+### A.4 比較評価の観点（元: ../DESIGN.md 11章）
+
+| 観点 | 計測方法 |
+|---|---|
+| コールドスタート | CloudWatch `Init Duration`（メモリ 256/512/1024MB で比較） |
+| ウォームレイテンシ p50/p95/p99 | k6 で同一シナリオ（解析サーバーはスタブで固定遅延）。B は POST → 303 → view → qr の一連で計測 |
+| QR / HTML 生成性能 | B-2, B-3 単体の負荷試験 + ベンチマーク（Go: `testing.B`、Node: tinybench 等） |
+| メモリ使用量・コスト | `Max Memory Used`、GB秒換算 |
+| デプロイサイズ | zip サイズ |
+| 開発・保守性 | コード量、型安全性、テスト容易性、ライブラリの成熟度 |
+| 出力一致性 | 同一コードに対するQRのデコード結果が一致すること（画像バイト一致は求めない）、HTMLが一致すること |
+
+### A.5 E2E を Node 版で流す（元: ../E2E.md・../E2E_RUN.md）
+
+- `compose.e2e.yaml` の `api` コンテナは、ビルドのターゲット（`api-${API_IMPL:-go}`）で Go / Node を切り替える。Node 版は Lambda の公式イメージ `public.ecr.aws/lambda/nodejs:24` の上で、`index.handler` を RIE で動かす（ローカルサーバーの `@hono/node-server` ではなく、Lambda のハンドラー `@hono/aws-lambda` を通る）
+- `@hono/aws-lambda` は `version` でイベントの v1 / v2 を見分けるので、ゲートウェイ（`go/cmd/apigw-local`）が作るイベントは `version: "2.0"` にしてある
+- 流し方（../E2E_RUN.md 2章の Go 版の手順と同じで、先頭に `API_IMPL=node` を付ける）:
+
+  ```sh
+  API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
+  echo "exit: $?"
+  ```
+
+  API のイメージだけ作り直すときは `API_IMPL=node docker compose -f compose.e2e.yaml build api`。Go 版の結果（`e2e/playwright-report`・`e2e/test-results`）は上書きされるので、見るなら先に見ておく
+- 2026-10-14 の実行: ケース1（画面遷移方式）が Node 版でも通過（約 230 秒。../E2E_RUN.md 5章）
+- Origin の照合（`ALLOWED_ORIGINS`。未実装）を実装するときは、Node の `app.ts` にも入れる
+
+### A.6 CI（元: ../CI.md）
+
+- `ci.yml` の `node` ジョブ: Node の型チェック・テスト・ビルド → 成果物 `lambda-node`
+- `e2e` ジョブの matrix（`go` / `node`）で `API_IMPL` を切り替え、Node 版でも E2E を流す（成果物 `e2e-node`）
+- CD の案（../CD_CI.md）では、Go 版・Node 版をそれぞれ別のスタック（`IMPL=go` / `IMPL=node`）に並列でデプロイする想定。Go を採用したので、全体のドキュメントは Go 版だけを前提にしている
+
+### A.7 デプロイ（元: ../DEPLOY.md・../infra/）
+
+- 手順は [DEPLOY.md](DEPLOY.md)。スタック名は `ticketqr-node`、`ticketqr-node-example`。Go 版とは別のスタック・別の salt のパラメータにする
+- CloudFormation は Go 版と同じ `infra/cloudformation/api.yaml` を `Impl=node` で使う
+- SAM: `infra/sam/node/template.yaml`。`sam build` が esbuild で `node/src/ticketqr.ts` をまとめる（`npm run build:ticketqr` と同じオプション。`ticketqr.mjs`、ハンドラーは `ticketqr.handler`）。SAM は本番用の依存しか入れないので、esbuild を PATH に置いてビルドする
+
+  ```sh
+  PATH="$PWD/node/node_modules/.bin:$PATH" \
+    sam build --template-file infra/sam/node/template.yaml --build-dir infra/sam/node/.aws-sam/build
+  ```
+
+  変換した CloudFormation は `infra/sam/generated/node.cfn.yaml`（`translate.py node/template.yaml generated/node.cfn.yaml`）
+
+### A.8 ローカルで外の解析 API につなぐ（元: ../LOCAL_ANALYZER_TEST.md 5章）
+
+```sh
+npm --prefix node ci   # 初回だけ
+APP_ENV=local \
+ANALYZER_MODE=http \
+ANALYZER_URL="$TEST_ANALYZER_URL" \
+ANALYZER_API_KEY="$TEST_ANALYZER_KEY" \
+ANALYZER_TIMEOUT_MS=5000 \
+npm --prefix node run dev
+```
+
+- プロキシを通す環境では、Node の `fetch` は既定ではプロキシの環境変数を使わない（Node の版によっては `NODE_USE_ENV_PROXY=1` で使える。要確認）
+- 画面（SPA）の開発サーバーは、`/v1` をこのサーバー（:8080）に転送する
+
+### A.9 検索エンジンに載せない設定（元: ../infra/NOINDEX.md 3.2）
+
+`node/src/shared.ts` の共通のヘッダー（`commonHeaders`）で `X-Robots-Tag: noindex, nofollow, noarchive` を付けている。
+
+### A.10 画像解析サーバーの HTTP クライアント（元: ../analyzer-stub/DESIGN.md 8章）
+
+`node/src/infra.ts`:
+
+| 項目 | 内容 |
+|---|---|
+| `newAnalyzer(env)` | `ANALYZER_MODE=mock` → プロセス内のモック、`http` → `httpAnalyzer`。`http` のときは `ANALYZER_URL`（必須）、`ANALYZER_API_KEY_PARAMETER_NAME`（Lambda 上。ローカルは `APP_ENV=local` + `ANALYZER_API_KEY`）、`ANALYZER_TIMEOUT_MS`（既定 5000）を読む |
+| `httpAnalyzer` | 標準の `fetch` で POST する（依存なし）。1回ごとに `AbortSignal.timeout` で打ち切る。5xx・タイムアウト・通信エラーのときだけ1回リトライし、4xx と形式の崩れたレスポンスはリトライしない |
+| `parseAnalyzerResponse` | 解析サーバーの応答から `result`（`PASS` / `REJECT` / `RETRY`）だけを読む。それ以外の値はエラー（502） |
+| テスト | `node/test/app.test.ts` の `http analyzer client`。ローカルの HTTP サーバーを立てて、送ったバイト列とヘッダー、リトライの回数、タイムアウト、API のエラー（422 / 502 / 504）への変換を確認する |

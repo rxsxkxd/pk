@@ -240,7 +240,7 @@ aws ecs run-task --cluster ticketqr-analyzer-stub --task-definition ticketqr-ana
   --launch-type FARGATE \
   --network-configuration "awsvpcConfiguration={subnets=[$STUB_SUBNET],securityGroups=[$STUB_SG],assignPublicIp=ENABLED}"
 # → タスクの ARN からプライベート IP を取り出す（aws ecs describe-tasks）
-# → API を AnalyzerUrl=http://{IP}:8090/v1/analyze でデプロイする（go/node DEPLOY.md 4-A.4）
+# → API を AnalyzerUrl=http://{IP}:8090/v1/analyze でデプロイする（go/DEPLOY.md 4-A.4）
 # → 発行して、スタブのログの sha256 を確かめる
 
 # 終わったら

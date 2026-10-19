@@ -5,7 +5,7 @@
 クライアントから画像を受け取り、外部の画像解析サーバーで検証する。valid と判定された場合のみチケットコードを採番し、QRコード画像を生成して返す。
 
 - 実行環境: AWS Lambda（API Gateway HTTP API 経由）
-- 実装言語: **Go と Node.js（TypeScript）で同一仕様を実装**し、後で比較評価する
+- 実装言語: **Go**
 - QRの返却方式は2パターン
   - パターンA: base64エンコード済みQR画像を JSON で返す（1エンドポイント）
   - パターンB: QR生成URLを埋め込んだ HTML ビューを返す（発行・ビュー・QR生成の3エンドポイント）
@@ -49,11 +49,6 @@ flowchart LR
 | CloudWatch Logs | 発行ログ（唯一の記録） |
 
 データストア（DynamoDB / S3）は使わない。
-
-### Go / Node の並行運用
-
-同一のAPI契約を持つスタックを `impl=go` / `impl=node` のパラメータで2つデプロイする（ベースURLは別）。
-同じ契約テスト・負荷テストを両方に流して比較する。
 
 ## 3. 処理フロー
 
@@ -176,7 +171,7 @@ sequenceDiagram
 | 要素 | 桁 | 内容 |
 |---|---|---|
 | 日付・時刻 | 14 | 発行日時（秒まで）。**タイムゾーンは JST 固定**（Lambda は UTC のため明示変換）。レスポンスの `issuedAt` と同じ時刻 |
-| UUIDv4 | 32 | 暗号論的乱数（Go: `crypto/rand`、Node: `crypto.randomBytes`）の16バイトから作る UUID のバージョン4（RFC 9562。乱数122ビット）。ハイフンなし、**小文字**の16進 |
+| UUIDv4 | 32 | 暗号論的乱数（`crypto/rand`）の16バイトから作る UUID のバージョン4（RFC 9562。乱数122ビット）。ハイフンなし、**小文字**の16進 |
 | 固定文字列 | 1〜32 | Parameter Store の **String**（`TICKET_CODE_SUFFIX_PARAMETER_NAME`。秘密ではないので、ローカル実行と E2E は環境変数 `TICKET_CODE_SUFFIX` で直接渡せる）。**英数字だけ**（URL のパスと QR にそのまま入るため）。起動時に読み込み、形が違えば起動に失敗する |
 
 - 区切り文字はない。日時は14桁・UUID は32桁で固定なので、固定文字列は47文字目から最後まで
@@ -193,8 +188,8 @@ sequenceDiagram
 ### ルールとの関係
 
 - 生成ルールはチケット利用側と共有された仕様であり、APIはそれに**厳密に準拠したコードのみ**を生成する
-- 採番ロジックは生成器（Go: `ticket.Generator`、Node: `generateTicket`）に分離し、ルール変更の影響をここに閉じ込める（コードの形式チェックは API では行わない。署名で照合する）
-- 時刻と乱数源はインターフェース化し、テスト時は固定値を注入する。Go/Node の両実装に**同一のテストベクタ**（`testdata/ticketcode.json`。入力: 時刻・乱数16バイト・固定文字列 → 期待コード。UTC→JST の日付またぎ、UUID の版と種別のビット、32文字の固定文字列も含む）を流す
+- 採番ロジックは生成器（`ticket.Generator`）に分離し、ルール変更の影響をここに閉じ込める（コードの形式チェックは API では行わない。署名で照合する）
+- 時刻と乱数源はインターフェース化し、テスト時は固定値を注入する。**共通のテストベクタ**（`testdata/ticketcode.json`。入力: 時刻・乱数16バイト・固定文字列 → 期待コード。UTC→JST の日付またぎ、UUID の版と種別のビット、32文字の固定文字列も含む）で確かめる
 
 > suffix の具体的なルールは **要確定**。ルールが連番など状態を必要とするものだった場合、本前提（外部ストアなし）と両立しないため再検討が必要。
 
@@ -205,8 +200,7 @@ sequenceDiagram
 - 画像の受け取り: A・B-1 とも `multipart/form-data` の `image` フィールド（ブラウザの `<input type="file">` / `FormData` で送る形式に統一）
 - 画像サイズ上限: **4MB**（Lambda 同期呼び出しのペイロード上限 6MB に対し、API Gateway → Lambda 間で base64 化され約1.33倍に膨らむため）。環境ごとに**下げられる**（API の環境変数 `MAX_IMAGE_BYTES`、CloudFormation の `MaxImageBytes`、SPA の `config.json` の `maxImageBytes`。両方を同じ値にする）。4MB より大きい値は、API は起動時のエラー、SPA は設定の読み込みのエラーにする。経路ごとの上限は次の表
 - 画像の形式判定はファイルの中身で行い、パートの `Content-Type` は信用しない（ブラウザによって `application/octet-stream` になる場合があるため）。先頭のバイトで形式を決め、その形式のヘッダーを画像サイズまで解析できることまで確かめる（画像本体はデコードしない）。先頭数バイトだけの偽の画像は 415
-  - Node: `image-size` が両方を行う
-  - Go: 形式は `github.com/gabriel-vasile/mimetype`、確認は形式ごとのパーサー（JPEG / PNG は標準の `DecodeConfig`、WebP は `golang.org/x/image/webp`、HEIC / HEIF / AVIF は `go4.org/media/heif` で primary item の ispe ボックスを読む）。バイト列を直接比べる処理は自前で持たない
+  - 形式は `github.com/gabriel-vasile/mimetype`、確認は形式ごとのパーサー（JPEG / PNG は標準の `DecodeConfig`、WebP は `golang.org/x/image/webp`、HEIC / HEIF / AVIF は `go4.org/media/heif` で primary item の ispe ボックスを読む）。バイト列を直接比べる処理は自前で持たない
 - 受け付ける形式: JPEG、PNG、HEIC / HEIF（iPhone の標準、Samsung などの HEIF）、AVIF、WebP。画像は変換せずにそのまま解析サーバーへ送る
 - `Cache-Control: no-store`（全エンドポイント）
 
@@ -319,14 +313,13 @@ Response `200 OK`, `Content-Type: text/html; charset=utf-8`
 
 | 項目 | 方針 |
 |---|---|
-| テンプレート | Go は `go/internal/view/templates/ticket.html` / `error.html` を `embed` で同梱。Node は `hono/html` で同じ内容の HTML を作る（ファイルは共有しない。NODE.md 5.3） |
+| テンプレート | Go は `go/internal/view/templates/ticket.html` / `error.html` を `embed` で同梱 |
 | 埋め込みデータ | `ticketCode`, `qrUrl` のみ。発行日時は保存していないため別途は表示しない（日時はコードの先頭14桁に含まれる） |
 | `qrUrl` | **絶対URL**。`PUBLIC_BASE_URL` から組み立てる |
-| エスケープ | 自動エスケープ必須（Go: `html/template`、Node: `hono/html`）。属性値・本文とも |
+| エスケープ | 自動エスケープ必須（`html/template`）。属性値・本文とも |
 | 機械可読性 | `data-*` 属性にコード等を載せ、HTMLをパースする利用側でも値を取り出せるようにする |
 | 外部リソース | 使わない（CSS はインライン、JS なし） |
 | セキュリティヘッダ | `Content-Security-Policy: default-src 'none'; img-src {PUBLIC_BASE_URL}; style-src 'unsafe-inline'`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` |
-| 出力の同等性 | Go/Node で同一入力に対し、`data-*` 属性・`<img src>`・文言が同じであることを契約テストで確認（HTML のバイト単位の一致は求めない） |
 
 > デザイン（文言・スタイル）は **要確定**。上記は最小構成の例。
 
@@ -351,13 +344,13 @@ sig = base64url( HMAC-SHA256(salt, ticketCode) ) の先頭 22 文字（128bit）
 | 署名対象 | `ticketCode` のみ（UTF-8）。B-3 と B-2 で同じ `sig` を使う |
 | 長さ | 128bit に切り詰め（URLを短く保ちつつ総当たりは非現実的） |
 | エンコード | base64url、パディングなし |
-| 比較 | 定数時間比較（Go: `hmac.Equal`、Node: `crypto.timingSafeEqual`） |
+| 比較 | 定数時間比較（`hmac.Equal`） |
 | salt 管理 | Parameter Store の SecureString（`/ticketqr/{impl}/signing-salt`）。コールド起動時に取得しメモリに保持 |
 | salt ローテーション | 検証側は「現行 + 旧」の2つの salt を受け入れる期間を設けて切り替える |
 | 有効期限 | なし（簡易チェックのため）。必要になれば `exp` を署名対象に追加する拡張余地のみ残す |
 
 - 同じ `ticketCode` からは常に同じ `sig` が得られる（ステートレス・保存不要）
-- Go/Node で同一の署名が出ることを**共通テストベクタ**（salt, ticketCode → sig）で担保する
+- 署名は**共通テストベクタ**（salt, ticketCode → sig）で確かめる
 - パターンA はQRを直接返すため署名不要
 - B-3 はブラウザのリダイレクト追従、B-2 は `<img>` の自動取得で呼ばれ、いずれも認証ヘッダを付けられないため、**API Gateway の認証をかけず `sig` をアクセス制御とする**
 
@@ -427,7 +420,7 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 
 ImageAnalyzer はインターフェースとして抽象化し、テスト時はスタブに差し替える。
 
-> 実装状況: Go 版・Node 版とも HTTP クライアント（`ANALYZER_MODE=http`）を実装済み（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`（任意）、レスポンスは本物の形式で `result` だけを読む。2026-10-08 に仮の `{valid, reason}` から切り替えた）。`x-api-key` は任意（API キーを指定したときだけ付ける）。本番の解析サーバーは、VPC 内で Lambda のセキュリティグループからのアクセスだけを許可し、API キーを使わない想定（[notes/lambda-vpc.md](notes/lambda-vpc.md)）。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。`ANALYZER_MODE=mock` では、通信せずに常に valid を返す。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 3章（スタブ）と go/DEPLOY.md・node/DEPLOY.md 6章（API の切り替え）。
+> 実装状況: HTTP クライアント（`ANALYZER_MODE=http`）を実装済み（[analyzer-stub/DESIGN.md](analyzer-stub/DESIGN.md) 3章: `POST`、`x-api-key`（任意）、レスポンスは本物の形式で `result` だけを読む。2026-10-08 に仮の `{valid, reason}` から切り替えた）。`x-api-key` は任意（API キーを指定したときだけ付ける）。本番の解析サーバーは、VPC 内で Lambda のセキュリティグループからのアクセスだけを許可し、API キーを使わない想定（[notes/lambda-vpc.md](notes/lambda-vpc.md)）。AWS 上の接続先には、常に valid を返す画像解析サーバーのスタブ（Lambda + Function URL）を使う。`ANALYZER_MODE=mock` では、通信せずに常に valid を返す。本物の送信先・認証・レスポンス形式が決まったら、クライアントのレスポンスの解釈部分を差し替える。デプロイ手順は DEPLOY.md 3章（スタブ）と go/DEPLOY.md・node/DEPLOY.md 6章（API の切り替え）。
 
 ## 8. 状態・データ
 
@@ -469,31 +462,30 @@ st/
 │       ├── signer/            # 署名付き URL の署名と照合（salt + HMAC）
 │       ├── analyzer/          # 画像解析サーバー（証明書の画像の検証）のクライアント（ticket.Verifier を実装。mock と HTTP）
 │       ├── httpapi/           # HTTP 層: API Gateway イベント ⇔ ticket、routeKey による振り分け、業務のエラー → HTTP の応答
-│       ├── view/              # HTML レンダリング（templates/ticket.html・error.html を embed。Node は hono/html で同じ内容を持つ）
+│       ├── view/              # HTML レンダリング（templates/ticket.html・error.html を embed）
 │       ├── imageinput/        # 画像形式の判定とサイズ上限（HTTP 層で使う。受け付けるかは ticket が判断。重い依存をここに閉じ込める）
 │       ├── config/            # 環境変数と Parameter Store（salt、解析サーバーの API キー）
 │       ├── qr/                # QR の PNG（チケット系と example で共有）
 │       └── localhttp/         # ローカル実行用 net/http → Lambda イベント変換（routeKey を付与。cmd で共有）
-├── node/                      # 詳細は NODE.md（domain.ts / infra.ts / app.ts / image.ts / shared.ts / example.ts + 入口の ticketqr.ts / exampleqr.ts / local.ts）
-├── infra/cloudformation/      # IaC（impl=go|node でパラメータ化）: api.yaml（チケット API）、example.yaml（EX。別スタック）
+├── infra/cloudformation/      # IaC: api.yaml（チケット API）、example.yaml（EX。別スタック）
 └── tests/
-    ├── contract/              # 両実装に同一ケースを流す
+    ├── contract/              # 契約テスト
     └── load/                  # k6 シナリオ
 ```
 
 ローカル開発では、Lambda エミュレータを使わずに `go/cmd/ticketqr` をそのまま起動する（ローカル HTTP サーバーとして動く）。ハンドラは Lambda と同じものを呼び出す。画像解析サーバーのプロトコルが決まるまでは、`ANALYZER_MODE=mock`（常に valid を返す）で動かす。
 
-| 項目 | Go | Node.js |
-|---|---|---|
-| ランタイム | `provided.al2023`（arm64, `bootstrap`） | `nodejs24.x`（arm64、`index.handler`） |
-| Lambda アダプタ | `aws-lambda-go` | Hono + `@hono/aws-lambda`（NODE.md 5.1） |
-| AWS SDK | aws-sdk-go-v2（SSM のみ） | AWS SDK for JavaScript v3（SSM のみ。Lambda ランタイム同梱） |
-| QR ライブラリ | `github.com/skip2/go-qrcode` | `lean-qr`（NODE.md 3章） |
-| multipart 解析 | 標準 `mime/multipart` | Hono の `c.req.formData()`（NODE.md 5.2） |
-| HTMLテンプレート | `html/template` + `embed` | `hono/html` のタグ付きテンプレート（コード内） |
-| ビルド | `GOOS=linux GOARCH=arm64 go build` | esbuild でバンドル（tree-shaking） |
+| 項目 | 内容 |
+|---|---|
+| ランタイム | `provided.al2023`（arm64, `bootstrap`） |
+| Lambda アダプタ | `aws-lambda-go` |
+| AWS SDK | aws-sdk-go-v2（SSM のみ） |
+| QR ライブラリ | `github.com/skip2/go-qrcode` |
+| multipart 解析 | 標準 `mime/multipart` |
+| HTMLテンプレート | `html/template` + `embed` |
+| ビルド | `GOOS=linux GOARCH=arm64 go build` |
 
-QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256px、余白4モジュール、PNG。
+QR 生成パラメータ: 誤り訂正レベル M、256px、余白4モジュール、PNG。
 
 ## 10. 非機能・運用
 
@@ -516,7 +508,7 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 
 ### ブラウザと OS の記録（QR 同梱付与 API・チケット付与 API）
 
-証明書の画像を受け取る2つの API（`grant-inline`、`grant`）では、完了ログ（`"msg":"request completed"`）に、ブラウザが送ってきた情報を `client` グループとして**そのまま**記録する。成功もエラーも記録する。ほかの API（チケット表示ページ、QR 画像 API）では記録しない。Go 版・Node 版で同じキーにそろえる。
+証明書の画像を受け取る2つの API（`grant-inline`、`grant`）では、完了ログ（`"msg":"request completed"`）に、ブラウザが送ってきた情報を `client` グループとして**そのまま**記録する。成功もエラーも記録する。ほかの API（チケット表示ページ、QR 画像 API）では記録しない。
 
 | キー | リクエストヘッダー | 内容 |
 |---|---|---|
@@ -532,7 +524,7 @@ QR 生成パラメータは両実装で揃える: 誤り訂正レベル M、256p
 ```
 
 - 届いたヘッダーだけを記録し、1つもなければ `client` を出さない。値はクライアントが自由に送れるので、1つあたり 512 文字で切る
-- API では解析・加工せず、生の値を残す（Go と Node で結果がずれないようにし、解釈の規則を後から変えられるようにするため。解釈は後処理のスクリプトで行う）
+- API では解析・加工せず、生の値を残す（解釈の規則を後から変えられるようにするため。解釈は後処理のスクリプトで行う）
 - IP アドレスや端末の型番（`Sec-CH-UA-Model`）は記録しない
 - `Sec-CH-UA*` は、Chromium 系のブラウザが HTTPS の通信にだけ付ける（Safari と Firefox は送らない。ローカルや E2E の `http://` では届かない）
 
@@ -554,7 +546,7 @@ Permissions-Policy: ch-ua-platform-version=(self "https://{API のオリジン}"
 見方（後処理）: ログは加工せずに残し、集計はログを取り出してから行う。サンプルのスクリプト `scripts/client_log_summary.py`（Python の標準ライブラリだけで動く）が、User-Agent を解釈して、OS・ブラウザごとの件数とエラー数を表にする。上の「分かること・分からないこと」の扱い（iOS 26 以降は Safari の版から推定、Android の固定値は Client Hints があれば使う）も、スクリプトの中で行う。
 
 ```sh
-# CloudWatch Logs から直近1日分を取り出して集計する（Go 版・Node 版のどちらのログも読める）
+# CloudWatch Logs から直近1日分を取り出して集計する
 aws logs tail /aws/lambda/ticketqr-go-tickets --since 1d --filter-pattern '"request completed"' \
   | python3 scripts/client_log_summary.py             # OS とブラウザの組み合わせごと
 ... | python3 scripts/client_log_summary.py --by os   # OS と版ごと（--by browser でブラウザと版ごと）
@@ -568,23 +560,11 @@ Android  不明（UA は 10 に固定）              Chrome          138       
 Android  13                                Chrome          138           1     0
 ```
 
-- 入力は1行に1つのログで、JSON の前に付いた文字（Node のログに Lambda が付ける時刻やリクエスト ID、`aws logs tail` の時刻とストリーム名）は読み飛ばす
+- 入力は1行に1つのログで、JSON の前に付いた文字（`aws logs tail` の時刻とストリーム名など）は読み飛ばす
 - 対象は QR 同梱付与 API・チケット付与 API の完了ログだけ。ほかのログや JSON でない行は無視する
 - あくまでサンプル。User-Agent の解釈の規則は、ブラウザの変化に合わせて直していく
 
-## 11. Go / Node 比較評価の観点
-
-| 観点 | 計測方法 |
-|---|---|
-| コールドスタート | CloudWatch `Init Duration`（メモリ 256/512/1024MB で比較） |
-| ウォームレイテンシ p50/p95/p99 | k6 で同一シナリオ（解析サーバーはスタブで固定遅延）。B は POST → 303 → view → qr の一連で計測 |
-| QR / HTML 生成性能 | B-2, B-3 単体の負荷試験 + ベンチマーク（Go: `testing.B`、Node: tinybench 等） |
-| メモリ使用量・コスト | `Max Memory Used`、GB秒換算 |
-| デプロイサイズ | zip サイズ |
-| 開発・保守性 | コード量、型安全性、テスト容易性、ライブラリの成熟度 |
-| 出力一致性 | 同一コードに対するQRのデコード結果が一致すること（画像バイト一致は求めない）、HTMLが一致すること |
-
-## 12. 要確定事項
+## 11. 要確定事項
 
 1. suffix の具体的なルール（ステートレスに生成可能であること、桁数・文字種）
 2. ピーク時の発行レート（件/秒）と許容衝突確率

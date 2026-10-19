@@ -1,6 +1,6 @@
 # CI / CD 構成案（CI は GitHub Actions、CD は CodePipeline / CodeBuild）
 
-> **状態**: 構成案（未実装）。CI は今の CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。CI.md 4章、未検証）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[node/DEPLOY.md](node/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
+> **状態**: 構成案（未実装）。CI は今の CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。CI.md 4章、未検証）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
 >
 > どの構成パターンを採るかは未決定（0章で比較）。1〜9章は、そのうちパターン P1 の詳細。P3 を採る場合の差分は 0.4 にまとめた。
 >
@@ -63,8 +63,8 @@ GitHub Actions（ci.yml）: テスト・ビルド・E2E
 
 AWS: CodePipeline V2 ticketqr-st（トリガー: CodeConnections で、タグ st-release/* の push）
   ├─ Source    GitHub のそのタグのコミット（CodeConnections）
-  ├─ Package   CodeBuild ticketqr-st-package（デプロイの権限なし）: 単体テスト → Go・Node の zip と SPA の dist を作る
-  ├─ Dev       CodeBuild ticketqr-st-deploy（デプロイの権限あり）×2 並列（Go・Node）: 反映 → スモークテスト（4.2 と同じ）
+  ├─ Package   CodeBuild ticketqr-st-package（デプロイの権限なし）: 単体テスト → Go の zip と SPA の dist を作る
+  ├─ Dev       CodeBuild ticketqr-st-deploy（デプロイの権限あり）: 反映 → スモークテスト（4.2 と同じ）
   ├─ Approve   手動の承認（本番がある場合）
   └─ Prod      Dev と同じ（本番の設定）
 ```
@@ -75,7 +75,7 @@ AWS: CodePipeline V2 ticketqr-st（トリガー: CodeConnections で、タグ st
 | タグの保護 | GitHub のリポジトリのルールセットで、`st-release/*` の作成・削除・付け替えを制限する（GitHub Actions 以外が作れないようにする。設定できる範囲は実装時に確かめる） |
 | CodePipeline のトリガー | V2 のトリガー（Git の push、タグ `st-release/*`）。GitHub Actions の `GITHUB_TOKEN` で付けたタグでも、CodeConnections（GitHub App）には通知が届く想定（実装時に確かめる） |
 | AWS 側の一度だけの設定 | CodeConnections の接続を作り、GitHub 側で GitHub App のインストールを承認する（対象はこのリポジトリだけ） |
-| パッケージ用の CodeBuild | Go・Node のビルド環境（版は CI と同じ）。`make -C go test build`、`npm --prefix node ci/test/run build`、`npm --prefix web ci/test/run build`。出力は zip と `dist`。IAM の権限は、ログとパイプラインの成果物バケットだけ |
+| パッケージ用の CodeBuild | Go と Node.js（SPA）のビルド環境（版は CI と同じ）。`make -C go test build`、`npm --prefix web ci/test/run build`。出力は zip と `dist`。IAM の権限は、ログとパイプラインの成果物バケットだけ |
 | デプロイ用の CodeBuild | 4.2 と同じ（入力が Package の出力になるだけ。ハッシュの照合はパイプラインの中なので不要） |
 | GitHub Actions のロール・リリースバケット | 不要（P1 の 3章・5章の公開用ロールとリリースバケットはなくなる） |
 
@@ -138,7 +138,7 @@ E2 のために必要な変更:
 
 | する | しない |
 |---|---|
-| リリースの中の zip を、成果物バケットに**デプロイごとの接頭辞**で置き直す（CloudFormation が Lambda のコードを更新できるようにする） | Go・Node のコンパイルやバンドルのやり直し（**ビルドは CI で1回だけ**。テストと E2E を通ったものと同じバイナリを反映する） |
+| リリースの中の zip を、成果物バケットに**デプロイごとの接頭辞**で置き直す（CloudFormation が Lambda のコードを更新できるようにする） | Go のコンパイルや SPA のバンドルのやり直し（**ビルドは CI で1回だけ**。テストと E2E を通ったものと同じバイナリを反映する） |
 | 環境ごとの値（API の URL、`config.json`、CORS のオリジン）を入れ、環境の発行方式の SPA のビルド（`web-dist-{方式}`）を選ぶ | SPA のビルドのやり直し（発行方式ごとのビルドは CI で作っておく） |
 | スタックのパラメータを環境ごとに決めて、CloudFormation でデプロイする | |
 
@@ -149,15 +149,15 @@ E2 のために必要な変更:
 - **起動は GitHub Actions から AWS への一方向**: GitHub Actions の最後に、OIDC の一時的な認証情報で CodePipeline を開始する（2.1）。AWS 側に GitHub のトークンは置かない
 - **GitHub に AWS の強い権限を持たせない**: GitHub Actions のロールは「リリースを置いて、パイプラインを開始する」だけ。デプロイの権限は CodeBuild だけが持つ
 - **デプロイの記録と承認は AWS 側に集める**: パイプラインの実行履歴、承認、ロールバックは CodePipeline で行う
-- **手順書と同じコマンド**: CodeBuild の buildspec は、各手順書の CloudFormation の手順（go/node DEPLOY.md 4-A.1、web/DEPLOY.md 3・5・6章）を実行する
+- **手順書と同じコマンド**: CodeBuild の buildspec は、各手順書の CloudFormation の手順（go/DEPLOY.md 4-A.1、web/DEPLOY.md 3・5・6章）を実行する
 
 ## 2. 全体の流れ
 
 ```
 GitHub（master への push / PR）
   └─ GitHub Actions: ci.yml
-       ├─ go / node / web / infra（テスト・ビルド）
-       ├─ e2e（compose。matrix: go / node）
+       ├─ go / web / infra（テスト・ビルド）
+       ├─ e2e（compose）
        └─ publish（master の push だけ。上がすべて成功したとき）
             ├─ OIDC で「公開用ロール」を引き受ける（S3 への書き込みと、パイプラインの開始だけ）
             ├─ リリースの zip を S3 に置く: s3://ticketqr-releases-…/st/release.zip（バージョニングあり）
@@ -166,7 +166,7 @@ GitHub（master への push / PR）
 AWS
   └─ CodePipeline（V2）: ticketqr-st
        ├─ Source       S3 の st/release.zip（開始した時点の最新のバージョン）
-       ├─ Dev          CodeBuild ×2 を並列: Go 版・Node 版をそれぞれ再パッケージ → デプロイ → スモークテスト
+       ├─ Dev          CodeBuild: 再パッケージ → デプロイ → スモークテスト
        ├─ Approve      手動の承認（SNS で通知。本番がある場合だけ）
        └─ Prod         Dev と同じ CodeBuild を、本番の設定で実行
 ```
@@ -205,13 +205,13 @@ Y で用意するもの（これだけで動く）:
 
 | 項目 | 内容 |
 |---|---|
-| 条件 | master への push で、`go`・`node`・`web`・`infra`・`e2e` がすべて成功したとき（PR では動かない） |
+| 条件 | master への push で、`go`・`web`・`infra`・`e2e` がすべて成功したとき（PR では動かない） |
 | 権限 | `id-token: write`（OIDC）。GitHub の environment `release`（任意で承認者を付けられる） |
-| やること | 各ジョブの成果物（`lambda-go`、`lambda-node`、`web-dist-{page,inline,form}`）とテンプレートを、1つの zip（リリース）にまとめて S3 に置き、パイプラインを開始する |
+| やること | 各ジョブの成果物（`lambda-go`、`web-dist-{page,inline,form}`）とテンプレートを、1つの zip（リリース）にまとめて S3 に置き、パイプラインを開始する |
 
 ```yaml
   publish:
-    needs: [go, node, web, infra, e2e]
+    needs: [go, web, infra, e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     environment: release
@@ -219,7 +219,7 @@ Y で用意するもの（これだけで動く）:
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
-        with: { path: release/artifacts }        # lambda-go / lambda-node / web-dist
+        with: { path: release/artifacts }        # lambda-go / web-dist
       - name: Assemble the release
         run: |
           mkdir -p release/infra release/testdata release/buildspec
@@ -252,7 +252,6 @@ release.zip
 ├── SHA256SUMS                    # artifacts/ の各ファイルのハッシュ（CodeBuild が照合する）
 ├── artifacts/
 │   ├── lambda-go/{ticketqr.zip,exampleqr.zip}
-│   ├── lambda-node/{ticketqr.zip,exampleqr.zip}
 │   └── web-dist-{page,inline,form}/  # SPA のビルド結果（発行方式ごと。config.json は環境ごとに作り直す）
 ├── infra/cloudformation/{api.yaml,example.yaml,web.yaml}
 ├── buildspec/{deploy.yml}        # CodeBuild の手順（リポジトリの cd/buildspec/ から）
@@ -273,11 +272,10 @@ release.zip
 | ステージ | アクション | 内容 |
 |---|---|---|
 | Source | S3（`st/release.zip`） | 開始した時点の最新のバージョンを取り出す。変更の検知はしない（`PollForSourceChanges: false`。GitHub Actions が開始する） |
-| Dev | CodeBuild `ticketqr-st-deploy` を2つ並列（`IMPL=go`、`IMPL=node`。`DEPLOY_ENV=dev`） | 再パッケージ → API のスタック → Web のスタック → CORS → SPA のアップロード → スモークテスト（4.2） |
+| Dev | CodeBuild `ticketqr-st-deploy`（`IMPL=go`。`DEPLOY_ENV=dev`） | 再パッケージ → API のスタック → Web のスタック → CORS → SPA のアップロード → スモークテスト（4.2） |
 | Approve | 手動の承認 | 本番を作るときだけ。SNS で通知し、`manifest.json` のコミットを確かめてから承認する |
 | Prod | Dev と同じ CodeBuild（`DEPLOY_ENV=prod`） | Dev と同じ手順を、本番の設定で実行する |
 
-- 実装（Go・Node）ごとにスタックが分かれているので、並列に動かしても干渉しない
 - 片方の実装だけを使う環境では、使わない側のアクションを外す
 - パイプラインの変数 `ReleaseSha` で、どのコミットを反映しているかが実行履歴に残る
 
@@ -285,9 +283,9 @@ release.zip
 
 | 項目 | 内容 |
 |---|---|
-| 環境 | Amazon Linux の ARM（`aws/codebuild/amazonlinux-aarch64-standard`）。使うのは AWS CLI と `curl`、`python3` だけで、ビルドのツール（Go・Node のコンパイラー）は要らない |
+| 環境 | Amazon Linux の ARM（`aws/codebuild/amazonlinux-aarch64-standard`）。使うのは AWS CLI と `curl`、`python3` だけで、ビルドのツール（Go のコンパイラーなど）は要らない |
 | 入力 | Source の成果物（リリースの zip を展開したもの） |
-| 環境変数 | `IMPL`（`go` / `node`）、`DEPLOY_ENV`（`dev` / `prod`）、`ARTIFACT_BUCKET`、`GRANT_MODE`（SPA の発行方式。`page` / `inline` / `form`。既定 `page`。`artifacts/web-dist-$GRANT_MODE` を置く） |
+| 環境変数 | `IMPL`（`go`）、`DEPLOY_ENV`（`dev` / `prod`）、`ARTIFACT_BUCKET`、`GRANT_MODE`（SPA の発行方式。`page` / `inline` / `form`。既定 `page`。`artifacts/web-dist-$GRANT_MODE` を置く） |
 | buildspec | リリースの中の `buildspec/deploy.yml` |
 | 構成と画像の上限 | 下の案は直結（web/DEPLOY.md 3.1）だけ。統合（3.2）にする環境では、`github-template/workflows/deploy.yml` と同じ分岐（`LAYOUT`、`ApiOriginDomain`、API の2回目のデプロイ、CORS なし、`apiBaseUrl: ""`）と、`MAX_IMAGE_BYTES`（API の `MaxImageBytes` と `config.json` の `maxImageBytes`）を足す |
 
@@ -307,10 +305,10 @@ phases:
       - export CODE_SUFFIX_PARAM=/ticketqr/$IMPL/ticket-code-suffix
   build:
     commands:
-      # 再パッケージ: zip をデプロイごとの接頭辞で置く（go/node DEPLOY.md 4-A.1）
+      # 再パッケージ: zip をデプロイごとの接頭辞で置く（go/DEPLOY.md 4-A.1）
       - aws s3 cp artifacts/lambda-$IMPL/ticketqr.zip  s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/ticketqr.zip
       - aws s3 cp artifacts/lambda-$IMPL/exampleqr.zip s3://$ARTIFACT_BUCKET/$ARTIFACT_PREFIX/exampleqr.zip
-      # API のスタック（go/node DEPLOY.md 4-A.1）
+      # API のスタック（go/DEPLOY.md 4-A.1）
       - >-
         aws cloudformation deploy --stack-name ticketqr-$IMPL --template-file infra/cloudformation/api.yaml
         --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset
@@ -339,7 +337,7 @@ phases:
       - aws cloudfront create-invalidation --distribution-id $DIST_ID --paths /index.html /config.json
   post_build:
     commands:
-      # スモークテスト（go/node DEPLOY.md 7章、web/DEPLOY.md 7章）。build が失敗したときは飛ばす
+      # スモークテスト（go/DEPLOY.md 7章、web/DEPLOY.md 7章）。build が失敗したときは飛ばす
       - '[ "$CODEBUILD_BUILD_SUCCEEDING" = 1 ] || exit 1'
       - curl -fsS -o /dev/null "$WEB_URL/"
       - |
@@ -399,11 +397,11 @@ phases:
 |---|---|---|
 | 流れ | GitHub Actions がビルド・テスト・E2E → zip を S3 へ → CodePipeline が反映 | CodePipeline が GitHub からソースを取得（CodeConnections）→ CodeBuild がビルド → 反映 |
 | ビルドの回数 | 1回 | 2回（CI と CD） |
-| テストしたものとデプロイするものの一致 | **同じファイル**（ハッシュで確かめられる） | 同じソースからの別のビルド。ツールの版やベースイメージが違えば、中身がずれうる（Go・Node のビルドを完全に再現できるようにしない限り、保証できない） |
+| テストしたものとデプロイするものの一致 | **同じファイル**（ハッシュで確かめられる） | 同じソースからの別のビルド。ツールの版やベースイメージが違えば、中身がずれうる（Go と SPA のビルドを完全に再現できるようにしない限り、保証できない） |
 | CI の結果との結び付き | CI が成功したときだけ、CI が S3 に置く | CodePipeline は GitHub Actions の結果を知らない。テストに落ちたコミットでもデプロイが動きうる（別途、結果を確かめる仕組みが要る） |
 | GitHub → AWS の認証 | GitHub Actions が **OIDC** で、権限の小さいロール（S3 への書き込みとパイプラインの開始だけ）を引き受ける | GitHub に AWS の権限は渡さない。AWS 側が **GitHub App（CodeConnections）** でリポジトリを読む |
 | 長期の秘密情報 | なし（OIDC は一時的な認証情報。ロールの ARN は秘密ではない） | なし（接続は AWS 側で管理） |
-| 必要なビルド環境 | GitHub Actions だけ | GitHub Actions と CodeBuild の両方に、Go・Node・SPA のビルド環境を用意して、版をそろえ続ける |
+| 必要なビルド環境 | GitHub Actions だけ | GitHub Actions と CodeBuild の両方に、Go・SPA のビルド環境を用意して、版をそろえ続ける |
 | 主な攻撃の入口 | S3 のリリースを書き換えられること（9.3 で防ぐ） | GitHub のリポジトリへの書き込み（A と同じ）。CodeBuild の中でビルドするので、ビルドの依存（npm など）が CD の権限の中で動く |
 
 ### 9.2 ベストプラクティスの整理
@@ -447,9 +445,8 @@ phases:
 2. E2E をどこで行うか（0.5）: GitHub Actions の模擬環境（E1）、AWS の本物に近い環境（E2）、両方（E3）（推奨: E3）
 3. 本番の環境を、同じ AWS アカウントでスタック名を分けて作るか（例: `ticketqr-prod-go`）、別のアカウントにするか（推奨: 別のアカウント。CodePipeline からアカウントをまたいでデプロイするには、KMS のキーとアカウントをまたぐロールが必要）
 4. Dev への反映を、master への push ごとに自動にするか（推奨: 自動）
-5. Go 版・Node 版の両方を、毎回デプロイするか（比較の期間は両方。どちらかに決めたら片方にする）
-6. 承認者と通知先
-7. リリースの記録（`st/releases/<SHA>.zip`）を残す期間
+5. 承認者と通知先
+6. リリースの記録（`st/releases/<SHA>.zip`）を残す期間
 
 ## 12. 参考
 

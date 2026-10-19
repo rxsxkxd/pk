@@ -1,6 +1,6 @@
-# Go 版 API のデプロイ手順
+# API のデプロイ手順
 
-チケット QR API の **Go 版**（`go/`）を AWS にデプロイする手順。Node 版は [../node/DEPLOY.md](../node/DEPLOY.md)、全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、Web フロントエンドは [../web/DEPLOY.md](../web/DEPLOY.md)。実装の詳細は [README.md](README.md)。
+チケット QR API（`go/`）を AWS にデプロイする手順。全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、Web フロントエンドは [../web/DEPLOY.md](../web/DEPLOY.md)。実装の詳細は [README.md](README.md)。
 
 ```
 API Gateway HTTP API ticketqr-go（$default ステージ、自動デプロイ、スロットリング）
@@ -64,7 +64,6 @@ rm -f "$SALT_FILE"
 - Parameter Store の SecureString（Standard ティア、無料）に、`{"current":"…","previous":"…"}` の JSON を保存する。CloudFormation は SecureString を作れないので、CLI で作る
 - salt を引数に直接書かない（シェルの履歴やプロセス一覧に残るため。`--value file://…` でファイルから渡す）
 - 暗号化は既定の `aws/ssm` キーを使う。この場合、実行ロールには `ssm:GetParameter` だけを付ければよい。独自の KMS キーを使う場合は、実行ロールに `kms:Decrypt` を追加する
-- Node 版とは別のパラメータにする（スタックごとに URL が別になるため、同じ salt を使う必要はない）
 
 ### 3.1 チケットコードの固定文字列の作成（初回だけ）
 
@@ -468,7 +467,7 @@ aws iam delete-role --role-name ticketqr-$IMPL-lambda
 
 ### 5.2 スタブ（4-A.3 / 4-B.3）
 
-本物の画像解析サーバーができるまでは、`http` の接続先に画像解析サーバーのスタブを使う。**スタブと API キーの用意は Go 版・Node 版で共通**なので、[../DEPLOY.md](../DEPLOY.md) 3章で行い、`ANALYZER_URL`・`ANALYZER_KEY_PARAM`・`STUB_IMPL` を設定しておく。
+本物の画像解析サーバーができるまでは、`http` の接続先に画像解析サーバーのスタブを使う。**スタブと API キーの用意**は、[../DEPLOY.md](../DEPLOY.md) 3章で行い、`ANALYZER_URL`・`ANALYZER_KEY_PARAM`・`STUB_IMPL` を設定しておく。
 
 確認:
 

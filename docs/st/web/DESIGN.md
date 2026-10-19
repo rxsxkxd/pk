@@ -2,7 +2,7 @@
 
 チケット QR API（[../DESIGN.md](../DESIGN.md)）を使う Web フロントエンド。静的ファイルとしてビルドし、S3 に直接、または CloudFront 経由で配信する SPA。
 
-> **状態**: 実装済み（単体テスト 49件。E2E はケース1（画面遷移方式）を Go 版・Node 版の API で通過。../E2E.md）。ただし 2.1 の対応ブラウザ（iOS 13 / Android 9）の要件にはまだ対応しておらず、その実装は保留（2.4）。API 側の前提（チケット付与 API の `Accept: application/json` 対応）は Go 版・Node 版とも実装済み。CORS と Origin の照合（7章）は未実装。
+> **状態**: 実装済み（単体テスト 49件。E2E はケース1（画面遷移方式）を通過。../E2E.md）。ただし 2.1 の対応ブラウザ（iOS 13 / Android 9）の要件にはまだ対応しておらず、その実装は保留（2.4）。API 側の前提（チケット付与 API の `Accept: application/json` 対応）は実装済み。CORS と Origin の照合（7章）は未実装。
 > エンドポイントと画面の名前、API の使い方の3パターンとその評価は [../PAGES.md](../PAGES.md) にまとめてある。
 > [../E2E.md](../E2E.md) 3章の「素の HTML / JS の静的サイト」案は、本設計で置き換える。
 
@@ -37,7 +37,7 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 | 状態管理 | **Pinia** 4 | 発行の状態（送信中、結果、エラー）を1つのストアにまとめる（5章） |
 | スタイル | **Tailwind CSS 3.4**（3.4.19。`v3-lts`）+ PostCSS + autoprefixer | 2026-10-13 に 4 から戻した（4 は iOS 13〜15.3 でスタイルがまったく付かない。notes/tailwind-compat.md）。`tailwind.config.js`（`content` だけ）、`postcss.config.js`、`src/style.css` は `@tailwind` の3行。autoprefixer の対象は `package.json` の `browserslist`（`ios_saf >= 13`、`chrome >= 80`。Chrome の下限は仮。11章の 6） |
 | 検証 | **valibot** 1.5.0（版は固定） | 実行時設定（`config.json`）、API のレスポンス（成功・エラー）、チケット画面の URL パラメータを検証する。2026-10-13 に zod 4 から替えた（zod 4 は読み込み時に `BigInt` を使い、iOS 13 で動かないため。2.4 の 5）。使う関数だけがビルドに入るので小さい（約 7KB） |
-| 言語 | TypeScript **6** | 型チェックは `vue-tsc --noEmit`。vue-tsc が TypeScript 7（Go 製のコンパイラー）に対応していないため、Node 版（7）とは違い 6 系に固定する |
+| 言語 | TypeScript **6** | 型チェックは `vue-tsc --noEmit`。vue-tsc が TypeScript 7（Go 製のコンパイラー）に対応していないため、6 系に固定する |
 | 古いブラウザ向けの補い | **core-js** 3.50.0（版は固定） | 対象のブラウザにない組み込みの関数を補う（今は `Object.hasOwn` だけ。2.4 の 5）。JS は gzip で約 4KB 増える。インストール時のスクリプト（`postinstall`。寄付のお願いを表示するだけ）は許可していない（npm が警告を出すが、動作には影響しない） |
 | 画像の縮小 | **Compressor.js** 1.4.0（`compressorjs`。版は固定） | 上限を超えた写真だけを縮めて JPEG にする（3章）。npm の依存は3つに見えるが、`is-blob`・`blueimp-canvas-to-blob` は実行時に使われない（説明は notes/image-compression.md 6.1） |
 | テスト | Vitest + `@vue/test-utils` + happy-dom | ストア、API クライアント、コンポーネント。ブラウザでの通しの確認は E2E（Playwright。E2E.md） |
@@ -223,7 +223,7 @@ SPA の発行画面 #/（画面遷移方式）           SPA のチケット画�
 3. 画面（HTML）は API が返す。QR は、その HTML の `<img>` が QR 画像 API から取る。SPA には戻らない
 
 - `fetch` を使わないので CORS が要らない。CORS の設定前や、`fetch` がうまく動かない環境での代替になる
-- 画面のデザインは API 側の HTML（Go・Node）になり、SPA とはそろわない
+- 画面のデザインは API 側の HTML になり、SPA とはそろわない
 - SPA 自体は JavaScript で描画するので、JavaScript が使えない環境には、この方式でも対応できない
 - 証明書の画像の選択欄はこのフォーム専用のものを使う（`CertificateImagePicker` で選んだファイルを使い回さない）。送信前の確認（上限超えなど）はしない。API がエラーページで知らせる
 
@@ -445,7 +445,7 @@ st/web/
 
 | 変更 | 状態 | 内容 | 必要な理由 |
 |---|---|---|---|
-| チケット付与 API の `Accept: application/json` 対応 | **実装済み**（Go・Node） | `201 { ticketCode, issuedAt, sig, qrUrl }`、エラーも JSON（DESIGN.md 5.2） | 画面遷移方式（メイン）のため |
+| チケット付与 API の `Accept: application/json` 対応 | **実装済み** | `201 { ticketCode, issuedAt, sig, qrUrl }`、エラーも JSON（DESIGN.md 5.2） | 画面遷移方式（メイン）のため |
 | CORS | 未実装（E2E.md 4.3） | QR 同梱付与 API とチケット付与 API のレスポンスに `Access-Control-Allow-Origin: {フロントのオリジン}` を付ける。本番は API Gateway HTTP API の CORS 設定、ローカルは各実装のローカルサーバー | 付けないと、SPA の JS が発行のレスポンスを読めない（フォーム送信方式は不要） |
 | Origin の照合 | 未実装（E2E.md 4.2） | QR 同梱付与 API とチケット付与 API で `Origin` を `ALLOWED_ORIGINS` と照合し、違えば 403。フォーム送信方式でも、ブラウザは SPA のオリジンを `Origin` に入れて送る | 他のサイトから発行させないため（CSRF 対策） |
 | 設定 | 未実装 | 環境変数 `ALLOWED_ORIGINS`、CloudFormation のパラメータ `AllowedOrigins` | フロントのオリジン（CloudFront のドメイン）を API に教える |
@@ -461,7 +461,7 @@ npm ci
 npm run dev          # http://localhost:5173
 ```
 
-- 開発時は Vite のプロキシで `/v1` をローカルの API（`http://localhost:8080`。Go 版 `make run` または Node 版 `npm run dev`）に転送し、`public/config.json` の `apiBaseUrl` を空（同じオリジン）にする。こうすると、7章の CORS が実装されるまでの間も、ローカルでもすべての方式を確かめられる
+- 開発時は Vite のプロキシで `/v1` をローカルの API（`http://localhost:8080`。`make -C go run`）に転送し、`public/config.json` の `apiBaseUrl` を空（同じオリジン）にする。こうすると、7章の CORS が実装されるまでの間も、ローカルでもすべての方式を確かめられる
 - ただし API が返す `qrUrl` は API の `PUBLIC_BASE_URL`（`http://localhost:8080`）になる。SPA のチケット画面は `qrUrl()` で `apiBaseUrl` から組み立てるので、プロキシ経由で表示される
 - `npm run build` → `dist/`。`npm run preview` でビルド結果を確認する
 

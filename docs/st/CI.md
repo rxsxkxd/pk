@@ -1,10 +1,10 @@
 # CI / CD（GitHub Actions）
 
-> **状態**: CI（ビルド・単体テスト・E2E）は定義済みで、ローカルの act（GitHub Actions のローカル実行ツール）で全ジョブ（go、node、web、infra、e2e の go / node）の成功を確認済み（成果物のアクションだけ、act の制約で v4 に置き換えて実行。5章）。GitHub 上ではまだ動かしていない（リポジトリへの push 前）。画像解析サーバーのスタブの CI（2026-10-08 にチケット API の CI から分けた）は、actionlint と、各ステップと同じコマンドの手元での実行で確認した（act では未確認）。
+> **状態**: CI（ビルド・単体テスト・E2E）は定義済みで、ローカルの act（GitHub Actions のローカル実行ツール）で全ジョブの成功を確認済み（成果物のアクションだけ、act の制約で v4 に置き換えて実行。5章）。GitHub 上ではまだ動かしていない（リポジトリへの push 前）。画像解析サーバーのスタブの CI（2026-10-08 にチケット API の CI から分けた）は、actionlint と、各ステップと同じコマンドの手元での実行で確認した（act では未確認）。
 >
 > **ワークフローの置き場所（2026-10-08）**: 実運用では、チケット QR API とスタブをそれぞれ専用のリポジトリに置いて CI / CD を動かす。そのため、ワークフローは `.github/` ではなくテンプレートとして置く: チケット QR API は `github-template/workflows/`（`ci.yml`・`deploy.yml`）、スタブは `analyzer-stub/github-template/workflows/ci.yml`。各リポジトリでは、それぞれの `github-template/` の中身を `.github/` にコピーして使う（各 `github-template/README.md`）。ワークフローは、リポジトリのルートを今の作業ディレクトリ（スタブは `analyzer-stub`）として書いてある。このモノレポでは動かない。デプロイ（4章）は定義だけで、未検証（AWS 側と GitHub 側の準備が必要。4.2）。
 
-関連: デプロイの手順は [DEPLOY.md](DEPLOY.md)（全体と共通の準備）・[go/DEPLOY.md](go/DEPLOY.md)・[node/DEPLOY.md](node/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)、E2E の構成は [E2E.md](E2E.md)。
+関連: デプロイの手順は [DEPLOY.md](DEPLOY.md)（全体と共通の準備）・[go/DEPLOY.md](go/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)、E2E の構成は [E2E.md](E2E.md)。
 
 ## 1. 全体像
 
@@ -14,10 +14,9 @@
 pull request / master への push
   └─ CI（ci.yml）: チケット API と SPA
        ├─ go     Go のテスト・ビルド       → 成果物 lambda-go（ticketqr.zip、exampleqr.zip）
-       ├─ node   Node の型チェック・テスト・ビルド → 成果物 lambda-node
        ├─ web    SPA のテスト・ビルド（発行方式ごと） → 成果物 web-dist-page / web-dist-inline / web-dist-form
        ├─ infra  CloudFormation テンプレート（infra/）の cfn-lint
-       └─ e2e    （go・node・web の後）matrix: go / node
+       └─ e2e    （go・web の後）
                   web-dist-page を使い、compose（storage + api + e2e）で Playwright を流す
 
 手動実行（workflow_dispatch: 実装と環境を選ぶ）
@@ -51,7 +50,7 @@ pull request / master への push
 - **ビルドは1回だけ**: CI が作った成果物（zip と SPA の `dist`）を、E2E とデプロイでそのまま使う。デプロイの前に別のビルドはしない
 - **E2E を通ったものだけをデプロイする**: デプロイのワークフローは、最初に CI を丸ごと実行する
 - **長期の AWS の鍵を持たない**: GitHub の OIDC で、デプロイ用の IAM ロールを一時的に引き受ける
-- **手順は各手順書と同じ**: ワークフローの各ステップは、go/DEPLOY.md・node/DEPLOY.md（4-A.1）と web/DEPLOY.md（3・5・6章）の CloudFormation の手順をそのまま実行する。手順を変えるときは、両方を直す
+- **手順は各手順書と同じ**: ワークフローの各ステップは、go/DEPLOY.md（4-A.1）と web/DEPLOY.md（3・5・6章）の CloudFormation の手順をそのまま実行する。手順を変えるときは、両方を直す
 
 ## 3. CI（チケット QR API の `ci.yml`）
 
@@ -71,12 +70,11 @@ pull request / master への push
 | ジョブ | 内容 | 成果物 |
 |---|---|---|
 | `go` | `make -C go test`（vet・テスト）、`make -C go build`（arm64 の Lambda 用 zip） | `lambda-go` |
-| `node` | `npm ci`、型チェック、prettier、テスト、`npm run build`（esbuild と zip） | `lambda-node` |
 | `web` | `npm ci`、prettier、テスト（Vitest。3方式とも）、`npm run build`（vue-tsc と vite）を発行方式ごとに3回（`GRANT_MODE`。web/DESIGN.md 4.1） | `web-dist-page`・`web-dist-inline`・`web-dist-form` |
 | `infra` | cfn-lint で `infra/cloudformation/*.yaml` を検査する | - |
-| `e2e` | `go`・`node`・`web` の後に、matrix（`go` / `node`）で実行する。`web-dist-page` を `web/dist` に置き、`docker compose -f compose.e2e.yaml up` を実行する | `e2e-go` / `e2e-node`（Playwright のレポート、トレース、失敗したときのコンテナのログ） |
+| `e2e` | `go`・`web` の後に実行する。`web-dist-page` を `web/dist` に置き、`docker compose -f compose.e2e.yaml up` を実行する | `e2e-go`（Playwright のレポート、トレース、失敗したときのコンテナのログ） |
 
-- `go`・`node`・`web`・`infra` は並列に動く
+- `go`・`web`・`infra` は並列に動く
 - E2E の `api` コンテナは、ソースから Lambda 用のビルドをやり直す（Docker のマルチステージビルド）。`lambda-*` の zip は使わない。E2E で確かめるのは「同じソースから同じ手順で作ったもの」になる
 - 成果物の保持期間は7日
 
@@ -91,7 +89,7 @@ pull request / master への push
 ### 3.4 失敗したとき
 
 - 単体テストの失敗は、ジョブのログに出る
-- E2E の失敗は、成果物 `e2e-go` / `e2e-node` を取り出す
+- E2E の失敗は、成果物 `e2e-go` を取り出す
   - `playwright-report/index.html`: 結果の一覧
   - `test-results/**/trace.zip`: `npx playwright show-trace trace.zip` で、操作・通信・画面を1手ずつ再生できる
   - `compose-logs.txt`: `storage`（Garage）と `api`（ゲートウェイと Lambda）のログ
@@ -131,7 +129,7 @@ pull request / master への push
 
 ### 4.1 流れ
 
-手動で実行し、**実装**（`go` / `node`）、**構成**（`layout`。`direct` = 直結、`unified` = 統合。web/DEPLOY.md の冒頭）と **環境**（GitHub の environment。例: `dev`、`prod`）を選ぶ。画像の上限は、environment の変数 `MAX_IMAGE_BYTES`（任意。既定 4194304）で API と `config.json` の両方に入る。
+手動で実行し、**実装**（`go`）、**構成**（`layout`。`direct` = 直結、`unified` = 統合。web/DEPLOY.md の冒頭）と **環境**（GitHub の environment。例: `dev`、`prod`）を選ぶ。画像の上限は、environment の変数 `MAX_IMAGE_BYTES`（任意。既定 4194304）で API と `config.json` の両方に入る。
 
 | ステップ | 内容 | 手順書 |
 |---|---|---|

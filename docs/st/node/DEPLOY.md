@@ -1,6 +1,6 @@
 # Node 版 API のデプロイ手順
 
-チケット QR API の **Node 版**（`node/`）を AWS にデプロイする手順。Go 版は [../go/DEPLOY.md](../go/DEPLOY.md)、全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、Web フロントエンドは [../web/DEPLOY.md](../web/DEPLOY.md)。実装の詳細は [../NODE.md](../NODE.md)。
+チケット QR API の **Node 版**（`node/`）を AWS にデプロイする手順。Go 版は [../go/DEPLOY.md](../go/DEPLOY.md)、全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、Web フロントエンドは [../web/DEPLOY.md](../web/DEPLOY.md)。実装の詳細は [README.md](README.md)。
 
 ```
 API Gateway HTTP API ticketqr-node（$default ステージ、自動デプロイ、スロットリング）

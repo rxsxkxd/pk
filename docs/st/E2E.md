@@ -1,6 +1,6 @@
 # E2E テスト環境 構成案
 
-> **状態**: 3つのコンテナとケース1（画面遷移方式）を実装済み。Go 版・Node 版の両方で通過。ほかのケースは未実装（7章）。API の設計は [DESIGN.md](DESIGN.md)、エンドポイントと画面の名前は [PAGES.md](PAGES.md)、SPA は [web/DESIGN.md](web/DESIGN.md) を参照。
+> **状態**: 3つのコンテナとケース1（画面遷移方式）を実装済み・通過。ほかのケースは未実装（7章）。API の設計は [DESIGN.md](DESIGN.md)、エンドポイントと画面の名前は [PAGES.md](PAGES.md)、SPA は [web/DESIGN.md](web/DESIGN.md) を参照。
 
 ## 1. 目的とスコープ
 
@@ -15,7 +15,7 @@
 | SPA の3つの発行方式（画面遷移方式・その場表示方式・フォーム送信方式）の一連の動作 | ○ | |
 | 取得した QR が PNG で、表示できること | ○ | |
 | リロードで再発行されないこと | ○ | |
-| デプロイ用の zip（Go・Node）が Lambda の実行環境で動くこと | ○（RIE） | |
+| デプロイ用の zip が Lambda の実行環境で動くこと | ○（RIE） | |
 | QR の中身（デコード結果がチケットコードと一致するか） | | ○（7章 フェーズ6） |
 | 画像解析サーバーとの連携 | アプリ内のモック（`ANALYZER_MODE=mock`） | 解析サーバーのスタブ（analyzer-stub）のコンテナ化 |
 | 本物の API Gateway・CloudFront の挙動 | | ○（8章） |
@@ -39,7 +39,7 @@ flowchart LR
 | コンテナ | イメージ | 役割 | 本番で対応するもの |
 |---|---|---|---|
 | `storage` | `web/docker/storage.Dockerfile`（Garage v2.4.1 の公式イメージのバイナリを Alpine に入れ、初期設定スクリプトを動かす。公式イメージはバイナリだけでシェルがないため） | S3 互換ストレージ。SPA の静的ファイルを置き、ウェブサイトとして配信する | S3（+ CloudFront） |
-| `api` | `go/docker/api.Dockerfile`（Lambda の公式イメージ + ゲートウェイ + デプロイ用の zip。`IMPL=go|node` で切り替え） | API。Lambda の実行環境の模擬と、API Gateway 役のゲートウェイ | API Gateway HTTP API + Lambda |
+| `api` | `go/docker/api.Dockerfile`（Lambda の公式イメージ + ゲートウェイ + デプロイ用の zip） | API。Lambda の実行環境の模擬と、API Gateway 役のゲートウェイ | API Gateway HTTP API + Lambda |
 | `e2e` | `e2e/docker/e2e.Dockerfile`（`mcr.microsoft.com/playwright:v1.63.0-noble`。バージョンは `@playwright/test` とそろえる） | テストの前に SPA をアップロードし（本番の `aws s3 sync` に相当）、ヘッドレス Chromium で操作する | デプロイ作業と、利用者のブラウザ |
 
 アップロードだけを行う4つ目のコンテナは作らない。`e2e` の Playwright の `globalSetup` で行う（3.2）。
@@ -75,12 +75,12 @@ AWS は S3 のローカル用エミュレーターを公式には提供してい
 
 ### 2.3 API コンテナ: Lambda の模擬
 
-Lambda の公式イメージ（`public.ecr.aws/lambda/provided:al2023`、`public.ecr.aws/lambda/nodejs:24`）には、Lambda のエミュレーター（RIE）が入っている。デプロイ用の zip がこの上で動くことは、Go・Node・Rust で確認済み。
+Lambda の公式イメージ（`public.ecr.aws/lambda/provided:al2023`）には、Lambda のエミュレーター（RIE）が入っている。デプロイ用の zip がこの上で動くことは確認済み。
 
 ただし RIE は、Lambda のイベント（JSON）を受け取る呼び出し口（`POST /2015-03-31/functions/function/invocations`）しか持たない。そこで、API Gateway の役目をするゲートウェイを同じコンテナで動かす。
 
 ```
-ブラウザ ──HTTP──▶ ゲートウェイ :3000 ──payload v2 イベント──▶ RIE :8080 ──▶ bootstrap（Go）/ index.handler（Node）
+ブラウザ ──HTTP──▶ ゲートウェイ :3000 ──payload v2 イベント──▶ RIE :8080 ──▶ bootstrap
                    （ルート、CORS、                                  （ticketqr.zip。tickets と get-qr の
                     base64 の変換）                                     両方のルートを1つの zip で処理する）
 ```
@@ -88,15 +88,14 @@ Lambda の公式イメージ（`public.ecr.aws/lambda/provided:al2023`、`public
 | 部品 | 内容 |
 |---|---|
 | ゲートウェイ（新規 `go/cmd/apigw-local`。静的な Go バイナリ） | `:3000` で HTTP を受け、既存の `internal/localhttp` で payload v2 のイベント（`routeKey` 付き）を作って RIE を呼ぶ。応答の `statusCode`・`headers`・`isBase64Encoded` を HTTP に戻す。ルート表は CloudFormation と同じ4ルートで、それ以外は 404。**CORS（API Gateway の CORS 設定と同じ動き。プリフライトの `OPTIONS` と `Access-Control-Allow-Origin` の付与）もここで行う** |
-| Lambda 部分 | RIE が、デプロイ用の zip の中身（Go: `/var/runtime/bootstrap`、Node: `/var/task/index.mjs`）を動かす |
+| Lambda 部分 | RIE が、デプロイ用の zip の中身（`/var/runtime/bootstrap`）を動かす |
 | 起動 | `go/docker/api-entrypoint.sh` がゲートウェイを起動してから、イメージ本来のエントリポイント（RIE）を起動する |
-| イベントの形 | `internal/localhttp` が作るイベントは、API Gateway と同じく `version: "2.0"`、`requestContext.domainName`・`stage`・`routeKey` などを持つ（Node の `@hono/aws-lambda` は `version` で v1 / v2 を見分けるため。Go のローカルモードも同じイベントになる） |
+| イベントの形 | `internal/localhttp` が作るイベントは、API Gateway と同じく `version: "2.0"`、`requestContext.domainName`・`stage`・`routeKey` などを持つ（ローカルモードも同じイベントになる） |
 | 環境変数（Lambda 側） | `APP_ENV=local`、`SIGNING_SALT=e2e-salt`（平文の salt は `APP_ENV=local` のときだけ使える）、`ANALYZER_MODE=mock`、`PUBLIC_BASE_URL=http://api:3000`、`ALLOWED_ORIGINS=http://web:3902` |
 
 ローカルモードで動かす方式と比べた利点:
 
 - デプロイするものと同じ zip を検証できる
-- Node 版も、ローカルサーバー（`@hono/node-server`）ではなく、Lambda のハンドラー（`@hono/aws-lambda`）を通る
 - CORS が、本番と同じく「API Gateway（ゲートウェイ）の役目」になり、ハンドラーには CORS の処理が入らない
 
 注意点:
@@ -104,7 +103,7 @@ Lambda の公式イメージ（`public.ecr.aws/lambda/provided:al2023`、`public
 - RIE は同時に1件ずつしか処理しない。Playwright は `workers: 1` で動かし、テストを並列にしない
 - ゲートウェイは自作なので、API Gateway の細部（ペイロードの上限、エラー時の応答など）は再現しない（8章）
 
-難しい場合の代わり: `api` コンテナを、ローカルモード（Go: `go/cmd/ticketqr`、Node: `node/src/local.ts`）を起動するイメージに差し替える。その場合、CORS はローカルモード側に実装する。ほかのコンテナとテストは変えない。
+難しい場合の代わり: `api` コンテナを、ローカルモード（`go/cmd/ticketqr`）を起動するイメージに差し替える。その場合、CORS はローカルモード側に実装する。ほかのコンテナとテストは変えない。
 
 ## 3. SPA の配置
 
@@ -161,7 +160,7 @@ Garage のデータは tmpfs に置く。コンテナを再起動しても、毎
 | `Origin` が含まれない、または `Origin` が無い | `403 FORBIDDEN`。画像解析も採番もしない。エラーの形式は各 API と同じ（チケット付与 API のフォーム送信なら HTML のエラーページ、それ以外は JSON） |
 
 - 対象は、チケット付与 API と QR 同梱付与 API（どちらも発行する API）。チケット表示ページと QR 画像 API は署名で守るので対象外
-- 照合は **Lambda のハンドラーの中**（Go・Node）で行う。API Gateway の CORS 設定は、リクエストそのものを止めないため
+- 照合は **Lambda のハンドラーの中**で行う。API Gateway の CORS 設定は、リクエストそのものを止めないため
 - `Sec-Fetch-Site` も参考情報としてログに出す（判定には使わない）
 - 限界: curl などブラウザ以外のクライアントは `Origin` を自由に偽装できる。これはブラウザを踏み台にした発行を防ぐための対策で、ブラウザ以外からの乱用はレート制限で抑える（DESIGN.md 10章）
 
@@ -189,8 +188,8 @@ Garage のデータは tmpfs に置く。コンテナを再起動しても、毎
 
 | 変更 | 実装する場所 |
 |---|---|
-| 環境変数 `ALLOWED_ORIGINS`（カンマ区切り。完全一致で照合し、ワイルドカードは使わない） | Go・Node の設定 |
-| チケット付与 API と QR 同梱付与 API での Origin の照合と、そのテスト | Go の handler、Node の `app.ts` |
+| 環境変数 `ALLOWED_ORIGINS`（カンマ区切り。完全一致で照合し、ワイルドカードは使わない） | API の設定 |
+| チケット付与 API と QR 同梱付与 API での Origin の照合と、そのテスト | API の handler |
 | ゲートウェイ（イベント変換、ルート、CORS） | 新規 `go/cmd/apigw-local` |
 | HTTP API の CORS 設定と `AllowedOrigins` パラメータ | `infra/cloudformation/api.yaml`、web/DEPLOY.md 5章 |
 | 仕様への反映 | DESIGN.md の 5.6、10章、12章 |
@@ -201,7 +200,7 @@ Garage のデータは tmpfs に置く。コンテナを再起動しても、毎
 
 | 候補 | 評価 |
 |---|---|
-| **Playwright（TS）**（採用） | オリジンをまたぐ画面の移動（SPA → API のチケット表示ページ）を制約なしで扱える。待機処理が自動で入る。失敗したときのトレース・動画・スクリーンショットが標準で付く。公式の Docker イメージがある。SPA・Node 版とツールチェーン（TypeScript）を共有できる |
+| **Playwright（TS）**（採用） | オリジンをまたぐ画面の移動（SPA → API のチケット表示ページ）を制約なしで扱える。待機処理が自動で入る。失敗したときのトレース・動画・スクリーンショットが標準で付く。公式の Docker イメージがある。SPA とツールチェーン（TypeScript）を共有できる |
 | playwright-go | Go に統一できるが、テストランナーとレポート機能は自前で作る必要があり、エコシステムも小さい |
 | Cypress | オリジンをまたぐ移動に `cy.origin` が必要で、フォーム送信方式の流れと相性が悪い |
 | chromedp（Go） | 低レベルな API で、テストの記述量が多い |
@@ -233,7 +232,7 @@ st/
 ├── go/
 │   ├── cmd/apigw-local/          # API Gateway 役のゲートウェイ（E2E 専用。デプロイしない）
 │   └── docker/
-│       ├── api.Dockerfile        # api: Lambda の公式イメージ + ゲートウェイ + デプロイ用のビルド（ターゲット api-go / api-node）
+│       ├── api.Dockerfile        # api: Lambda の公式イメージ + ゲートウェイ + デプロイ用のビルド（ターゲット api-go）
 │       └── api-entrypoint.sh     # ゲートウェイを起動してから RIE を起動する
 ├── web/
 │   ├── dist/                     # 事前にビルドした SPA（compose の前に作る）
@@ -264,7 +263,7 @@ services:
     build:
       context: .
       dockerfile: go/docker/api.Dockerfile
-      target: api-${API_IMPL:-go}        # ビルドのターゲットで Go / Node を切り替える
+      target: api-${API_IMPL:-go}
     environment:
       APP_ENV: local
       ANALYZER_MODE: mock
@@ -287,7 +286,6 @@ services:
 ```sh
 (cd web && npm ci && npm run build)
 docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
-API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
 ```
 
 - 手で流すときの手順（結果の見方、失敗したときの調べ方を含む）は [E2E_RUN.md](E2E_RUN.md)
@@ -298,19 +296,18 @@ API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container
 
 E2E は CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。専用のリポジトリでは `.github/workflows/ci.yml`）のジョブ `e2e` で動く。構成は [CI.md](CI.md) 3章。
 
-- SPA は `web` ジョブでビルドし、画面遷移方式（`page`）の成果物 `web-dist-page` を `e2e` ジョブに渡す（Go 版・Node 版で同じ SPA を使う。ほかの方式のビルドはデプロイ用）
-- matrix（`go` / `node`）で `API_IMPL` を切り替え、`docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` を実行する
-- 成果物 `e2e-go` / `e2e-node` に、Playwright のレポート・トレースと、失敗したときのコンテナのログを残す
+- SPA は `web` ジョブでビルドし、画面遷移方式（`page`）の成果物 `web-dist-page` を `e2e` ジョブに渡す（ほかの方式のビルドはデプロイ用）
+- `docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` を実行する
+- 成果物 `e2e-go` に、Playwright のレポート・トレースと、失敗したときのコンテナのログを残す
 
 ## 7. 段階的な進め方
 
 | フェーズ | 内容 |
 |---|---|
-| 1 | **済み**: ゲートウェイ（`go/cmd/apigw-local`。イベント変換・ルート・CORS）と、RIE の `api` コンテナ（Go 版） |
+| 1 | **済み**: ゲートウェイ（`go/cmd/apigw-local`。イベント変換・ルート・CORS）と、RIE の `api` コンテナ |
 | 2 | **一部済み**: `storage`（Garage）と初期設定、`e2e` のアップロード（`globalSetup`）、ケース1。残りはケース2〜8 |
-| 3 | **済み（ケース1）**: Node 版の `api` コンテナ（`API_IMPL=node`）で同じテストを通す |
-| 4 | Origin の照合（Go・Node の `ALLOWED_ORIGINS`）とケース9 |
-| 5 | **済み（act で確認）**: GitHub Actions に組み込む（matrix で go / node。CI.md） |
+| 4 | Origin の照合（`ALLOWED_ORIGINS`）とケース9 |
+| 5 | **済み（act で確認）**: GitHub Actions に組み込む（CI.md） |
 | 6 | QR の中身を確認する（テスト内で `jsQR` などを使ってデコードし、チケットコードと照合する） |
 | 7 | 本番側: CloudFormation に HTTP API の CORS 設定と `AllowedOrigins` を入れる |
 | 8 | 画像解析サーバーのプロトコルが決まったら、解析サーバーのスタブをコンテナとして追加し、`ANALYZER_MODE=http` で E2E を回す |

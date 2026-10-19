@@ -40,7 +40,7 @@ flowchart LR
 
 | 要素 | 内容 |
 |---|---|
-| `tickets` の VPC の設定 | `api.yaml` の既存のパラメータ `VpcSubnetIds`（プライベートサブネット）・`VpcSecurityGroupIds`（`tickets` の SG）で指定する（実装済み。go/node DEPLOY.md 4-A.4）。SAM に移すときも同じ設定を引き継ぐ |
+| `tickets` の VPC の設定 | `api.yaml` の既存のパラメータ `VpcSubnetIds`（プライベートサブネット）・`VpcSecurityGroupIds`（`tickets` の SG）で指定する（実装済み。go/DEPLOY.md 4-A.4）。SAM に移すときも同じ設定を引き継ぐ |
 | プライベートサブネット | **2つの AZ** に1つずつ（Lambda は、指定したサブネットの AZ に ENI を作る。1つの AZ だけだと、その AZ の障害で発行が止まる）。ルートテーブルの `0.0.0.0/0` を NAT ゲートウェイに向ける。IP の数は少なくてよい（Lambda の ENI は「サブネット × SG」ごとに共有される。例: `/26` で足りる） |
 | `tickets` の SG | 受信: なし。送信: 解析サーバーのポート（未確定。HTTPS なら 443）と、Parameter Store への 443。宛先が決まるまでは `0.0.0.0/0` への 443（と解析サーバーのポート） |
 | Parameter Store（署名の salt）への経路 | NAT 経由でそのまま届く（VPC エンドポイントは要らない）。NAT の通信量を減らしたい・インターネットに出したくない場合は、`ssm` のインターフェイス型エンドポイントを足す（時間課金） |
@@ -118,7 +118,7 @@ flowchart LR
 
 ### 4.1 テンプレート（CloudFormation。2026-10-08 作成、AWS 上では未検証）
 
-ネットワークは事前に CloudFormation で作り、Lambda のビルドと登録だけを SAM で行う。ネットワークのスタックは1つ（Go 版・Node 版の API で共用できる）。
+ネットワークは事前に CloudFormation で作り、Lambda のビルドと登録だけを SAM で行う。ネットワークのスタックは1つ。
 
 | パターン | テンプレート | 作るもの | 主なパラメータ | 出力（API のスタックに渡す） |
 |---|---|---|---|---|

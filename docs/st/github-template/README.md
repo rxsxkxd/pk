@@ -9,7 +9,7 @@
 
 使い方:
 
-1. 専用のリポジトリのルートに、作業ディレクトリの内容（`analyzer-stub/` を除く）を置く。ワークフローは、リポジトリのルートを今の作業ディレクトリとして書いてある（`go/`、`node/`、`web/`、`infra/`、`compose.e2e.yaml` などがルートにある前提）
+1. 専用のリポジトリのルートに、作業ディレクトリの内容（`analyzer-stub/` を除く）を置く。ワークフローは、リポジトリのルートを今の作業ディレクトリとして書いてある（`go/`、`web/`、`infra/`、`compose.e2e.yaml` などがルートにある前提）
 2. このフォルダの中身を `.github/` にコピーする（`github-template/workflows/ci.yml` → `.github/workflows/ci.yml`）。`deploy.yml` は `./.github/workflows/ci.yml` を呼ぶので、ファイル名を変えない
 3. デプロイを使う場合は、CI.md 4.2 の準備（IAM ロール、environment、変数）を行う
 

@@ -25,7 +25,7 @@ export function pngResponse(c: Context, png: Buffer): Response {
 const QR_MAX_PX = 256;
 const QUIET_ZONE = 4;
 
-// テキストを誤り訂正 M・余白4モジュールの QR PNG にする（256px 以内に収まる最大の整数倍。NODE.md 3）。
+// テキストを誤り訂正 M・余白4モジュールの QR PNG にする（256px 以内に収まる最大の整数倍。node/README.md 3章）。
 export function qrPng(text: string): Buffer {
   const code = generate(text, { minCorrectionLevel: correction.M, maxCorrectionLevel: correction.M });
   const scale = Math.max(1, Math.floor(QR_MAX_PX / (code.size + 2 * QUIET_ZONE)));

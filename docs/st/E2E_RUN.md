@@ -20,25 +20,18 @@
 
 `web/dist/index.html` ができていれば成功。
 
-### 2.2 Go 版で流す
+### 2.2 流す
 
 ```sh
 docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
 echo "exit: $?"
 ```
 
-### 2.3 結果を確かめる（Go 版）
+### 2.3 結果を確かめる
 
-成功したかどうかは 2.6 の出力で確かめる。`e2e/playwright-report` と `e2e/test-results` は次の実行で上書きされるので、失敗したときは Node 版を流す前に 3章の手順で中身を見ておく。
+成功したかどうかは 2.5 の出力で確かめる。`e2e/playwright-report` と `e2e/test-results` は次の実行で上書きされるので、失敗したときは、次に流す前に 3章の手順で中身を見ておく。
 
-### 2.4 Node 版で流す
-
-```sh
-API_IMPL=node docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e
-echo "exit: $?"
-```
-
-### 2.5 片付ける
+### 2.4 片付ける
 
 ```sh
 docker compose -f compose.e2e.yaml down
@@ -47,7 +40,7 @@ docker compose -f compose.e2e.yaml down
 - `storage` のデータは tmpfs なので、`down` で消える（次回は空の状態から始まる）
 - ビルドしたイメージも消すときは `down --rmi local`
 
-### 2.6 成功したときの出力
+### 2.5 成功したときの出力
 
 | 確認するところ | 成功のとき |
 |---|---|
@@ -94,7 +87,7 @@ docker compose -f compose.e2e.yaml logs e2e
 
 | やりたいこと | コマンド |
 |---|---|
-| API のイメージだけ作り直す | `docker compose -f compose.e2e.yaml build api`（Node 版は先頭に `API_IMPL=node`） |
+| API のイメージだけ作り直す | `docker compose -f compose.e2e.yaml build api` |
 | ビルドのキャッシュを使わずに作り直す | `docker compose -f compose.e2e.yaml build --no-cache` |
 | テストを絞って流す | `docker compose -f compose.e2e.yaml run --rm e2e npx playwright test -g "page mode"`（`storage` と `api` は `depends_on` で起動する。終わったら 2.5 の `down`） |
 
@@ -109,10 +102,9 @@ docker compose -f compose.e2e.yaml logs e2e
 | 0 | ローカルで起動していたスタブ・API・Web の開発サーバーを止めた。Docker Desktop が止まっていたので起動した（Docker Engine 29.8.2、Docker Compose v5.5.1） | - |
 | 1 | 2.1: `web/` で `npm ci` と `npm run build`（画面遷移方式。Tailwind CSS 3.4・valibot・core-js・画像の縮小・バナー・説明文を含む） | `web/dist/index.html` ができた |
 | 2 | 2.2: Go 版で `docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` | **成功**（`exit: 0`。イメージのビルドを含めて約 100 秒） |
-| 3 | 2.4: Node 版で同じコマンド（`API_IMPL=node`） | **成功**（`exit: 0`。約 230 秒） |
-| 4 | 2.5: `docker compose -f compose.e2e.yaml down` | コンテナとネットワークを削除（残り 0） |
+| 3 | 2.4: `docker compose -f compose.e2e.yaml down` | コンテナとネットワークを削除（残り 0） |
 
-確かめた出力（2.6 のとおり。Go 版・Node 版で同じ）:
+確かめた出力（2.5 のとおり）:
 
 - `e2e` のログ: `deployed 5 files + config.json to web, evil`
 - `✓ 1 tests/page-mode.spec.ts:11:1 › page mode: grant, move to the SPA ticket screen and show the QR`、`1 passed`（約 6 秒）

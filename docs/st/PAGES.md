@@ -3,10 +3,10 @@
 チケット QR API について、利用者が見る画面がどこで作られているかをまとめる。対象は次の3つ。
 
 - Web フロントエンド（SPA）の設計
-- API の Go 版・Node 版が返す HTML
+- API が返す HTML
 - ローカル開発用のフォーム
 
-API の詳しい仕様は [DESIGN.md](DESIGN.md)、SPA の設計は [web/DESIGN.md](web/DESIGN.md)、Node 版の詳細は [NODE.md](NODE.md) にある。
+API の詳しい仕様は [DESIGN.md](DESIGN.md)、SPA の設計は [web/DESIGN.md](web/DESIGN.md)にある。
 
 ## 1. 登場するエンドポイントと画面
 
@@ -29,9 +29,9 @@ API の詳しい仕様は [DESIGN.md](DESIGN.md)、SPA の設計は [web/DESIGN.
 |---|---|---|
 | **SPA の発行画面**（`#/`） | Web フロントエンド | 証明書の画像を選んで発行する。メインは画面遷移方式で、ほかの方式はオプション（4章） |
 | **SPA のチケット画面**（`#/tickets/{code}?sig=…`） | Web フロントエンド | URL の情報だけから QR とチケットコードを表示する |
-| **チケット表示ページ** | API（Go / Node） | 上の表の `get-view`。フォーム送信で発行したときの移動先 |
-| **エラーページ** | API（Go / Node） | チケット付与 API（フォーム送信のとき）とチケット表示ページで、エラーを HTML で見せる |
-| **ローカル試験フォーム**（`http://localhost:8080/`） | ローカル開発用サーバー（Go / Node） | QR 同梱付与 API とチケット付与 API を手で試すためのフォーム。デプロイしない |
+| **チケット表示ページ** | API | 上の表の `get-view`。フォーム送信で発行したときの移動先 |
+| **エラーページ** | API | チケット付与 API（フォーム送信のとき）とチケット表示ページで、エラーを HTML で見せる |
+| **ローカル試験フォーム**（`http://localhost:8080/`） | ローカル開発用サーバー | QR 同梱付与 API とチケット付与 API を手で試すためのフォーム。デプロイしない |
 
 ## 2. 全体像: API の使い方は3パターン
 
@@ -101,7 +101,7 @@ SPA のチケット画面（URL の code と sig だけで描画する）
 
 | | Web フロントエンド（SPA） | API が返す HTML | ローカル試験フォーム |
 |---|---|---|---|
-| 置き場所 | `web/`（設計は `web/DESIGN.md`） | Go: `go/internal/view/`（テンプレートは `templates/`）<br>Node: `node/src/app.ts` の Views セクション | Go: `go/cmd/ticketqr/local.go`<br>Node: `node/src/local.ts` |
+| 置き場所 | `web/`（設計は `web/DESIGN.md`） | `go/internal/view/`（テンプレートは `templates/`） | `go/cmd/ticketqr/local.go` |
 | 状態 | 実装済み（E2E は保留中） | 実装済み | 実装済み（開発専用） |
 | 画面 | SPA の発行画面、SPA のチケット画面 | チケット表示ページ、エラーページ | ローカル試験フォーム |
 | 関わるパターン | 2（メイン）、1・3（オプション） | 3 | 1、3 |
@@ -118,7 +118,7 @@ SPA のチケット画面（URL の code と sig だけで描画する）
 | URL の保存・共有 | できない | できる | できる |
 | JavaScript | 必要 | 必要 | **不要**（普通のフォームで動く） |
 | CORS | 必要（別オリジンからの `fetch`） | 必要 | **不要**（画面の移動と `<img>` だけ） |
-| 画面の作り手 | SPA | SPA | API（Go と Node の両方に HTML がある） |
+| 画面の作り手 | SPA | SPA | API |
 | 署名付き URL の露出 | **なし**（URL を作らない） | SPA の URL（`#` 以降）に入る | ページの URL（クエリ）に入る |
 
 ### 3.2 パターン1: QR 同梱付与 API を使う
@@ -157,7 +157,7 @@ SPA のチケット画面（URL の code と sig だけで描画する）
 
 **悪い点**
 - 通信が3回、Lambda の起動が3回で、表示が一番遅い。コールドスタートが重なると体感にも影響する
-- 画面の HTML が API 側にあり、Go と Node の2か所にある（SPA と合わせると、チケットの画面は3か所）
+- 画面の HTML が API 側にある（SPA と合わせると、チケットの画面は2か所）
 - 署名付き URL がページの URL（クエリ）に入るので、ブラウザの履歴やアクセスログに残る（Referer には `Referrer-Policy: no-referrer` で出さない）
 - エラーの見せ方が、API の HTML のエラーページに限られる
 
@@ -200,13 +200,13 @@ API 側は、3パターンすべてに対応する前提で、今の実装（QR 
 
 | 変更 | 状態 |
 |---|---|
-| チケット付与 API の `Accept: application/json` 対応 | 実装済み（Go・Node） |
+| チケット付与 API の `Accept: application/json` 対応 | 実装済み |
 | CORS（SPA の JS が応答を読めるようにする。フォーム送信方式は不要） | 未実装 |
 | Origin の照合（ほかのサイトから発行させない） | 未実装 |
 
 未確定の事項（その場表示方式の結果をリロード後も残すか、配置方式、CORS を先に実装するか、デザイン）は、`web/DESIGN.md` 11章にある。
 
-## 5. API が返す HTML（Go 版・Node 版）
+## 5. API が返す HTML
 
 ### 5.1 画面の中身
 
@@ -217,46 +217,27 @@ API 側は、3パターンすべてに対応する前提で、今の実装（QR 
 
 `data-*` 属性は、E2E テストが画面を見分けるための目印。
 
-### 5.2 Go と Node の作り方
+### 5.2 作り方
 
-Go と Node は、同じ内容の HTML をそれぞれ別の方法で作る。テンプレートファイルは共有しない。
+| | 内容 |
+|---|---|
+| テンプレート | `go/internal/view/templates/ticket.html`、`error.html`（`html/template` の構文） |
+| 同梱の方法 | `go/internal/view/view.go` の `//go:embed templates/*.html` でバイナリに埋め込む |
+| 描画 | `view.Renderer`（起動時に1回だけテンプレートを解析） |
+| スタイル | 各 HTML の `<style>` に直接書く |
+| エスケープ | `html/template` が文脈に応じて自動で行う |
 
-| | Go | Node |
-|---|---|---|
-| テンプレート | `go/internal/view/templates/ticket.html`、`error.html`（`html/template` の構文） | `node/src/app.ts` の `ticketView` / `errorView`（`hono/html` の `html` タグ付きテンプレート） |
-| 同梱の方法 | `go/internal/view/view.go` の `//go:embed templates/*.html` でバイナリに埋め込む | コードそのものなので esbuild がバンドルに含める |
-| 描画 | `view.Renderer`（起動時に1回だけテンプレートを解析） | 関数を呼ぶだけ |
-| スタイル | 各 HTML の `<style>` に直接書く | 文字列定数 `STYLE` を `raw()` で埋め込む（example 用のバンドルに残さないため） |
-| エスケープ | `html/template` が文脈に応じて自動で行う | `hono/html` が自動で行う |
-
-**そろえていること**
-- 文言、`data-*` 属性、`<img>` の属性、スタイル
-- セキュリティヘッダー。CSP は `default-src 'none'; img-src {公開オリジン}; style-src 'unsafe-inline'` で、Go は handler、Node は `commonHeaders` が付ける。ほかに `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`
-
-**そろえていないこと**
-- 空白・インデント、`<meta ... />` の書き方、エスケープの表記（Go は `&#34;`、Node は `&quot;`）。表示と意味は同じ
-
-文言やデザインを変えるときは、Go と Node の両方を直す。
-
-### 5.3 共有をやめた経緯
-
-以前は、テンプレートを Go と Node で共有する想定で `st/templates/` に置いていた。そのため、Go のモジュールルート（`go.mod`）も、`templates/` を埋め込めるように `st/` 直下に置いていた。
-
-Node が `hono/html` で自前の HTML を作ると決めてからは、テンプレートを使うのは Go だけになった。そこで次のように整理した。
-
-- テンプレートを `go/internal/view/templates/` に移し、`view` パッケージが直接埋め込む（`st/templates/embed.go` は削除）
-- `go.mod` と `go.sum` を `go/` に移した。import パスは `ticketqr/go/internal/…` から `ticketqr/internal/…` に変わった。`make -C go test` / `build` / `run` は `go/` の中で完結する
-- Go のテストが読む共通のテストデータ（`st/testdata/`）は、これまでどおり相対パスで読む
+セキュリティヘッダー: CSP は `default-src 'none'; img-src {公開オリジン}; style-src 'unsafe-inline'`。ほかに `Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`X-Robots-Tag`。
 
 ## 6. ローカル試験フォーム
 
-`make -C go run`（Go）と `npm run dev`（Node）で起動するローカルサーバーの `http://localhost:8080/` に出るフォーム。
+`make -C go run` で起動するローカルサーバーの `http://localhost:8080/` に出るフォーム。
 
 - QR 同梱付与 API を `fetch` で呼ぶフォームと、チケット付与 API に普通のフォーム送信をするフォームの2つがある
 - 後者は、チケット表示ページまでの移動をブラウザで確かめるのに使う
-- Go と Node でそれぞれ別に書いている。Lambda のデプロイパッケージには含まれない
+- Lambda のデプロイパッケージには含まれない
 
 ## 7. 今後の注意点
 
-- SPA を実装すると、チケットを見せる画面が「SPA のチケット画面」と「チケット表示ページ」の2か所になる。表示内容（QR・チケットコード）を変えるときは、SPA・Go・Node の3か所を確認する
+- SPA を実装すると、チケットを見せる画面が「SPA のチケット画面」と「チケット表示ページ」の2か所になる。表示内容（QR・チケットコード）を変えるときは、SPA と API の2か所を確認する
 - SPA のメインは画面遷移方式（パターン2）。チケット表示ページは、SPA のオプション（フォーム送信方式）と、SPA を使わない利用のために残す（3.6）

@@ -286,7 +286,7 @@ if (!(form.get('image') instanceof File)) throw badRequest('image is required');
 ## 9. 使い方
 
 ```sh
-cd docs/st/node
+cd node
 npm ci
 npm run dev          # http://localhost:8080/（フォーム）、http://localhost:8081/v1/example/qr
 npm test             # 62件。共通テストデータ（../testdata）と Go と同じハンドラーのケース

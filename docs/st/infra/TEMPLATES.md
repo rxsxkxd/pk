@@ -44,7 +44,6 @@
 ## 確かめ方
 
 ```sh
-cd docs/st
 # 手で書いた 12 ファイル
 uvx cfn-lint==1.57.1 --regions=ap-northeast-1 -- infra/cloudformation/*.yaml infra/sam/*/template.yaml analyzer-stub/network.yaml analyzer-stub/template.yaml dummy-analyzer/template.yaml
 # 自動で作った 2 ファイル（E1161: 仮の S3 バケット名）

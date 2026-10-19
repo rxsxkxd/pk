@@ -32,7 +32,6 @@ API Gateway を SAM の `AWS::Serverless::HttpApi` と関数の `Events` で書�
 前提: SAM CLI（例: `uvx --from aws-sam-cli sam …`、またはインストール）、Go（Go 版）、Node.js 24 と `npm --prefix node ci` 済みの `node/node_modules`（Node 版）、署名の salt（go/node DEPLOY.md 3章）、ネットワークのスタック。
 
 ```sh
-cd docs/st
 export IMPL=go                                      # go / node
 export SALT_PARAM=/ticketqr/$IMPL/signing-salt
 export CODE_SUFFIX_PARAM=/ticketqr/$IMPL/ticket-code-suffix   # String（チケットコードの末尾の固定文字列。go/node DEPLOY.md 3章）
@@ -86,7 +85,7 @@ export API_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-sam-$I
 ## 4. 生成される CloudFormation を見比べる
 
 ```sh
-cd docs/st/infra/sam
+cd infra/sam
 uvx --with aws-sam-translator==1.113.0 --with pyyaml --with cfn-flip==1.3.0 python translate.py go/template.yaml generated/go.cfn.yaml
 uvx --with aws-sam-translator==1.113.0 --with pyyaml --with cfn-flip==1.3.0 python translate.py node/template.yaml generated/node.cfn.yaml
 uvx cfn-lint==1.57.1 --regions=ap-northeast-1 --ignore-checks E1161 -- generated/*.cfn.yaml   # E1161: 仮の S3 バケット名

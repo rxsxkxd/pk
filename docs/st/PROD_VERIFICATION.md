@@ -29,7 +29,6 @@
 ### 1.1 変数
 
 ```sh
-cd docs/st
 export AWS_REGION=ap-northeast-1
 export IMPL=go
 export WEB_URL=$(aws cloudformation describe-stacks --stack-name ticketqr-web-$IMPL \

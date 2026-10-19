@@ -47,7 +47,6 @@
 前提: SAM CLI（例: `uvx --from aws-sam-cli sam …`）、AWS の認証情報。検証環境のアカウント・リージョンで行う。
 
 ```sh
-cd docs/st
 export DUMMY_STACK=ticketqr-stg-dummy-analyzer
 
 sam build --template-file dummy-analyzer/template.yaml --build-dir dummy-analyzer/.aws-sam/build

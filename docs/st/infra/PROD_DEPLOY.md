@@ -22,7 +22,6 @@
 前提: AWS CLI v2 と本番アカウントのプロファイル（すべての `aws`・`sam deploy` に `--profile $PROFILE` を付けている）、SAM CLI（`uvx --from aws-sam-cli sam` でもよい）、Go（`go/go.mod` のバージョン）、Node.js 24、`openssl`。
 
 ```sh
-cd docs/st
 export PROFILE=ticketqr-prod   # 本番アカウントの AWS CLI のプロファイル名に置き換える（~/.aws/config）
 export AWS_REGION=ap-northeast-1
 export ACCOUNT_ID=$(aws --profile $PROFILE sts get-caller-identity --query Account --output text)

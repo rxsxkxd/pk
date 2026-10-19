@@ -456,7 +456,7 @@ st/web/
 ## 8. 開発
 
 ```sh
-cd docs/st/web
+cd web
 npm ci
 npm run dev          # http://localhost:5173
 ```

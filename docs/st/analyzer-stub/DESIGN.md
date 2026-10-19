@@ -148,7 +148,7 @@ analyzer-stub/
 ```
 
 ```sh
-cd docs/st/analyzer-stub/node
+cd analyzer-stub/node
 npm test          # testdata/cases.json の全ケース + ヘッダー名の大文字小文字 + 応答とログの形 + API キーの読み込み + ビジネスロジック単体
 npm run dev       # http://localhost:8090/v1/analyze（x-api-key: local-stub-key）
 npm run build     # dist/analyzer-stub.zip（index.mjs と analyzer.mjs）
@@ -205,7 +205,7 @@ analyzer-stub/rust/
 | サイズ | `analyzer-stub.zip` 4.4MB（ほとんどが AWS SDK。Node 版の zip は数 KB） |
 
 ```sh
-cd docs/st/analyzer-stub/rust
+cd analyzer-stub/rust
 ./build.sh test     # cargo test（analyzer の単体テスト 3件 + tests/cases.rs 6件。共通ケースは1件のテストの中で全件確認する）
 ./build.sh lint     # cargo fmt --check と cargo clippy --all-targets（警告はエラー扱い）
 ./build.sh fmt      # cargo fmt（ソースを書き換える）
@@ -224,7 +224,6 @@ cd docs/st/analyzer-stub/rust
 手順の詳細は [../DEPLOY.md](../DEPLOY.md) 3章（スタブ）と、[../go/DEPLOY.md](../go/DEPLOY.md)・[../node/DEPLOY.md](../node/DEPLOY.md) 4-A.3・4-B.3（API の切り替え）。要点は次のとおり。
 
 ```sh
-cd docs/st
 export STUB_IMPL=node                                        # python / rust も可
 export ANALYZER_KEY_PARAM=/ticketqr/analyzer-stub/$STUB_IMPL/api-key
 
@@ -304,7 +303,7 @@ analyzer-stub/python/
 ```
 
 ```sh
-cd docs/st/analyzer-stub/python
+cd analyzer-stub/python
 python3 -m unittest -v                             # 9件（共通ケースは1件のテストの中で全件確認する）
 python3 local.py                                   # http://localhost:8090/v1/analyze（x-api-key: local-stub-key）
 uvx mypy --strict *.py                            # 任意: 型チェック（プロジェクトの依存には入れない）

@@ -27,7 +27,6 @@ Parameter Store（SecureString）: /ticketqr/node/signing-salt（スタックの
 - 作業ディレクトリは `docs/st`（テンプレートとテスト画像を相対パスで参照するため）
 
 ```sh
-cd docs/st
 export AWS_REGION=ap-northeast-1
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export IMPL=node

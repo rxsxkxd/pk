@@ -24,7 +24,6 @@
 ### 1.1 手元の環境
 
 ```sh
-cd docs/st
 # API（解析サーバーは呼ばず、常に PASS。ポート 8080）
 make -C go run
 # 画面（別の端末で。/v1 は 8080 の API に転送される。http://127.0.0.1:5173/）
@@ -75,7 +74,7 @@ ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 python3 fake_analyzer.py REJECT 9000
 
 # API を、解析サーバーの代わりにつないで起動（8080 の API を止めてから。画面からも使える）
-cd docs/st/go
+cd go
 ANALYZER_MODE=http ANALYZER_URL=http://127.0.0.1:9000/v1/analyze ANALYZER_TIMEOUT_MS=1000 make run
 ```
 
@@ -371,7 +370,7 @@ default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: bl
 A・B・C・D を 1 つで行う。標準のライブラリと `golang.org/x/image` だけで動く（入力は JPEG・PNG・WebP。HEIC は、先に sips で JPEG にする）。
 
 ```sh
-cd docs/st/go
+cd go
 go run ./cmd/upsize -in ~/photo.jpg -out ~/big.jpg                        # A: 5MiB を超えるまで拡大（JPEG、画質 95）
 go run ./cmd/upsize -in ~/photo.jpg -out ~/big.jpg -target 8MiB -quality 98
 go run ./cmd/upsize -in ~/photo.jpg -out ~/big.png -format png            # C（＋必要なら拡大）: PNG

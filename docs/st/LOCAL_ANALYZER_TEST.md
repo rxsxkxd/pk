@@ -44,7 +44,6 @@ flowchart LR
 ## 3. 変数を用意する
 
 ```sh
-cd docs/st
 
 export TEST_ANALYZER_URL=https://analyzer-test.example.com/v1/analyze   # 受け取った POST 先
 export TEST_ANALYZER_KEY=                                               # API キーがあれば（なければ空のまま）

@@ -48,7 +48,6 @@ S3（スタックの外で管理）: 成果物バケット ticketqr-artifacts-{a
 - ビルドに必要なもの（Go・Node.js など）は、各手順書の前提を参照
 
 ```sh
-cd docs/st
 export AWS_REGION=ap-northeast-1
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 ```

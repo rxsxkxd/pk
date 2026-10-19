@@ -177,7 +177,7 @@ curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: applicat
 
 ### 3.2 Lambda に届かない大きさ（本番で行える。記録だけ）
 
-画面は送る前に止めるので、普段は起きない。API Gateway・CloudFront が何を返すかを記録する（web/DEPLOY.md 12章。期待値はまだ決めていない）。
+画面は送る前に止めるので、普段は起きない。API Gateway・CloudFront が何を返すかを記録する（web/DEPLOY.md 12章）。
 
 ```sh
 curl -s -i -w '\nstatus=%{http_code} time=%{time_total}s\n' -H 'Accept: application/json' -F "image=@$WORK/b.bin" "$BASE/v1/tickets" | tee -a $WORK/record.txt

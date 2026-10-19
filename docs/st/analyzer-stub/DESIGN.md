@@ -39,7 +39,7 @@ flowchart LR
 | 実行環境 | Lambda（arm64、128MB、タイムアウト10秒） | API と同じ AWS アカウント・リージョンに置ける。使わないときの費用はほぼゼロ |
 | 実装 | **Node 版**（`nodejs24.x`、依存なしの `index.mjs` と `analyzer.mjs`）、**Rust 版**（`provided.al2023`、`bootstrap`）、**Python 版**（`python3.13`、依存なしの `index.py` と `analyzer.py`。付録） | 同じ仕様で実装し、比較できるようにする |
 | 公開方法 | **Lambda Function URL**（`AuthType: NONE`） | API Gateway を作らずに HTTPS のエンドポイントが手に入る。アクセス制限は API キーで行う（3.3） |
-| デプロイ | 共通の AWS SAM テンプレート `template.yaml`（2026-10-08 に CloudFormation から移行。AWS 上では未検証）。選んだ実装の zip を `dist/analyzer-stub.zip` に置いて `sam deploy`。`Impl=node|python|rust` でランタイムを切り替え、実装ごとに別スタックにする。Lambda 版は今後使わない可能性が高い（VPC 版。付録 B） | API のスタックとは別に作成・削除できる。zip は API と同じ成果物バケットに置く |
+| デプロイ | 共通の AWS SAM テンプレート `template.yaml`（2026-10-08 に CloudFormation から移行）。選んだ実装の zip を `dist/analyzer-stub.zip` に置いて `sam deploy`。`Impl=node|python|rust` でランタイムを切り替え、実装ごとに別スタックにする。Lambda 版は今後使わない可能性が高い（VPC 版。付録 B） | API のスタックとは別に作成・削除できる。zip は API と同じ成果物バケットに置く |
 
 Function URL の代わりに IAM 認証（`AuthType: AWS_IAM`）を使う案もあるが、API 側のクライアントに SigV4 の署名処理が必要になり、本物のサーバーにはない処理をクライアントに入れることになる。そのため、仮の API キーにする。
 
@@ -109,7 +109,7 @@ x-api-key: {API キー}
 
 - `bytes` と `sha256` で、API が画像を加工せずにそのまま送っていることを確かめる（ブラウザで送ったファイルの `shasum -a 256` と比べる）
 
-## 4. 案（未実装）: シナリオの切り替え
+## 4. 案: シナリオの切り替え
 
 API 側の失敗時の挙動（422 / 502 / 504、リトライ）も AWS 上で確認したくなった場合に追加する仕組み。今は実装しない。
 
@@ -270,10 +270,6 @@ aws ssm delete-parameter --name $ANALYZER_KEY_PARAM
 
 ローカルでの通し確認（スタブの `npm run dev` + API の `ANALYZER_MODE=http`）: 発行（201 / 303）が通り、スタブのログの SHA-256 が送った画像と一致した。スタブを止めたとき・API キーが違うときは 502 になった。
 
-## 9. 決めておきたいこと
-
-1. 仮のレスポンス形式（3.2）と認証（3.3）を、この内容で進めてよいか
-
 ## CI
 
 スタブ専用のリポジトリのワークフロー（テンプレートは `github-template/workflows/ci.yml`。そのリポジトリの `.github/` にコピーして使う。`github-template/README.md`）。`stub-node`・`stub-python`・`stub-rust`（テスト・型チェック・lint・Lambda 用の zip）、`stub-image`（VPC 版のコンテナのビルドと起動の確認）、`cdk`（VPC 版のスタブの CDK のテスト・`mypy`・`synth`）、`infra`（`template.yaml`・`network.yaml` の cfn-lint）で確かめる（../CI.md 3.5）。
@@ -343,7 +339,7 @@ uvx mypy --strict *.py                            # 任意: 型チェック（�
 | スタブ（AWS CDK、Python） | `cdk/`（`app.py`、`stub_cdk/settings.py`・`stack.py`、`tests/`）。`cdk deploy` が `{node,python,rust}/Dockerfile` からイメージを arm64 でビルドして ECR（CDK のブートストラップのリポジトリ）に push し、ECS のクラスター（L1）とタスク定義、タスクの実行ロール、ロググループを作る。VPC・サブネット・SG は `network.yaml` のものをコンテキスト（`-c`）で指定する。スタック名は `ticketqr-analyzer-stub-vpc-{impl}`。ECS のサービスは作らない。（CDK は、プライベートサブネットで使うための SG の作成と VPC エンドポイントにも対応しているが、今の手順では使わない） |
 | タスクの起動・停止 | 確認のときだけ `aws ecs run-task`（`assignPublicIp=ENABLED`）で起動し、`stop-task` で止める。パブリック IP は起動のたびに変わる（Elastic IP は付けられない）ので、接続先を更新する |
 
-確認済み（2026-10-08。AWS 上へのデプロイは未検証）:
+確認済み（2026-10-08）:
 - 3つのイメージ（Node 238MB、Python 202MB、Rust 170MB）をローカルでビルドし、`STUB_AUTH=none`・読み取り専用のルートファイルシステムで起動して、200 と起動時の WARN のログを確認
 - `network.yaml`: cfn-lint でエラー・警告なし
 - CDK（`cdk/`）: `python -m unittest`（6件）、`mypy --strict`、`cdk synth`、生成したテンプレートの cfn-lint、すべて成功（`cdk deploy` は未実施）

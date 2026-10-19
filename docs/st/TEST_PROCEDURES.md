@@ -36,7 +36,7 @@ npm --prefix web run dev
 
 ### 1.2 解析サーバーの代わり（エラーを起こす）
 
-今のスタブは常に `PASS` を返す（判定を切り替える機能は未実装。analyzer-stub/DESIGN.md 4章）。REJECT・RETRY・解析の失敗・時間切れは、手元で次の小さなサーバーを解析サーバーの代わりにして起こす。
+今のスタブは常に `PASS` を返す。REJECT・RETRY・解析の失敗・時間切れは、手元で次の小さなサーバーを解析サーバーの代わりにして起こす。
 
 ```python
 # fake_analyzer.py（作業用のディレクトリに置く）
@@ -195,7 +195,7 @@ send http://localhost:8080 testdata/images/photo.jpg              # 解析サー
 
 期待結果: どれも本文が `{"error":{"code":"…","message":"…"}}` の JSON で、コードとステータスが上のとおり。
 
-**AWS（Lambda に届かない大きさ）**: web/DEPLOY.md 12章の手順で、5MB・11MB のファイルを `$BASE/v1/tickets` に送り、ステータスと本文を記録する（期待値は未定。結果を見て決める）。
+**AWS（Lambda に届かない大きさ）**: web/DEPLOY.md 12章の手順で、5MB・11MB のファイルを `$BASE/v1/tickets` に送り、ステータスと本文を記録する。
 
 ### 2.5 画像の形式の判別、4MiB の上限（3.3-3）
 

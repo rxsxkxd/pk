@@ -1,6 +1,6 @@
 # CD を Lambda の zip と Web のファイルの更新だけにする構成案
 
-> **状態**: 構成案（未実装。2026-10-15）。今の CD（[CI.md](CI.md) 4章の `deploy.yml`、[CD_CI.md](CD_CI.md) の CodePipeline / CodeBuild の案）は、デプロイのたびに CloudFormation のスタックの作成・更新と、ファイルの更新をまとめて行う。この文書は、それを **構築（CloudFormation）と更新（CD）に分ける** 別のパターン。今の CI.md・CD_CI.md・`deploy.yml` は変えていない。採るときに、それぞれをこの案に合わせて直す。
+> **状態**: 構成案（2026-10-15）。今の CD（[CI.md](CI.md) 4章の `deploy.yml`、[CD_CI.md](CD_CI.md) の CodePipeline / CodeBuild の案）は、デプロイのたびに CloudFormation のスタックの作成・更新と、ファイルの更新をまとめて行う。この文書は、それを **構築（CloudFormation）と更新（CD）に分ける** 別のパターン。今の CI.md・CD_CI.md・`deploy.yml` は変えていない。採るときに、それぞれをこの案に合わせて直す。
 
 ## 1. 考え方
 
@@ -127,11 +127,3 @@ CD_CI.md の構成パターン（P1・P3 など）は、CD を GitHub Actions �
 
 - CodePipeline のデプロイの段階（CodeBuild の `ticketqr-st-deploy`）のコマンドを、4章のものにする。CodeBuild のロールの権限は 4.1 になる
 - 構築は、別のパイプライン（7章）か手作業にする
-
-## 9. 決めること
-
-1. この案を採るか（今の「毎回スタックも更新」のままにするか）
-2. 構築を手作業にするか、別のパイプラインにするか（7章）
-3. Lambda の zip の場所の決まり（3.1 の `current` と `releases/{SHA}` でよいか）
-4. SPA の前の版を、どこにどれだけ残すか（5章）
-5. 構成のずれをどう見つけるか（CloudFormation のドリフトの検出、aws-test の B を定期的に流す、など）

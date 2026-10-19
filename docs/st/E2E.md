@@ -1,22 +1,22 @@
 # E2E テスト環境 構成案
 
-> **状態**: 3つのコンテナとケース1（画面遷移方式）を実装済み・通過。ほかのケースは未実装（7章）。API の設計は [DESIGN.md](DESIGN.md)、エンドポイントと画面の名前は [PAGES.md](PAGES.md)、SPA は [web/DESIGN.md](web/DESIGN.md) を参照。
+> **状態**: 3つのコンテナとケース1（画面遷移方式）を実装済み・通過。API の設計は [DESIGN.md](DESIGN.md)、エンドポイントと画面の名前は [PAGES.md](PAGES.md)、SPA は [web/DESIGN.md](web/DESIGN.md) を参照。
 
 ## 1. 目的とスコープ
 
 - 本番に近い構成（**S3 に置いた SPA → API Gateway + Lambda**）で、ブラウザから実際に操作し、チケットの発行から QR の表示までを自動テストで確認する
 - ローカルでは Docker Compose、リモートでは GitHub Actions 上で**同じ構成**を動かす
 - SPA は事前にビルドした静的ファイルを、**S3 互換ストレージ**に置いて配信する（本番の S3 に相当）
-- API は、**Lambda の公式イメージ（Runtime Interface Emulator）でデプロイ用の zip をそのまま動かし**、API Gateway の役目をする小さなゲートウェイを前に置く。難しい場合は、ローカルモード（`make -C go run` / `npm run dev` と同じ起動方法）に切り替える（2.3）
+- API は、**Lambda の公式イメージ（Runtime Interface Emulator）でデプロイ用の zip をそのまま動かし**、API Gateway の役目をする小さなゲートウェイを前に置く。難しい場合は、ローカルモード（`make -C go run` と同じ起動方法）に切り替える（2.3）
 - SPA から API へオリジンをまたいで送信するため、ここで生じる CSRF と CORS の問題もあわせて解決する（4章）
 
-| 対象 | 今回 | 保留 |
+| 対象 | 今回 | 今回の対象外 |
 |---|---|---|
 | SPA の3つの発行方式（画面遷移方式・その場表示方式・フォーム送信方式）の一連の動作 | ○ | |
 | 取得した QR が PNG で、表示できること | ○ | |
 | リロードで再発行されないこと | ○ | |
 | デプロイ用の zip が Lambda の実行環境で動くこと | ○（RIE） | |
-| QR の中身（デコード結果がチケットコードと一致するか） | | ○（7章 フェーズ6） |
+| QR の中身（デコード結果がチケットコードと一致するか） | | ○ |
 | 画像解析サーバーとの連携 | アプリ内のモック（`ANALYZER_MODE=mock`） | 解析サーバーのスタブ（analyzer-stub）のコンテナ化 |
 | 本物の API Gateway・CloudFront の挙動 | | ○（8章） |
 
@@ -300,18 +300,6 @@ E2E は CI のワークフロー（テンプレート `github-template/workflows
 - `docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` を実行する
 - 成果物 `e2e-go` に、Playwright のレポート・トレースと、失敗したときのコンテナのログを残す
 
-## 7. 段階的な進め方
-
-| フェーズ | 内容 |
-|---|---|
-| 1 | **済み**: ゲートウェイ（`go/cmd/apigw-local`。イベント変換・ルート・CORS）と、RIE の `api` コンテナ |
-| 2 | **一部済み**: `storage`（Garage）と初期設定、`e2e` のアップロード（`globalSetup`）、ケース1。残りはケース2〜8 |
-| 4 | Origin の照合（`ALLOWED_ORIGINS`）とケース9 |
-| 5 | **済み（act で確認）**: GitHub Actions に組み込む（CI.md） |
-| 6 | QR の中身を確認する（テスト内で `jsQR` などを使ってデコードし、チケットコードと照合する） |
-| 7 | 本番側: CloudFormation に HTTP API の CORS 設定と `AllowedOrigins` を入れる |
-| 8 | 画像解析サーバーのプロトコルが決まったら、解析サーバーのスタブをコンテナとして追加し、`ANALYZER_MODE=http` で E2E を回す |
-
 ## 8. この構成で確認できないこと
 
 | 対象 | 理由 |
@@ -324,10 +312,3 @@ E2E は CI のワークフロー（テンプレート `github-template/workflows
 これらは、検証用の AWS アカウントにデプロイし、同じ Playwright テストを `baseURL` と `config.json` だけ差し替えて流すことで確認する（`sam local start-api` も候補だが、中で Docker を起動するので、compose や CI では使いにくい）。
 
 この模擬環境の E2E と、AWS 上の本物に近い環境での E2E（パイプラインの中で CodeBuild から流す）をどう使い分けるかの評価は、[CD_CI.md](CD_CI.md) 0.5（推奨: 両方。PR は模擬環境、本番の承認の前は AWS）。
-
-## 9. 決めておきたいこと
-
-1. Origin が無い POST を拒否してよいか（推奨: 拒否。curl などで動作確認するときは `-H 'Origin: ...'` が必要になる）
-2. CORS の実装を先に進めてよいか（E2E でメインの画面遷移方式を通すために必須。web/DESIGN.md 11章の未確定事項3）
-3. CI のトリガー（PR ごとか、変わったファイルで絞るか）
-4. RIE + ゲートウェイの方式で進めて、難しければローカルモードに切り替える、という判断の基準（例: フェーズ1が想定より大きくなったら切り替える）

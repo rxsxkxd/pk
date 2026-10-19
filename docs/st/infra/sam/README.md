@@ -2,7 +2,7 @@
 
 ネットワークは事前に CloudFormation で作り（`infra/cloudformation/tickets-network-existing-vpc.yaml` か `tickets-network-new-vpc.yaml`。[../../notes/tickets-network.md](../../notes/tickets-network.md)）、**Lambda のビルドと登録（と API Gateway）だけを AWS SAM で行う**ための定義。既存の CloudFormation の定義（`infra/cloudformation/api.yaml`）はそのまま残してあり、SAM から生成した CloudFormation と見比べられるようにしている（4章）。
 
-> 2026-10-08 作成。`sam build`、`sam validate --lint`、cfn-lint、CloudFormation への変換と、変換結果の cfn-lint までを確認。AWS 上への `sam deploy` は未検証。
+> 2026-10-08 作成。`sam build`、`sam validate --lint`、cfn-lint、CloudFormation への変換と、変換結果の cfn-lint までを確認。
 
 ## 1. ファイル
 

@@ -1,8 +1,8 @@
 # CI / CD（GitHub Actions）
 
-> **状態**: CI（ビルド・単体テスト・E2E）は定義済みで、ローカルの act（GitHub Actions のローカル実行ツール）で全ジョブの成功を確認済み（成果物のアクションだけ、act の制約で v4 に置き換えて実行。5章）。GitHub 上ではまだ動かしていない（リポジトリへの push 前）。画像解析サーバーのスタブの CI（2026-10-08 にチケット API の CI から分けた）は、actionlint と、各ステップと同じコマンドの手元での実行で確認した（act では未確認）。
+> **状態**: CI（ビルド・単体テスト・E2E）は定義済みで、ローカルの act（GitHub Actions のローカル実行ツール）で全ジョブの成功を確認済み（成果物のアクションだけ、act の制約で v4 に置き換えて実行。5章）。画像解析サーバーのスタブの CI（2026-10-08 にチケット API の CI から分けた）は、actionlint と、各ステップと同じコマンドの手元での実行で確認した。
 >
-> **ワークフローの置き場所（2026-10-08）**: 実運用では、チケット QR API とスタブをそれぞれ専用のリポジトリに置いて CI / CD を動かす。そのため、ワークフローは `.github/` ではなくテンプレートとして置く: チケット QR API は `github-template/workflows/`（`ci.yml`・`deploy.yml`）、スタブは `analyzer-stub/github-template/workflows/ci.yml`。各リポジトリでは、それぞれの `github-template/` の中身を `.github/` にコピーして使う（各 `github-template/README.md`）。ワークフローは、リポジトリのルートを今の作業ディレクトリ（スタブは `analyzer-stub`）として書いてある。このモノレポでは動かない。デプロイ（4章）は定義だけで、未検証（AWS 側と GitHub 側の準備が必要。4.2）。
+> **ワークフローの置き場所（2026-10-08）**: 実運用では、チケット QR API とスタブをそれぞれ専用のリポジトリに置いて CI / CD を動かす。そのため、ワークフローは `.github/` ではなくテンプレートとして置く: チケット QR API は `github-template/workflows/`（`ci.yml`・`deploy.yml`）、スタブは `analyzer-stub/github-template/workflows/ci.yml`。各リポジトリでは、それぞれの `github-template/` の中身を `.github/` にコピーして使う（各 `github-template/README.md`）。ワークフローは、リポジトリのルートを今の作業ディレクトリ（スタブは `analyzer-stub`）として書いてある。このモノレポでは動かない。デプロイ（4章）を使うには、AWS 側と GitHub 側の準備が要る（4.2）。
 
 関連: デプロイの手順は [DEPLOY.md](DEPLOY.md)（全体と共通の準備）・[go/DEPLOY.md](go/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)、E2E の構成は [E2E.md](E2E.md)。
 
@@ -40,7 +40,7 @@ pull request / master への push
 | テンプレート（このモノレポでの置き場所） | 専用のリポジトリでの置き場所 | 内容 |
 |---|---|---|
 | `github-template/workflows/ci.yml` | `.github/workflows/ci.yml` | チケット API と SPA のビルド・単体テスト・E2E。`workflow_call` で、デプロイからも呼ばれる |
-| `github-template/workflows/deploy.yml` | `.github/workflows/deploy.yml` | AWS へのデプロイ（手動実行）。未検証 |
+| `github-template/workflows/deploy.yml` | `.github/workflows/deploy.yml` | AWS へのデプロイ（手動実行） |
 | `analyzer-stub/github-template/workflows/ci.yml` | スタブのリポジトリの `.github/workflows/ci.yml` | 画像解析サーバーのスタブのテスト・ビルド（3.5）。デプロイのワークフローはない（スタブは手順書で手動でデプロイする。DEPLOY.md 3章） |
 
 ワークフローのファイルは、GitHub の決まりでリポジトリのルートの `.github/workflows/` に置く。テンプレートは、各リポジトリのルート（チケット QR API は今の作業ディレクトリ、スタブは今の `analyzer-stub`）で動く前提で書いてあり、`working-directory` の指定はない。
@@ -84,7 +84,7 @@ pull request / master への push
 |---|---|
 | Go のモジュールとビルド | `actions/setup-go` の標準のキャッシュ（`go.sum` で判定） |
 | npm | `actions/setup-node` の `cache: npm`（各 `package-lock.json` で判定） |
-| E2E の Docker イメージ | まだキャッシュしていない（毎回ビルドする）。必要になったら、compose の `build.cache_from` / `cache_to` に `type=gha` を指定する |
+| E2E の Docker イメージ | キャッシュしない（毎回ビルドする） |
 
 ### 3.4 失敗したとき
 
@@ -117,15 +117,13 @@ pull request / master への push
 
 | キャッシュの対象 | 方法 |
 |---|---|
-| スタブ（Rust）のビルド | まだキャッシュしていない。`build.sh` のビルド環境のイメージ（rustup の導入）と、cargo のレジストリ・`target/` を毎回作り直すので、数分かかる。必要になったら、`actions/cache` で cargo のディレクトリを保存する |
+| スタブ（Rust）のビルド | キャッシュしない。`build.sh` のビルド環境のイメージ（rustup の導入）と、cargo のレジストリ・`target/` を毎回作り直すので、数分かかる |
 
 ## 4. デプロイ（チケット QR API の `deploy.yml`）
 
 > **見直し中**: デプロイを CodePipeline / CodeBuild に移す案がある（[CD_CI.md](CD_CI.md)）。採用したら、この章と `deploy.yml` は廃止する。
 >
 > 別の案: CloudFormation による構築と、Lambda の zip・SPA のファイルの更新を分け、CD は更新だけにする（[CD_UPDATE_ONLY.md](CD_UPDATE_ONLY.md)）。今のこの章は、デプロイのたびにスタックの作成・更新も行う形。
-
-> 未検証。4.2 の準備をしてから、`dev` で試す。
 
 ### 4.1 流れ
 
@@ -199,17 +197,6 @@ pull request / master への push
 ### 4.3 ロールバック
 
 前のコミットを選んで、デプロイのワークフローをもう一度実行する（`Run workflow` でブランチやタグを選ぶ）。zip の接頭辞はコミットごとに違うので、前のコードに戻る。CloudFormation の更新が失敗したときは、スタックが自動で元に戻る。
-
-### 4.4 まだ対応していないこと
-
-| 項目 | 状態 |
-|---|---|
-| example.com の QR のスタック（`example.yaml`） | デプロイしない。必要になったら、同じ形のステップを足す |
-| 画像解析サーバー（`AnalyzerMode=http`） | `mock` のまま。パラメータを environment の変数で渡す形にする |
-| API の CORS のテンプレート化 | `api.yaml` に `CorsConfiguration` を入れたら、CORS のステップを消す |
-| Origin の照合（`ALLOWED_ORIGINS`） | 未実装（E2E.md 4.2）。実装したら、API のスタックに SPA のオリジンを渡す |
-| master への push で `dev` に自動デプロイ | 今は手動だけ。安定したら `push` のトリガーを足す |
-| 解析サーバーのスタブのデプロイ | 入れない（スタブは別のリポジトリ。テストとビルドはそのリポジトリの CI（3.5）、デプロイは手順書で手動） |
 
 ## 5. ローカルでの確認
 

@@ -191,8 +191,6 @@ sequenceDiagram
 - 採番ロジックは生成器（`ticket.Generator`）に分離し、ルール変更の影響をここに閉じ込める（コードの形式チェックは API では行わない。署名で照合する）
 - 時刻と乱数源はインターフェース化し、テスト時は固定値を注入する。**共通のテストベクタ**（`testdata/ticketcode.json`。入力: 時刻・乱数16バイト・固定文字列 → 期待コード。UTC→JST の日付またぎ、UUID の版と種別のビット、32文字の固定文字列も含む）で確かめる
 
-> suffix の具体的なルールは **要確定**。ルールが連番など状態を必要とするものだった場合、本前提（外部ストアなし）と両立しないため再検討が必要。
-
 ## 5. API 仕様
 
 共通事項:
@@ -218,7 +216,7 @@ sequenceDiagram
 
 - 今の構成では、どちらの経路でも上限は **4MB** で同じ。違いが出るのは、統合の CloudFront に WAF を付けるとき（`SizeRestrictions_BODY` を `/v1/tickets` と `/v1/tickets/qr-inline` で除外するか、Count にしてから本体のサイズ制限を別のルールで書く。Web ACL の案は web/DEPLOY.md 13章）と、ボディを読む Lambda@Edge を付けるとき（1MB）
 - どちらかの経路でもっと小さい上限が必要になったら、その環境の `MaxImageBytes` と `config.json` の `maxImageBytes` を下げる（コードの変更は要らない）。4MB より大きくしたい場合は、この設計（Lambda にボディを渡す）のままではできない。S3 の署名付き URL に直接アップロードし、Lambda には S3 のキーを渡す、などの設計の変更が要る
-- Lambda の上限（6MB）を超えたリクエストは Lambda まで届かず、API Gateway がエラーを返す（API の JSON の 413 `PAYLOAD_TOO_LARGE` にはならない。ステータスは AWS 上で要確認。確かめ方と記録の表は web/DEPLOY.md 12章）。SPA は送る前に `maxImageBytes` で止めるので、SPA からは通常は起きない
+- Lambda の上限（6MB）を超えたリクエストは Lambda まで届かず、API Gateway がエラーを返す（API の JSON の 413 `PAYLOAD_TOO_LARGE` にはならない。確かめ方と記録の表は web/DEPLOY.md 12章）。SPA は送る前に `maxImageBytes` で止めるので、SPA からは通常は起きない
 
 ### 5.1 パターンA: `POST /v1/tickets/qr-inline`
 
@@ -321,7 +319,7 @@ Response `200 OK`, `Content-Type: text/html; charset=utf-8`
 | 外部リソース | 使わない（CSS はインライン、JS なし） |
 | セキュリティヘッダ | `Content-Security-Policy: default-src 'none'; img-src {PUBLIC_BASE_URL}; style-src 'unsafe-inline'`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` |
 
-> デザイン（文言・スタイル）は **要確定**。上記は最小構成の例。
+> 上記は最小構成の例。
 
 ### 5.4 パターンB-2: `GET /v1/tickets/{ticketCode}/qr`
 
@@ -409,7 +407,6 @@ APIはステートレスで「同じリクエストの再送か」を判定で�
 | 項目 | 方針 |
 |---|---|
 | 送信形式 | **確定**: `POST`、`Content-Type: application/octet-stream`、ボディは画像バイト列そのもの（multipart から取り出した `image` パートの中身。圧縮・リサイズ・形式変換・再エンコードはしないパススルー） |
-| 送信先URL / メソッド以外のヘッダ | 要確認（画像形式を `X-Image-Type` 等で伝えるか、ファイル名などのメタデータを送るか） |
 | レスポンス | **確定（2026-10-08）**: `{ "confidence": 数値, "detected": 文字列, "reason": 文字列, "result": "PASS" \| "REJECT" \| "RETRY", "status": 整数 }`。**API が見るのは `result` だけ**: `PASS` → チケットを発行、`REJECT` → 422 `IMAGE_REJECTED`、`RETRY` → 422 `IMAGE_RETRY`（Web はそれぞれ別の文言を出す）、それ以外の値・`result` なし → 502 `ANALYSIS_UPSTREAM_ERROR`。ほかの項目の意味（`status` など）は解析側に確認中 |
 | ローカルでの確認 | ローカル PC の API・SPA から、インターネット上のテスト用の解析 API につないで確かめる手順: [LOCAL_ANALYZER_TEST.md](LOCAL_ANALYZER_TEST.md) |
 | ログ | 解析サーバーの応答の本文は、2xx でもそれ以外でも、**JSON として読まずにそのまま**ログに出す（`"msg":"analyzer response"`、`status` と `body`（本文の文字列）。2xx は INFO、それ以外は WARN。リトライしたときは1回ごと）。判定に使うのは、そのあと読む `result` だけ（2026-10-08） |
@@ -490,10 +487,10 @@ QR 生成パラメータ: 誤り訂正レベル M、256px、余白4モジュー�
 ## 10. 非機能・運用
 
 - **認証**:
-  - A: API Gateway で API キー / JWT（Cognito等）/ IAM のいずれか（**要確定**）
+  - A: API Gateway で API キー / JWT（Cognito等）/ IAM のいずれか
   - B-1: **認証なし（公開）**。ブラウザのフォーム送信ではヘッダ認証が使えないため、発行者の制限は行わず、レート制限で濫用を抑える
     - API Gateway のスロットリング（ルート単位のレート / バースト上限）
-    - AWS WAF のレートベースルール（送信元IP単位）を HTTP API 前段の CloudFront 等に適用（WAF は HTTP API に直接関連付けできないため。採否は要確定。統合の構成での Web ACL の案と作り方は web/DEPLOY.md 13章）
+    - AWS WAF のレートベースルール（送信元IP単位）を HTTP API 前段の CloudFront 等に適用（WAF は HTTP API に直接関連付けできないため。統合の構成での Web ACL の案と作り方は web/DEPLOY.md 13章）
     - Lambda 予約同時実行数で画像解析サーバーへの同時リクエスト数に上限を設ける
     - Cookie を使わないため CSRF 対策は不要
     - 将来制限が必要になった場合の拡張候補: フォームトークン（有効期限付き HMAC を hidden フィールドに埋め込む）/ Cookie ログイン + Lambda オーソライザ
@@ -563,17 +560,3 @@ Android  13                                Chrome          138           1     0
 - 入力は1行に1つのログで、JSON の前に付いた文字（`aws logs tail` の時刻とストリーム名など）は読み飛ばす
 - 対象は QR 同梱付与 API・チケット付与 API の完了ログだけ。ほかのログや JSON でない行は無視する
 - あくまでサンプル。User-Agent の解釈の規則は、ブラウザの変化に合わせて直していく
-
-## 11. 要確定事項
-
-1. suffix の具体的なルール（ステートレスに生成可能であること、桁数・文字種）
-2. ピーク時の発行レート（件/秒）と許容衝突確率
-3. 日時のタイムゾーン（JST 前提で良いか）と精度（秒で良いか。ミリ秒まで入れれば衝突はさらに減るがコードが3桁長くなる）
-4. QR のペイロード（チケットコードのみ / URL / 署名付きデータ）
-5. 画像解析サーバーのI/F（送信先URL、レスポンス形式、認証、配置場所。送信形式は `application/octet-stream` で確定）
-6. 入力画像の対応形式とサイズ上限
-7. A の認証方式（B-1 は認証なしで決定）、B-1 のレート制限値・WAF 導入有無
-8. 同一画像の繰り返し送信を防ぐ必要があるか（6章 共通の残課題）
-9. ビューURLに有効期限が必要か
-10. IaC ツール（SAM / CDK / Terraform）
-11. HTMLビューのデザイン・文言、`PUBLIC_BASE_URL`（カスタムドメイン有無）

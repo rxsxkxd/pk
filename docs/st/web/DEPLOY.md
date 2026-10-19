@@ -282,8 +282,8 @@ aws apigatewayv2 update-api --api-id $API_ID \
 ```
 
 - `fetch` の `FormData` 送信は単純リクエストなので、`AllowHeaders` は不要
-- **CloudFormation で作った API の注意**: `api.yaml` にはまだ CORS の設定がない（../DEPLOY.md 4章「まだ対応していないもの」）。上のコマンドはスタックの外からの変更になる。`api.yaml` に `AllowedOrigins` パラメータと `CorsConfiguration` を追加するまでの暫定の手順で、API のスタックを更新したあとに CORS が残っているかを確認する（`aws apigatewayv2 get-api --api-id $API_ID --query CorsConfiguration`）
-- CORS が止めるのは、応答を JS から読むことだけ。ほかのサイトからの発行を止める Origin の照合（`ALLOWED_ORIGINS`）は未実装（../E2E.md 4.2）
+- **CloudFormation で作った API の注意**: `api.yaml` には CORS の設定がない。上のコマンドはスタックの外からの変更になる。`api.yaml` に `AllowedOrigins` パラメータと `CorsConfiguration` を追加するまでの暫定の手順で、API のスタックを更新したあとに CORS が残っているかを確認する（`aws apigatewayv2 get-api --api-id $API_ID --query CorsConfiguration`）
+- CORS が止めるのは、応答を JS から読むことだけ。ほかのサイトからの発行は止めない（Origin の照合の案は ../E2E.md 4.2）
 
 ## 6. config.json の作成とアップロード
 
@@ -476,9 +476,9 @@ aws apigatewayv2 delete-cors-configuration --api-id $API_ID
 - 切り替えの途中でも SPA が API を呼べる順番にしてある（統合へは、`/v1/*` を先に用意してから SPA を向ける。直結へは、CORS を先に設定してから SPA を向け、最後に `/v1/*` を外す）
 - 切り替えの前に発行したチケットの URL（QR 画像・チケット表示ページ）は、古い `PublicBaseUrl` のオリジンのまま。execute-api の URL は統合でも使えるので、直結 → 統合では古い URL も使える。統合 → 直結では、4. のあとは CloudFront の `/v1/*` の URL が使えなくなる。SPA のチケット画面（`#/tickets/{code}?sig=…`）は `config.json` から QR の URL を作るので、影響を受けない
 
-## 11. 統合で、CloudFront を通らないアクセスを防ぐ（未実装）
+## 11. 統合で、CloudFront を通らないアクセスを防ぐ方法（案）
 
-統合でも、execute-api の URL（`$API_URL`）は CloudFront を通さずに呼べる。WAF やレート制限を CloudFront に付けても、直接呼ばれると効かない。防ぐ方法は次のとおり（まだ実装していない）。
+統合でも、execute-api の URL（`$API_URL`）は CloudFront を通さずに呼べる。WAF やレート制限を CloudFront に付けても、直接呼ばれると効かない。防ぐ方法は次のとおり。
 
 | 方法 | 内容 | 作業 |
 |---|---|---|
@@ -487,7 +487,7 @@ aws apigatewayv2 delete-cors-configuration --api-id $API_ID
 
 ## 12. 上限を超えた画像を送ったときの応答の確認
 
-API は 4MB（または `MaxImageBytes`）を超えた画像に、JSON の 413 `PAYLOAD_TOO_LARGE` を返す。ただし、Lambda の上限（6MB。base64 にしたあとの大きさ）や API Gateway の上限（10MB）を超えたリクエストは、Lambda まで届かない。そのときに **API Gateway（統合では CloudFront 経由）が何を返すかは、まだ確かめていない**（../DESIGN.md 5章）。次の手順で確かめ、結果を 12.3 の表と ../DESIGN.md 5章に書く。
+API は 4MB（または `MaxImageBytes`）を超えた画像に、JSON の 413 `PAYLOAD_TOO_LARGE` を返す。ただし、Lambda の上限（6MB。base64 にしたあとの大きさ）や API Gateway の上限（10MB）を超えたリクエストは、Lambda まで届かない。そのときに API Gateway（統合では CloudFront 経由）が何を返すかを、次の手順で確かめ、結果を 12.3 の表と ../DESIGN.md 5章に書く。
 
 SPA は送る前に `maxImageBytes` で止めるので、普段は起きない。ただし、フォーム送信方式（送る前の確認をしない）や、SPA を通さない呼び出しでは起きる。応答によって、SPA の表示も変わる（12.4）。
 
@@ -498,8 +498,8 @@ API は形式より先に大きさを確かめるので、中身は画像でな�
 | ケース | 大きさ | 期待すること |
 |---|---|---|
 | A | 4MB + 1 バイト（4194305） | Lambda まで届き、API が 413 `PAYLOAD_TOO_LARGE`（JSON）を返す。比べるための基準 |
-| B | 5MB（5242880） | base64 で 約6.7MB になり、Lambda の 6MB を超える。API Gateway の 10MB 以下。**未確認** |
-| C | 11MB（11534336） | API Gateway の 10MB を超える。**未確認** |
+| B | 5MB（5242880） | base64 で 約6.7MB になり、Lambda の 6MB を超える。API Gateway の 10MB 以下。記録する |
+| C | 11MB（11534336） | API Gateway の 10MB を超える。記録する |
 
 ```sh
 export WORK=$(mktemp -d)
@@ -557,7 +557,7 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 10m --filter-pattern '"
 | B | 統合 | | | - | | |
 | C | 統合 | | | - | | |
 
-### 12.4 結果を見て決めること
+### 12.4 結果ごとの SPA での見え方と対応（案）
 
 | 結果 | SPA での見え方 | 対応 |
 |---|---|---|
@@ -565,16 +565,15 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 10m --filter-pattern '"
 | 直結で `access-control-allow-origin` が付かない | ブラウザが応答を読めず、通信エラー（`NETWORK`）と同じ表示になる | API Gateway のエラーの応答に CORS のヘッダーが付かないなら、SPA 側では区別できない。送る前の確認（`maxImageBytes`）に頼る |
 | フォーム送信方式 | API Gateway の応答（JSON の文字列）がそのまま画面に出る | API のエラーページにはならない。上限を超えそうな利用者が多ければ、フォーム送信方式を使わないか、SPA 側で送る前に確かめる |
 
-結果は ../DESIGN.md 5章の表（「Lambda の同期呼び出しのリクエスト」の行）にも書き、「要確認」を消す。
+結果は ../DESIGN.md 5章の表（「Lambda の同期呼び出しのリクエスト」の行）にも書く。
 
 ## 13. WAF の Web ACL（統合の構成。任意）
 
-`web.yaml` は、パラメータ `WebAclArn` で**既存の** Web ACL を CloudFront に付けるだけで、Web ACL 自体は作らない（テンプレートに含めていない）。ここでは、Web ACL の中身の案と、AWS CLI で作る手順を書く。**未検証**（AWS 上で作っていない）。
+`web.yaml` は、パラメータ `WebAclArn` で**既存の** Web ACL を CloudFront に付けるだけで、Web ACL 自体は作らない（テンプレートに含めていない）。ここでは、Web ACL の中身の案と、AWS CLI で作る手順を書く。
 
 - **統合の構成で使う**。直結では、CloudFront に付けても SPA の静的ファイルしか守れない（API Gateway の HTTP API には WAF を付けられない）
 - 統合でも、execute-api の URL を直接呼ばれると迂回される（11章）
 - CloudFront に付ける Web ACL は、スコープ `CLOUDFRONT` で、**us-east-1** に作る（Web のスタックのリージョンとは関係ない）
-- 採否とレート制限の値は、まだ決まっていない（../DESIGN.md の「決めておきたいこと」7）
 
 ### 13.1 ルールの案
 
@@ -700,13 +699,11 @@ aws logs tail --region $WAF_REGION aws-waf-logs-ticketqr-web-$IMPL --since 1h \
 | レート制限 | 5分間に 100 回を超えて送る（`testdata/images/photo.jpg` で十分。解析サーバーを `mock` にした環境で行う） | 超えたあとは 403。数分たつと戻る |
 | サンプル | `aws wafv2 get-sampled-requests --region $WAF_REGION --web-acl-arn $WEB_ACL_ARN --rule-metric-name aws-common --scope CLOUDFRONT --time-window StartTime=$(date -u -v-1H +%s),EndTime=$(date -u +%s) --max-items 50`（Linux では `date -u -d '-1 hour' +%s`） | 誤検知の例があれば、ここに出る |
 
-### 13.6 決めること・注意
+### 13.6 注意
 
 | 項目 | 内容 |
 |---|---|
-| レート制限の値 | 仮に「送信元 IP ごとに 5分 100 回」。想定の発行量（ピーク 1秒 2件）に比べて十分大きい。ただし、携帯回線や会社のネットワークは多くの利用者が同じ IP を使う（キャリアグレード NAT など）ので、小さくしすぎると正しい利用者が止まる。ログ（13.4）で実際の回数を見て決める |
 | 料金（目安。[公式の料金](https://aws.amazon.com/waf/pricing/)で確かめる） | Web ACL 1つ 月 5 USD、ルール（マネージドのルールグループも1つで1ルール）1つ 月 1 USD、リクエスト 100万件あたり 0.60 USD。この案（5ルール）なら、リクエスト以外で月 10 USD ほど。ボディの検査を 16KB より広げると追加の料金がかかる |
-| テンプレート化 | 今は CLI で作る。続けて使うなら、us-east-1 に置く別のテンプレート（例: `infra/cloudformation/waf.yaml`。`AWS::WAFv2::WebACL`、`Scope: CLOUDFRONT`）にし、出力の ARN を `web.yaml` の `WebAclArn` に渡す。Web のスタックとはリージョンが違うので、同じテンプレートには入れられない |
 | 迂回 | execute-api の URL を直接呼ばれると WAF を通らない（11章） |
 | ボットや不正利用の対策 | Bot Control などの追加のマネージドルール（有料）は、この案には入れていない |
 

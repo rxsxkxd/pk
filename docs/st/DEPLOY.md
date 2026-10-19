@@ -38,7 +38,7 @@ S3（スタックの外で管理）: 成果物バケット ticketqr-artifacts-{a
 4. 必要なら: 画像解析サーバーのスタブ（この文書の 3章）をデプロイし、API を `http` モードに切り替える（各実装の DEPLOY.md 4-A.3。手動は 4-B.3）
    - 外部の解析サーバー（送信元の IP で許可、API キーなし）に近い形で確かめる場合は、Fargate のスタブ（3.4。パブリックサブネットに置き、許可した IP からだけ呼べる）を使う。API からスタブまでの経路（`tickets` を VPC に置くか、NAT など）は未確定
 
-> 現在の実装の状態: 実装済み。画像解析は `mock`（プロセス内で常に valid）と `http`（画像解析サーバーに POST）から選ぶ。`ALLOWED_ORIGINS`（Origin の照合）は未実装（E2E.md 4章）。
+> 現在の実装の状態: 実装済み。画像解析は `mock`（プロセス内で常に valid）と `http`（画像解析サーバーに POST）から選ぶ。
 
 ## 1. 前提（共通）
 
@@ -96,7 +96,7 @@ rm -f "$KEY_FILE"
 
 ### 3.2 スタブをデプロイする（初回、またはスタブを更新するとき。AWS SAM）
 
-> Lambda 版のスタブは、今後使わない可能性が高い（VPC 内のスタブ（3.4）を使う見込み）。SAM のテンプレートは、`sam validate --lint` と cfn-lint だけを確かめていて、AWS 上へのデプロイは未検証。
+> Lambda 版のスタブは、今後使わない可能性が高い（VPC 内のスタブ（3.4）を使う見込み）。
 
 テンプレートは AWS SAM（`analyzer-stub/template.yaml`）。選んだ実装のビルドで作った zip を `analyzer-stub/dist/analyzer-stub.zip` にコピーし、`sam deploy` がそれを成果物バケットに上げてからスタックを作る（`Impl` でランタイムとハンドラーを切り替える。zip と `Impl` は同じ実装にそろえる）。SAM CLI が要る（例: `uvx --from aws-sam-cli sam …`、または SAM CLI をインストールする）。
 
@@ -278,15 +278,3 @@ aws cloudformation wait stack-delete-complete --stack-name ticketqr-analyzer-stu
 ```
 
 - `destroy` にも、スタック名を決めるために `deploy` と同じ `-c` が要る（`aws cloudformation delete-stack --stack-name ticketqr-analyzer-stub-vpc-$STUB_IMPL` でも消せる）
-
-## 4. まだ対応していないもの（今後、各手順書に追加する）
-
-| 項目 | 状態 |
-|---|---|
-| `ALLOWED_ORIGINS`（Origin の照合） | 未実装（E2E.md 4.2）。実装したら、API の Lambda の環境変数を追加する |
-| HTTP API の CORS 設定のテンプレート化 | 今は web/DEPLOY.md 5章の `update-api` で設定する（スタックの外からの変更）。`api.yaml` に `AllowedOrigins` パラメータと `CorsConfiguration` を追加する |
-| Web フロントエンドの独自ドメイン | CloudFront の代替ドメイン名と、us-east-1 の ACM 証明書を `web.yaml` に追加する。そのときは、直結では CORS の `AllowOrigins`、統合では API の `PublicBaseUrl` も独自ドメインにする |
-| API の独自ドメイン | `PublicBaseUrl` パラメータだけ用意してある。ACM 証明書と `AWS::ApiGatewayV2::DomainName`、`ApiMapping` は別途追加する |
-| 本物の画像解析サーバーへの接続 | HTTP クライアントは、仮のプロトコル（analyzer-stub/DESIGN.md 3）で実装済み。本物の仕様が決まったら、レスポンスの解釈部分（`parseResponse`）を差し替える。VPC の設定が必要になる可能性がある |
-| WAF | HTTP API に直接は付けられない。統合の構成（web/DEPLOY.md 3.2）なら、CloudFront に付けて API も守れる（`web.yaml` の `WebAclArn`。Web ACL はテンプレートに含めていない。ルールの案と AWS CLI で作る手順は web/DEPLOY.md 13章。未検証）。画像のアップロードを通すため、マネージドルールの `SizeRestrictions_BODY` を除外する（DESIGN.md 5章）。execute-api の URL を直接呼ばれると迂回される（web/DEPLOY.md 11章） |
-| GitHub Actions からのデプロイ | `github-template/workflows/deploy.yml` を定義済み（専用のリポジトリの `.github/` にコピーして使うテンプレート。未検証）。OIDC で IAM ロールを引き受け、各手順書の CloudFormation の手順を実行する。準備と流れは [CI.md](CI.md) 4章 |

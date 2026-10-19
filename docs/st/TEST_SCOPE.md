@@ -48,7 +48,7 @@
 | 3 | 画像の形式の判別、4MiB の上限 | 単体（Go: `imageinput`、`TestMaxImageBytes`、`TestUploadFormats`） | スモーク（curl）・AWS（CloudFront 経由） |  |  |  |  |
 | 4 | チケットコードの形（日本時間、UUIDv4、固定文字列） | 単体（Go: `code_test`） | 実機 |  |  |  |  |
 | 5 | sig（HMAC、salt の入れ替え中は新旧） | 単体（Go: `signer_test`） | AWS（Parameter Store の salt を入れ替える手順） |  |  |  |  |
-| 6 | 解析サーバーへの送信（そのまま送る、5 秒、1 回のやり直し、応答のログ） | 単体（Go: `analyzer/http_test`） | AWS（本物の解析サーバー。接続先は未決） |  |  |  |  |
+| 6 | 解析サーバーへの送信（そのまま送る、5 秒、1 回のやり直し、応答のログ） | 単体（Go: `analyzer/http_test`） | AWS（本物の解析サーバー） |  |  |  |  |
 | 7 | ブラウザと OS の情報のログ | 単体（Go: `TestClientLog`） | AWS（CloudWatch） |  |  |  |  |
 | 8 | `Cache-Control: no-store`: API のすべての応答（発行の 201 とエラー、QR 画像の 200 と 403）に、応答のヘッダー `Cache-Control: no-store` と `X-Content-Type-Options: nosniff` が付いていること。ブラウザや途中のキャッシュに、発行の結果や QR 画像が保存されない | 単体（Go: 発行の JSON の 201・エラー、QR の 200・403） | スモーク（curl）・ブラウザのデベロッパーツール |  |  |  |  |
 | 9 | 解析サーバーのタイムアウト: 解析サーバーの応答が遅いとき、1 回 5 秒で打ち切り、1 回だけやり直し、約 10 秒で 504 `ANALYSIS_TIMEOUT` の JSON が返ること。5 秒以内に応答があれば発行されること | 単体（Go: `analyzer/http_test` の時間切れとやり直し） | AWS（検証環境。応答の遅いダミーの解析サーバー。PROD_VERIFICATION.md 5章） |  |  |  |  |
@@ -122,12 +122,3 @@
 
 1. A と B を書き、`deploy.yml` のスモークの代わりに流す（読むだけなので、デプロイのたびに流せる）
 2. C は手動で起動するワークフロー（`workflow_dispatch`）にし、試験用の環境だけで流す
-3. 試験用の環境ができるまでは、書いても流せない。先に環境を用意するかを決める
-
-## 6. 保留しているテスト
-
-2章のテスト項目から外し、実施を保留しているもの（2026-10-15）。テスト仕様書・TEST_RESULT.md の対象には含めない。再開するときは、2章の表に戻す。
-
-| 順 | 確認事項と期待結果 | specによるテスト | spec以外の確認事項 | 保留にした日 | 備考 |
-|---|---|---|---|---|---|
-| 1 | 古いブラウザへの対応（ビルドの出力先、core-js、valibot、Tailwind 3.4）: iOS 13 の Safari と Android 9 の Chrome（80）で、画面が表示され（真っ白にならない）、スタイルが付き、画像を選んで発行し、チケット画面に QR が出る | 単体（web: `main-imports`）、ビルド | 実機（iOS 13 / Android 9） | 2026-10-15 | 元は 2.5 の 7。対応の中身は web/DESIGN.md 2.4。実機で確かめていないことは README の未対応事項「古い端末での動作」にも書いてある |

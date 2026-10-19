@@ -644,4 +644,3 @@ aws logs tail /aws/lambda/ticketqr-$IMPL-tickets --since 1d --filter-pattern '"r
    - 手動の場合: `update-function-configuration` で環境変数を変える（4-B.1.5）
 3. 古い URL が不要になったら、`previous` を消す。**sig には期限が無いので、`previous` を消した時点で古い salt で発行したチケット表示ページ / QR 画像の URL はすべて 403 になる**
 
-まだ対応していないもの（CORS のテンプレート化、Origin の照合、独自ドメインなど）は [../DEPLOY.md](../DEPLOY.md) 4章。

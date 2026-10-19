@@ -2,7 +2,7 @@
 
 チケット QR API（[../DESIGN.md](../DESIGN.md)）を使う Web フロントエンド。静的ファイルとしてビルドし、S3 に直接、または CloudFront 経由で配信する SPA。
 
-> **状態**: 実装済み（単体テスト 49件。E2E はケース1（画面遷移方式）を通過。../E2E.md）。ただし 2.1 の対応ブラウザ（iOS 13 / Android 9）の要件にはまだ対応しておらず、その実装は保留（2.4）。API 側の前提（チケット付与 API の `Accept: application/json` 対応）は実装済み。CORS と Origin の照合（7章）は未実装。
+> **状態**: 実装済み（単体テスト 49件。E2E はケース1（画面遷移方式）を通過。../E2E.md）。API 側の前提（チケット付与 API の `Accept: application/json` 対応）は実装済み。
 > エンドポイントと画面の名前、API の使い方の3パターンとその評価は [../PAGES.md](../PAGES.md) にまとめてある。
 > [../E2E.md](../E2E.md) 3章の「素の HTML / JS の静的サイト」案は、本設計で置き換える。
 
@@ -35,7 +35,7 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 | UI | **Vue 3.5**（Composition API、`<script setup lang="ts">`） | |
 | ルーティング | **vue-router** 5（hash モード） | SPA の発行画面と SPA のチケット画面の2つ。hash モードなので、S3 に直接置いてもリロードや直接アクセスで 404 にならない |
 | 状態管理 | **Pinia** 4 | 発行の状態（送信中、結果、エラー）を1つのストアにまとめる（5章） |
-| スタイル | **Tailwind CSS 3.4**（3.4.19。`v3-lts`）+ PostCSS + autoprefixer | 2026-10-13 に 4 から戻した（4 は iOS 13〜15.3 でスタイルがまったく付かない。notes/tailwind-compat.md）。`tailwind.config.js`（`content` だけ）、`postcss.config.js`、`src/style.css` は `@tailwind` の3行。autoprefixer の対象は `package.json` の `browserslist`（`ios_saf >= 13`、`chrome >= 80`。Chrome の下限は仮。11章の 6） |
+| スタイル | **Tailwind CSS 3.4**（3.4.19。`v3-lts`）+ PostCSS + autoprefixer | 2026-10-13 に 4 から戻した（4 は iOS 13〜15.3 でスタイルがまったく付かない。notes/tailwind-compat.md）。`tailwind.config.js`（`content` だけ）、`postcss.config.js`、`src/style.css` は `@tailwind` の3行。autoprefixer の対象は `package.json` の `browserslist`（`ios_saf >= 13`、`chrome >= 80`。Chrome の下限は仮） |
 | 検証 | **valibot** 1.5.0（版は固定） | 実行時設定（`config.json`）、API のレスポンス（成功・エラー）、チケット画面の URL パラメータを検証する。2026-10-13 に zod 4 から替えた（zod 4 は読み込み時に `BigInt` を使い、iOS 13 で動かないため。2.4 の 5）。使う関数だけがビルドに入るので小さい（約 7KB） |
 | 言語 | TypeScript **6** | 型チェックは `vue-tsc --noEmit`。vue-tsc が TypeScript 7（Go 製のコンパイラー）に対応していないため、6 系に固定する |
 | 古いブラウザ向けの補い | **core-js** 3.50.0（版は固定） | 対象のブラウザにない組み込みの関数を補う（今は `Object.hasOwn` だけ。2.4 の 5）。JS は gzip で約 4KB 増える。インストール時のスクリプト（`postinstall`。寄付のお願いを表示するだけ）は許可していない（npm が警告を出すが、動作には影響しない） |
@@ -46,7 +46,7 @@ SPA の発行方式と、API の使い方（PAGES.md 2章の3パターン）と�
 
 ### 2.1 対応ブラウザ（最低動作バージョン）
 
-> **状態**: 仕様として決定。今の実装はまだこの要件を満たしていない（2.4。実装は保留）。
+> **状態**: 仕様として決定。対応の内容は 2.4。
 
 | OS | 最低バージョン | ブラウザ | 備考 |
 |---|---|---|---|
@@ -82,7 +82,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, ms: number): Pro
 
 ### 2.3 Fetch Upload Streams（検討中・優先度低）
 
-> **保留（2026-10-12）**: 遅い環境には、上限を超えた写真を縮める処理（3章）のほうが効くので、進み具合は保留にした。以下は保留にする前の案。
+> 以下は、アップロードの進み具合を出す場合の案（2026-10-12 まで検討）。
 >
 > **検討中（優先度は低い）**: アップロードの進み具合は、**Android だけ** Fetch Upload Streams で出す案で考えている。iOS の Safari は、最新の正式版（26.x）でも対応していない（開発者向けの Safari Technology Preview 250 で初期の対応をした段階）ので、iOS では進み具合を出さない。将来の Safari の正式版が対応すれば、下の判定で自動的に進み具合が出る。全端末で進み具合を出せる XMLHttpRequest（`xhr.upload.onprogress`）案は、今は採らない。検討の経緯は [notes/upload-progress.md](notes/upload-progress.md)（一時メモ）。この節は、採用が決まったときの仕様の案。
 
@@ -119,7 +119,7 @@ const supportsRequestStreams = (() => {
 
 | 項目 | 内容 |
 |---|---|
-| HTTP/2 以上が必要 | ストリームの送信は HTTP/1.1 では使えない（ボディの長さが事前に分からないため）。サーバーが HTTP/2・HTTP/3 に対応していないと失敗する。**API Gateway HTTP API（execute-api）のエンドポイントが HTTP/2 で応答するかは要確認**（`curl -sI --http2 $API_URL/...` で確かめる）。対応していなければ、常にフォールバックになる。独自ドメインや CloudFront を API の前に置く場合は、そこでも確かめる |
+| HTTP/2 以上が必要 | ストリームの送信は HTTP/1.1 では使えない（ボディの長さが事前に分からないため）。サーバーが HTTP/2・HTTP/3 に対応していないと失敗する。API Gateway HTTP API（execute-api）のエンドポイントが HTTP/2 で応答するかは `curl -sI --http2 $API_URL/...` で確かめる。対応していなければ、常にフォールバックになる。独自ドメインや CloudFront を API の前に置く場合は、そこでも確かめる |
 | CORS のプリフライト | オリジンをまたぐストリームの送信は、必ずプリフライト（`OPTIONS`）が発生する（`FormData` の送信は単純リクエストで発生しない）。API Gateway の CORS 設定でプリフライトに応答できるようにする（7章。`AllowMethods` に `POST`、必要なら `AllowHeaders`） |
 | 進み具合の精度 | 数えられるのは「ブラウザがストリームから読み出した量」で、ネットワークに送り終えた量ではない（ブラウザ内のバッファーの分だけ先に進む）。目安の表示として使い、100% になっても応答が来るまでは「送信中」とする |
 | リダイレクト | ストリームのボディは送り直せないので、リダイレクト（303 以外）されると失敗する。画面遷移方式は 201 の JSON を受け取るので、影響しない |
@@ -131,10 +131,10 @@ const supportsRequestStreams = (() => {
 
 | # | 変更 | 理由 |
 |---|---|---|
-| 1 | **済み（2026-10-13）**: `vite.config.ts` の `build.target`（と `cssTarget`）を `['safari13', 'chrome80']` にした（Chrome の下限は仮。11章の 6）。`?.`・`??`・`??=`・クラスのフィールドが変換されることを、ビルドの解析で確かめた | Vite 8 の既定の出力先は新しいブラウザ向けで、新しい構文をそのまま出力する |
+| 1 | **済み（2026-10-13）**: `vite.config.ts` の `build.target`（と `cssTarget`）を `['safari13', 'chrome80']` にした（Chrome の下限は仮）。`?.`・`??`・`??=`・クラスのフィールドが変換されることを、ビルドの解析で確かめた | Vite 8 の既定の出力先は新しいブラウザ向けで、新しい構文をそのまま出力する |
 | 2 | **済み（2026-10-13）**: `src/main.ts` の起動の処理を関数（`start()`）にし、トップレベルの `await` をやめた | トップレベルの `await` は Safari 15 から。変換もできない（ビルドがエラーになる） |
 | 3 | **済み（2026-10-13）**: `src/api/client.ts` のタイムアウトを `AbortController` と `setTimeout` にした（応答の読み終わりまでを 30 秒で打ち切り、終わったらタイマーを止める） | `AbortSignal.timeout()` は Safari 16 / Chrome 124 から |
-| 4 | **済み（2026-10-13）**: Tailwind CSS 3.4 に戻した（[notes/tailwind-compat.md](notes/tailwind-compat.md)）。あわせて CSS の出力先を `build.cssTarget: ['safari13', 'chrome80']` にした（JS の `build.target` は 1 のまま未対応）。`gap` は使っていない（Android の2つのボタンも、縦並びにしてからは `space-y` で間隔を空ける） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
+| 4 | **済み（2026-10-13）**: Tailwind CSS 3.4 に戻した（[notes/tailwind-compat.md](notes/tailwind-compat.md)）。あわせて CSS の出力先を `build.cssTarget: ['safari13', 'chrome80']` にした（JS の `build.target` も同じ。1）。`gap` は使っていない（Android の2つのボタンも、縦並びにしてからは `space-y` で間隔を空ける） | Tailwind CSS 4 は Safari 16.4 / Chrome 111 以降が前提（カスケードレイヤー、`@property`、`color-mix()` などを使う）。出力がすべて `@layer` の中にあるので、Safari 15.3 以前（iOS 13 を含む）ではスタイルがまったく付かない。4.1 以降のフォールバックも `@layer` の中にあり、iOS 13 には効かない。flex の `gap`（Safari 14.5 から）は、どの案でも `space-y-*` に置き換える |
 | 5 | **済み（2026-10-13。[notes/builtin-compat.md](notes/builtin-compat.md)）: zod 4（読み込み時に `BigInt` を使い、iOS 13 で JS 全体が止まる）を valibot に替えた。Pinia の `Object.hasOwn` は core-js（`src/main.ts` の先頭で `core-js/actual/object/has-own` だけを読み込む）で補った。Vue の `toSorted()` などは今のコードが呼ばない。ビルドの解析で、ほかに iOS 13 にない機能がないことを確かめた。** もとの項目: 依存ライブラリ（Vue、vue-router、Pinia、zod）のビルド後のコードが、iOS 13 にない組み込みの機能（`Array.prototype.at`、`Object.hasOwn`、`structuredClone` など）を使っていないかを調べる。使っていれば、必要な分だけポリフィルを入れる（`@vitejs/plugin-legacy` の `modernPolyfills`。`renderLegacyChunks: false` にして、CSP に反するインラインのスクリプトを出さない） | 構文はビルドで変換できるが、組み込みの機能は変換されない |
 | 6 | （検討中・優先度低）Fetch Upload Streams の送信（2.3）と、Android での送信中の進み具合の表示 | 新しい機能。採用が決まってから行う |
 | 7 | 実機での確認: iOS 13 の端末（またはクラウドの実機サービス）と、Android 9 + Chrome 138 以下 | E2E の Playwright の WebKit は最新の WebKit で、Safari 13 の動きは再現しない |
@@ -173,7 +173,7 @@ SPA の発行画面 #/（画面遷移方式）           SPA のチケット画�
 
 ### 証明書の画像の選択（共通）
 
-- `accept="image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp"`。`image/heic` を含めると、iPhone が変換せずに HEIC のまま渡すことが期待できる（実機で要確認）
+- `accept="image/jpeg,image/png,image/heic,image/heif,image/avif,image/webp"`。`image/heic` を含めると、iPhone が変換せずに HEIC のまま渡すことが期待できる
 - 形式は拡張子と MIME タイプで目安として確かめる。最終的な判定は API に任せる
 - **上限（`config.json` の `maxImageBytes`。既定 4MB。API の上限と同じ値にする）を超えた写真は、選んだときにブラウザで縮める**（`src/image/shrink.ts`。Compressor.js。2026-10-12）
   - 長辺 4096・画質 0.9 から、上限に収まるまで順に試す（4096・0.8 → 3072・0.8 → 2048・0.8）。出力は JPEG（名前も `.jpg`）。写真の向きは直し、EXIF は消える
@@ -446,9 +446,9 @@ st/web/
 | 変更 | 状態 | 内容 | 必要な理由 |
 |---|---|---|---|
 | チケット付与 API の `Accept: application/json` 対応 | **実装済み** | `201 { ticketCode, issuedAt, sig, qrUrl }`、エラーも JSON（DESIGN.md 5.2） | 画面遷移方式（メイン）のため |
-| CORS | 未実装（E2E.md 4.3） | QR 同梱付与 API とチケット付与 API のレスポンスに `Access-Control-Allow-Origin: {フロントのオリジン}` を付ける。本番は API Gateway HTTP API の CORS 設定、ローカルは各実装のローカルサーバー | 付けないと、SPA の JS が発行のレスポンスを読めない（フォーム送信方式は不要） |
-| Origin の照合 | 未実装（E2E.md 4.2） | QR 同梱付与 API とチケット付与 API で `Origin` を `ALLOWED_ORIGINS` と照合し、違えば 403。フォーム送信方式でも、ブラウザは SPA のオリジンを `Origin` に入れて送る | 他のサイトから発行させないため（CSRF 対策） |
-| 設定 | 未実装 | 環境変数 `ALLOWED_ORIGINS`、CloudFormation のパラメータ `AllowedOrigins` | フロントのオリジン（CloudFront のドメイン）を API に教える |
+| CORS | 直結の構成だけ。`update-api` で設定（web/DEPLOY.md 5章） | QR 同梱付与 API とチケット付与 API のレスポンスに `Access-Control-Allow-Origin: {フロントのオリジン}` を付ける。本番は API Gateway HTTP API の CORS 設定、ローカルは各実装のローカルサーバー | 付けないと、SPA の JS が発行のレスポンスを読めない（フォーム送信方式は不要） |
+| Origin の照合 | 案（E2E.md 4.2） | QR 同梱付与 API とチケット付与 API で `Origin` を `ALLOWED_ORIGINS` と照合し、違えば 403。フォーム送信方式でも、ブラウザは SPA のオリジンを `Origin` に入れて送る | 他のサイトから発行させないため（CSRF 対策） |
+| 設定 | 案 | 環境変数 `ALLOWED_ORIGINS`、CloudFormation のパラメータ `AllowedOrigins` | フロントのオリジン（CloudFront のドメイン）を API に教える |
 
 - `<img>` による QR の取得（QR 画像 API）には CORS は不要
 - API 側は、SPA が使わない機能（QR 同梱付与 API、チケット表示ページ、フォーム送信のリダイレクト）も含めて、すべて残す
@@ -512,7 +512,7 @@ Strict-Transport-Security: max-age=31536000
 
 - S3 バケット・CloudFront・OAC・Response Headers Policy は、API とは別の CloudFormation テンプレート `infra/cloudformation/web.yaml`（スタック `ticketqr-web-{impl}`）で作る。手動（AWS CLI）の手順もある
 - `config.json` は環境ごとに作ってアップロードする。ビルドに含まれる `dist/config.json`（ローカル開発用）はアップロードしない
-- 直結では、CloudFront のドメインを、API Gateway の CORS 設定（`AllowOrigins`）に入れる。`api.yaml` にはまだ CORS の設定がないため、今は `aws apigatewayv2 update-api` で設定する（web/DEPLOY.md 5章）
+- 直結では、CloudFront のドメインを、API Gateway の CORS 設定（`AllowOrigins`）に入れる。`api.yaml` には CORS の設定がないので、`aws apigatewayv2 update-api` で設定する（web/DEPLOY.md 5章）
 - 統合では CORS は要らない。代わりに、API の `PublicBaseUrl` を CloudFront の URL にする（web/DEPLOY.md 3.2）
 
 ## 10. テスト
@@ -525,13 +525,11 @@ Strict-Transport-Security: max-age=31536000
 | 画像の縮小 | `shrinkToFit` の試す順と諦める条件（圧縮の部分は差し替え）。ストアでは、上限以下はそのまま送ること、縮めている間は送れないこと、縮めた写真を送ること、縮められなければ「大きすぎます」、選び直したら前の結果を捨てること（`shrinkToFit` は差し替え）。実際の圧縮は happy-dom に canvas がないので、ブラウザで確かめる（2026-10-12 に Chrome で確認: 11.9MB → 3.4MB、約 0.5 秒。CSP に `blob:` がないと失敗することも確認） |
 | ストア | 送信前の確認（未選択、上限超え（`maxImageBytes`）、拡張子）、二重送信の防止、エラーメッセージの対応 |
 | SPA のチケット画面 | URL のパラメータの検証、`<img>` の読み込みエラー時の表示、コードと発行日時を画面に出さないこと |
-| 通しの確認（**保留中**） | E2E.md の Playwright で、ビルドしたサイト + API（ローカル）を使って、スマートフォン相当の画面幅で操作する。メインの画面遷移方式は必ず確かめ、SPA のチケット画面のリロードで再発行されないことも確かめる。オプションの方式は、その方式でビルドしたもので確かめる（今の E2E は画面遷移方式だけ） |
+| 通しの確認 | E2E.md の Playwright で、ビルドしたサイト + API（ローカル）を使って、スマートフォン相当の画面幅で操作する。メインの画面遷移方式は必ず確かめ、SPA のチケット画面のリロードで再発行されないことも確かめる。オプションの方式は、その方式でビルドしたもので確かめる（今の E2E は画面遷移方式だけ） |
 
 - 画面の説明文（発行画面の説明文と補足事項、チケット画面の使い方）は、あとで文言を入れ替える前提なので、テストでは文言の中身は確かめない。置き場所（前後の要素との順番）と、空でないことだけを確かめる
 
-## 11. 決めておきたいこと
-
-決定済み:
+## 11. 決定事項
 
 | 項目 | 決定 |
 |---|---|
@@ -539,16 +537,3 @@ Strict-Transport-Security: max-age=31536000
 | API 側の機能 | 3パターンすべてに対応したまま残す（QR 同梱付与 API、チケット付与 API の JSON とリダイレクト、チケット表示ページ、QR 画像 API） |
 | チケット付与 API の返し方 | `Accept: application/json` で JSON に切り替える（API 側は実装済み） |
 | 対応ブラウザ | iOS 13 / Android 9 以上（2.1）。`fetch`・`Promise`・`async`/`await`・`AbortController`/`AbortSignal` を使う（2.2） |
-
-未確定:
-
-1. その場表示方式（オプション）の結果をリロード後も残すか（sessionStorage）。メインの画面遷移方式があるので、既定では残さない案
-2. 配置方式（推奨: CloudFront + 非公開 S3）と、独自ドメインを使うか
-3. 7章の API 側の変更（CORS、Origin の照合）を、フロントエンドの実装より先に行ってよいか
-4. 画面の文言・デザインの指定（今はシンプルな2画面を想定）
-5. スタイルの方式。**2026-10-13: Tailwind CSS 3.4 に戻した（2章、2.4 の 4）**。もとの論点: Tailwind CSS 3.4 にするか、Tailwind を使わずに CSS を書くか（Tailwind CSS 4 は iOS 13 に対応しない。2.4）。調査（2026-10-10）では 3.4（`v3-lts`、3.4.19）を推奨: [notes/tailwind-compat.md](notes/tailwind-compat.md)
-6. Android 9 で対応する Chrome の下限の版（Android 9 の Chrome は 138 で更新が止まっている。2.1）
-7. （**保留**。2026-10-12: 遅い環境には圧縮のほうが効くので、進み具合の優先度は低い）アップロードの進み具合を Android だけ Fetch Upload Streams で出すか（2.3。notes/upload-progress.md）。出す場合は、API Gateway（execute-api）が HTTP/2 に対応しているかを確かめる（対応していなければ使えない）
-8. 証明書の画像をブラウザで圧縮してから送るか。**2026-10-12 に実装: Compressor.js を入れ、上限（`maxImageBytes`）を超えた写真だけを縮める。上限以下の写真は今までどおりそのまま送る（3章、notes/image-compression.md 7.1）**。残り: 画像解析サーバーが縮めた写真で足りるかの確認、iPhone・Android の実機での確認。圧縮するなら、ライブラリ（第一候補: Compressor.js）、長辺・画質、HEIC の扱い。比較は [notes/image-compression.md](notes/image-compression.md)（一時メモ）。圧縮する場合、7 の進み具合は要らなくなる可能性がある
-9. （保留）Android の「PC 版サイトを表示」（Chrome・Samsung Internet・Firefox。大画面のタブレットの Chrome は既定でこの表示）では User-Agent から `Android` が消え、「カメラを起動」のボタンが出ない（1つの選択欄になる。3章「証明書の画像の選択」）。対策の案は、判定に `matchMedia('(pointer: coarse)')`（指で操作する端末）を足すこと。ただし iPhone・iPad にもボタンが2つ出る（iPad は Mac を名乗るので、iOS だけ除く判定は外れやすい）ため、影響が大きく保留。PC 版表示で `navigator.userAgentData.platform` と `navigator.platform` が何を返すかは、実機で確かめていない
-10. （**済み。2026-10-13**）エラーの表示位置をそろえた。送る前の確認（「画像のサイズが大きすぎます（4MB まで）」「この形式の画像には対応していません」）も、API のエラーと同じく「発行する」ボタンの下のエラーの枠に出す（ストアの `errorMessage`。選んだ画像の問題を先に出し、別の画像を選ぶと前の API のエラーは消える）

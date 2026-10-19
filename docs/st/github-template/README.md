@@ -5,7 +5,7 @@
 | ファイル | 内容 |
 |---|---|
 | `workflows/ci.yml` | ビルド・単体テスト・E2E（[../CI.md](../CI.md) 3章）。`deploy.yml` からも呼ばれる |
-| `workflows/deploy.yml` | AWS へのデプロイ（手動実行。[../CI.md](../CI.md) 4章）。未検証 |
+| `workflows/deploy.yml` | AWS へのデプロイ（手動実行。[../CI.md](../CI.md) 4章） |
 
 使い方:
 

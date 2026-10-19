@@ -1,8 +1,8 @@
 # CI / CD 構成案（CI は GitHub Actions、CD は CodePipeline / CodeBuild）
 
-> **状態**: 構成案（未実装）。CI は今の CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。CI.md 4章、未検証）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
+> **状態**: 構成案。CI は今の CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。CI.md 4章）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
 >
-> どの構成パターンを採るかは未決定（0章で比較）。1〜9章は、そのうちパターン P1 の詳細。P3 を採る場合の差分は 0.4 にまとめた。
+> 構成パターンは 0章で比較した。1〜9章は、そのうちパターン P1 の詳細。P3 を採る場合の差分は 0.4 にまとめた。
 >
 > この文書のデプロイは、毎回スタックの作成・更新も行う形。CD を Lambda の zip と SPA のファイルの更新だけにする別の案は [CD_UPDATE_ONLY.md](CD_UPDATE_ONLY.md)（どちらのパターンとも組み合わせられる。8章）。
 
@@ -263,7 +263,7 @@ release.zip
 
 ### 3.3 今の `deploy.yml` との関係
 
-この案を採用したら、`deploy.yml`（GitHub Actions から直接デプロイする。未検証）は廃止する。CI.md 4章の「デプロイ用の IAM ロール」も、権限の小さい「公開用ロール」（5章）に置き換わる。
+この案を採用したら、`deploy.yml`（GitHub Actions から直接デプロイする）は廃止する。CI.md 4章の「デプロイ用の IAM ロール」も、権限の小さい「公開用ロール」（5章）に置き換わる。
 
 ## 4. CodePipeline / CodeBuild（CD）
 
@@ -438,15 +438,6 @@ phases:
 | 3 | `deploy.yml` を廃止し、CI.md 4章をこの文書への案内に置き換える |
 | 4 | 本番の環境を作り、承認と Prod のステージを足す |
 | 5 | example.com の QR のスタックや、画像解析サーバーの `http` モードのパラメータを、必要に応じて buildspec に足す |
-
-## 11. 決めること
-
-1. 構成パターン（0章）: P3（タグで開始し、CodeBuild でパッケージを作り直す。認証を AWS に一元化）か、P1（CI で作って S3 に置く。テストしたものと同じファイルを出す）か（推奨: 目的に合わせて P3）
-2. E2E をどこで行うか（0.5）: GitHub Actions の模擬環境（E1）、AWS の本物に近い環境（E2）、両方（E3）（推奨: E3）
-3. 本番の環境を、同じ AWS アカウントでスタック名を分けて作るか（例: `ticketqr-prod-go`）、別のアカウントにするか（推奨: 別のアカウント。CodePipeline からアカウントをまたいでデプロイするには、KMS のキーとアカウントをまたぐロールが必要）
-4. Dev への反映を、master への push ごとに自動にするか（推奨: 自動）
-5. 承認者と通知先
-6. リリースの記録（`st/releases/<SHA>.zip`）を残す期間
 
 ## 12. 参考
 

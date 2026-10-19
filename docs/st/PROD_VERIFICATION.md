@@ -67,7 +67,7 @@ sips -s format png  cert.jpg --out $WORK/cert.png
 sips -s format heic cert.jpg --out $WORK/cert.heic
 sips -s format avif cert.jpg --out $WORK/cert.avif
 cwebp -q 90 cert.jpg -o $WORK/cert.webp
-cp cert.jpg other.jpg blurry.jpg $WORK/                # 用意した写真（docs/st に置いた場合）
+cp cert.jpg other.jpg blurry.jpg $WORK/                # 用意した写真（作業ディレクトリに置いた場合）
 cp testdata/images/not-image.txt $WORK/
 cp testdata/images/not-image.txt $WORK/fake.jpg       # 拡張子だけ JPEG にしたもの
 

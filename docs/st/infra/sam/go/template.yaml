@@ -5,7 +5,7 @@ Description: >-
   deploys the HTTP API and the two functions. Go (provided.al2023): sam build runs the make targets build-TicketsFunction / build-GetQRFunction in go/Makefile. The tickets function goes into the private subnets made
   beforehand by infra/cloudformation/tickets-network-*.yaml (outputs PrivateSubnetIds, SecurityGroupId) and
   reaches the analysis server through their NAT gateway. Same API as infra/cloudformation/api.yaml (Impl=go),
-  which is kept for comparison. See docs/st/infra/sam/README.md.
+  which is kept for comparison. See infra/sam/README.md.
 
 Parameters:
   # tickets 関数を置くプライベートサブネット（必須。ネットワークのスタックの出力 PrivateSubnetIds）

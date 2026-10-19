@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Description: >-
   Image analysis server stub for checking the ticket QR API on AWS (AWS SAM: Lambda + Function URL, public,
   limited by the x-api-key check in the function). The code is the zip that the chosen implementation's build
-  makes, copied to dist/analyzer-stub.zip; sam deploy uploads it. See docs/st/DEPLOY.md 3.2.
+  makes, copied to dist/analyzer-stub.zip; sam deploy uploads it. See DEPLOY.md 3.2.
 
 Parameters:
   # スタブの実装（node / python / rust）。dist/ の zip と合わせる。実装ごとに1スタック

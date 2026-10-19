@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Network for the tickets function, pattern N1 (docs/st/notes/tickets-network.md 3.2): new private subnets in
+  Network for the tickets function, pattern N1 (notes/tickets-network.md 3.2): new private subnets in
   an existing VPC, routed to existing NAT gateways, and the function's security group. Existing subnets, route
   tables and NAT gateways are not changed. The ticket API stack (SAM) takes the PrivateSubnetIds and
   SecurityGroupId outputs.

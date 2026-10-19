@@ -3,7 +3,7 @@ Description: >-
   Web frontend (SPA) of the ticket QR API — private S3 bucket behind CloudFront (OAC) with security headers. Two
   layouts: direct (ApiOriginDomain empty; the SPA calls the API Gateway URL, another origin, with CORS) and
   unified (ApiOriginDomain set; this CloudFront also forwards /v1/* to the API, one origin, no CORS). Separate
-  from the API stacks. See docs/st/web/DEPLOY.md.
+  from the API stacks. See web/DEPLOY.md.
 
 Parameters:
   # 統合の構成だけ: /v1/* を振り分ける API のドメイン（API のスタックの出力 ApiDomain）。空なら直結の構成

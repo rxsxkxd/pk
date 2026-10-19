@@ -223,9 +223,9 @@ Y で用意するもの（これだけで動く）:
       - name: Assemble the release
         run: |
           mkdir -p release/infra release/testdata release/buildspec
-          cp -r docs/st/infra/cloudformation release/infra/
-          cp docs/st/testdata/images/photo.jpg release/testdata/
-          cp docs/st/cd/buildspec/*.yml release/buildspec/
+          cp -r infra/cloudformation release/infra/
+          cp testdata/images/photo.jpg release/testdata/
+          cp cd/buildspec/*.yml release/buildspec/
           printf '{"sha":"%s","ref":"%s","run":"%s"}\n' "$GITHUB_SHA" "$GITHUB_REF" "$GITHUB_RUN_ID" > release/manifest.json
           (cd release && find artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)   # 中身の改ざんの検知用（9.3）
           (cd release && zip -qr ../release.zip .)
@@ -255,7 +255,7 @@ release.zip
 │   ├── lambda-node/{ticketqr.zip,exampleqr.zip}
 │   └── web-dist-{page,inline,form}/  # SPA のビルド結果（発行方式ごと。config.json は環境ごとに作り直す）
 ├── infra/cloudformation/{api.yaml,example.yaml,web.yaml}
-├── buildspec/{deploy.yml}        # CodeBuild の手順（リポジトリの docs/st/cd/buildspec/ から）
+├── buildspec/{deploy.yml}        # CodeBuild の手順（リポジトリの cd/buildspec/ から）
 └── testdata/photo.jpg            # スモークテスト用
 ```
 

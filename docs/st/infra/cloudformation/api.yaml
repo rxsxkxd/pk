@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Ticket QR API (ticketqr package on 2 functions behind one HTTP API). The example.com QR endpoint is a separate stack (example.yaml). See docs/st/go/DEPLOY.md or docs/st/node/DEPLOY.md.
+Description: Ticket QR API (ticketqr package on 2 functions behind one HTTP API). The example.com QR endpoint is a separate stack (example.yaml). See go/DEPLOY.md or node/DEPLOY.md.
 
 Parameters:
   # 実装（go / node）。実装ごとに1スタック
@@ -79,7 +79,7 @@ Parameters:
   VpcSubnetIds:
     Type: CommaDelimitedList
     Default: ""
-    Description: Optional. Existing private subnets (2+ AZs) for the tickets function, which calls the analysis server. Empty = every function outside any VPC. See docs/st/notes/lambda-vpc.md.
+    Description: Optional. Existing private subnets (2+ AZs) for the tickets function, which calls the analysis server. Empty = every function outside any VPC. See notes/lambda-vpc.md.
   # tickets 関数に付ける既存のセキュリティグループ（VpcSubnetIds を指定したときは必須）
   VpcSecurityGroupIds:
     Type: CommaDelimitedList

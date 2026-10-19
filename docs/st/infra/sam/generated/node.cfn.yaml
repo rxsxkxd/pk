@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Ticket QR API, node implementation (AWS SAM): sam build builds the Lambda code and sam deploy uploads it and deploys the HTTP API and the two functions. Node.js (nodejs24.x): sam build bundles src/ticketqr.ts
   with esbuild. The tickets function goes into the private subnets made beforehand by infra/cloudformation/tickets-network-*.yaml (outputs PrivateSubnetIds, SecurityGroupId) and reaches the analysis server
-  through their NAT gateway. Same API as infra/cloudformation/api.yaml (Impl=node), which is kept for comparison. See docs/st/infra/sam/README.md.
+  through their NAT gateway. Same API as infra/cloudformation/api.yaml (Impl=node), which is kept for comparison. See infra/sam/README.md.
 Parameters:
   VpcSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>

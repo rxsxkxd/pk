@@ -4,7 +4,7 @@ Description: >-
   task's security group. The stub is reached from outside over the internet at the task's public IP, allowed
   by source CIDR (like an analysis server that admits the caller's fixed NAT IP). How the ticket API reaches it
   (its own NAT, peering, ...) is not part of this stack. No NAT gateway and no VPC endpoints, so nothing here is
-  billed by the hour. The stub itself (image, ECS) is the CDK app in cdk/. See docs/st/DEPLOY.md 3.4.
+  billed by the hour. The stub itself (image, ECS) is the CDK app in cdk/. See DEPLOY.md 3.4.
 
 Parameters:
   # スタブ用の VPC の CIDR

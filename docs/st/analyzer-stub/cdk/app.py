@@ -15,6 +15,6 @@ StubFargateStack(
     app,
     settings.stack_name,
     settings=settings,
-    description="Image analysis server stub on ECS Fargate (test only). See docs/st/DEPLOY.md 3.4.",
+    description="Image analysis server stub on ECS Fargate (test only). See DEPLOY.md 3.4.",
 )
 app.synth()

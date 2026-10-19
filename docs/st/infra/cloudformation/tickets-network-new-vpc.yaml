@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Network for the tickets function, pattern N2 (docs/st/notes/tickets-network.md 3.3): a new VPC with two
+  Network for the tickets function, pattern N2 (notes/tickets-network.md 3.3): a new VPC with two
   private subnets (for the function), public subnets with NAT gateways (fixed Elastic IPs, used by the tickets
   function only), an internet gateway and the function's security group. The ticket API stack (SAM) takes the
   PrivateSubnetIds and SecurityGroupId outputs. NAT gateways and Elastic IPs are billed by the hour.

@@ -4,7 +4,7 @@ Description: >-
   Dummy image analysis server for the verification environment (AWS SAM: Python Lambda + public Function URL). Returns
   the result, delay or failure chosen by its settings, to check the ticket QR API's analysis client on AWS
   (timeouts, retries, REJECT / RETRY, upstream errors). Reads no image. Separate from analyzer-stub. Do not use in
-  production. See docs/st/dummy-analyzer/README.md.
+  production. See dummy-analyzer/README.md.
 
 Parameters:
   # 関数とロググループの名前の先頭。空ならスタック名を使う

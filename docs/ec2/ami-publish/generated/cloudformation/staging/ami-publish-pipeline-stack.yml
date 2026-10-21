@@ -7,6 +7,12 @@ Metadata:
     config:
       ignore_checks:
         - W6001
+Parameters:
+  ConfigFile:
+    Type: String
+    Default: config/ami_publish.yml
+    AllowedPattern: ^[A-Za-z0-9_][A-Za-z0-9._/-]*\.ya?ml$
+    Description: Configuration file read by the AMI publish tool on CodeBuild (relative to the repository root).
 Resources:
   ArtifactBucket:
     Type: AWS::S3::Bucket
@@ -208,7 +214,11 @@ Resources:
           - Name: AMI_PUBLISH_ENVIRONMENT
             Value: staging
             Type: PLAINTEXT
-      TimeoutInMinutes: 60
+          - Name: AMI_PUBLISH_CONFIG
+            Value:
+              Ref: ConfigFile
+            Type: PLAINTEXT
+      TimeoutInMinutes: 90
       ConcurrentBuildLimit: 1
       LogsConfig:
         CloudWatchLogs:

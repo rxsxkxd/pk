@@ -153,7 +153,7 @@ aws codepipeline start-pipeline-execution --name myapp-staging-ami-publish \
 | 5-6 | 出力変数 | パイプラインの実行詳細で、アクション `PublishAmi` の出力変数 | `AMI_ID`、`LAUNCH_TEMPLATE_VERSION` |
 | 5-7 | リリース用インスタンス | `describe-iam-instance-profile-associations`（[1](#1-aws-側の事前準備) のコマンド）と、インスタンス上の `curl http://localhost/up` | 紐付けが残っていない（`[]`）、アプリが応答する。紐付けを解除したので、SSM は `ConnectionLost` になっていく（正常） |
 | 5-8 | ヘルスチェックの出力 | CloudWatch Logs `/myapp/staging/ami-publish` の SSM のストリーム | `health check passed` |
-| 5-9 | 所要時間 | CodeBuild のログの `duration_seconds` | 各ステップの時間を記録し、`config/ami_publish.yml` の `timeouts` とビルドのタイムアウト（`timeouts.codebuild_minutes`、60 分）に余裕があるか確認する |
+| 5-9 | 所要時間 | CodeBuild のログの `duration_seconds` | 各ステップの時間を記録し、`config/ami_publish.yml` の `timeouts` とビルドのタイムアウト（`timeouts.codebuild_minutes`、90 分）に余裕があるか確認する |
 
 ## 6. 障害試験
 

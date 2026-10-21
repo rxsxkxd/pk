@@ -49,7 +49,7 @@ CodeBuild の `Command did not exit successfully bin/ami_publish run ... exit st
 | 「リリース用インスタンスのロール ... に必要な許可が足りない」 | [1a](#1a-リリース用インスタンスのロールの許可が足りない) |
 | `ping_status` が `ConnectionLost` のまま / 「SSM Agent が接続していない」 | [2](#2-ssm-agent-が接続しない) |
 | ステップ 4 で `ヘルスチェックが失敗した` | [3](#3-ヘルスチェックが失敗する) |
-| ステップ 2 で長時間待つ / `available にならなかった` / 60 分で強制終了 | [4](#4-ami-の作成が終わらない失敗する) |
+| ステップ 2 で長時間待つ / `available にならなかった` / 90 分で強制終了 | [4](#4-ami-の作成が終わらない失敗する) |
 | ステップ 2a で `起動できなかった` | [5](#5-停止中のインスタンスを起動できない) |
 | ステップ 5 で `起動テンプレート以外の変更が含まれているため中止した` / `更新できる状態ではない` | [6](#6-起動テンプレートのスタックを更新できない) |
 | install フェーズで失敗する（Ruby、`bundle install`、buildspec が見つからない） | [7](#7-codebuild-の-install-フェーズで失敗する) |
@@ -194,7 +194,7 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 
 ## 4. AMI の作成が終わらない・失敗する
 
-**症状**: ステップ 2 の進捗ログが長く続く。「available にならなかった」で失敗する。または CodeBuild が 60 分で強制終了される。
+**症状**: ステップ 2 の進捗ログが長く続く。「available にならなかった」で失敗する。または CodeBuild が 90 分で強制終了される。
 
 **意味**: AMI のスナップショットの取得に時間がかかっている、または失敗した。進捗ログの `snapshots`（例: `snap-0123 45%`）で進み具合がわかる。
 
@@ -202,8 +202,8 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 
 | 状況 | 対処 |
 |---|---|
-| 進捗は進んでいるが遅い | ディスクが大きい・変更量が多いと時間がかかる。待機時間の上限（`timeouts.image_available_seconds`、600 秒＝10 分）を超えると失敗する（AMI は削除され、紐付けは解除される）。実測に合わせて延ばす。延ばすときは、待機時間の合計が CodeBuild のタイムアウト（`codebuild_minutes`）に収まるようにする |
-| CodeBuild が 60 分（`timeouts.codebuild_minutes`）で強制終了された | ツールの後始末が動かないため、作成中の AMI と、インスタンスプロファイルの紐付けが残ることがある（紐付けは次の実行で解除される。[1b](#1b-インスタンスプロファイルの紐付けと解除の問題)）。パイプラインの画面で失敗したアクションを**再試行**すると、同じ実行の AMI を再利用して続きから進む。毎回そうなるなら `codebuild_minutes` を延ばすか、`image_available_seconds` をそれより短くしてツールのタイムアウトを先に来させる |
+| 進捗は進んでいるが遅い | ディスクが大きい・変更量が多いと時間がかかる。待機時間の上限（`timeouts.image_available_seconds`、1800 秒＝30 分）を超えると失敗する（AMI は削除され、紐付けは解除される）。実測に合わせて延ばす。延ばすときは、待機時間の合計が CodeBuild のタイムアウト（`codebuild_minutes`）に収まるようにする |
+| CodeBuild が 90 分（`timeouts.codebuild_minutes`）で強制終了された | ツールの後始末が動かないため、作成中の AMI と、インスタンスプロファイルの紐付けが残ることがある（紐付けは次の実行で解除される。[1b](#1b-インスタンスプロファイルの紐付けと解除の問題)）。パイプラインの画面で失敗したアクションを**再試行**すると、同じ実行の AMI を再利用して続きから進む。毎回そうなるなら `codebuild_minutes` を延ばすか、`image_available_seconds` をそれより短くしてツールのタイムアウトを先に来させる |
 | `failed` になった | AMI は削除済み。一時的な問題のことがあるので再実行する。繰り返すなら EBS ボリュームの状態を確認する |
 
 ## 5. 停止中のインスタンスを起動できない
@@ -271,7 +271,8 @@ sudo tail -n 100 /var/log/nginx/error.log              # Passenger / Rails の�
 |---|---|
 | `--version を指定する` | パイプラインを変数 `VERSION` なしで実行した。**スタック作成直後の自動実行で出るのは想定どおり**（AWS は何も変更していない）。`--variables name=VERSION,value=vX.Y.Z` を付けて実行する |
 | `--version の形式が不正` | `v1.2.3` の形式にする |
-| `環境 ... が ... にない` | CodeBuild の環境変数 `AMI_PUBLISH_ENVIRONMENT` と、`config/ami_publish.yml` の環境名が一致しているか確認する |
+| `設定値ファイルがない: ...` | AMI 公開パイプラインのスタックのパラメータ `ConfigFile`（CodeBuild の環境変数 `AMI_PUBLISH_CONFIG`）のパスが、パイプラインのソースのリポジトリにあるか確認する（リポジトリのルートからの相対パス）。直すときはパイプラインのスタックを `--parameter-overrides ConfigFile=...` を付けてデプロイする |
+| `環境 ... が ... にない` | CodeBuild の環境変数 `AMI_PUBLISH_ENVIRONMENT` と、パラメータ `ConfigFile` で指定した設定値ファイル（既定: `config/ami_publish.yml`）の環境名が一致しているか確認する |
 | `environments.<環境>.... がない` / `形式が不正` | `config/ami_publish.yml` を直し、仕組みの生成ツールで検証する（`go run ./cmd/generate-definitions --check`） |
 
 ## 9. 終了コード 3（AWS のエラー）

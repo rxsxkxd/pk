@@ -25,7 +25,7 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "config/ami_publish.yml", "設定値ファイル")
+	configPath := flag.String("config", definitions.DefaultConfigPath, "設定値ファイル")
 	outputDirectory := flag.String("output-dir", "generated", "生成先ディレクトリ")
 	check := flag.Bool("check", false, "書き出さず、生成結果が出力先の内容と一致するかだけを確認する")
 	flag.Usage = func() {

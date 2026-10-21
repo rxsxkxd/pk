@@ -206,6 +206,20 @@ func TestPipelineStack(t *testing.T) {
 		t.Errorf("パイプライン変数 = %v", names)
 	}
 
+	// 設定値ファイルはスタックのパラメータ ConfigFile で指定し、CodeBuild の環境変数 AMI_PUBLISH_CONFIG で渡す
+	if got := dig(t, document, "Parameters", "ConfigFile", "Default"); got != DefaultConfigPath {
+		t.Errorf("ConfigFile の既定値 = %v, want %s", got, DefaultConfigPath)
+	}
+	configFilePassed := false
+	for _, variable := range dig(t, document, "Resources", "CodeBuildProject", "Properties", "Environment", "EnvironmentVariables").([]any) {
+		if dig(t, variable, "Name") == ConfigFileEnvironmentVariable {
+			configFilePassed = dig(t, variable, "Value", "Ref") == "ConfigFile"
+		}
+	}
+	if !configFilePassed {
+		t.Errorf("CodeBuild の環境変数 %s にパラメータ ConfigFile を渡していない", ConfigFileEnvironmentVariable)
+	}
+
 	stages := dig(t, pipeline, "Stages").([]any)
 	source := dig(t, stages[0], "Actions").([]any)[0]
 	if got := dig(t, source, "Configuration", "DetectChanges"); got != false {
@@ -409,6 +423,9 @@ func TestBuildspec(t *testing.T) {
 	commands := dig(t, document, "phases", "build", "commands").([]any)
 	if !strings.HasPrefix(commands[0].(string), "bundle exec ruby bin/ami_publish run ") {
 		t.Errorf("AMI 公開ツールを ruby コマンド経由で呼んでいない: %v", commands[0])
+	}
+	if !strings.Contains(commands[0].(string), `--config "$AMI_PUBLISH_CONFIG"`) {
+		t.Errorf("設定値ファイルを CodeBuild の環境変数 AMI_PUBLISH_CONFIG から渡していない: %v", commands[0])
 	}
 }
 

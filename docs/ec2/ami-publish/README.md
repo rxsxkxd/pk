@@ -5,6 +5,7 @@
 リリースの流れ（前段: 作成元のインスタンスでのテスト → **中段: AMI と起動テンプレートの用意** → 後段: 起動テンプレートを使ったインスタンスの構築）のうち、中段を担当する（フェーズ 1。後段がフェーズ 2、前段がフェーズ 3）。全体像と前段・後段のフォルダは [`../README.md`](../README.md#全体像) を参照。
 
 - 設計: [開発計画: AMI 作成以降](../ami-publish-development-plan.md)（決定事項 D1〜D10）
+- はじめて作るとき: [チュートリアル: development と production の AMI 公開パイプラインを作って動かす](./tutorial-development-production.md)
 - スコープ: AMI の作成と起動テンプレートの用意まで。起動テンプレートを使った実際のインスタンスの構築（Auto Scaling グループを含む）は対象外
 
 | ツール | 言語 | 動くタイミング | 実行する人 |
@@ -102,6 +103,16 @@ aws cloudformation execute-change-set  --stack-name <スタック名> --change-s
 ```
 
 - 起動テンプレートのスタックのパラメータ `AmiId` / `AppVersion` はパイプラインが更新する。手動のデプロイで指定しない（初回は空のまま作られ、起動テンプレートに AMI が入っていない状態になる。AMI が入るまでは、この起動テンプレートでインスタンスを起動するには AMI の指定が必要）。
+- AMI 公開ツールが CodeBuild で読む設定値ファイルは、AMI 公開パイプラインのスタックのパラメータ `ConfigFile`（既定: `config/ami_publish.yml`。リポジトリのルートからの相対パス）で指定する。CodeBuild の環境変数 `AMI_PUBLISH_CONFIG` を経由して、buildspec が `--config` に渡す。既定以外のファイルを使うときは、デプロイ用シェルスクリプトを使わず、パイプラインのスタックだけを `--parameter-overrides` を付けて手でデプロイする。一度指定すれば、以降の `up` でも値は引き継がれる（`aws cloudformation deploy` は、指定しなかったパラメータの現在値を引き継ぐ）。既定に戻すときも、同じように `ConfigFile=config/ami_publish.yml` を指定してデプロイする:
+
+  ```bash
+  aws cloudformation deploy --region ap-northeast-1 --stack-name myapp-staging-ami-publish-pipeline \
+    --template-file generated/cloudformation/staging/ami-publish-pipeline-stack.yml \
+    --capabilities CAPABILITY_IAM --no-execute-changeset --no-fail-on-empty-changeset \
+    --parameter-overrides ConfigFile=config/ami_publish.production.yml
+  ```
+
+  指定するファイルは、パイプラインのソース（このリポジトリ）に含まれ、CodeBuild の環境変数 `AMI_PUBLISH_ENVIRONMENT` の環境を含んでいる必要がある。仕組みの生成も同じファイルから行う（`go run ./cmd/generate-definitions --config <ファイル>`）。生成時と実行時で値がずれないようにするため。
 - パイプラインは作成直後に 1 回自動で実行されることがある。変数 `VERSION` が未指定のため AMI 公開ツールが使い方の誤り（終了コード 2）で止まり、AWS には何も変更しない。
 
 ### 仕組みの撤去

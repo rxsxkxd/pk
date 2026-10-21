@@ -8,9 +8,17 @@ import (
 // BuildspecPath は、CodeBuild プロジェクトが参照する buildspec のリポジトリ内のパス。
 const BuildspecPath = "generated/codebuild/ami-publish-buildspec.yml"
 
+// DefaultConfigPath は、設定値ファイルの既定のパス（リポジトリのルートからの相対パス）。
+// 仕組みの生成ツールの --config の既定値と、パイプラインのスタックのパラメータ ConfigFile の既定値。
+const DefaultConfigPath = "config/ami_publish.yml"
+
+// ConfigFileEnvironmentVariable は、CodeBuild で AMI 公開ツールに設定値ファイルのパスを渡す環境変数の名前。
+const ConfigFileEnvironmentVariable = "AMI_PUBLISH_CONFIG"
+
 // AMIPublishPipelineStack は AMI 公開パイプラインのスタックの CloudFormation テンプレートを返す。
 //
 // 含めるもの:
+//   - パラメータ ConfigFile（AMI 公開ツールが CodeBuild で読む設定値ファイル。既定は DefaultConfigPath）
 //   - CodePipeline（V2、実行モード QUEUED、パイプライン変数 VERSION / VERIFIED）
 //   - CodeBuild プロジェクト（同時実行数 1）と、そのサービスロール（AMI 作成・ヘルスチェック・スタック更新に必要な権限だけ）
 //   - パイプラインのアーティファクト用 S3 バケット、ログ用の CloudWatch Logs ロググループ
@@ -25,6 +33,16 @@ func AMIPublishPipelineStack(environment Environment) Map {
 		// 出力の一部（LaunchTemplateStackName など）は他のスタックの Export をそのまま出している（W6001）。
 		// AMI 公開ツールが、パイプラインのスタックの出力だけを見れば他のスタックの名前がわかるようにするための意図した使い方
 		"Metadata", M("cfn-lint", M("config", M("ignore_checks", []any{"W6001"}))),
+		"Parameters", M(
+			// AMI 公開ツールが CodeBuild で読む設定値ファイル。デプロイ時に --parameter-overrides ConfigFile=... で変えられる
+			// （aws cloudformation deploy は、指定しなかったパラメータの現在値を引き継ぐ）
+			"ConfigFile", M(
+				"Type", "String",
+				"Default", DefaultConfigPath,
+				"AllowedPattern", `^[A-Za-z0-9_][A-Za-z0-9._/-]*\.ya?ml$`,
+				"Description", "Configuration file read by the AMI publish tool on CodeBuild (relative to the repository root).",
+			),
+		),
 		"Resources", M(
 			"ArtifactBucket", artifactBucket(),
 			"LogGroup", M(
@@ -274,6 +292,7 @@ func codeBuildProject(environment Environment) Map {
 				"Image", codeBuildImage,
 				"EnvironmentVariables", []any{
 					M("Name", "AMI_PUBLISH_ENVIRONMENT", "Value", environment.Name, "Type", "PLAINTEXT"),
+					M("Name", ConfigFileEnvironmentVariable, "Value", Ref("ConfigFile"), "Type", "PLAINTEXT"),
 				},
 			),
 			"TimeoutInMinutes", environment.Timeouts.CodeBuildMinutes,

@@ -8,7 +8,7 @@ env:
 phases:
   install:
     commands:
-      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.11; fi
       - ruby --version
       - echo 'Entered install phase.'
       - aws --version

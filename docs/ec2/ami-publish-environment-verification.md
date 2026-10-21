@@ -105,7 +105,7 @@ bash generated/deploy/staging.sh up
 | 4-2 | 起動テンプレート | `aws ec2 describe-launch-template-versions --launch-template-name myapp-staging --query 'LaunchTemplateVersions[0].[VersionDescription,LaunchTemplateData.ImageId]'` | `myapp (AMI not set)` と `null`（初回はまだ AMI が入っていない） |
 | 4-3 | パイプラインの出力 | `aws cloudformation describe-stacks --stack-name myapp-staging-ami-publish-pipeline --query 'Stacks[0].Outputs'` | `LaunchTemplateStackName`・`HealthCheckDocumentName`・`LogGroupName`・`ReleaseInstanceRoleArn`・`ReleaseInstanceProfileArn` などがある |
 | 4-4 | 作成直後の自動実行 | `aws codepipeline list-pipeline-executions --pipeline-name myapp-staging-ami-publish` | 作成直後に 1 回実行されていれば `Failed`（`VERSION` 未指定で終了コード 2）。CodeBuild のログに「--version を指定する」。AMI は作られていない |
-| 4-5 | CodeBuild の Ruby | 4-4 の CodeBuild のログ | `ruby --version` が 3.4.10、`bundle install` が成功している（`rbenv local 3.4.10` が失敗した場合は、イメージに 3.4.10 がない。`codeBuildRubyVersion` をイメージにあるバージョンに上げる） |
+| 4-5 | CodeBuild の Ruby | 4-4 の CodeBuild のログ | `ruby --version` が 3.4.11、`bundle install` が成功している（`rbenv local 3.4.11` が失敗した場合は、イメージに 3.4.11 がない。`codeBuildRubyVersion` をイメージにあるバージョンに上げる） |
 | 4-6 | ヘルスチェックの単体実行（任意） | 下記 | `Success`。終了後に紐付けが残っていない |
 | 4-7 | `plan` | 下記 | 終了コード 0。`profile_association_checked`、`release_instance_permissions_checked`（`missing` が空）、`profile_association_planned`、`create_image_planned`、`launch_template_stack_update_planned` がログに出る。AWS に変更がない。リリース用インスタンスに別のインスタンスプロファイルが付いていれば、ここで終了コード 1 になる |
 

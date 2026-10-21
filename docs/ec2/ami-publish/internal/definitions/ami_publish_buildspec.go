@@ -10,7 +10,7 @@ const (
 	codeBuildImage = "aws/codebuild/standard:8.0"
 	// codeBuildRubyVersion は、codeBuildImage に入っている Ruby 3.4 系のバージョン。
 	// イメージの更新でなくなると rbenv local が失敗するので、そのときはイメージにあるバージョンに上げる。
-	codeBuildRubyVersion = "3.4.10"
+	codeBuildRubyVersion = "3.4.11"
 )
 
 // AMIPublishBuildspec は CodeBuild プロジェクト ami-publish の buildspec を返す（全環境で共通）。

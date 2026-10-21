@@ -256,7 +256,7 @@ LocalStack などで EC2 や SSM を模擬する方法もあるが、AMI の作�
 | Ruby: `rspec`（87 件、AWS には接続しない）/ `rubocop` | 通過。テストが失敗を検出できることも、実装を一時的に壊して確認済み |
 | `cfn-lint`（生成した CloudFormation テンプレート） | 指摘なし |
 | buildspec の手順を Linux（`ruby:3.4`、x86_64）で実行 | install 成功。`VERSION` 未指定で終了コード 2、認証情報なしで終了コード 3、出力ファイルは作られない |
-| CodeBuild 標準イメージ | `aws/codebuild/standard:8.0`（Ubuntu 24.04。Ubuntu 系の最新）を使う。rbenv（`/usr/local/rbenv`）と Ruby 3.4.10 が入っている（[公式のイメージ定義](https://github.com/aws/aws-codebuild-docker-images/blob/master/ubuntu/standard/8.0/Dockerfile)）。buildspec は `runtime-versions` を使わず、`rbenv local 3.4.10` でイメージの Ruby を選ぶ（Ruby のビルドは行わない）。手元の `.ruby-version`（3.4.11）とはパッチバージョンが異なるが、deployment モードの `bundle install` が問題なく通ることを確認済み。イメージと Ruby のバージョンは頻繁に変えないため、設定値ファイルではなく `internal/definitions/ami_publish_buildspec.go` の定数 `codeBuildImage` / `codeBuildRubyVersion` で固定している。イメージの更新で 3.4.10 がなくなったら `codeBuildRubyVersion` を上げる |
+| CodeBuild 標準イメージ | `aws/codebuild/standard:8.0`（Ubuntu 24.04。Ubuntu 系の最新）を使う。rbenv（`/usr/local/rbenv`）と Ruby 3.4.11 が入っている（[公式のイメージ定義](https://github.com/aws/aws-codebuild-docker-images/blob/master/ubuntu/standard/8.0/Dockerfile)）。buildspec は `runtime-versions` を使わず、`rbenv local 3.4.11` でイメージの Ruby を選ぶ（Ruby のビルドは行わない）。手元の `.ruby-version`（3.4.11）と同じバージョンにしている。イメージと Ruby のバージョンは頻繁に変えないため、設定値ファイルではなく `internal/definitions/ami_publish_buildspec.go` の定数 `codeBuildImage` / `codeBuildRubyVersion` で固定している。イメージの更新で 3.4.11 がなくなったら `codeBuildRubyVersion` を上げる |
 
 - `Gemfile.lock` には Linux のプラットフォーム（`x86_64-linux`・`aarch64-linux`）を含めている。macOS だけで `bundle lock` し直すと CodeBuild の `bundle install` が失敗するので、プラットフォームを消さない
 - ネイティブ拡張（`bigdecimal`）のビルドに C コンパイラが必要。CodeBuild の標準イメージには入っている

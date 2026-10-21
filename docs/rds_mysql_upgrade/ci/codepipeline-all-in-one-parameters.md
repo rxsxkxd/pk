@@ -211,7 +211,7 @@ ENVIRONMENT_NAME=staging examples/rds-blue-green-deployment/pipeline-stack.sh do
 | パラメータ | 型 | 既定値 | 内容 |
 |---|---|---|---|
 | `EnvironmentName` | String | **(必須)** | `development` / `staging` / `production`。`config/blue-green/<この値>.yml` を読む。リソース名にも入る |
-| `PipelineNamePrefix` | String | `rds-bg` | CodePipeline・CodeBuild・IAM ロール名の共通接頭辞 |
+| `PipelineNamePrefix` | String | `rds-bg` | CodePipeline・CodeBuild・IAM ロール名の共通接頭辞。**英小文字・数字・ハイフンの 13 文字以内**（自動作成するバケット名を S3 の上限 63 文字に収めるため） |
 | `DefaultServiceName` | String | `example-service` | 対象サービスの既定値。実行時に `--variables name=ServiceName,value=...` で上書きできる |
 | `ArtifactBucketName` | String | `''` | **空ならバケットを新規作成する。**名前は `<Prefix>-<Env>-artifacts-<AccountId>-<Region>`。既存名を渡すとスタックはバケットに触らない |
 | `ArtifactRetentionDays` | Number | `90` | 新規作成したバケットでアーティファクトを保持する日数（1〜3650）。既存バケット指定時は使わない |

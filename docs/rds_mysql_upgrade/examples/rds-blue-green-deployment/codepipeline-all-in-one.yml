@@ -39,117 +39,171 @@ Parameters:
   PipelineNamePrefix:
     Type: String
     Default: rds-bg
-    Description: 生成するリソース名の接頭辞。
+    # 自動作成するアーティファクトバケット名（S3 の上限 63 文字）に収める。
+    # 接頭辞以外の部分は最長 50 文字（-development-artifacts-<12 桁>-<14 文字のリージョン>）。
+    MaxLength: 13
+    AllowedPattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+    # 英小文字・数字・ハイフンの 13 文字以内（先頭と末尾は英小文字か数字）。
+    ConstraintDescription: Up to 13 lowercase letters, digits, or hyphens (must start and end with a letter or digit).
+    # 生成するリソース名の接頭辞。アーティファクトバケット名にも入るため、
+    # 英小文字・数字・ハイフンの 13 文字以内。
+    Description: >-
+      Prefix for generated resource names. Because it is also part of the artifact
+      bucket name, use up to 13 lowercase letters, digits, or hyphens.
 
   EnvironmentName:
     Type: String
     AllowedValues: [development, staging, production]
+    # 対象環境。config/blue-green/<環境>.yml を CONFIG_FILE として使う
+    # （リポジトリにそのファイルが無いと、パイプラインの最初の CodeBuild で失敗する）。
     Description: >-
-      対象環境。config/blue-green/<環境>.yml を CONFIG_FILE として使う
-      （リポジトリにそのファイルが無いと、パイプラインの最初の CodeBuild で失敗する）。
+      Target environment. config/blue-green/<environment>.yml is used as CONFIG_FILE
+      (if the file is missing from the repository, the first CodeBuild in the pipeline fails).
 
   DefaultServiceName:
     Type: String
     Default: example-service
+    # SERVICE_NAME の既定値。パイプライン実行時に --variables で上書きできる。
+    # config の services 配下に定義したサービス名を指定する。
     Description: >-
-      SERVICE_NAME の既定値。パイプライン実行時に --variables で上書きできる。
-      config の services 配下に定義したサービス名を指定する。
+      Default value of SERVICE_NAME. Can be overridden with --variables when starting
+      the pipeline. Specify a service name defined under services in the config.
 
   ArtifactBucketName:
     Type: String
     Default: ''
+    # CodePipeline のソースおよび各 Step の成果物を保存する S3 バケット名。
+    # **空にするとこのスタックが新規作成する**（名前は
+    # <PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>）。
+    # 既存バケット名を指定した場合は、このスタックはバケットおよび
+    # バケットポリシーを作成・変更・削除しない。同一リージョンであること。
     Description: >-
-      CodePipeline のソースおよび各 Step の成果物を保存する S3 バケット名。
-      **空にするとこのスタックが新規作成する**（名前は
-      <PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>）。
-      既存バケット名を指定した場合は、このスタックはバケットおよび
-      バケットポリシーを作成・変更・削除しない。同一リージョンであること。
+      S3 bucket that stores the CodePipeline source and the artifacts of each step.
+      If empty, this stack creates a new bucket (named
+      <PipelineNamePrefix>-<EnvironmentName>-artifacts-<AccountId>-<Region>).
+      If an existing bucket name is given, this stack does not create, modify, or
+      delete the bucket or its bucket policy. The bucket must be in the same region.
 
   ArtifactRetentionDays:
     Type: Number
     Default: 90
     MinValue: 1
     MaxValue: 3650
+    # 新規作成するバケットで、アーティファクトを保持する日数。経過後は失効させる。
+    # アーティファクトは使い捨てだが、移行作業の記録（レポート、収集した JSON）が
+    # 入るため短くしすぎない。ArtifactBucketName を指定した場合は使わない。
     Description: >-
-      新規作成するバケットで、アーティファクトを保持する日数。経過後は失効させる。
-      アーティファクトは使い捨てだが、移行作業の記録（レポート、収集した JSON）が
-      入るため短くしすぎない。ArtifactBucketName を指定した場合は使わない。
+      Number of days to keep artifacts in the newly created bucket; they expire afterwards.
+      Artifacts are disposable but include records of the migration (reports, collected
+      JSON), so do not make this too short. Not used when ArtifactBucketName is given.
 
   SourceProvider:
     Type: String
     Default: CodeConnections
     AllowedValues: [CodeConnections, CodeCommit]
+    # ソースの取得元。CodeConnections なら GitHub（CodeStarConnectionArn と
+    # RepositoryId を使う）、CodeCommit なら CodeCommitRepositoryName を使う。
+    # 選ばなかった側のパラメータは無視される。
     Description: >-
-      ソースの取得元。CodeConnections なら GitHub（CodeStarConnectionArn と
-      RepositoryId を使う）、CodeCommit なら CodeCommitRepositoryName を使う。
-      選ばなかった側のパラメータは無視される。
+      Where to fetch the source from. CodeConnections uses GitHub (CodeStarConnectionArn
+      and RepositoryId); CodeCommit uses CodeCommitRepositoryName.
+      Parameters for the provider not selected are ignored.
 
   CodeStarConnectionArn:
     Type: String
     # 仮置き。事前に GitHub と接続して AVAILABLE にした接続の ARN へ置き換える。
     Default: arn:aws:codeconnections:ap-northeast-1:123456789012:connection/00000000-0000-0000-0000-000000000000
+    # CodeConnections（GitHub）の接続 ARN。事前に AVAILABLE にしておく。
+    # SourceProvider=CodeConnections のときだけ使う。
     Description: >-
-      CodeConnections（GitHub）の接続 ARN。事前に AVAILABLE にしておく。
-      SourceProvider=CodeConnections のときだけ使う。
+      ARN of the CodeConnections (GitHub) connection. It must be AVAILABLE beforehand.
+      Used only when SourceProvider=CodeConnections.
 
   RepositoryId:
     Type: String
     # 仮置き。
     Default: your-org/your-repository
+    # GitHub リポジトリ（owner/repo）。SourceProvider=CodeConnections のときだけ使う。
     Description: >-
-      GitHub リポジトリ（owner/repo）。SourceProvider=CodeConnections のときだけ使う。
+      GitHub repository (owner/repo). Used only when SourceProvider=CodeConnections.
 
   CodeCommitRepositoryName:
     Type: String
     Default: ''
+    # CodeCommit のリポジトリ名。SourceProvider=CodeCommit のときは必須である。
     Description: >-
-      CodeCommit のリポジトリ名。SourceProvider=CodeCommit のときは必須である。
+      CodeCommit repository name. Required when SourceProvider=CodeCommit.
 
   MySqlCredentialsKmsKeyArn:
     Type: String
     Default: ''
+    # 上記 SecureString を暗号化しているカスタマー管理キー（CMK）の ARN。
+    # **AWS 管理キー（alias/aws/ssm）なら空のままでよい**
+    # （SSM が代理で復号するため、呼び出し側に kms:Decrypt は要らない）。
+    # CMK の場合は指定する。指定すると VerifyGreen のロールへ、そのキーに限った
+    # kms:Decrypt を kms:ViaService=ssm.<region>.amazonaws.com 条件付きで付与する。
+    # どちらのキーを使っているかは次で確認できる。
+    # aws ssm describe-parameters --parameter-filters
+    # "Key=Name,Values=<パラメータ名>" --query 'Parameters[0].KeyId'
+    # （alias/aws/ssm なら AWS 管理キー、キー ID / ARN が返れば CMK）
+    # **注意: KMS は IAM ポリシーとキーポリシーの両方で許可されて初めて通る。**
+    # キーはこのスタックの外にあるため、キーポリシー側の許可はテンプレートでは
+    # 設定できない。キーポリシーがアカウントのルートへ委任する標準の形なら
+    # この指定だけで足りるが、principal を絞っている場合は VerifyGreen の
+    # ロールをキーポリシーへ手で追記する必要がある。
     Description: >-
-      上記 SecureString を暗号化しているカスタマー管理キー（CMK）の ARN。
-      **AWS 管理キー（alias/aws/ssm）なら空のままでよい**
-      （SSM が代理で復号するため、呼び出し側に kms:Decrypt は要らない）。
-      CMK の場合は指定する。指定すると VerifyGreen のロールへ、そのキーに限った
-      kms:Decrypt を kms:ViaService=ssm.<region>.amazonaws.com 条件付きで付与する。
-      どちらのキーを使っているかは次で確認できる。
+      ARN of the customer managed key (CMK) that encrypts the SecureString parameters
+      (see MySqlCredentialsParameterPath). Leave empty for the AWS managed key
+      (alias/aws/ssm): SSM decrypts on the caller's behalf, so kms:Decrypt is not needed.
+      Specify it for a CMK; the VerifyGreen role then gets kms:Decrypt on that key only,
+      with the condition kms:ViaService=ssm.<region>.amazonaws.com.
+      Check which key is used with:
       aws ssm describe-parameters --parameter-filters
-      "Key=Name,Values=<パラメータ名>" --query 'Parameters[0].KeyId'
-      （alias/aws/ssm なら AWS 管理キー、キー ID / ARN が返れば CMK）
-      **注意: KMS は IAM ポリシーとキーポリシーの両方で許可されて初めて通る。**
-      キーはこのスタックの外にあるため、キーポリシー側の許可はテンプレートでは
-      設定できない。キーポリシーがアカウントのルートへ委任する標準の形なら
-      この指定だけで足りるが、principal を絞っている場合は VerifyGreen の
-      ロールをキーポリシーへ手で追記する必要がある。
+      "Key=Name,Values=<parameter name>" --query 'Parameters[0].KeyId'
+      (alias/aws/ssm means the AWS managed key; a key ID / ARN means a CMK).
+      NOTE: KMS requires both the IAM policy and the key policy to allow access.
+      The key is outside this stack, so the template cannot set the key policy.
+      If the key policy delegates to the account root (the default form), this is enough;
+      if it restricts principals, add the VerifyGreen role to the key policy manually.
 
   RdsMonitoringRoleName:
     Type: String
     Default: rds-monitoring-role
+    # 移行元 DB の拡張モニタリング（Enhanced Monitoring）が使っている IAM ロール名。
+    # Blue/Green 作成時に RDS が Green へこの設定をコピーするため、BuildGreen の
+    # 実行ロールに iam:PassRole が必要になる。移行元で拡張モニタリングを使って
+    # いない場合は空文字にしてよい（その場合この権限は付かない）。
+    # 移行元の設定は次で確認できる。
+    # aws rds describe-db-instances --db-instance-identifier <blue-id>
+    # --query 'DBInstances[0].[MonitoringInterval,MonitoringRoleArn]'
     Description: >-
-      移行元 DB の拡張モニタリング（Enhanced Monitoring）が使っている IAM ロール名。
-      Blue/Green 作成時に RDS が Green へこの設定をコピーするため、BuildGreen の
-      実行ロールに iam:PassRole が必要になる。移行元で拡張モニタリングを使って
-      いない場合は空文字にしてよい（その場合この権限は付かない）。
-      移行元の設定は次で確認できる。
+      IAM role name used by Enhanced Monitoring on the source DB. RDS copies this setting
+      to Green when creating the Blue/Green deployment, so the BuildGreen role needs
+      iam:PassRole. Leave empty if the source does not use Enhanced Monitoring
+      (the permission is then not granted).
+      Check the source setting with:
       aws rds describe-db-instances --db-instance-identifier <blue-id>
       --query 'DBInstances[0].[MonitoringInterval,MonitoringRoleArn]'
 
   BranchName:
     Type: String
     Default: main
-    Description: ソースとして取得するブランチ。
+    # ソースとして取得するブランチ。
+    Description: Branch to fetch as the source.
 
   CollectMySqlRuntimeValues:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
+    # Step 4 で Green DB へ MySQL 接続し実効値を収集するか。
+    # true にする場合は VpcId 以下を指定して VerifyGreen を RDS へ到達できる
+    # subnet へ配置する。**カスタムイメージは要らない。**収集は BuildReportTool が
+    # ビルドする静的リンクの Go バイナリが行い、MySQL クライアントを使わない。
     Description: >-
-      Step 4 で Green DB へ MySQL 接続し実効値を収集するか。
-      true にする場合は VpcId 以下を指定して VerifyGreen を RDS へ到達できる
-      subnet へ配置する。**カスタムイメージは要らない。**収集は BuildReportTool が
-      ビルドする静的リンクの Go バイナリが行い、MySQL クライアントを使わない。
+      Whether Step 4 connects to the Green DB over MySQL to collect effective values.
+      If true, set VpcId and the following parameters so that VerifyGreen runs in a subnet
+      that can reach RDS. No custom image is needed: collection is done by a statically
+      linked Go binary built by BuildReportTool, without a MySQL client.
 
   # Step 4 の 2 つのプロジェクトを配置する VPC。**両方とも同一 VPC 内に置く。**
   # レポート実行（VerifyGreen）は専用のサブネットへ隔離し、そこには外部経路を置かない。
@@ -159,27 +213,37 @@ Parameters:
   VpcId:
     Type: String
     Default: ''
+    # VerifyGreen（Step 4 の検証実行）を配置する VPC。空なら VPC 外で実行する
+    # （その場合 Green DB へは接続できない）。
+    # **BuildReportTool はここに入れない。**Go ビルドは AWS API も RDS も呼ばず、
+    # Go module の取得で外部へ出るだけなので、他の VPC 外プロジェクトと揃える。
     Description: >-
-      VerifyGreen（Step 4 の検証実行）を配置する VPC。空なら VPC 外で実行する
-      （その場合 Green DB へは接続できない）。
-      **BuildReportTool はここに入れない。**Go ビルドは AWS API も RDS も呼ばず、
-      Go module の取得で外部へ出るだけなので、他の VPC 外プロジェクトと揃える。
+      VPC in which VerifyGreen (the Step 4 verification run) is placed. If empty, it runs
+      outside a VPC (and cannot connect to the Green DB).
+      BuildReportTool is not placed here: the Go build calls neither AWS APIs nor RDS and
+      only goes out to fetch Go modules, so it stays outside the VPC like the other projects.
 
   VerifyGreenSubnetIds:
     Type: CommaDelimitedList
     Default: ''
+    # **レポート実行（VerifyGreen）専用の private subnet。**RDS へ到達できること。
+    # 外部経路を持たせないため、他の用途と共有せず専用に用意する。
+    # 障害耐性のため 2 アベイラビリティゾーン以上を推奨する。**外部 egress は不要**で、その場合は
+    # s3／logs／rds／monitoring／ssm の VPC endpoint を用意する。
     Description: >-
-      **レポート実行（VerifyGreen）専用の private subnet。**RDS へ到達できること。
-      外部経路を持たせないため、他の用途と共有せず専用に用意する。
-      障害耐性のため 2 アベイラビリティゾーン以上を推奨する。**外部 egress は不要**で、その場合は
-      s3／logs／rds／monitoring／ssm の VPC endpoint を用意する。
+      Private subnets dedicated to the report run (VerifyGreen). They must reach RDS.
+      To keep them without an outbound route, do not share them with other uses.
+      Two or more Availability Zones are recommended for resilience. No external egress
+      is needed; provide VPC endpoints for s3, logs, rds, monitoring, and ssm instead.
 
   VerifyGreenSecurityGroupIds:
     Type: CommaDelimitedList
     Default: ''
+    # VerifyGreen に付けるセキュリティグループ。RDS 側の inbound でこの SG からの
+    # 3306/tcp を許可する。
     Description: >-
-      VerifyGreen に付けるセキュリティグループ。RDS 側の inbound でこの SG からの
-      3306/tcp を許可する。
+      Security groups attached to VerifyGreen. Allow inbound 3306/tcp from these
+      security groups on the RDS side.
 
   MySqlCredentialsParameterPath:
     Type: String
@@ -187,41 +251,64 @@ Parameters:
     # 先頭の / は必須、末尾の / は付けない。パラメータ ARN は
     # arn:...:parameter/<階層> の形で、名前の先頭 / がそのまま ARN の区切りになるため。
     AllowedPattern: '^$|^/[A-Za-z0-9_.\-/]*[A-Za-z0-9_.\-]$'
+    # / で始まり / で終わらない SSM パラメータの階層を指定する（例: /rds-bg/staging）。
     ConstraintDescription: >-
-      / で始まり / で終わらない SSM パラメータの階層を指定する（例: /rds-bg/staging）。
+      Specify an SSM parameter hierarchy that starts with / and does not end with / (e.g. /rds-bg/staging).
+    # VerifyGreen へ ssm:GetParameter を許可する SSM パラメータ（SecureString）の**階層**。
+    # 例: /rds-bg/staging → /rds-bg/staging/ 配下のパラメータをすべて読める。
+    # **これは IAM の許可範囲であり、読むパラメータ名を決めるものではない。**
+    # どのパラメータを読むかは config/blue-green/<env>.yml の
+    # services.<name>.mysql_verification（parameter_name / user_parameter_name）が決める。
+    # パイプラインは環境ごとに 1 本でサービスは実行時に切り替えるため、
+    # **その環境の全サービスのパラメータをこの階層の下に置く。**
+    # サービスを増やしてもスタックの更新は要らない。
+    # **この階層には移行作業用のパラメータだけを置く**（配下すべてが読めるため）。
+    # 空なら Parameter Store の読み取り権限を付与しない。
+    # 暗号化がカスタマー管理キー（CMK）の場合は MySqlCredentialsKmsKeyArn も渡す。
     Description: >-
-      VerifyGreen へ ssm:GetParameter を許可する SSM パラメータ（SecureString）の**階層**。
-      例: /rds-bg/staging → /rds-bg/staging/ 配下のパラメータをすべて読める。
-      **これは IAM の許可範囲であり、読むパラメータ名を決めるものではない。**
-      どのパラメータを読むかは config/blue-green/<env>.yml の
-      services.<name>.mysql_verification（parameter_name / user_parameter_name）が決める。
-      パイプラインは環境ごとに 1 本でサービスは実行時に切り替えるため、
-      **その環境の全サービスのパラメータをこの階層の下に置く。**
-      サービスを増やしてもスタックの更新は要らない。
-      **この階層には移行作業用のパラメータだけを置く**（配下すべてが読めるため）。
-      空なら Parameter Store の読み取り権限を付与しない。
-      暗号化がカスタマー管理キー（CMK）の場合は MySqlCredentialsKmsKeyArn も渡す。
+      Hierarchy of SSM parameters (SecureString) that VerifyGreen is allowed to read with
+      ssm:GetParameter. Example: /rds-bg/staging allows reading every parameter under
+      /rds-bg/staging/. This is the IAM permission scope, not the parameter names to read;
+      those are set by services.<name>.mysql_verification (parameter_name /
+      user_parameter_name) in config/blue-green/<env>.yml.
+      There is one pipeline per environment and the service is chosen at run time, so put
+      the parameters of every service in that environment under this hierarchy; adding
+      services needs no stack update. Put only migration parameters here, because
+      everything under it is readable. If empty, no Parameter Store read permission is
+      granted. If the parameters are encrypted with a CMK, also set MySqlCredentialsKmsKeyArn.
 
   ApprovalNotificationTopicArn:
     Type: String
     Default: ''
-    Description: 手動承認の通知先 SNS トピック ARN。空なら通知しない。
+    # 手動承認の通知先 SNS トピック ARN。空なら通知しない。
+    Description: SNS topic ARN notified for manual approvals. If empty, no notification is sent.
 
   ProtectedRdsResourceArns:
     Type: CommaDelimitedList
     Default: ''
+    # RDS の変更権限（保護スナップショットの作成）の対象を絞る ARN。
+    # **複数指定できる。**移行対象が複数ある場合は全部を列挙する。
+    # 対象は db と snapshot の 2 種類で、**両方を入れること**
+    # （snapshot を忘れると保護スナップショットの作成が AccessDenied で失敗する）。
+    # 例（1 サービス分。カンマ区切りで続けて書く）:
+    # arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging*,
+    # arn:aws:rds:ap-northeast-1:123456789012:snapshot:example-service-staging*
+    # 空にすると、このアカウント・このリージョンの db:* と snapshot:* になる
+    # （種類とアカウントとリージョンでは絞られるが、識別子では絞られない）。
+    # '*' 1 つだけを渡すこともできる——動作はするが**全リソースが対象になるため
+    # 推奨しない**。実運用では識別子まで絞る。
     Description: >-
-      RDS の変更権限（保護スナップショットの作成）の対象を絞る ARN。
-      **複数指定できる。**移行対象が複数ある場合は全部を列挙する。
-      対象は db と snapshot の 2 種類で、**両方を入れること**
-      （snapshot を忘れると保護スナップショットの作成が AccessDenied で失敗する）。
-      例（1 サービス分。カンマ区切りで続けて書く）:
+      ARNs that scope the RDS write permission (creating the protection snapshot).
+      Multiple values are allowed; list every migration target.
+      Include both kinds, db and snapshot (without snapshot, creating the protection
+      snapshot fails with AccessDenied).
+      Example (one service; continue comma-separated):
       arn:aws:rds:ap-northeast-1:123456789012:db:example-service-staging*,
       arn:aws:rds:ap-northeast-1:123456789012:snapshot:example-service-staging*
-      空にすると、このアカウント・このリージョンの db:* と snapshot:* になる
-      （種類とアカウントとリージョンでは絞られるが、識別子では絞られない）。
-      '*' 1 つだけを渡すこともできる——動作はするが**全リソースが対象になるため
-      推奨しない**。実運用では識別子まで絞る。
+      If empty, db:* and snapshot:* in this account and region are used (scoped by type,
+      account, and region, but not by identifier).
+      A single '*' also works but covers all resources and is not recommended;
+      in production, scope down to identifiers.
 
 Conditions:
   # ソースの取得元を切り替える。Source アクションと、CodePipeline ロールへ

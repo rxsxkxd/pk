@@ -145,11 +145,11 @@ run_build "$config"; expect '新規・パラメータグループが 8.4 でな�
 make_fake not80
 set_source 5.7.44 "$spg"
 run_build; expect '新規・移行元が 8.0 でない: フェーズガードで止める' $? 1 no no 'いずれの宣言とも一致しない'
-# 設定まで 5.7 と宣言していればフェーズガードは通る。作成前の検査が 2 段目として止めること。
+# 移行元の版は設定の source_engine_version から取る（8.0 の決め打ちではない）。宣言と実体が一致していれば作成へ進む。
 sed "s/source_engine_version: .*/source_engine_version: \"5.7\"/" "$config" > "$work/config-57.yml"
 make_fake not80-declared
 set_source 5.7.44 "$spg"
-run_build "$work/config-57.yml"; expect '新規・設定も 5.7: 作成前の検査で止める' $? 1 no no 'must be MySQL 8.0'
+run_build "$work/config-57.yml"; expect '新規・設定も 5.7: 宣言どおりなので作成する' $? 0 yes yes 'Created Blue/Green Deployment: bgd-new'
 
 make_fake new-fails; printf 'PROVISIONING\nINVALID_CONFIGURATION\n' > "$fake/statuses"
 run_build; expect '新規作成後に失敗: 止める' $? 1 yes yes 'did not become available'

@@ -108,7 +108,7 @@ Step 4 は Go レポート生成器を先にビルドし、`GREEN_REPORT_GENERAT
 
 CodeBuild のイメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定）が必要なツールチェーンを取得する。VPC 内で実行する場合は、その取得経路も確保する。Ruby ランタイムは CodeBuild に不要である。
 
-各 buildspec は設定 YAML を読むために、install フェーズで `rbenv local 3.4.10` を実行して Ruby を選ぶ（CodeBuild image 同梱の rbenv を使う。`rbenv` が無い環境では何もしない）。**YAML / JSON は Ruby の標準ライブラリなので、パッケージの追加導入は無く、PyPI へも到達しない。**ローカルで Step 3・4・5 のスクリプトを実行する場合も、Ruby があれば追加作業は要らない。
+各 buildspec は設定 YAML を読むために、install フェーズで `rbenv local 3.4.11` を実行して Ruby を選ぶ（CodeBuild image 同梱の rbenv を使う。`rbenv` が無い環境では何もしない）。**YAML / JSON は Ruby の標準ライブラリなので、パッケージの追加導入は無く、PyPI へも到達しない。**ローカルで Step 3・4・5 のスクリプトを実行する場合も、Ruby があれば追加作業は要らない。
 
 設定 YAML の読み取りは `scripts/lib/deployment_config.rb` が **Ruby の標準ライブラリ（psych）**で行い、各スクリプトは取り出す項目だけを宣言する（`変数名=種別:パス[=既定値]`）。AWS CLI の応答（JSON）も Ruby の標準ライブラリ（json）で読むので、**jq は使わない**。ローカル実行に要るのは Ruby と AWS CLI だけである。
 

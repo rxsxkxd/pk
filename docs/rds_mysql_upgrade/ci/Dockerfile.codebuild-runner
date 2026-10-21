@@ -5,7 +5,7 @@ FROM public.ecr.aws/aws-cli/aws-cli:2.37.9 AS aws-cli
 
 # 設定 YAML の読み取りに使う Ruby。compose.yaml の ruby サービスと同じ版で固定する。
 # YAML / JSON はどちらも標準ライブラリなので、追加パッケージの導入は要らない。
-FROM ruby:3.4.10-slim-bookworm
+FROM ruby:3.4.11-slim-bookworm
 
 # Shell scripts、JSON 読み取り（jq）、apt による任意の mysql-client 導入、TLS、
 # Docker CLI 実行に必要な最小パッケージ。

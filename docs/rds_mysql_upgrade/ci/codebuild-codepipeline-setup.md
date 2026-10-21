@@ -37,9 +37,9 @@ AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS �
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
-| BuildGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 3 を実行 |
-| VerifyGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` と `runtime-versions: golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | BuildReportTool がビルドした Go バイナリを受け取り、Ruby スクリプトから実行 |
-| Switchover | `aws/codebuild/standard:7.0` | `rbenv local 3.4.10` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 5 を実行 |
+| BuildGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.11` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 3 を実行 |
+| VerifyGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.11` と `runtime-versions: golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | BuildReportTool がビルドした Go バイナリを受け取り、Ruby スクリプトから実行 |
+| Switchover | `aws/codebuild/standard:7.0` | `rbenv local 3.4.11` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 5 を実行 |
 
 ### 共通コンテナ
 
@@ -48,17 +48,17 @@ AWS 用と Local Agent 用で buildspec を分けない。**設定 YAML の読�
 ```yaml
   install:
     commands:
-      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.10; fi
+      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.11; fi
       - ruby --version
 ```
 
 `rbenv` が無い環境（Local Agent 用のランナー image は Ruby を固定済み）では何もしない。YAML / JSON は Ruby の標準ライブラリなので、install フェーズでのパッケージ導入は無い（PyPI へも到達しない）。
 
-**`rbenv local` は cwd（`CODEBUILD_SRC_DIR`）へ `.ruby-version` を書く。**ローカルで buildspec を試すと作業ツリーにこのファイルが残るため `.gitignore` 済みである。ファイルを作らせたくない場合は `export RBENV_VERSION=3.4.10` でも同じ効果になる。
+**`rbenv local` は cwd（`CODEBUILD_SRC_DIR`）へ `.ruby-version` を書く。**ローカルで buildspec を試すと作業ツリーにこのファイルが残るため `.gitignore` 済みである。ファイルを作らせたくない場合は `export RBENV_VERSION=3.4.11` でも同じ効果になる。
 
 VerifyGreen だけは `runtime-versions: golang: 1.25` を指定する。Docker を使わずに Go レポート生成器を同一イメージ内でビルドするためである。
 
-> **指定したバージョンが image に無ければ、`rbenv local` はその場で失敗する**（`rbenv: version '3.4.10' not installed`）。別の Ruby で黙って動くより安全側である。利用できる版は `rbenv versions` で確認する。`golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブを image が提供するバージョンへ下げる。
+> **指定したバージョンが image に無ければ、`rbenv local` はその場で失敗する**（`rbenv: version '3.4.11' not installed`）。別の Ruby で黙って動くより安全側である。利用できる版は `rbenv versions` で確認する。`golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブを image が提供するバージョンへ下げる。
 
 ```bash
 ruby --version   # YAML / JSON は標準ライブラリなので追加導入は無い

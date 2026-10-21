@@ -86,6 +86,7 @@ begin
   service = config.service(options[:service])
   build = service.optional('actions.build', 'pending')
   source_db_instance_identifier = service.required('source_db_instance_identifier')
+  source_engine_version = service.required('source_engine_version')
   snapshot_identifier = service.required('protection_snapshot_identifier')
   target_engine_version = service.required('target_engine_version')
   target_db_instance_class = service.required('target_db_instance_class')
@@ -195,13 +196,13 @@ begin
   end
 
   # --- ここから新規作成 ------------------------------------------------------
-  # [作成前・読み取り] 移行元が 8.0 の MySQL であることを確かめる。
+  # [作成前・読み取り] 移行元が設定の source_engine_version（major.minor で比較）の MySQL であることを確かめる。
   unless instance['Engine'] == 'mysql'
     warn "Source DB engine must be mysql: #{instance['Engine']}"
     exit 1
   end
-  unless instance['EngineVersion'].to_s.start_with?('8.0.')
-    warn "Source DB engine must be MySQL 8.0: #{instance['EngineVersion']}"
+  unless MigrationPhase.major_minor(instance['EngineVersion']) == MigrationPhase.major_minor(source_engine_version)
+    warn "Source DB engine must be MySQL #{source_engine_version}: #{instance['EngineVersion']}"
     exit 1
   end
 

@@ -49,7 +49,7 @@ FROM public.ecr.aws/aws-cli/aws-cli:2.37.9 AS aws-cli
 
 # 設定 YAML の読み取りに使う Ruby。compose.yaml と同じ版で固定する。
 # YAML / JSON はどちらも標準ライブラリなので gem の追加導入は要らない。
-FROM ruby:3.4.10-slim-bookworm
+FROM ruby:3.4.11-slim-bookworm
 
 # シェルスクリプトの実行、JSON 読み取り（jq）、MySQL 接続、TLS に必要な最小パッケージ。
 # default-mysql-client は MariaDB 由来だが、performance_schema の参照と

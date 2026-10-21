@@ -49,7 +49,7 @@ jq と Python は使わない。
 | Step | 実行形態 | 補足 |
 |---|---|---|
 | 1・2・7 | ローカル | Go + AWS CLI（MySQL 側の確認は mysql / mysqlsh）。コンテナ経由（`compose.yaml`）を推奨 |
-| 3・5 | CI | Ruby + AWS CLI。CodeBuild は install フェーズの `rbenv local 3.4.10`、GitHub Actions はランナー同梱の Ruby、Local Agent は `ci/Dockerfile.codebuild-runner` |
+| 3・5 | CI | Ruby + AWS CLI。CodeBuild は install フェーズの `rbenv local 3.4.11`、GitHub Actions はランナー同梱の Ruby、Local Agent は `ci/Dockerfile.codebuild-runner` |
 | 4 | CI（構成確認）＋ローカル（DB 接続を伴う確認） | **リモートで MySQL へ到達できない構成もありうる**（VPC 構成が別途必要）。その場合は MySQL 接続とレポート出力をローカルで完結させる。判定器は同じプログラムで、`--runtime-values` の有無だけが違う。詳細は [decisions/implementation-language-policy.md](../decisions/implementation-language-policy.md) |
 
 ## 補足: YAML は Ruby で読む

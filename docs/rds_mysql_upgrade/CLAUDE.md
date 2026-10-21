@@ -83,4 +83,4 @@ grep -nP '\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]' scripts/*.sh tests/*.sh   # `$VA
 
 - `.env`、`ci/.act.env`、`aws-config/*`、`global-bundle.pem` は `.gitignore` 済み。`my.cnf` は空プレースホルダとして追跡しており、実接続情報を書き込んで commit しない。
 - ドキュメント間の相互参照が密である。Step の分割や実行形態を変えたら `docs/upgrade-flow-steps.md`（パスのみ）・`ci/README.md`・`tools/README.md`・`examples/*/README.md`・該当 `docs/phase-*.md` を揃えて更新する。
-- コンテナイメージは `latest` を使わない。AWS CLI・MySQL・Ruby はパッチまで、Go はマイナーまで固定し、Ruby は `ruby:3.4.10-slim-bookworm` に統一する。
+- コンテナイメージは `latest` を使わない。AWS CLI・MySQL・Ruby はパッチまで、Go はマイナーまで固定し、Ruby は `ruby:3.4.11-slim-bookworm` と CodeBuild の `rbenv local 3.4.11` に統一する。

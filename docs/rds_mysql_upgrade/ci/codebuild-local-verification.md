@@ -56,7 +56,7 @@ docker pull --platform linux/amd64 public.ecr.aws/codebuild/local-builds:latest
 docker pull --platform linux/arm64 public.ecr.aws/codebuild/local-builds:aarch64
 
 # x86_64 用: Local Agent 専用の軽量実行 image を作成する。
-# Ruby 3.4.10（YAML/JSON は標準ライブラリ）、jq、AWS CLI v2、Docker CLI/Buildx を含む。
+# Ruby 3.4.11（YAML/JSON は標準ライブラリ）、jq、AWS CLI v2、Docker CLI/Buildx を含む。
 docker build \
   --platform linux/amd64 \
   --tag rds-codebuild-runner:local-amd64 \

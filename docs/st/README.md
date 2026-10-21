@@ -27,3 +27,5 @@
 ## 未対応事項
 
 確かめていないこと・実装していないこと・決めること・保留していることは、[OPEN_ITEMS.md](OPEN_ITEMS.md) にまとめている。
+
+Go などのバージョンの更新の手順は、[MAINTENANCE.md](MAINTENANCE.md) にまとめている。

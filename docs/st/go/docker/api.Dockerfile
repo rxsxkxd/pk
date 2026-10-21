@@ -3,7 +3,7 @@
 # target: api-go or api-node.
 
 # --- Go: the deployment bootstrap (same flags as go/Makefile) and the gateway ---
-FROM golang:1.27.1 AS go-build
+FROM golang:1.27.3 AS go-build
 WORKDIR /src/go
 COPY go/go.mod go/go.sum ./
 RUN go mod download

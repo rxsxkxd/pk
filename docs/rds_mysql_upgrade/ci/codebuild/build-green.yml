@@ -14,6 +14,13 @@ phases:
       # Local Agent 用のランナー image は rbenv を持たず Ruby を固定済みなので何もしない。
       - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.11; fi
       - ruby --version
+      # scripts/lib/aws_cli.rb が exec する AWS CLI の版を記録する。Python/x.y.z は AWS CLI 同梱の Python。
+      - aws --version
+      # 比較用。イメージにプリインストールの Python（AWS CLI はこれを使わない）。無ければ表示しないだけ。
+      - python3 --version || true
+      # AWS CLI が使う CA バンドル。AWS_CA_BUNDLE が空なら同梱の cacert.pem（OS の証明書ストアや certifi ではない）。
+      - echo "AWS_CA_BUNDLE=${AWS_CA_BUNDLE:-}"
+      - sha256sum /usr/local/aws-cli/v2/current/dist/awscli/botocore/cacert.pem || true
   build:
     commands:
       # 実行ビットに頼らず ruby へ明示的に渡す（CodePipeline の artifact で落ちうるため）。

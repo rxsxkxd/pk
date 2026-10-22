@@ -1,5 +1,7 @@
 # CI / CD 構成案（CI は GitHub Actions、CD は CodePipeline / CodeBuild）
 
+> **採用した形（2026-10-22）**: master への push で CodePipeline が動き、CodeBuild がソースから単体テストとビルドを行い、デプロイは更新だけにした（[CD_PIPELINE.md](CD_PIPELINE.md)。P3 に近いが、タグではなく push で開始する）。以下は検討の記録。
+>
 > **状態**: 構成案。CI は今の CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。CI.md 4章）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
 >
 > 構成パターンは 0章で比較した。1〜9章は、そのうちパターン P1 の詳細。P3 を採る場合の差分は 0.4 にまとめた。

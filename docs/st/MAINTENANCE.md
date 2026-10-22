@@ -13,7 +13,8 @@
 | 5 | npm のライブラリ | - | `web/package.json`、`e2e/package.json`（`package-lock.json`） |
 | 6 | Python（Lambda） | `python3.13` | `infra/cloudformation/quota-guard.yaml`、`dummy-analyzer/template.yaml`、`github-template/workflows/ci.yml` の `python-version` |
 | 7 | Docker イメージ（E2E） | `golang:1.27.3`、`node:24`、`public.ecr.aws/lambda/provided:al2023`、`mcr.microsoft.com/playwright:v1.63.0-noble`、`dxflrs/garage:v2.4.1`、`alpine:3.22` | `go/docker/api.Dockerfile`、`e2e/docker/e2e.Dockerfile`、`web/docker/storage.Dockerfile` |
-| 8 | GitHub Actions | `actions/checkout@v7`、`actions/setup-go@v7` など | `github-template/workflows/*.yml` |
+| 8 | CodeBuild のイメージ（CD） | `aws/codebuild/amazonlinux-aarch64-standard:4.0`（Node.js 24、Go 1.26。Go は `GOTOOLCHAIN=auto` で `go.mod` の版を取る） | `infra/cloudformation/pipeline.yaml`、`cd/buildspec/test.yml` |
+| 9 | GitHub Actions | `actions/checkout@v7`、`actions/setup-go@v7` など | `github-template/workflows/*.yml` |
 
 Go のライブラリ（直接使っているもの）:
 

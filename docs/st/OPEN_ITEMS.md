@@ -18,6 +18,7 @@
 | 上限を超えた画像への API Gateway の応答 | Lambda まで届かない大きさ（約 4.5MB 超・10MB 超）のときのステータスと本文。結果を見て SPA の扱いを決める（3.3） | web/DEPLOY.md 12章、DESIGN.md 5章の経路ごとの上限の表 |
 | API Gateway HTTP API の HTTP/2 | execute-api のエンドポイントが HTTP/2 で応答するか（アップロードの進み具合を出す場合に要る。4章の保留） | web/DESIGN.md 2.3 |
 | AWS 上へのデプロイ | 次のものを AWS 上で動かしていない: SAM のテンプレート（API・スタブ・ダミーの解析サーバー）、ネットワークのテンプレート、CloudFront の統合の構成、発行の上限（quota-guard）、WAF の Web ACL、デプロイのワークフロー（`deploy.yml`） | infra/sam/README.md、infra/PROD_DEPLOY.md、notes/tickets-network.md 4.1、web/DEPLOY.md 3.2・13章、CI.md 4章、analyzer-stub/DESIGN.md 7章、dummy-analyzer/README.md |
+| CD パイプライン | `pipeline.yaml` のスタックを AWS 上で作っていない。CodeBuild の上で `GOTOOLCHAIN=auto` が `go.mod` の Go を取れること、GitHub との接続（CodeConnections）、Deploy の段の権限が足りることも未確認 | CD_PIPELINE.md 9章 |
 | GitHub 上での CI | ローカルの act でだけ流した（全ジョブ成功）。GitHub 上ではまだ動かしていない（専用のリポジトリへの push 前）。スタブの CI は act でも未確認 | CI.md 5章 |
 | 本番環境向けの検証 | PROD_VERIFICATION.md の手順（ダミーの解析サーバーを含む）を AWS 上で流していない | PROD_VERIFICATION.md、TEST_PROCEDURES.md |
 | テストの未実施の項目 | TEST_RESULT.md で実施日が空の項目 | TEST_RESULT.md、TEST_PROCEDURES.md |
@@ -37,8 +38,8 @@
 | Android の高画素の HEIF の案内 | 縮められず「大きすぎます」になったときに、撮り直しを案内する文言（案） | web/notes/image-compression.md 4.1.1 |
 | E2E のほかのケース | 画面遷移方式のケース1だけ。その場表示方式と、ほかのケース（CSRF など）、QR の中身の確認（デコードしてコードと照合）、解析サーバーのスタブを使う回、画像の縮小（4MB を超える写真）。E2E のブラウザ（Chromium）は最新の版で、古い iOS・Android の動きは再現しない。本番側の CloudFormation への CORS（`AllowedOrigins`）も | E2E.md 5章 |
 | AWS 環境に対するテスト | 計画だけで、コードはない（試験用の環境と認証情報がない） | aws-test/PLAN.md |
-| CD を CodePipeline / CodeBuild に移す | 構成案だけ | CD_CI.md |
-| CD を Lambda の zip と SPA のファイルの更新だけにする | 構成案だけ | CD_UPDATE_ONLY.md |
+| CD パイプラインの E2E の段 | 何もしない空のビルドを置いただけ。compose の E2E を CodeBuild で流すか、デプロイ後に本物の環境に対して流すか | CD_PIPELINE.md 6章 |
+| CD パイプラインの本番 | パイプラインは 1 つの環境（Dev 相当）だけ。本番の環境、承認の段、失敗の通知（SNS）はない | CD_PIPELINE.md、CD_CI.md 4.1・8章 |
 | デプロイのワークフロー（`deploy.yml`）の残り | example.com の QR のスタックはデプロイしない。画像解析サーバーは `mock` のまま（`AnalyzerMode=http` のパラメータを environment の変数で渡す形にする）。master への push で `dev` に自動でデプロイしない（今は手動だけ） | CI.md 4章 |
 | CI のキャッシュ | E2E の Docker イメージ（compose の `build.cache_from` / `cache_to` に `type=gha`）と、スタブ（Rust）のビルド（`actions/cache` で cargo のディレクトリ）をキャッシュしていない | CI.md 3.3 |
 
@@ -90,12 +91,11 @@
 
 | 項目 | 内容 | 関連 |
 |---|---|---|
-| CodePipeline の構成パターン | P3（タグで開始し、CodeBuild でパッケージを作り直す）か P1（CI で作って S3 に置く）か（推奨: P3） | CD_CI.md 0章 |
 | E2E をどこで流すか | GitHub Actions の模擬環境（E1）、AWS の本物に近い環境（E2）、両方（E3）（推奨: E3）。CI のトリガー（PR ごとか、変わったファイルで絞るか） | CD_CI.md 0.5、E2E.md 6章 |
 | 本番の環境 | 同じ AWS アカウントでスタック名を分けるか、別のアカウントにするか（推奨: 別のアカウント） | CD_CI.md |
 | Dev への反映 | master への push ごとに自動にするか（推奨: 自動） | CD_CI.md |
 | 承認者と通知先、リリースの記録を残す期間 | - | CD_CI.md |
-| CD を更新だけにするか | 今の「毎回スタックも更新」のままにするか。採るなら、構築を手作業にするか別のパイプラインにするか、Lambda の zip の場所の決まり（`current` と `releases/{SHA}`）、SPA の前の版を残す場所と量、構成のずれの見つけ方 | CD_UPDATE_ONLY.md |
+| CD の控えと構成のずれ | 控え（`releases/`・`web-releases/`）をいつまで残すか（今は消さない）、構築を別のパイプラインにするか（今は手順書）、テンプレートと実環境のずれの見つけ方 | CD_PIPELINE.md 4・7章、CD_UPDATE_ONLY.md 6・7章 |
 | AWS 環境に対するテスト | 試験用の環境を持つか（持たないなら A だけを本番のデプロイの後に流す）、C-7（1 秒あたりの上限に負荷をかける）を流すか、A-9 の期待値、WAF を入れたときの確認 | aws-test/PLAN.md |
 | E2E の方式の切り替えの基準 | RIE + ゲートウェイの方式が難しくなったら、ローカルモードに切り替える判断の基準 | E2E.md 2章 |
 
@@ -138,3 +138,4 @@
 | QR のペイロード | コード |
 | 入力画像の対応形式とサイズ上限 | JPEG / PNG / HEIC / HEIF / AVIF / WebP、4MiB |
 | IaC ツール | CloudFormation（と SAM） |
+| CD の構成（2026-10-22） | CodePipeline / CodeBuild。master への push で開始し、CodeBuild がソースから単体テストとビルドを行い、デプロイは Lambda のコードと SPA のファイルの差し替えだけ（CD_PIPELINE.md） |

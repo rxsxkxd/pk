@@ -1,5 +1,7 @@
 # CD を Lambda の zip と Web のファイルの更新だけにする構成案
 
+> **採用（2026-10-22）**: この案を CodePipeline / CodeBuild で実装した（[CD_PIPELINE.md](CD_PIPELINE.md)）。以下は考え方の記録。
+>
 > **状態**: 構成案（2026-10-15）。今の CD（[CI.md](CI.md) 4章の `deploy.yml`、[CD_CI.md](CD_CI.md) の CodePipeline / CodeBuild の案）は、デプロイのたびに CloudFormation のスタックの作成・更新と、ファイルの更新をまとめて行う。この文書は、それを **構築（CloudFormation）と更新（CD）に分ける** 別のパターン。今の CI.md・CD_CI.md・`deploy.yml` は変えていない。採るときに、それぞれをこの案に合わせて直す。
 
 ## 1. 考え方

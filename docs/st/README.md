@@ -29,3 +29,5 @@
 確かめていないこと・実装していないこと・決めること・保留していることは、[OPEN_ITEMS.md](OPEN_ITEMS.md) にまとめている。
 
 Go などのバージョンの更新の手順は、[MAINTENANCE.md](MAINTENANCE.md) にまとめている。
+
+CD（CodePipeline / CodeBuild。単体テスト → E2E → Lambda のコードと SPA のファイルの差し替え）は、[CD_PIPELINE.md](CD_PIPELINE.md) にまとめている。

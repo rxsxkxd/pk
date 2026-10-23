@@ -7,6 +7,7 @@ AWS アカウントの 1 リージョンにあるリソースを一覧にし、1
 | [`lambda-inventory/`](./lambda-inventory/README.md) | Lambda | 関数 | ランタイムとベース OS、設定、トリガー（ポリシーとイベントソースマッピング） |
 | [`ec2-inventory/`](./ec2-inventory/README.md) | EC2 | インスタンス | ベース OS（SSM の報告か AMI 名から）、AMI、IMDS、SSM の状態、ネットワーク |
 | [`ecs-inventory/`](./ecs-inventory/README.md) | ECS | サービス / コンテナインスタンス | タスク定義・イメージ・OS・アーキテクチャ、ロードバランサー、ホストのエージェントと AMI |
+| [`compute-inventory/`](./compute-inventory/README.md) | EC2 + ECS | インスタンス / サービス | 一覧（`snapshot`）と、絞り込んだ対象の詳細（`detail`）の 2 段階。数百台の環境向け。**作成中**で、できたら `ec2-inventory/` と `ecs-inventory/` を置き換える |
 
 ## 共通の方針
 

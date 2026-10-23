@@ -294,7 +294,7 @@ docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-c
 
 ## 6. GitHub Actions
 
-E2E は CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。専用のリポジトリでは `.github/workflows/ci.yml`）のジョブ `e2e` で動く。構成は [CI.md](CI.md) 3章。
+E2E は今、CI にも CD にも入っていない（2026-10-23）。CI（[ci/README.md](ci/README.md)）は単体テストだけで、CD の E2E の段（[cd/README.md](cd/README.md) 6章）は何もしない空のビルド。手元で流す手順は [E2E_RUN.md](E2E_RUN.md)。
 
 - SPA は `web` ジョブでビルドし、画面遷移方式（`page`）の成果物 `web-dist-page` を `e2e` ジョブに渡す（ほかの方式のビルドはデプロイ用）
 - `docker compose -f compose.e2e.yaml up --build --abort-on-container-exit --exit-code-from e2e` を実行する
@@ -311,4 +311,4 @@ E2E は CI のワークフロー（テンプレート `github-template/workflows
 
 これらは、検証用の AWS アカウントにデプロイし、同じ Playwright テストを `baseURL` と `config.json` だけ差し替えて流すことで確認する（`sam local start-api` も候補だが、中で Docker を起動するので、compose や CI では使いにくい）。
 
-この模擬環境の E2E と、AWS 上の本物に近い環境での E2E（パイプラインの中で CodeBuild から流す）をどう使い分けるかの評価は、[CD_CI.md](CD_CI.md) 0.5（推奨: 両方。PR は模擬環境、本番の承認の前は AWS）。
+この模擬環境の E2E と、AWS 上の本物に近い環境での E2E（パイプラインの中で CodeBuild から流す）をどう使い分けるかの評価は、[cd/PATTERNS.md](cd/PATTERNS.md) 0.5（推奨: 両方。PR は模擬環境、本番の承認の前は AWS）。

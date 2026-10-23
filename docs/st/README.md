@@ -30,4 +30,4 @@
 
 Go などのバージョンの更新の手順は、[MAINTENANCE.md](MAINTENANCE.md) にまとめている。
 
-CD（CodePipeline / CodeBuild。単体テスト → E2E → Lambda のコードと SPA のファイルの差し替え）は、[CD_PIPELINE.md](CD_PIPELINE.md) にまとめている。
+CD（CodePipeline / CodeBuild。単体テスト → E2E → Lambda のコードと SPA のファイルの差し替え）は、[cd/README.md](cd/README.md) にまとめている（CD のファイルはすべて `cd/`）。CI（GitHub Actions。コミットごとの単体テストだけ）は [ci/README.md](ci/README.md)。

@@ -4,7 +4,7 @@ SPA（`web/`。[DESIGN.md](DESIGN.md)）を、非公開の S3 バケットに置
 
 API（チケット発行・QR 生成）への経路は、環境ごとに次の2つから選ぶ。どちらも同じテンプレート・同じ SPA のビルドで、`web.yaml` のパラメータ `ApiOriginDomain` と `config.json` で切り替える。
 
-全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、API のデプロイは [../go/DEPLOY.md](../go/DEPLOY.md)。GitHub Actions からのデプロイは [../CI.md](../CI.md) 4章。
+全体の構成と共通の準備は [../DEPLOY.md](../DEPLOY.md)、API のデプロイは [../go/DEPLOY.md](../go/DEPLOY.md)。CD（Lambda のコードと SPA のファイルの差し替え）は [../cd/README.md](../cd/README.md)。
 
 | 構成 | API への経路 | `ApiOriginDomain` | SPA の `apiBaseUrl` | API の `PublicBaseUrl` | CORS | CSP の API の分 |
 |---|---|---|---|---|---|---|

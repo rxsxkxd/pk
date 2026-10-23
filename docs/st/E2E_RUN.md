@@ -1,6 +1,6 @@
 # E2E の手動実行手順
 
-ローカルの Docker Compose で E2E（3つのコンテナ: `storage`・`api`・`e2e`）を手で流すための手順。構成と設計の理由は [E2E.md](E2E.md)、GitHub Actions での実行は [CI.md](CI.md) を参照。
+ローカルの Docker Compose で E2E（3つのコンテナ: `storage`・`api`・`e2e`）を手で流すための手順。構成と設計の理由は [E2E.md](E2E.md)、CI・CD での扱いは [E2E.md](E2E.md) の該当の章を参照。
 
 ## 1. 前提
 

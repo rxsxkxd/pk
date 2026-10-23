@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  CD pipeline (CD_PIPELINE.md): CodePipeline V2 with three CodeBuild stages. Test runs the unit tests and builds the
+  CD pipeline (cd/README.md): CodePipeline V2 with three CodeBuild stages. Test runs the unit tests and builds the
   Lambda zip and the SPA; E2E is an empty placeholder for now; Deploy only replaces the Lambda code and the SPA files
-  (CD_UPDATE_ONLY.md). The API and web stacks, config.json and the Parameter Store values are not touched.
+  (cd/UPDATE_ONLY.md). The API and web stacks, config.json and the Parameter Store values are not touched.
 
 Parameters:
   # パイプライン・CodeBuild・ロールの名前の先頭
@@ -36,7 +36,7 @@ Parameters:
     Default: ticketqr/go
     AllowedPattern: ^[A-Za-z0-9._/-]*[A-Za-z0-9._-]$
     Description: >-
-      Key prefix in ArtifactBucket. The API stack's ArtifactPrefix must be <this>/current (CD_UPDATE_ONLY.md 3.1).
+      Key prefix in ArtifactBucket. The API stack's ArtifactPrefix must be <this>/current (cd/UPDATE_ONLY.md 3.1).
   # 発行の関数の名前（api.yaml なら ticketqr-go-tickets）
   TicketsFunctionName:
     Type: String
@@ -158,7 +158,7 @@ Resources:
                 Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject]
                 Resource: !Sub ${PipelineArtifactStore.Arn}/*
 
-  # デプロイの CodeBuild のロール: zip と SPA のファイルの差し替えだけ（CD_UPDATE_ONLY.md 4.1）
+  # デプロイの CodeBuild のロール: zip と SPA のファイルの差し替えだけ（cd/UPDATE_ONLY.md 4.1）
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
@@ -222,7 +222,7 @@ Resources:
         CloudWatchLogs: { Status: ENABLED, GroupName: !Ref TestLogGroup }
       TimeoutInMinutes: 30
 
-  # E2E（今は何もしない。CD_PIPELINE.md 6章）。cd/buildspec/e2e.yml
+  # E2E（今は何もしない。cd/README.md 6章）。cd/buildspec/e2e.yml
   E2EProject:
     Type: AWS::CodeBuild::Project
     Properties:

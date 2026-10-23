@@ -417,11 +417,11 @@ Go と Node は、同じ内容の HTML をそれぞれ別の方法で作る。�
 - 2026-10-14 の実行: ケース1（画面遷移方式）が Node 版でも通過（約 230 秒。../E2E_RUN.md 5章）
 - Origin の照合（`ALLOWED_ORIGINS`。未実装）を実装するときは、Node の `app.ts` にも入れる
 
-### A.6 CI（元: ../CI.md）
+### A.6 CI（元: ../CI.md。今の CI は ../ci/README.md）
 
 - `ci.yml` の `node` ジョブ: Node の型チェック・テスト・ビルド → 成果物 `lambda-node`
 - `e2e` ジョブの matrix（`go` / `node`）で `API_IMPL` を切り替え、Node 版でも E2E を流す（成果物 `e2e-node`）
-- CD の案（../CD_CI.md）では、Go 版・Node 版をそれぞれ別のスタック（`IMPL=go` / `IMPL=node`）に並列でデプロイする想定。Go を採用したので、全体のドキュメントは Go 版だけを前提にしている
+- CD の案（../cd/PATTERNS.md）では、Go 版・Node 版をそれぞれ別のスタック（`IMPL=go` / `IMPL=node`）に並列でデプロイする想定。Go を採用したので、全体のドキュメントは Go 版だけを前提にしている
 
 ### A.7 デプロイ（元: ../DEPLOY.md・../infra/）
 

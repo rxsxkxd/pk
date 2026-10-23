@@ -1,8 +1,8 @@
-# CD pipeline, E2E stage (CD_PIPELINE.md 6): a placeholder that does nothing yet, so the stage and its place in the
+# CD pipeline, E2E stage (cd/README.md 6): a placeholder that does nothing yet, so the stage and its place in the
 # pipeline already exist. Replace the command when the E2E is run here.
 version: 0.2
 
 phases:
   build:
     commands:
-      - echo "E2E is skipped for now (CD_PIPELINE.md 6)."
+      - echo "E2E is skipped for now (cd/README.md 6)."

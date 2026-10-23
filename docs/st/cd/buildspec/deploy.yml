@@ -1,4 +1,4 @@
-# CD pipeline, Deploy stage (CD_PIPELINE.md 4): replaces the Lambda code and the SPA files only (cd/deploy.sh).
+# CD pipeline, Deploy stage (cd/README.md 4): replaces the Lambda code and the SPA files only (cd/deploy.sh).
 # The settings come from the CodeBuild project (pipeline.yaml) and COMMIT_ID from the pipeline.
 version: 0.2
 

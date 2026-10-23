@@ -7,12 +7,12 @@
 | 状態 | **一部実装（2026-10-09）**。本番の2構成（S = 直結、U = 統合）は、テンプレートを分けずに `web.yaml` のパラメータで実装した（7章）。構成 T（CloudFront なし）とテンプレートの分割は、提案のまま |
 | 日付 | 2026-10-06 |
 | 決める人 | （未定） |
-| 関係する文書 | [../web/DEPLOY.md](../web/DEPLOY.md)、[../web/DESIGN.md](../web/DESIGN.md) 9章、[../CD_CI.md](../CD_CI.md) 0.5、[../E2E.md](../E2E.md)、`infra/cloudformation/web.yaml`・`api.yaml` |
+| 関係する文書 | [../web/DEPLOY.md](../web/DEPLOY.md)、[../web/DESIGN.md](../web/DESIGN.md) 9章、[../cd/PATTERNS.md](../cd/PATTERNS.md) 0.5、[../E2E.md](../E2E.md)、`infra/cloudformation/web.yaml`・`api.yaml` |
 
 ## 1. 背景（Context）
 
 - 今の `infra/cloudformation/web.yaml` は、SPA を置く S3 のバケットと CloudFront（OAC、セキュリティヘッダー）を、1つのスタックにまとめている
-- AWS 上で E2E を流す環境や開発用の環境（CD_CI.md 0.5 の E2）では、SPA が配信できれば十分。CloudFront は作成・反映に十数分かかり、環境を作っては消す使い方に向かない（テスト環境には大げさ）
+- AWS 上で E2E を流す環境や開発用の環境（cd/PATTERNS.md 0.5 の E2）では、SPA が配信できれば十分。CloudFront は作成・反映に十数分かかり、環境を作っては消す使い方に向かない（テスト環境には大げさ）
 - 本番では、SPA（`/*`）と API（`/v1/*`）を1つの CloudFront にまとめて同じオリジンにする選択肢がある。そうすると CORS が要らなくなり、CSP が単純になり、WAF と独自ドメインを1か所で管理できる。その場合の CloudFront は Web だけのものではなくなり、Web のスタックに置くのは不自然になる
 - 実際に、CSP の `connect-src` に `'self'` が足りず `config.json` が読めない不具合があった。SPA と API のオリジンが分かれていることで、CSP と CORS の設定が増えている
 
@@ -75,7 +75,7 @@
 - 構成 U の初回は、API と CloudFront が互いの URL を必要とするため、API を2回デプロイする（独自ドメインを使えば1回）
 - 構成 U でも、execute-api の URL は CloudFront を通さずに呼べる（WAF を迂回できる）。防ぐには、CloudFront の秘密のヘッダーを API 側で確かめるか、API Gateway に独自ドメインを付けて `DisableExecuteApiEndpoint` を有効にする（追加の作業）
 - 構成 T の S3 のウェブサイトは HTTP だけで、セキュリティヘッダーも付かない。CSP と HTTPS の確認は、構成 S・U の環境でしかできない。また、アカウントのパブリックアクセスのブロックを、テスト用のアカウントで許可する必要がある
-- 手順書（web/DEPLOY.md）と CI/CD（CD_CI.md の buildspec）を、構成 T・S・U ごとに書き分ける必要がある
+- 手順書（web/DEPLOY.md）と CI/CD（cd/PATTERNS.md の buildspec）を、構成 T・S・U ごとに書き分ける必要がある
 
 ## 6. 未解決の事項（Open Questions）
 

@@ -441,7 +441,8 @@ ImageAnalyzer はインターフェースとして抽象化し、テスト時は
 st/
 ├── DESIGN.md
 ├── PAGES.md                   # 画面と HTML テンプレートの構成（SPA・API の HTML・ローカル試験フォーム）
-├── CI.md                      # GitHub Actions（ビルド・テスト・E2E・デプロイ）
+├── ci/                        # CI（GitHub Actions。単体テストだけ）
+├── cd/                        # CD（CodePipeline / CodeBuild。テンプレート・buildspec・手順書）
 ├── scripts/client_log_summary.py  # ログの後処理のサンプル（ブラウザと OS ごとの件数。10章）
 ├── testdata/                  # 両実装共通のテストベクタ（ticketcode.json, signature.json）
 ├── go/                       # Go モジュールルート（go.mod）

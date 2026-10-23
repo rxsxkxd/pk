@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CD (CD_PIPELINE.md 4, CD_UPDATE_ONLY.md 4): replace the Lambda code and the SPA files. The stacks, config.json and
+# CD (cd/README.md 4, cd/UPDATE_ONLY.md 4): replace the Lambda code and the SPA files. The stacks, config.json and
 # Parameter Store are not touched. Run from the root of the Test stage's output (go/bin/ticketqr.zip, web/dist/).
 #
 # Settings (environment): ARTIFACT_BUCKET, ARTIFACT_PREFIX (e.g. ticketqr/go), FUNCTION_NAMES (space separated),
@@ -16,7 +16,7 @@ for f in "$ZIP" "$DIST/index.html"; do
 done
 
 # Where things go in the artifact bucket. The API stack's ArtifactPrefix is $ARTIFACT_PREFIX/current, so updating
-# the stack later keeps the code that runs now (CD_UPDATE_ONLY.md 3.1). releases/ and web-releases/ are for rollback.
+# the stack later keeps the code that runs now (cd/UPDATE_ONLY.md 3.1). releases/ and web-releases/ are for rollback.
 release="$ARTIFACT_PREFIX/releases/$COMMIT_ID/ticketqr.zip"
 current="$ARTIFACT_PREFIX/current/ticketqr.zip"
 web_release="$ARTIFACT_PREFIX/web-releases/$COMMIT_ID/"

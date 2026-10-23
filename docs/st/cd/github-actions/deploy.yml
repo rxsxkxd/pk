@@ -1,9 +1,11 @@
-# Deploy to AWS (CI.md 4). Runs the whole CI first, then deploys the artifacts it built:
+# Deploy to AWS (cd/GITHUB_ACTIONS.md). FORMER PLAN, NOT ADOPTED: the CD is the CodePipeline in cd/README.md.
+# It calls the old CI (build, unit tests, E2E, artifacts); the current ci/workflows/ci.yml runs unit tests only, so
+# this file does not work as is. Runs the whole CI first, then deploys the artifacts it built:
 # Lambda zips → ticket API stack (api.yaml) → web stack (web.yaml) → SPA files → smoke test.
 # layout (web/DEPLOY.md): direct = the SPA calls the API Gateway URL (CORS); unified = CloudFront also
 # forwards /v1/* to the API (same origin; the API's PublicBaseUrl is the CloudFront URL).
-# NOT VERIFIED YET: needs the IAM role and the repository / environment settings of CI.md 4.2.
-# Template for the ticket repository: copy github-template/ to .github/ (github-template/README.md).
+# NOT VERIFIED YET: needs the IAM role and the repository / environment settings of cd/GITHUB_ACTIONS.md 2.
+# Template for the ticket repository: it would go to .github/workflows/deploy.yml.
 name: Deploy
 
 on:

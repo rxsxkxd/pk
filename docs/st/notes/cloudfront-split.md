@@ -1,6 +1,6 @@
 # 【提案】CloudFront の定義を Web のバケットから分ける
 
-> 提案（2026-10-06。未実装）。採用が決まったら、テンプレート（`infra/cloudformation/`）、[../web/DEPLOY.md](../web/DEPLOY.md)、[../CD_CI.md](../CD_CI.md) に反映し、このファイルは削除する。
+> 提案（2026-10-06。未実装）。採用が決まったら、テンプレート（`infra/cloudformation/`）、[../web/DEPLOY.md](../web/DEPLOY.md)、[../cd/PATTERNS.md](../cd/PATTERNS.md) に反映し、このファイルは削除する。
 >
 > **2026-10-09**: 構成 S（直結）と U（統合）は、テンプレートを分けずに `web.yaml` のパラメータ `ApiOriginDomain` で実装した（[adr-0001-cloudfront-split.md](adr-0001-cloudfront-split.md) 7章、[../web/DEPLOY.md](../web/DEPLOY.md)）。この文書の残りの提案は、構成 T（CloudFront なし）とテンプレートの分割。
 
@@ -10,7 +10,7 @@
 
 | 理由 | 内容 |
 |---|---|
-| テスト環境に CloudFront は大げさ | AWS 上の E2E（CD_CI.md 0.5 の E2）や開発用の環境では、SPA が配信できれば十分。CloudFront は作成・反映に時間がかかり（十数分）、環境を作っては消す用途に向かない |
+| テスト環境に CloudFront は大げさ | AWS 上の E2E（cd/PATTERNS.md 0.5 の E2）や開発用の環境では、SPA が配信できれば十分。CloudFront は作成・反映に時間がかかり（十数分）、環境を作っては消す用途に向かない |
 | 本番では、SPA と API を1つの CloudFront にまとめる選択肢がある | `/*` を S3、`/v1/*` を API Gateway に振り分けると、SPA と API が**同じオリジン**になる。CORS が要らなくなり、CSP も単純になり、WAF や独自ドメインを1か所で管理できる。この CloudFront は Web だけのものではなくなるので、Web のスタックに置くのは不自然 |
 
 ## 2. 提案: 3つのテンプレートに分ける
@@ -66,7 +66,7 @@
 |---|---|
 | 作成の速さ | CloudFront がないので、スタックの作成・削除が早い。E2E のたびに作って消す使い方もできる |
 | 確かめられないこと | CloudFront のセキュリティヘッダー（CSP など）、キャッシュ、OAC、HTTPS での SPA（Client Hints は HTTPS のページからしか届かない場合がある） |
-| CSRF のテスト（E2E のケース9） | 攻撃者を想定した2つ目のオリジンを、**もう1つの `s3-website` のバケット**で安く作れる（CD_CI.md 0.5 で課題にしていた点が解ける） |
+| CSRF のテスト（E2E のケース9） | 攻撃者を想定した2つ目のオリジンを、**もう1つの `s3-website` のバケット**で安く作れる（cd/PATTERNS.md 0.5 で課題にしていた点が解ける） |
 
 ## 4. デプロイの順番（構成 U）
 
@@ -83,8 +83,8 @@ API と CloudFront が互いの URL を必要とするので、初回だけ API 
 ## 5. 今の `web.yaml` からの移行
 
 - `web.yaml` を `web-bucket.yaml` と `edge.yaml` に分ける。論理 ID が変わるため、バケットと CloudFront は作り直しになる（まだ利用者がいない今のうちに行うのがよい）
-- 手順書（web/DEPLOY.md）は、構成 T・S・U ごとの手順にする。CI/CD（CD_CI.md）の buildspec は、環境ごとに構成を選べるようにする（例: 環境変数 `EDGE_MODE=none|split|unified`）
-- E2E を AWS 上で流す（CD_CI.md 0.5 の E2）ときは、構成 T を使う
+- 手順書（web/DEPLOY.md）は、構成 T・S・U ごとの手順にする。CI/CD（cd/PATTERNS.md）の buildspec は、環境ごとに構成を選べるようにする（例: 環境変数 `EDGE_MODE=none|split|unified`）
+- E2E を AWS 上で流す（cd/PATTERNS.md 0.5 の E2）ときは、構成 T を使う
 
 ## 6. 決めること
 

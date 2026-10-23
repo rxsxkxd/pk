@@ -1,4 +1,4 @@
-# CD pipeline, Test stage (CD_PIPELINE.md 3): unit tests, then the Lambda zip and the SPA. The output goes to the
+# CD pipeline, Test stage (cd/README.md 3): unit tests, then the Lambda zip and the SPA. The output goes to the
 # E2E and Deploy stages unchanged (built once). The unit tests make no outside calls (analyzer and fetch are stubbed).
 version: 0.2
 

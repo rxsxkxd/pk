@@ -4,7 +4,7 @@ master への push で、**単体テスト → E2E → Lambda のコードと SP
 
 > **状態（2026-10-22）**: テンプレートと手順を作り、手元で確かめられる範囲だけ確かめた（9章）。AWS 上ではまだ作っていない。E2E の段は、何もしない空のビルドを置いてある（6章）。
 
-関連: デプロイを「更新だけ」にする考え方は [CD_UPDATE_ONLY.md](CD_UPDATE_ONLY.md)（このパイプラインはその案を採ったもの）。CodePipeline の構成パターンの比較は [CD_CI.md](CD_CI.md) 0章。GitHub Actions の CI（pull request ごとのテスト）は [CI.md](CI.md)。
+関連: デプロイを「更新だけ」にする考え方は [UPDATE_ONLY.md](UPDATE_ONLY.md)（このパイプラインはその案を採ったもの）。CodePipeline の構成パターンの比較は [PATTERNS.md](PATTERNS.md) 0章。GitHub Actions の CI（pull request ごとの単体テスト）は [../ci/README.md](../ci/README.md)。GitHub Actions からデプロイする旧案は [GITHUB_ACTIONS.md](GITHUB_ACTIONS.md)。
 
 ## 1. 全体像
 
@@ -21,7 +21,7 @@ GitHub（このリポジトリ。master への push）
 | 方針 | 内容 |
 |---|---|
 | ビルドは 1 回だけ | Test の段で作った zip と `dist` を、E2E・Deploy の段にそのまま渡す。Deploy の段ではビルドしない |
-| デプロイは更新だけ | 差し替えるのは Lambda のコードと SPA のファイルだけ。CloudFormation のスタック、`config.json`、Parameter Store、IAM には触れない（構築は手順書で行う。CD_UPDATE_ONLY.md 1・2章） |
+| デプロイは更新だけ | 差し替えるのは Lambda のコードと SPA のファイルだけ。CloudFormation のスタック、`config.json`、Parameter Store、IAM には触れない（構築は手順書で行う。UPDATE_ONLY.md 1・2章） |
 | 権限を分ける | Test・E2E の CodeBuild は AWS の資源に触れない（ログとパイプラインの成果物だけ）。デプロイの権限は Deploy の CodeBuild だけが持ち、その中身も差し替えに要るものだけ（8章） |
 | GitHub に AWS の権限を置かない | パイプラインは AWS 側から GitHub を読む（CodeConnections）。GitHub Actions には AWS の権限も秘密情報も渡さない |
 | 実装は Go だけ | Node.js 版はパイプラインに入れない |
@@ -30,11 +30,14 @@ GitHub（このリポジトリ。master への push）
 
 | ファイル | 内容 |
 |---|---|
-| `infra/cloudformation/pipeline.yaml` | パイプライン、CodeBuild のプロジェクト 3 つ、ロール 3 つ、段の間の受け渡し用のバケット、ログ |
+| `cd/pipeline.yaml` | パイプライン、CodeBuild のプロジェクト 3 つ、ロール 3 つ、段の間の受け渡し用のバケット、ログ。構築は [../infra/CD_PIPELINE.md](../infra/CD_PIPELINE.md) |
 | `cd/buildspec/test.yml` | Test の段（3章） |
 | `cd/buildspec/e2e.yml` | E2E の段（何もしない。6章） |
 | `cd/buildspec/deploy.yml` | Deploy の段。`cd/deploy.sh` を呼ぶだけ |
 | `cd/deploy.sh` | 差し替えの本体（4章）。手元でも同じものを流せる |
+| `cd/UPDATE_ONLY.md` | デプロイを更新だけにする考え方（このパイプラインが採った案） |
+| `cd/PATTERNS.md` | CI / CD の構成パターンの比較と、CodePipeline でスタックも更新する案（検討の記録） |
+| `cd/GITHUB_ACTIONS.md`、`cd/github-actions/deploy.yml` | GitHub Actions からデプロイする旧案（採用していない。今の CI では動かない） |
 
 buildspec はリポジトリの中にあるので、手順はコミットごとに固定される（パイプラインの設定を変えなくても、buildspec を直して push すれば次の実行から変わる）。
 
@@ -51,7 +54,7 @@ buildspec はリポジトリの中にあるので、手順はコミットごと�
 
 - 単体テストは外に通信しない。画像解析サーバーは偽物（Go の `stubVerifier`）か、テストの中で立てるローカルのサーバー（`httptest`）、SPA の `fetch` は `vi.stubGlobal` で差し替えている。外への通信を止めた状態で全件通ることを確かめた（2026-10-22。macOS の `sandbox-exec`）
 - 外に出るのは、依存の取得（`npm ci`、Go のモジュール）と、次の Go 本体の取得だけ
-- 環境: CodeBuild の ARM のイメージ `aws/codebuild/amazonlinux-aarch64-standard:4.0`。Node.js は 24、Go は 1.26 まで入っている。`go.mod` の `go` 行（今は 1.27.3）がそれより新しいので、`GOTOOLCHAIN=auto` で go コマンドに Go 本体を取らせる（チェックサムで検証される）。イメージに `go.mod` の版が入ったら、`runtime-versions` を上げて `GOTOOLCHAIN` を外せる（[MAINTENANCE.md](MAINTENANCE.md)）
+- 環境: CodeBuild の ARM のイメージ `aws/codebuild/amazonlinux-aarch64-standard:4.0`。Node.js は 24、Go は 1.26 まで入っている。`go.mod` の `go` 行（今は 1.27.3）がそれより新しいので、`GOTOOLCHAIN=auto` で go コマンドに Go 本体を取らせる（チェックサムで検証される）。イメージに `go.mod` の版が入ったら、`runtime-versions` を上げて `GOTOOLCHAIN` を外せる（[MAINTENANCE.md](../MAINTENANCE.md)）
 - 次の段に渡すもの: `go/bin/ticketqr.zip`、`web/dist/`、`cd/`（Deploy の段のスクリプト）
 
 ## 4. Deploy の段（差し替えだけ）
@@ -70,90 +73,12 @@ buildspec はリポジトリの中にあるので、手順はコミットごと�
 
 - `config.json`（環境ごとの設定）は上げない・消さない。Web のスタックを作ったときに置いたものを使い続ける（web/DEPLOY.md 6章）
 - スモークテストでは発行しない（解析サーバーを呼ばない）。発行まで確かめるのは aws-test/PLAN.md の A
-- API のスタックの `ArtifactPrefix` は `ticketqr/go/current` にしておく（5.2 の 3）。こうすると、あとで構築の手順でスタックを更新しても、今動いているコードのまま変わらない（CD_UPDATE_ONLY.md 3.1）
+- API のスタックの `ArtifactPrefix` は `ticketqr/go/current` にしておく（[../infra/CD_PIPELINE.md](../infra/CD_PIPELINE.md) 2章の 3）。こうすると、あとで構築の手順でスタックを更新しても、今動いているコードのまま変わらない（UPDATE_ONLY.md 3.1）
 - SAM（infra/sam）で作った環境でも使える（関数名を `pipeline.yaml` のパラメータで渡す）。ただし、その後に `sam deploy` をすると、SAM がビルドしたコードに置き換わる
 
-## 5. 構築の手順（初回だけ）
+## 5. 構築（初回だけ）
 
-作業ディレクトリで、AWS CLI に構築用の権限がある状態で行う。リージョンは API・Web のスタックと同じにする。
-
-### 5.1 前提
-
-| 前提 | 内容 |
-|---|---|
-| リポジトリ | このディレクトリを GitHub の専用のリポジトリにしてある（ルートに `cd/`・`go/`・`web/` がある） |
-| 成果物バケット | DEPLOY.md 2章 |
-| API のスタック | go/DEPLOY.md 4-A.1 で作ってある（`ticketqr-go`） |
-| Web のスタック | web/DEPLOY.md 3章で作り、`config.json` を置いてある（6章） |
-
-### 5.2 手順
-
-1. **GitHub との接続を作る**（アカウントに 1 つ）
-
-   ```sh
-   aws codeconnections create-connection --provider-type GitHub --connection-name ticketqr-st \
-     --query ConnectionArn --output text
-   ```
-
-   作った直後は「保留中」。AWS のコンソール（デベロッパー用ツール → 設定 → 接続）でその接続を開き、「保留中の接続を更新」から GitHub App をインストールして、このリポジトリだけを許可する。状態が「利用可能」になれば完了。
-
-2. **値を集める**
-
-   ```sh
-   ARTIFACT_BUCKET=<成果物バケット>
-   CONNECTION_ARN=<1 の ARN>
-   REPO=<owner>/<リポジトリ名>
-   out() { aws cloudformation describe-stacks --stack-name "$1" --query "Stacks[0].Outputs[?OutputKey=='$2'].OutputValue" --output text; }
-   WEB_BUCKET=$(out ticketqr-web-go BucketName)
-   DIST_ID=$(out ticketqr-web-go DistributionId)
-   WEB_URL=$(out ticketqr-web-go WebUrl)
-   ```
-
-3. **API のスタックが `current` の zip を指すようにする**（CD_UPDATE_ONLY.md 3.1）
-
-   ```sh
-   make -C go build
-   aws s3 cp go/bin/ticketqr.zip "s3://$ARTIFACT_BUCKET/ticketqr/go/current/ticketqr.zip"
-   aws cloudformation deploy --stack-name ticketqr-go --template-file infra/cloudformation/api.yaml \
-     --capabilities CAPABILITY_IAM --parameter-overrides ArtifactPrefix=ticketqr/go/current
-   ```
-
-   `--parameter-overrides` に書かないパラメータは、今の値のまま変わらない。
-
-4. **パイプラインのスタックを作る**
-
-   ```sh
-   aws cloudformation deploy --stack-name ticketqr-st-pipeline \
-     --template-file infra/cloudformation/pipeline.yaml --capabilities CAPABILITY_NAMED_IAM \
-     --parameter-overrides ConnectionArn="$CONNECTION_ARN" FullRepositoryId="$REPO" BranchName=master \
-       ArtifactBucket="$ARTIFACT_BUCKET" WebBucketName="$WEB_BUCKET" DistributionId="$DIST_ID" WebUrl="$WEB_URL"
-   ```
-
-   作った直後に、パイプラインは今の master で 1 回流れる。
-
-5. **確かめる**
-
-   ```sh
-   aws codepipeline get-pipeline-state --name ticketqr-st \
-     --query 'stageStates[].[stageName,latestExecution.status]' --output table
-   ```
-
-   4 つの段がすべて `Succeeded` になれば成功。Deploy の段のログ（`/aws/codebuild/ticketqr-st-deploy`）の最後に `deployed <コミット>` が出る。
-
-### 5.3 パラメータ（`pipeline.yaml`）
-
-| パラメータ | 既定 | 内容 |
-|---|---|---|
-| `NamePrefix` | `ticketqr-st` | パイプライン・CodeBuild・ロールの名前の先頭 |
-| `ConnectionArn` | - | 5.2 の 1 |
-| `FullRepositoryId` | - | `owner/name` |
-| `BranchName` | `master` | このブランチへの push で動く |
-| `ArtifactBucket` | - | 成果物バケット |
-| `ArtifactPrefix` | `ticketqr/go` | 成果物バケットの中の置き場所（`current/`・`releases/`・`web-releases/` をこの下に作る） |
-| `TicketsFunctionName` / `GetQRFunctionName` | `ticketqr-go-tickets` / `ticketqr-go-get-qr` | 差し替える関数（`api.yaml` の名前）。SAM の環境では `<NamePrefix>-tickets` など |
-| `WebBucketName` / `DistributionId` / `WebUrl` | - / - / 空 | Web のスタックの出力。`WebUrl` が空ならスモークテストを飛ばす |
-| `GrantMode` | `page` | SPA の発行方式 |
-| `LogRetentionDays` | 30 | CodeBuild のログを残す日数 |
+パイプラインのスタック（`cd/pipeline.yaml`）の作成、GitHub との接続、API のスタックを `current` の zip に向ける作業は、最初の環境構築の手順として [../infra/CD_PIPELINE.md](../infra/CD_PIPELINE.md) にまとめている。
 
 ## 6. E2E の段（今は空）
 
@@ -165,7 +90,7 @@ buildspec はリポジトリの中にあるので、手順はコミットごと�
 |---|---|
 | A: 今の compose の E2E を CodeBuild で流す | CodeBuild のプロジェクトを特権モード（`PrivilegedMode: true`）にして、`docker compose -f compose.e2e.yaml up --build ...` を流す（E2E_RUN.md 2章）。Test の段の `web/dist` を使えるが、compose は API をソースから作り直す（E2E.md 2.3）ので、入力にはソースも要る（`pipeline.yaml` の E2E の段の入力に `SourceOutput` を足す） |
 | A の注意 | 毎回、golang・node・Playwright・Garage のイメージを取得する（合わせて数 GB）。Docker Hub は取得の回数に上限があり、CodeBuild の共有の IP では上限に当たりやすい。ECR Public のミラー（`public.ecr.aws/docker/library/golang` など）に替えるか、ECR のプルスルーキャッシュを使う |
-| B: デプロイしたあとに、本物の環境に対して流す | Deploy の段のあとに段を足し、Playwright のテストを本物の CloudFront・API Gateway に対して流す（CD_CI.md 0.5 の E2） |
+| B: デプロイしたあとに、本物の環境に対して流す | Deploy の段のあとに段を足し、Playwright のテストを本物の CloudFront・API Gateway に対して流す（PATTERNS.md 0.5 の E2） |
 
 ## 7. ロールバック
 
@@ -192,13 +117,7 @@ aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths /index.h
 
 ## 8. 権限
 
-| ロール | 使うもの | 権限 |
-|---|---|---|
-| `ticketqr-st-pipeline` | CodePipeline | GitHub との接続の利用、3 つの CodeBuild の開始、段の間の受け渡し用のバケット |
-| `ticketqr-st-build` | Test・E2E の CodeBuild | ログと、受け渡し用のバケットの読み書きだけ（AWS の資源には触れない） |
-| `ticketqr-st-deploy` | Deploy の CodeBuild | 成果物バケットの `ticketqr/go/*` の読み書き、2 つの関数の `UpdateFunctionCode`・`GetFunctionConfiguration`、Web のバケットの書き込み・削除・一覧、そのディストリビューションの `CreateInvalidation`（CD_UPDATE_ONLY.md 4.1 と同じ） |
-
-CloudFormation・IAM・API Gateway・CloudFront の設定を変える権限は、どのロールにもない。長期のアクセスキーもどこにも置かない。
+ロールは 3 つ（パイプライン、Test・E2E、Deploy）。Deploy の CodeBuild だけが差し替えの権限を持つ。中身は [../infra/CD_PIPELINE.md](../infra/CD_PIPELINE.md) 4章。
 
 ## 9. 確かめたこと（2026-10-22。手元だけ）
 
@@ -211,4 +130,4 @@ CloudFormation・IAM・API Gateway・CloudFront の設定を変える権限は�
 | 5 | Test の段のコマンド（`npm ci` を除く）を手元で流す | Go のテスト・zip、Prettier、Vitest（115 件）、SPA のビルドがすべて成功 |
 | 6 | 単体テストが外に通信しないこと | 外への通信を止めて、Go と SPA のテストが全件成功（3章） |
 
-確かめていないこと（[OPEN_ITEMS.md](OPEN_ITEMS.md) 1章）: AWS 上でのスタックの作成と実行、CodeBuild の上で `GOTOOLCHAIN=auto` が Go 1.27.3 を取れること、CodeConnections の接続、Deploy の段の権限が足りること。
+確かめていないこと（[OPEN_ITEMS.md](../OPEN_ITEMS.md) 1章）: AWS 上でのスタックの作成と実行、CodeBuild の上で `GOTOOLCHAIN=auto` が Go 1.27.3 を取れること、CodeConnections の接続、Deploy の段の権限が足りること。

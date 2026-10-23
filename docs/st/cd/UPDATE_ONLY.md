@@ -1,8 +1,8 @@
 # CD を Lambda の zip と Web のファイルの更新だけにする構成案
 
-> **採用（2026-10-22）**: この案を CodePipeline / CodeBuild で実装した（[CD_PIPELINE.md](CD_PIPELINE.md)）。以下は考え方の記録。
+> **採用（2026-10-22）**: この案を CodePipeline / CodeBuild で実装した（[README.md](README.md)）。以下は考え方の記録。
 >
-> **状態**: 構成案（2026-10-15）。今の CD（[CI.md](CI.md) 4章の `deploy.yml`、[CD_CI.md](CD_CI.md) の CodePipeline / CodeBuild の案）は、デプロイのたびに CloudFormation のスタックの作成・更新と、ファイルの更新をまとめて行う。この文書は、それを **構築（CloudFormation）と更新（CD）に分ける** 別のパターン。今の CI.md・CD_CI.md・`deploy.yml` は変えていない。採るときに、それぞれをこの案に合わせて直す。
+> **状態**: 構成案（2026-10-15）。当時の CD（[GITHUB_ACTIONS.md](GITHUB_ACTIONS.md) の `deploy.yml`、[PATTERNS.md](PATTERNS.md) の CodePipeline / CodeBuild の案）は、デプロイのたびに CloudFormation のスタックの作成・更新と、ファイルの更新をまとめて行う。この文書は、それを **構築（CloudFormation）と更新（CD）に分ける** 別のパターン。当時の GITHUB_ACTIONS.md・PATTERNS.md・`deploy.yml` は変えていない。採るときに、それぞれをこの案に合わせて直す。
 
 ## 1. 考え方
 
@@ -10,7 +10,7 @@
 |---|---|---|
 | 中身 | AWS の資源を作る・構成を変える（CloudFormation のスタック、Parameter Store、IAM など） | 動かすもの（Lambda の zip、SPA のファイル）だけを差し替える |
 | 頻度 | 初回と、構成を変えるときだけ | コードを変えるたび |
-| 誰が・どこで | 運用の担当者が手順書（[DEPLOY.md](DEPLOY.md)・[go/DEPLOY.md](go/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）で行う。または構築用の別のパイプライン（7章） | CD（GitHub Actions、または CodePipeline / CodeBuild） |
+| 誰が・どこで | 運用の担当者が手順書（[DEPLOY.md](../DEPLOY.md)・[go/DEPLOY.md](../go/DEPLOY.md)・[web/DEPLOY.md](../web/DEPLOY.md)）で行う。または構築用の別のパイプライン（7章） | CD（GitHub Actions、または CodePipeline / CodeBuild） |
 | 必要な権限 | 広い（CloudFormation、IAM のロールの作成、CloudFront など） | 小さい（4章） |
 
 ねらい:
@@ -95,7 +95,7 @@ aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths /index.h
 | CloudFront | `cloudfront:CreateInvalidation`（そのディストリビューションに限る） |
 | CloudFormation（任意） | `cloudformation:DescribeStacks`（バケット名などをスタックの出力から取る場合。値を CD の変数に持たせるなら要らない） |
 
-今の CD のロール（CI.md 4.2）にある `cloudformation:*`、IAM のロールの作成、`lambda:*`、`apigateway:*`、CloudFront の作成・更新は要らなくなる。
+今の CD のロール（GITHUB_ACTIONS.md 2章）にある `cloudformation:*`、IAM のロールの作成、`lambda:*`、`apigateway:*`、CloudFront の作成・更新は要らなくなる。
 
 ## 5. ロールバック
 
@@ -123,9 +123,9 @@ aws cloudfront create-invalidation --distribution-id "$DIST_ID" --paths /index.h
 | 手作業（手順書） | 今の各 DEPLOY.md の CloudFormation の手順をそのまま使う。頻度が低いうちはこれで足りる |
 | 構築用の別のワークフロー・パイプライン | テンプレート（`infra/`）が変わったときだけ、権限の広いロールで、承認を挟んで流す。CD（更新）のロールとは分ける。CloudFormation の変更セットを作り、中身を見てから実行する |
 
-## 8. CD_CI.md の案との組み合わせ
+## 8. PATTERNS.md の案との組み合わせ
 
-CD_CI.md の構成パターン（P1・P3 など）は、CD を GitHub Actions から CodePipeline / CodeBuild に移す話で、この案とは別の軸。組み合わせられる。
+PATTERNS.md の構成パターン（P1・P3 など）は、CD を GitHub Actions から CodePipeline / CodeBuild に移す話で、この案とは別の軸。組み合わせられる。
 
 - CodePipeline のデプロイの段階（CodeBuild の `ticketqr-st-deploy`）のコマンドを、4章のものにする。CodeBuild のロールの権限は 4.1 になる
 - 構築は、別のパイプライン（7章）か手作業にする

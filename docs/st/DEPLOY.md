@@ -7,8 +7,8 @@
 | [go/DEPLOY.md](go/DEPLOY.md) | チケット API の Go 版（と、example.com の QR） | `ticketqr-go`、`ticketqr-go-example` |
 | [web/DEPLOY.md](web/DEPLOY.md) | Web フロントエンド（SPA。S3 + CloudFront）と、API への経路（直結: CORS の設定、統合: CloudFront の `/v1/*`） | `ticketqr-web-{impl}` |
 | この文書 | 共通の準備（1・2章）、画像解析サーバーのスタブ（3章） | `ticketqr-analyzer-stub-{stub}` |
-| [CI.md](CI.md) | GitHub Actions からのデプロイ（上の手順を自動で実行する） | - |
-| [CD_CI.md](CD_CI.md) | 構成案: CI は GitHub Actions、CD（デプロイ）は CodePipeline / CodeBuild | `ticketqr-st-pipeline` |
+| [cd/README.md](cd/README.md) | CD（CodePipeline / CodeBuild）。Lambda のコードと SPA のファイルの差し替えだけ | `ticketqr-st-pipeline` |
+| [cd/GITHUB_ACTIONS.md](cd/GITHUB_ACTIONS.md) | 旧案: GitHub Actions からのデプロイ（採用していない） | - |
 
 ## 0. 全体の構成と順番
 
@@ -57,7 +57,7 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 | API | `iam:CreateRole` / `PassRole` / `PutRolePolicy` / `AttachRolePolicy`、`lambda:*`、`apigateway:*`（`/apis*`）、`logs:CreateLogGroup` / `PutRetentionPolicy`、`ssm:PutParameter` / `GetParameter`、`s3:PutObject`（成果物バケット）、`cloudformation:*`（CloudFormation の場合） |
 | Web | `s3:CreateBucket` / `PutBucketPolicy` / `PutObject` / `DeleteObject` / `ListBucket`、`cloudfront:*`（ディストリビューション、OAC、Response Headers Policy、無効化）、`apigateway:*`（CORS の設定） |
 
-GitHub Actions から OIDC でデプロイするときのロールの権限は、CI.md 4.2。
+CD のロールの権限は cd/README.md 8章（GitHub Actions から OIDC でデプロイする旧案のロールは cd/GITHUB_ACTIONS.md 2章）。
 
 ## 2. 成果物バケットの作成（初回だけ）
 

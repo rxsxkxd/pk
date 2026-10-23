@@ -118,7 +118,7 @@ aws cloudformation deploy \
 
 - 上限を変えるときは `HourlyLimit`・`DailyLimit` を変える。API のスタックの `ThrottlingRateLimit`・`ThrottlingBurstLimit` を変えたときは、このスタックの `RateLimit`・`BurstLimit` も同じ値にする（止めたあとに戻す値）
 - SAM で作った API（`ticketqr-sam-$IMPL`）にも、同じように `ApiId` を渡して付けられる
-- デプロイのワークフロー（`github-template/workflows/deploy.yml`）にも、API のスタックのあとに足した
+- デプロイのワークフロー（`cd/github-actions/deploy.yml`。採用していない旧案）にも、API のスタックのあとに足した
 
 確かめたこと（2026-10-14）: cfn-lint、ガードの関数の動き（AWS の部分を差し替えて、アラームの状態の組み合わせごとに、止める・戻すが正しいこと）。
 

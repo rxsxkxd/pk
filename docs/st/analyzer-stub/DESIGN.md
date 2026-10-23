@@ -272,7 +272,7 @@ aws ssm delete-parameter --name $ANALYZER_KEY_PARAM
 
 ## CI
 
-スタブ専用のリポジトリのワークフロー（テンプレートは `github-template/workflows/ci.yml`。そのリポジトリの `.github/` にコピーして使う。`github-template/README.md`）。`stub-node`・`stub-python`・`stub-rust`（テスト・型チェック・lint・Lambda 用の zip）、`stub-image`（VPC 版のコンテナのビルドと起動の確認）、`cdk`（VPC 版のスタブの CDK のテスト・`mypy`・`synth`）、`infra`（`template.yaml`・`network.yaml` の cfn-lint）で確かめる（../CI.md 3.5）。
+スタブ専用のリポジトリのワークフロー（テンプレートは `github-template/workflows/ci.yml`。そのリポジトリの `.github/` にコピーして使う。`github-template/README.md`）。`stub-node`・`stub-python`・`stub-rust`（テスト・型チェック・lint・Lambda 用の zip）、`stub-image`（VPC 版のコンテナのビルドと起動の確認）、`cdk`（VPC 版のスタブの CDK のテスト・`mypy`・`synth`）、`infra`（`template.yaml`・`network.yaml` の cfn-lint）で確かめる。
 
 ## 付録: Python 版（試作）
 

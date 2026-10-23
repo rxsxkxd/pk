@@ -265,7 +265,7 @@ GRANT_MODE=inline npm run build     # inline（ローカルの開発も GRANT_MO
 
 - `vite.config.ts` が、別名 `@mode` を `src/modes/$GRANT_MODE/index.ts` に向ける。`main.ts` はそこから画面（ルート）を受け取る。選ばれなかった方式のファイルは、ビルドに入らない（最適化で消えるのを期待するのではなく、そもそも読み込まれない）
 - 3つ以外の値はビルドのエラー
-- 方式を変えるには、ビルドし直す。CI は3方式ともビルドし（`web-dist-{page,inline,form}`）、デプロイは環境の方式のものを置く（`GRANT_MODE`。CI.md 4章）
+- 方式を変えるには、ビルドし直す。CD は環境の方式で 1 つだけビルドして置く（`GRANT_MODE`。cd/pipeline.yaml の `GrantMode`、cd/README.md 3章）
 - フォーム送信方式は、CloudFront の CSP の `form-action` に送信先を入れる（web/DEPLOY.md 3.3 の `FormActionSource`。9章）
 
 API の URL などは**ビルドに埋め込まず**、起動時に `/config.json` を読み込む。同じ方式のビルド結果を、環境ごとに `config.json` だけ差し替えて配置できるようにするため。

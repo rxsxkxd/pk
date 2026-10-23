@@ -14,7 +14,7 @@ CloudFormation の YAML の定義は 15 ファイル（2026-10-22 時点）。�
 | `infra/cloudformation/tickets-network-new-vpc.yaml` | `tickets` 用のネットワーク（VPC から新しく作る） | notes/tickets-network.md |
 | `infra/cloudformation/tickets-network-sg-only.yaml` | `tickets` 用のネットワーク（既存のプライベートサブネットを使い、SG だけ作る。N3） | infra/PROD_DEPLOY.md 1.3 |
 | `analyzer-stub/network.yaml` | 画像解析のスタブ（Fargate）用の VPC・サブネット・SG | DEPLOY.md 3.4 |
-| `infra/cloudformation/pipeline.yaml` | CD のパイプライン（CodePipeline と CodeBuild。単体テスト → E2E（空）→ Lambda のコードと SPA のファイルの差し替え） | CD_PIPELINE.md 5章 |
+| `cd/pipeline.yaml` | CD のパイプライン（CodePipeline と CodeBuild。単体テスト → E2E（空）→ Lambda のコードと SPA のファイルの差し替え） | infra/CD_PIPELINE.md |
 
 ## SAM（CloudFormation の拡張）: 4
 
@@ -46,7 +46,7 @@ CloudFormation の YAML の定義は 15 ファイル（2026-10-22 時点）。�
 
 ```sh
 # 手で書いた 13 ファイル
-uvx cfn-lint==1.57.1 --regions=ap-northeast-1 -- infra/cloudformation/*.yaml infra/sam/*/template.yaml analyzer-stub/network.yaml analyzer-stub/template.yaml dummy-analyzer/template.yaml
+uvx cfn-lint==1.57.1 --regions=ap-northeast-1 -- infra/cloudformation/*.yaml cd/pipeline.yaml infra/sam/*/template.yaml analyzer-stub/network.yaml analyzer-stub/template.yaml dummy-analyzer/template.yaml
 # 自動で作った 2 ファイル（E1161: 仮の S3 バケット名）
 uvx cfn-lint==1.57.1 --regions=ap-northeast-1 --ignore-checks E1161 -- infra/sam/generated/*.cfn.yaml
 ```

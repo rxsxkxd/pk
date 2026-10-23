@@ -1,12 +1,12 @@
 # CI / CD 構成案（CI は GitHub Actions、CD は CodePipeline / CodeBuild）
 
-> **採用した形（2026-10-22）**: master への push で CodePipeline が動き、CodeBuild がソースから単体テストとビルドを行い、デプロイは更新だけにした（[CD_PIPELINE.md](CD_PIPELINE.md)。P3 に近いが、タグではなく push で開始する）。以下は検討の記録。
+> **採用した形（2026-10-22）**: master への push で CodePipeline が動き、CodeBuild がソースから単体テストとビルドを行い、デプロイは更新だけにした（[README.md](README.md)。P3 に近いが、タグではなく push で開始する）。以下は検討の記録。
 >
-> **状態**: 構成案。CI は今の CI のワークフロー（テンプレート `github-template/workflows/ci.yml`。[CI.md](CI.md) 3章）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。CI.md 4章）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](go/DEPLOY.md)・[web/DEPLOY.md](web/DEPLOY.md)）の CloudFormation の手順と同じにする。
+> **状態**: 構成案。CI は当時の CI のワークフロー（ビルド・単体テスト・E2E。今は単体テストだけに絞った。[../ci/README.md](../ci/README.md)）をそのまま使い、デプロイを GitHub Actions（`deploy.yml`。[GITHUB_ACTIONS.md](GITHUB_ACTIONS.md)）から **AWS CodePipeline / CodeBuild** に移す。デプロイの中身（コマンド）は、各手順書（[go/DEPLOY.md](../go/DEPLOY.md)・[web/DEPLOY.md](../web/DEPLOY.md)）の CloudFormation の手順と同じにする。
 >
 > 構成パターンは 0章で比較した。1〜9章は、そのうちパターン P1 の詳細。P3 を採る場合の差分は 0.4 にまとめた。
 >
-> この文書のデプロイは、毎回スタックの作成・更新も行う形。CD を Lambda の zip と SPA のファイルの更新だけにする別の案は [CD_UPDATE_ONLY.md](CD_UPDATE_ONLY.md)（どちらのパターンとも組み合わせられる。8章）。
+> この文書のデプロイは、毎回スタックの作成・更新も行う形。CD を Lambda の zip と SPA のファイルの更新だけにする別の案は [UPDATE_ONLY.md](UPDATE_ONLY.md)（どちらのパターンとも組み合わせられる。8章）。
 
 ## 0. 目的と構成パターンの評価
 
@@ -124,7 +124,7 @@ E2 のために必要な変更:
 |---|---|
 | テストの宛先 | `e2e/env.ts` は `WEB_URL`・`API_URL` を環境変数で変えられる。CodeBuild から、Dev の CloudFront と API Gateway の URL を渡す |
 | SPA の配置 | 本物の環境ではパイプラインが SPA を置くので、`global-setup.ts` の S3（Garage）への配置を飛ばす設定を足す（例: `SKIP_DEPLOY=1`） |
-| CSRF のテスト（ケース9） | 攻撃者を想定した2つ目のオリジンを AWS に置く。CloudFront を分ける提案（[notes/cloudfront-split.md](notes/cloudfront-split.md)）の構成 T なら、もう1つの S3 のウェブサイトで安く作れる。用意するまでは、E2 ではこのケースを飛ばす |
+| CSRF のテスト（ケース9） | 攻撃者を想定した2つ目のオリジンを AWS に置く。CloudFront を分ける提案（[notes/cloudfront-split.md](../notes/cloudfront-split.md)）の構成 T なら、もう1つの S3 のウェブサイトで安く作れる。用意するまでは、E2 ではこのケースを飛ばす |
 | CodeBuild の環境 | Playwright と Chromium が入ったイメージ（Playwright の公式イメージを ECR に写したもの）か、標準のイメージに `npx playwright install --with-deps chromium` |
 | 失敗したときの記録 | Playwright のレポートとトレースを、CodeBuild の成果物（S3）に残す |
 | 環境 | まずは Dev に対して流す。テストのデータを本番に近い環境に残したくなければ、E2E 専用の環境（スタック）を分ける。CloudFront なしの構成（notes/cloudfront-split.md の構成 T）なら、作って消すのも早い |
@@ -265,7 +265,7 @@ release.zip
 
 ### 3.3 今の `deploy.yml` との関係
 
-この案を採用したら、`deploy.yml`（GitHub Actions から直接デプロイする）は廃止する。CI.md 4章の「デプロイ用の IAM ロール」も、権限の小さい「公開用ロール」（5章）に置き換わる。
+この案を採用したら、`deploy.yml`（GitHub Actions から直接デプロイする）は廃止する。GITHUB_ACTIONS.md 2章の「デプロイ用の IAM ロール」も、権限の小さい「公開用ロール」（5章）に置き換わる。
 
 ## 4. CodePipeline / CodeBuild（CD）
 
@@ -289,7 +289,7 @@ release.zip
 | 入力 | Source の成果物（リリースの zip を展開したもの） |
 | 環境変数 | `IMPL`（`go`）、`DEPLOY_ENV`（`dev` / `prod`）、`ARTIFACT_BUCKET`、`GRANT_MODE`（SPA の発行方式。`page` / `inline` / `form`。既定 `page`。`artifacts/web-dist-$GRANT_MODE` を置く） |
 | buildspec | リリースの中の `buildspec/deploy.yml` |
-| 構成と画像の上限 | 下の案は直結（web/DEPLOY.md 3.1）だけ。統合（3.2）にする環境では、`github-template/workflows/deploy.yml` と同じ分岐（`LAYOUT`、`ApiOriginDomain`、API の2回目のデプロイ、CORS なし、`apiBaseUrl: ""`）と、`MAX_IMAGE_BYTES`（API の `MaxImageBytes` と `config.json` の `maxImageBytes`）を足す |
+| 構成と画像の上限 | 下の案は直結（web/DEPLOY.md 3.1）だけ。統合（3.2）にする環境では、`cd/github-actions/deploy.yml` と同じ分岐（`LAYOUT`、`ApiOriginDomain`、API の2回目のデプロイ、CORS なし、`apiBaseUrl: ""`）と、`MAX_IMAGE_BYTES`（API の `MaxImageBytes` と `config.json` の `maxImageBytes`）を足す |
 
 `buildspec/deploy.yml`（案。コマンドは各手順書と同じ）:
 
@@ -355,7 +355,7 @@ phases:
 |---|---|---|
 | 公開用ロール（GitHub OIDC） | GitHub Actions の `publish` | `s3:PutObject`（リリースバケットの `st/*`）、`codepipeline:StartPipelineExecution`（`ticketqr-st` だけ）。信頼ポリシーは `repo:rxsxkxd/pk:environment:release` に限る。リリースバケットは、このロール以外の書き込みをバケットポリシーで拒否する（9.3） |
 | CodePipeline のサービスロール | パイプライン | リリースバケットの読み取り、パイプラインの成果物バケットの読み書き、CodeBuild の開始、SNS への通知 |
-| CodeBuild のサービスロール | `ticketqr-st-deploy` | CI.md 4.2 のデプロイ用ロールと同じ範囲（CloudFormation、Lambda の実行ロールの作成と `iam:PassRole`、Lambda、API Gateway、ログ、成果物バケットと Web のバケット、CloudFront）。対象は `ticketqr-*` に限る |
+| CodeBuild のサービスロール | `ticketqr-st-deploy` | GITHUB_ACTIONS.md 2章のデプロイ用ロールと同じ範囲（CloudFormation、Lambda の実行ロールの作成と `iam:PassRole`、Lambda、API Gateway、ログ、成果物バケットと Web のバケット、CloudFront）。対象は `ticketqr-*` に限る |
 | （任意）CloudFormation の実行ロール | スタック | CodeBuild のロールから強い IAM の権限を外したいときに、`--role-arn` で CloudFormation に渡す |
 
 - 長期のアクセスキーは、どこにも置かない
@@ -363,7 +363,7 @@ phases:
 
 ## 6. パイプライン自体の構築
 
-パイプラインと関連するリソースは、API・Web とは別のテンプレート `infra/cloudformation/pipeline.yaml`（新規。スタック `ticketqr-st-pipeline`）で作る。最初に一度だけ手で作り、その後の変更もこのテンプレートで行う。
+パイプラインと関連するリソースは、API・Web とは別のテンプレート `cd/pipeline.yaml`（新規。スタック `ticketqr-st-pipeline`）で作る。最初に一度だけ手で作り、その後の変更もこのテンプレートで行う。
 
 | リソース | 内容 |
 |---|---|
@@ -437,7 +437,7 @@ phases:
 |---|---|
 | 1 | `pipeline.yaml`（リリースバケット、CodeBuild、パイプライン、ロール）と `cd/buildspec/deploy.yml` を作る。Dev のステージだけで動かす |
 | 2 | `ci.yml` に `publish` ジョブを足し、master への push で Dev に自動で反映されるようにする |
-| 3 | `deploy.yml` を廃止し、CI.md 4章をこの文書への案内に置き換える |
+| 3 | `deploy.yml` を廃止し、GITHUB_ACTIONS.md をこの文書への案内に置き換える |
 | 4 | 本番の環境を作り、承認と Prod のステージを足す |
 | 5 | example.com の QR のスタックや、画像解析サーバーの `http` モードのパラメータを、必要に応じて buildspec に足す |
 

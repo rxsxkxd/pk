@@ -9,12 +9,12 @@
 | 1 | Go（ツールチェーン） | 1.27.3（2026-10-21 時点の最新） | `go/go.mod` の `go` 行、`go/docker/api.Dockerfile` の `FROM golang:` |
 | 2 | Go のライブラリ | 2026-10-21 に `go get -u` で最新にした（下の表） | `go/go.mod`、`go/go.sum` |
 | 3 | Lambda のランタイム（Go） | `provided.al2023`（arm64） | `infra/sam/go/template.yaml`、`infra/cloudformation/api.yaml`、`infra/cloudformation/example.yaml` |
-| 4 | Node.js | 24（SPA のビルド、E2E、Lambda の `nodejs24.x`） | `web/package.json` の `engines`、`github-template/workflows/ci.yml` の `node-version`、`go/docker/api.Dockerfile` |
+| 4 | Node.js | 24（SPA のビルド、E2E、Lambda の `nodejs24.x`） | `web/package.json` の `engines`、`ci/workflows/ci.yml` の `node-version`、`go/docker/api.Dockerfile` |
 | 5 | npm のライブラリ | - | `web/package.json`、`e2e/package.json`（`package-lock.json`） |
-| 6 | Python（Lambda） | `python3.13` | `infra/cloudformation/quota-guard.yaml`、`dummy-analyzer/template.yaml`、`github-template/workflows/ci.yml` の `python-version` |
+| 6 | Python（Lambda） | `python3.13` | `infra/cloudformation/quota-guard.yaml`、`dummy-analyzer/template.yaml` |
 | 7 | Docker イメージ（E2E） | `golang:1.27.3`、`node:24`、`public.ecr.aws/lambda/provided:al2023`、`mcr.microsoft.com/playwright:v1.63.0-noble`、`dxflrs/garage:v2.4.1`、`alpine:3.22` | `go/docker/api.Dockerfile`、`e2e/docker/e2e.Dockerfile`、`web/docker/storage.Dockerfile` |
-| 8 | CodeBuild のイメージ（CD） | `aws/codebuild/amazonlinux-aarch64-standard:4.0`（Node.js 24、Go 1.26。Go は `GOTOOLCHAIN=auto` で `go.mod` の版を取る） | `infra/cloudformation/pipeline.yaml`、`cd/buildspec/test.yml` |
-| 9 | GitHub Actions | `actions/checkout@v7`、`actions/setup-go@v7` など | `github-template/workflows/*.yml` |
+| 8 | CodeBuild のイメージ（CD） | `aws/codebuild/amazonlinux-aarch64-standard:4.0`（Node.js 24、Go 1.26。Go は `GOTOOLCHAIN=auto` で `go.mod` の版を取る） | `cd/pipeline.yaml`、`cd/buildspec/test.yml` |
+| 9 | GitHub Actions | `actions/checkout@v7`、`actions/setup-go@v7` など | `ci/workflows/ci.yml`（`cd/github-actions/deploy.yml` は旧案） |
 
 Go のライブラリ（直接使っているもの）:
 
@@ -96,7 +96,7 @@ GitHub Actions（`ci.yml`）は `go-version-file: go/go.mod` で `go.mod` から
 
 ### 3.5 デプロイ
 
-アプリのコードは変わらず、Lambda の zip を作り直すだけ。今のデプロイの手順（[go/DEPLOY.md](go/DEPLOY.md)、または GitHub Actions の `deploy.yml`。[CI.md](CI.md) 4章）をそのまま流せばよい。
+アプリのコードは変わらず、Lambda の zip を作り直すだけ。今のデプロイの手順（[go/DEPLOY.md](go/DEPLOY.md)、または CD のパイプライン。[cd/README.md](cd/README.md)）をそのまま流せばよい。
 
 ### 3.6 戻す
 
@@ -123,4 +123,4 @@ git checkout go/docker/api.Dockerfile
 | Node.js のメジャー版 | `engines`・`node-version`・Dockerfile の `node:`・Lambda の `nodejs<版>.x` をまとめて変える | 上と同じ |
 | Python の Lambda | `quota-guard.yaml`・`dummy-analyzer/template.yaml` の `Runtime`、`ci.yml` の `python-version` | `cfn-lint`、`(cd dummy-analyzer && sam build)` |
 | Docker イメージ（`garage`、`alpine`） | `web/docker/storage.Dockerfile` の版 | E2E |
-| GitHub Actions | `github-template/workflows/*.yml` の `@v<版>` | CI を 1 回流す |
+| GitHub Actions | `ci/workflows/ci.yml` の `@v<版>` | CI を 1 回流す |

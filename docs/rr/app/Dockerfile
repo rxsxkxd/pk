@@ -28,8 +28,10 @@ RUN set -eux; \
 
 WORKDIR /api
 
+# BUNDLE_DEPLOYMENT だけだと置き場所が ./vendor/bundle になるため、BUNDLE_PATH で固定する
 ENV RAILS_ENV=production \
     BUNDLE_DEPLOYMENT=1 \
+    BUNDLE_PATH=/usr/local/bundle \
     BUNDLE_WITHOUT=development:test
 
 COPY Gemfile Gemfile.lock ./
@@ -69,7 +71,9 @@ RUN set -eux; \
     ; \
     rm -rf /var/lib/apt/lists/*
 
-# RDS へ TLS で繋ぐときの CA（OS の証明書には含まれない）。database.yml の sslca で指す
+# RDS へ TLS で繋ぐときの CA（OS の証明書には含まれない）。database.yml の sslca で指す。
+# ADD --chmod は自動で作る親ディレクトリにも同じ権限を付けるため、ディレクトリは先に作る
+RUN mkdir -p -m 755 /etc/ssl/rds
 ADD --chmod=644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds/global-bundle.pem
 
 RUN useradd --system --create-home --uid 1000 --user-group rails
@@ -78,6 +82,7 @@ WORKDIR /api
 
 ENV RAILS_ENV=production \
     BUNDLE_DEPLOYMENT=1 \
+    BUNDLE_PATH=/usr/local/bundle \
     BUNDLE_WITHOUT=development:test \
     RAILS_LOG_TO_STDOUT=1 \
     RAILS_SERVE_STATIC_FILES=1

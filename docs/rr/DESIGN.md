@@ -1,6 +1,6 @@
 # Rails 5 / Ruby 2.7 をセキュリティ更新のある OS で動かす
 
-> 位置づけ: 設計と Dockerfile の雛形。**まだビルドして確かめていない**（確かめ方は 9 章、未確認の点は [OPEN_ITEMS.md](OPEN_ITEMS.md)）。確認日 2026-10-23。
+> 位置づけ: 設計と Dockerfile の雛形。手元（arm64）でビルドし、素の Rails 5.2 のアプリと MySQL 8.4 で動くことを確かめた（9 章）。統合管理システムの実物ではまだ試していない（[OPEN_ITEMS.md](OPEN_ITEMS.md)）。確認日 2026-10-23。
 
 ## 1. 前提（プロジェクト内の資料から）
 
@@ -46,6 +46,7 @@
   - gem を後から入れる方法は取らない。Gemfile に `openssl` を書かないと、`bundle exec` の中で読めなくなるため。
   - 置き換えた拡張は標準ライブラリとして入り、default gem としては登録されない（`gem list openssl` に出ない）。アプリの Gemfile.lock に `openssl` gem があれば、そちらが優先される。
   - 4.0 系も Ruby 2.7 に対応しているが、大きな変更を含むため避けた。
+  - Ruby 2.7 の `ext/digest` の extconf が、古い openssl 拡張の `ext/openssl/deprecation.rb` を読み込む。このファイルだけは元のものを残す（消すと `LoadError` で止まる）。
 - **アプリへの影響**（OPEN_ITEMS.md で確かめる）:
   - openssl gem 3.x では `OpenSSL::PKey` が変更できなくなった（`set_key` などが例外になる）。`OpenSSL::` を直接使うコードと、jwt・ruby-saml・net-ssh などの古い版が影響を受けうる。
   - OpenSSL 3 の既定のセキュリティレベルでは、外部への古い TLS や弱い鍵・署名（SHA-1、2048 bit 未満の RSA）が拒否される。
@@ -108,9 +109,31 @@ ruby-base/Dockerfile                      app/Dockerfile（アプリのリポジ
 | 実行環境 | ECS on Fargate。Web は ALB の後ろの ECS サービス、バッチは同じイメージの RunTask（09） |
 | イメージの置き場所 | ECR に 2 つのリポジトリ: Ruby のベースと、アプリ。ECR の拡張スキャン（Inspector）を有効にする |
 | CPU の種類 | Dockerfile はどちらでも組める。arm64（Graviton）のほうが安い。手元の Mac も arm64 なので、arm64 で gem が組めてテストが通れば arm64 にする。古い gem に arm64 の配布物がない・組めない場合は amd64 にする。**ビルドとテストは実行環境と同じ種類で行う** |
-| DB への接続 | mysql2 は MariaDB Connector/C（Debian の `libmariadb3`）で組む。trixie の `libmariadb3` には `caching_sha2_password` のプラグインが入っている。TLS で繋ぎ、`sslca` に RDS の CA を指定する |
+| DB への接続 | mysql2 は MariaDB Connector/C（Debian の `libmariadb3`）で組む。trixie の `libmariadb3` には `caching_sha2_password` のプラグインが入っている。**`sslca` に RDS の CA を指定し、`ssl_mode: verify_identity` を必ず付ける**（下記） |
 | 秘密の値 | Secrets Manager か Parameter Store に置き、タスク定義の `secrets` で渡す |
 | ログ | 標準出力 → CloudWatch Logs |
+
+### mysql2（MariaDB Connector/C 3.4）の TLS の指定
+
+手元の MySQL 8.4 で試した結果。**`sslca` だけでは、サーバーの証明書を検証しない**。関係のない CA を渡しても繋がってしまう。
+
+| `database.yml` の指定 | TLS | 証明書の検証 |
+|---|---|---|
+| なし | 使わない | — |
+| `ssl_mode: required` | 使う | しない |
+| `sslca` のみ | 使う | **しない**（違う CA でも繋がる） |
+| `sslca` ＋ `ssl_mode: verify_identity` | 使う | **する**（違う CA なら `self-signed certificate in certificate chain`、名前が違えば `Hostname verification failed` で拒否する） |
+| `ssl_mode: verify_ca` | — | このクライアントでは使えない（`does not support ssl_mode` の警告が出て無視される） |
+
+RDS では次のように書く。`host` には、証明書に載っている RDS のエンドポイント名を使う（IP アドレスや独自の CNAME では名前の検証に失敗する）。
+
+```yaml
+production:
+  adapter: mysql2
+  host: <%= ENV["DB_HOST"] %>   # 例: xxx.yyy.ap-northeast-1.rds.amazonaws.com
+  sslca: /etc/ssl/rds/global-bundle.pem
+  ssl_mode: verify_identity
+```
 
 ## 8. 更新の運用と、残るリスク
 
@@ -135,9 +158,30 @@ ruby-base/Dockerfile                      app/Dockerfile（アプリのリポジ
 - **Rails 5 と Ruby 2.7 にはセキュリティ修正が出ない**。2.7.8 のリリースノートにも、脆弱性が見つかっても 2.7.9 は出さないと書かれている。OS を新しくしても、ここは変わらない。
 - 当面の対策（公開範囲の制限、WAF など）と、06 のバージョンアップの計画を合わせて進める。このイメージは、版を上げるまでのつなぎである。
 
-## 9. 確かめ方（大きな取得があるため、Wi-Fi のあるところで行う）
+## 9. 確かめ方と結果
 
-初回の取得量の目安（実測していない）: `debian:trixie-slim` 約 30 MB、ビルド用の apt のパッケージ 100〜150 MB、Ruby のソース 12 MB、gem と Node.js などで数十 MB。**合計 200〜300 MB 程度**。
+### 2026-10-23 に手元（Mac、arm64）で確かめた結果
+
+| 確かめたこと | 結果 |
+|---|---|
+| Ruby のベース（`build`）のビルド | 通った（Ruby のコンパイルは 30 秒ほど）。組まれなかった拡張は、意図して外した dbm・gdbm・readline だけ |
+| Ruby のベース（`slim`）のビルドと動作 | `ruby 2.7.8p225 [aarch64-linux]`、`OpenSSL 3.5.7`、openssl 拡張 3.3.3。rubygems.org への HTTPS は 200。digest・psych・fiddle も読み込める。共有ライブラリの不足なし |
+| イメージの大きさ | `build` 709 MB（圧縮後 168 MB）、`slim` 201 MB（圧縮後 41 MB） |
+| アプリのイメージのビルド（`rails new` で作った Rails 5.2.8.1 のアプリ） | 通った。ネイティブ拡張の puma 3.12.6・mysql2 0.5.7・ffi・nio4r・bootsnap などが GCC 14 で組めた。nokogiri 1.15.7 は配布済みのバイナリ。`assets:precompile` も通った |
+| MySQL 8.4.11（`caching_sha2_password` のユーザー）への接続 | TLS 1.3 で接続できた。TLS の指定ごとの結果は 7 章の表 |
+| Puma の起動 | `rails` ユーザーで起動し、HTTP に応答した。アセットも Rails から返せた（`RAILS_SERVE_STATIC_FILES`） |
+
+試していて直したこと:
+
+- openssl 拡張を差し替えると `ext/digest` の extconf が止まった → `deprecation.rb` だけ残す（4.1）。
+- `BUNDLE_DEPLOYMENT=1` だけだと gem が `/api/vendor/bundle` に入り、`/usr/local/bundle` のコピーが空になっていた → `BUNDLE_PATH=/usr/local/bundle` を明示した。
+- `ADD --chmod=644` で自動で作られた `/etc/ssl/rds` のディレクトリまで 644 になり、`rails` ユーザーが CA を読めなかった → ディレクトリを先に作る。
+
+注意: サンプルのアプリでは、依存を新しく解決したため json 3.1.0 が選ばれ、Ruby 2.7 と Rails 5.2 の組み合わせで起動時に `ArgumentError (unknown keyword: create_additions)` になった。json を 2 系に固定して回避した。実物のアプリは今の Gemfile.lock を使うので起きないはずだが、**gem を更新するときは、Ruby 2.7 に対応しなくなった新しい版を拾わないよう注意する**。
+
+### 確かめ方
+
+初回の取得量の目安: `debian:trixie-slim` 約 30 MB、ビルド用の apt のパッケージ 100〜150 MB、Ruby のソース 12 MB、gem と Node.js などで数十 MB。**合計 200〜300 MB 程度**。
 
 ```bash
 # 1. Ruby のベース（アプリがなくても確かめられる）

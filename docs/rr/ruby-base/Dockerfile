@@ -67,10 +67,13 @@ RUN set -eux; \
     tar -xJf ruby.tar.xz -C ruby --strip-components=1; \
     tar -xOf openssl.gem data.tar.gz | tar -xzf - -C openssl-gem; \
     \
-    # openssl 拡張の差し替え。gem の lib/ は Ruby のソースでは ext/openssl/lib/ に置く
+    # openssl 拡張の差し替え。gem の lib/ は Ruby のソースでは ext/openssl/lib/ に置く。
+    # ext/digest の extconf が古い ext/openssl/deprecation.rb を読むため、それだけ残す
+    cp ruby/ext/openssl/deprecation.rb /usr/src/deprecation.rb; \
     rm -rf ruby/ext/openssl; \
     cp -r openssl-gem/ext/openssl ruby/ext/openssl; \
     cp -r openssl-gem/lib ruby/ext/openssl/lib; \
+    mv /usr/src/deprecation.rb ruby/ext/openssl/deprecation.rb; \
     \
     cd ruby; \
     # GCC 14 で既定でエラーになった古い書き方（暗黙の関数宣言、互換でないポインタの型など）を

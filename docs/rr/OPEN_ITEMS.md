@@ -2,14 +2,13 @@
 
 [DESIGN.md](DESIGN.md) の設計で、まだ確かめていないこと。確かめたら結果を書いて消す。
 
-## ビルド（手元で確かめられる。Wi-Fi のあるところで）
+## ビルド
 
-| # | 確かめること | 確かめ方 | だめだったとき |
-|---|---|---|---|
-| B1 | Ruby 2.7.8 が trixie の GCC 14 と `-fpermissive` で組めるか | `ruby-base` の `build` をビルドする | エラーの出たところの警告を個別に戻すか、bookworm に戻す（DESIGN.md の 3 章） |
-| B2 | openssl gem 3.3.3 の拡張が、Ruby 2.7 のソースの中で組めるか。OpenSSL 3.5 で動くか | 同上。`ruby -ropenssl` と、rubygems.org への HTTPS 接続 | 3.3 系の別の版を試す。だめなら Ruby のソースに当てるパッチを用意する |
-| B3 | `slim` で共有ライブラリが足りているか | `slim` のビルドの中の `ldd` の確認 | 足りないパッケージを `slim` に足す |
-| B4 | パッケージ名が trixie で合っているか（`libssl3t64`・`libffi8`・`libgmp10`・`libyaml-0-2`・`libmariadb3`） | ビルドが通るか | `apt-cache search` で正しい名前を探す |
+B1〜B4（GCC 14 での Ruby のビルド、openssl 拡張の差し替え、共有ライブラリ、trixie のパッケージ名）は、2026-10-23 に手元（arm64）で確かめた。結果は DESIGN.md の 9 章。
+
+| # | 確かめること | 確かめ方 |
+|---|---|---|
+| B5 | amd64 でも同じに組めるか | `docker build --platform linux/amd64 ...`（手元ではエミュレーションになり遅い。CodeBuild の amd64 で確かめてもよい） |
 
 ## アプリ（統合管理システムのリポジトリを見て確かめる）
 
@@ -27,11 +26,12 @@
 | A10 | 書き込む場所（`tmp`・`log` 以外。Active Storage の `storage` など） | `config/` | `rails` ユーザーが書けるようにする |
 | A11 | `config/puma.rb` があるか。ポートと、スレッド数・ワーカー数 | `config/puma.rb` | なければ用意する |
 | A12 | `mysql` コマンド（`default-mysql-client`）を使っているか | バッチ・スクリプト | 使っていなければ実行用イメージから外す |
+| A13 | gem を更新するとき、Ruby 2.7 に対応しなくなった新しい版を拾わないか（例: json 3.1 は Rails 5.2 と Ruby 2.7 で起動時に失敗した） | `bundle update` の差分 | 版の上限を Gemfile で固定する |
 
 ## AWS 上でしか確かめられないこと
 
 | # | 確かめること |
 |---|---|
-| W1 | RDS for MySQL 8.4 へ、mysql2（MariaDB Connector/C）から TLS と `caching_sha2_password` で繋がるか。`sslca`・`ssl_mode` の指定が効くか |
+| W1 | RDS for MySQL 8.4 へ、`sslca`（RDS の CA）＋ `ssl_mode: verify_identity` で繋がるか。手元では、違う CA と違う名前で拒否されることまでは確かめた（正しい CA と名前で通ることは RDS でしか確かめられない） |
 | W2 | Fargate の arm64 で、Web とバッチが amd64 と同じに動くか |
 | W3 | ECR のスキャンで、ソースから組んだ Ruby が検出の対象外になっていることを確かめ、運用でどう補うかを決める |

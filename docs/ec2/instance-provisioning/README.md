@@ -33,4 +33,6 @@ Auto Scaling グループで複数台構成にする余地がある。その場�
 
 - [メモ: 起動テンプレートを後から Auto Scaling グループで使うための余地](../notes/instance-provisioning/launch-template-auto-scaling-readiness-memo.md)
 - [補足: 構築の流れの中で Let's Encrypt の証明書をいつ扱うか](../notes/instance-provisioning/letsencrypt-certificate-timing.md)
+- [補足: 配った AMI から起動したインスタンスの運用中のメンテナンス](../notes/instance-provisioning/distributed-instance-maintenance.md)
+- [補足: 配布先のインスタンスの前段の構成（CloudFront と ALB）](../notes/instance-provisioning/cloudfront-alb-front-options.md)
 - [全体の設計の「起動テンプレート更新後の反映」](../ami-build-pipeline.md)

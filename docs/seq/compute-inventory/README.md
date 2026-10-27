@@ -1,6 +1,6 @@
-# EC2 と ECS の棚卸し
+# EC2・ECS・CodeBuild の棚卸し
 
-EC2 インスタンスと ECS サービスを、2 つの段階で棚卸しするツール。数百台の規模でも、運用中の環境に負荷をかけずに使えるようにしている。
+EC2 インスタンス、ECS サービス、CodeBuild プロジェクトを、2 つの段階で棚卸しするツール。数百台の規模でも、運用中の環境に負荷をかけずに使えるようにしている。
 
 1. **`snapshot`**: まとめて取得できる API だけを使って一覧を取る。台数が増えても、呼び出しはほとんど増えない。
 2. **`detail`**: 一覧を jq で絞り込み、絞った分だけ、リソースごとの API で詳細を取る。
@@ -57,7 +57,7 @@ Ruby 版と Python 版も、コマンドとオプションは同じ（`bundle ex
 
 ## 負荷を抑える仕組み
 
-- **`snapshot` は、リソースごとの呼び出しをしない。** 500 台なら、EC2 の呼び出しは 15 回ほどになる。内訳は DescribeInstances が 1 回、AMI 100 種類ごとの DescribeImages、SSM の 50 台ごとのページ。ECS は、クラスターごとの List と、10〜100 件ずつまとめた Describe だけ。
+- **`snapshot` は、リソースごとの呼び出しをしない。** 500 台なら、EC2 の呼び出しは 15 回ほどになる。内訳は DescribeInstances が 1 回、AMI 100 種類ごとの DescribeImages、SSM の 50 台ごとのページ。ECS は、クラスターごとの List と、10〜100 件ずつまとめた Describe だけ。CodeBuild は、ListProjects と、100 プロジェクトごとの BatchGetProjects だけ。
 - **`detail` は 1 件ずつ順に処理し、呼び出しの間に `--interval` 秒の間隔を空ける。** 並列には呼ばない。
 - **同じリソースは 1 回の実行で 1 回しか引かない。** タスク定義やターゲットグループのヘルスは、複数のレコードから参照されていても使い回す。
 - **再試行は adaptive にしている。** スロットリングされたときは、SDK と CLI が自分で送る速さを落とす。
@@ -67,24 +67,63 @@ Ruby 版と Python 版も、コマンドとオプションは同じ（`bundle ex
 
 どのレコードにも `record_type`、`account_id`、`region`、`collected_at`、`errors` が入る。
 
-**`ec2_instance`**（1 インスタンス 1 行）: `instance_id`、`name`、`state`、`instance_type`、`architecture`、`base_os`、`base_os_source`、`image_id`、`launch_time`、`tags`、`ecs`
+**`ec2_instance`**（1 インスタンス 1 行）: `instance_id`、`state`、`instance_type`、`architecture`、`base_os`、`base_os_source`、`image_id`、`launch_time`、`tags`、`ecs`
 
 - **`ecs`:** インスタンスが ECS のコンテナインスタンス（ホスト）なら、`{cluster_name, container_instance_arn, status, agent_connected, agent_version}` が入る。ホストでなければ `null`。EC2 と ECS を突き合わせる必要はない。
+- **`tags`:** `Name` 以外のタグ。インスタンス名（`Name` タグ）は出さない。
 - **`ecs` の範囲:** `--cluster` を指定したときは、指定したクラスターのホストだけに値が入る。
 - **ベース OS:** 判定の仕方は `../ec2-inventory/README.md` と同じ。SSM の報告 → AMI 名（[`ami-os-patterns.json`](./ami-os-patterns.json)）→ `PlatformDetails` の順に見る。
 
 **`ecs_service`**（1 サービス 1 行）: `cluster_name`、`service_name`、`service_arn`、`status`、`launch_type`、`desired_count`、`running_count`、`task_definition`、`load_balancers`
 
+**`codebuild_project`**（1 プロジェクト 1 行）: プロジェクトの定義（`BatchGetProjects`）から作る。ビルドの履歴は含まない。
+
+| 項目 | 内容 |
+|---|---|
+| `project_name` / `project_arn` / `description` | プロジェクト名・ARN・説明 |
+| `environment_type` | ビルド環境の種類（`LINUX_CONTAINER`、`ARM_CONTAINER`、`WINDOWS_SERVER_2019_CONTAINER`、`LINUX_LAMBDA_CONTAINER` など） |
+| `image` | ビルド環境のイメージ（例: `aws/codebuild/amazonlinux2-x86_64-standard:5.0`、ECR のイメージ） |
+| `base_os` | ベース OS（下の「CodeBuild のベース OS の判定」を参照） |
+| `compute_type` | コンピューティングの大きさ（`BUILD_GENERAL1_SMALL` など） |
+| `privileged_mode` | 特権モード（ビルドの中で Docker を動かすときに有効にする）が有効か |
+| `image_pull_credentials_type` | イメージを取得する認証（`CODEBUILD` / `SERVICE_ROLE`） |
+| `service_role` | サービスロールの ARN |
+| `source_type` / `source_location` / `source_version` | ソースの種類（`GITHUB`、`CODECOMMIT`、`S3`、`CODEPIPELINE`、`NO_SOURCE` など）・場所・ブランチやコミット |
+| `webhook` | Webhook でビルドを始める設定があれば `{build_type, filter_group_count}`、なければ `null` |
+| `vpc` | VPC の中でビルドするなら `{vpc_id, subnets, security_group_ids}`、しないなら `null` |
+| `timeout_in_minutes` / `queued_timeout_in_minutes` | ビルドのタイムアウトと、キューで待つ時間の上限（分） |
+| `concurrent_build_limit` | 同時に動かせるビルドの数の上限。設定していなければ `null` |
+| `artifacts_type` / `cache_type` | 成果物の置き場所とキャッシュの種類 |
+| `cloudwatch_logs` / `s3_logs` | ログの出力先ごとの有効・無効（`ENABLED` / `DISABLED`） |
+| `encryption_key` | 成果物を暗号化する KMS キー |
+| `created_at` / `last_modified_at` | 作成日時と最終更新日時 |
+| `tags` | タグ（キー → 値） |
+
+環境変数は、名前も値も出さない。
+
+#### CodeBuild のベース OS の判定
+
+CodeBuild が提供するイメージ（`aws/codebuild/` で始まるもの）は、イメージ名を [`codebuild-image-os.json`](./codebuild-image-os.json) の正規表現に上から順に当てて OS を決める。
+
+| `base_os` | 条件 |
+|---|---|
+| 対応表の OS（`Amazon Linux 2023`、`Ubuntu 22.04` など） | 対応表のどれかに一致した |
+| `Unknown` | `aws/codebuild/` で始まるが、対応表に無い。対応表への追記が要る |
+| `Custom Image` | ECR などの自前のイメージ。OS はイメージの中身で決まるので、このツールでは判定できない |
+
+`codebuild-image-os.json` は、AWS ドキュメントの「CodeBuild に用意されている Docker イメージ」の表に合わせて手で更新する。Lambda コンピューティング用のイメージ（`*-lambda-standard:*`）はまだ載せていないので、`Unknown` になる。
+
 ## 必要な IAM 権限
 
-- `snapshot`: `ec2:DescribeInstances`、`ec2:DescribeImages`、`ssm:DescribeInstanceInformation`、`ecs:ListClusters`、`ecs:ListServices`、`ecs:DescribeServices`、`ecs:ListContainerInstances`、`ecs:DescribeContainerInstances`
+- `snapshot`: `ec2:DescribeInstances`、`ec2:DescribeImages`、`ssm:DescribeInstanceInformation`、`ecs:ListClusters`、`ecs:ListServices`、`ecs:DescribeServices`、`ecs:ListContainerInstances`、`ecs:DescribeContainerInstances`、`codebuild:ListProjects`、`codebuild:BatchGetProjects`
 - `detail`: `ecs:DescribeTaskDefinition`、`ecs:ListTasks`、`ecs:DescribeTasks`、`elasticloadbalancing:DescribeTargetGroups`、`elasticloadbalancing:DescribeTargetHealth`
 
 ## この先の作業
 
-- [ ] `snapshot` の項目を、`../ec2-inventory/` と `../ecs-inventory/` から移す（AMI の詳細、IMDS、SSM の状態、ネットワーク、起動テンプレート、ECS の起動タイプの詳細、ネットワーク、サーキットブレーカーなど）
+- [ ] `snapshot` の項目を、`../ec2-inventory/` と `../ecs-inventory/` から移す（AMI の詳細、IMDS、SSM の状態、ネットワーク、起動テンプレート、ECS の起動タイプの詳細、ネットワーク、サーキットブレーカーなど）。EC2 のインスタンス名（`Name` タグ）と、ECS のコンテナの環境変数名・シークレット名は移さない
 - [ ] `detail` の `task_definition` の項目を、`../ecs-inventory/` のタスク定義の項目にそろえる
 - [ ] `detail` の `tasks` で、コンテナインスタンスの ARN を EC2 インスタンス ID に結び付ける（`snapshot` の `ecs.container_instance_arn` と突き合わせる例を書くか、`detail` 側で引くかを決める）
 - [ ] `detail` を中断したときに続きから再開する（`--skip-done 出力ファイル`。済んだレコードを `instance_id` / `service_arn` で飛ばす）
+- [ ] CodeBuild の `snapshot` を絞り込むオプション（`--ec2-filter` / `--cluster` に当たるもの）と、`detail` の種類（直近のビルドの結果など）が要るかを決める
 - [ ] 実際の AWS 環境での動作確認と、3 つの実装の出力がそろうことの確認
 - [ ] 移し終えたら `../ec2-inventory/` と `../ecs-inventory/` を削除し、`../README.md` を更新する

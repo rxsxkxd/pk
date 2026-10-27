@@ -111,8 +111,6 @@ module EcsInventory
         { "container_port" => pm.container_port, "host_port" => pm.host_port, "protocol" => pm.protocol }
       end,
       "log_driver" => definition.log_configuration&.log_driver,
-      "environment_variable_keys" => (definition.environment || []).map(&:name).sort,
-      "secret_names" => (definition.secrets || []).map(&:name).sort,
     }
   end
 

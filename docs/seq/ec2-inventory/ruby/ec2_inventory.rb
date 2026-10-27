@@ -46,12 +46,11 @@ module Ec2Inventory
   end
 
   def record(inst, image, ssm, ssm_error, patterns)
-    tags = (inst.tags || []).to_h { |t| [t.key, t.value] }
+    tags = (inst.tags || []).reject { |t| t.key == "Name" }.to_h { |t| [t.key, t.value] }
     os, os_source = base_os(inst, image, ssm, patterns)
     lt_id = tags["aws:ec2launchtemplate:id"]
     {
       "instance_id" => inst.instance_id,
-      "name" => tags["Name"],
       "state" => inst.state&.name,
       "instance_type" => inst.instance_type,
       "architecture" => inst.architecture,

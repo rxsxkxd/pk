@@ -114,7 +114,7 @@ jq -r --slurpfile ec2 ec2.jsonl '
 | `network_mode` | `awsvpc` / `bridge` / `host` など |
 | `requires_compatibilities` | タスク定義が対応する起動タイプ |
 | `task_role_arn` / `execution_role_arn` | タスクロールとタスク実行ロール |
-| `containers` | コンテナごとの `{name, image, essential, cpu, memory, memory_reservation, port_mappings, log_driver, environment_variable_keys, secret_names}` |
+| `containers` | コンテナごとの `{name, image, essential, cpu, memory, memory_reservation, port_mappings, log_driver}` |
 | `load_balancers` | つながっているターゲットグループの `{target_group_arn, load_balancer_name, container_name, container_port}` |
 | `service_registries` | サービスディスカバリ（Cloud Map）の登録先の ARN |
 | `network` | `awsvpc` のときの `{subnets, security_groups, assign_public_ip}`。それ以外は `null` |
@@ -122,8 +122,6 @@ jq -r --slurpfile ec2 ec2.jsonl '
 | `enable_execute_command` | ECS Exec が有効か |
 | `created_at` | サービスを作った日時 |
 | `errors` | 取得に失敗したもの。`{operation, code, message}` のリスト |
-
-環境変数とシークレットは**名前だけ**を出す。値は秘密情報を含みうるので出さない。
 
 `os_family` と `cpu_architecture` は、タスク定義に書いた値をそのまま出している。Fargate では指定が無ければ `LINUX` / `X86_64` で動く。EC2 起動タイプでは、実際にはタスクが置かれたホストで決まる。
 

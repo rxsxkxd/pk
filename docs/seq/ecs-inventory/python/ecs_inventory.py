@@ -139,8 +139,6 @@ def container(definition):
             for pm in definition.get("portMappings") or []
         ],
         "log_driver": (definition.get("logConfiguration") or {}).get("logDriver"),
-        "environment_variable_keys": sorted(e["name"] for e in definition.get("environment") or []),
-        "secret_names": sorted(s["name"] for s in definition.get("secrets") or []),
     }
 
 

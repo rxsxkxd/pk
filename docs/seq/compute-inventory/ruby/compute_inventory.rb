@@ -11,6 +11,7 @@
 require "json"
 require "optparse"
 require "time"
+require "aws-sdk-codebuild"
 require "aws-sdk-ec2"
 require "aws-sdk-ecs"
 require "aws-sdk-elasticloadbalancingv2"
@@ -18,6 +19,7 @@ require "aws-sdk-ssm"
 
 module ComputeInventory
   PATTERNS_PATH = File.expand_path("../ami-os-patterns.json", __dir__)
+  CODEBUILD_IMAGES_PATH = File.expand_path("../codebuild-image-os.json", __dir__)
   # 終了済み（terminated）は除く
   LIVE_STATES = %w[pending running stopping stopped shutting-down].freeze
   # 混み合っているときは SDK が自分で間隔を空ける
@@ -41,9 +43,11 @@ module ComputeInventory
       @ec2 = Aws::EC2::Client.new(**CLIENT_OPTIONS)
       @ssm = Aws::SSM::Client.new(**CLIENT_OPTIONS)
       @ecs = Aws::ECS::Client.new(**CLIENT_OPTIONS)
+      @codebuild = Aws::CodeBuild::Client.new(**CLIENT_OPTIONS)
       @ec2_filters = ec2_filters
       @clusters = clusters
       @patterns = JSON.parse(File.read(PATTERNS_PATH))
+      @codebuild_images = JSON.parse(File.read(CODEBUILD_IMAGES_PATH))
     end
 
     def run(out)
@@ -68,6 +72,7 @@ module ComputeInventory
         end
       end
       services.each { |service| out.puts JSON.generate(service_record(service)) }
+      fetch_projects.each { |project| out.puts JSON.generate(project_record(project)) }
     end
 
     private
@@ -101,7 +106,7 @@ module ComputeInventory
     end
 
     def ec2_record(account_id, inst, image, ssm, ssm_error, container_instance)
-      tags = (inst.tags || []).to_h { |t| [t.key, t.value] }
+      tags = (inst.tags || []).reject { |t| t.key == "Name" }.to_h { |t| [t.key, t.value] }
       os, os_source = base_os(inst, image, ssm)
       cluster, ci = container_instance
       {
@@ -109,7 +114,6 @@ module ComputeInventory
         "account_id" => account_id,
         **@common,
         "instance_id" => inst.instance_id,
-        "name" => tags["Name"],
         "state" => inst.state&.name,
         "instance_type" => inst.instance_type,
         "architecture" => inst.architecture,
@@ -162,6 +166,66 @@ module ComputeInventory
         end,
         "errors" => [],
       }
+    end
+
+    # プロジェクト名を 100 件ずつまとめて定義を引く
+    def fetch_projects
+      names = @codebuild.list_projects.flat_map(&:projects)
+      names.each_slice(100).flat_map { |chunk| @codebuild.batch_get_projects(names: chunk).projects }
+    end
+
+    def project_record(project)
+      env = project.environment
+      vpc = project.vpc_config
+      {
+        "record_type" => "codebuild_project",
+        "account_id" => project.arn.split(":")[4],
+        **@common,
+        "project_name" => project.name,
+        "project_arn" => project.arn,
+        "description" => project.description,
+        "environment_type" => env&.type,
+        "image" => env&.image,
+        "base_os" => codebuild_os(env&.image),
+        "compute_type" => env&.compute_type,
+        "privileged_mode" => env&.privileged_mode,
+        "image_pull_credentials_type" => env&.image_pull_credentials_type,
+        "service_role" => project.service_role,
+        "source_type" => project.source&.type,
+        "source_location" => project.source&.location,
+        "source_version" => project.source_version,
+        "webhook" => project.webhook && {
+          "build_type" => project.webhook.build_type,
+          "filter_group_count" => (project.webhook.filter_groups || []).size,
+        },
+        "vpc" => vpc.nil? || vpc.vpc_id.to_s.empty? ? nil : {
+          "vpc_id" => vpc.vpc_id,
+          "subnets" => vpc.subnets || [],
+          "security_group_ids" => vpc.security_group_ids || [],
+        },
+        "timeout_in_minutes" => project.timeout_in_minutes,
+        "queued_timeout_in_minutes" => project.queued_timeout_in_minutes,
+        "concurrent_build_limit" => project.concurrent_build_limit,
+        "artifacts_type" => project.artifacts&.type,
+        "cache_type" => project.cache&.type,
+        "cloudwatch_logs" => project.logs_config&.cloud_watch_logs&.status,
+        "s3_logs" => project.logs_config&.s3_logs&.status,
+        "encryption_key" => project.encryption_key,
+        "created_at" => ComputeInventory.utc_iso(project.created),
+        "last_modified_at" => ComputeInventory.utc_iso(project.last_modified),
+        "tags" => (project.tags || []).to_h { |t| [t.key, t.value] },
+        "errors" => [],
+      }
+    end
+
+    # CodeBuild が提供するイメージは名前から OS がわかる。自前のイメージ（ECR など）はわからない
+    def codebuild_os(image)
+      return nil if image.nil?
+
+      hit = @codebuild_images.find { |p| Regexp.new(p["pattern"]).match?(image) }
+      return hit["os"] if hit
+
+      image.start_with?("aws/codebuild/") ? "Unknown" : "Custom Image"
     end
   end
 

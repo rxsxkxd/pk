@@ -9,6 +9,7 @@ set -euo pipefail
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 patterns_file="$script_dir/../ami-os-patterns.json"
+codebuild_images_file="$script_dir/../codebuild-image-os.json"
 detail_kinds="task_definition tasks target_health"
 
 # 混み合っているときは CLI が自分で間隔を空ける
@@ -129,6 +130,13 @@ snapshot() {
       done >>"$work/container-instances.jsonl"
   done <"$work/clusters.txt"
 
+  # --- CodeBuild: プロジェクト名を 100 件ずつまとめて定義を引く
+  aws codebuild list-projects --output json | jq '.projects' | chunks 100 |
+    while read -r names; do
+      # shellcheck disable=SC2086 # プロジェクト名を別々の引数として渡す
+      aws codebuild batch-get-projects --names $names --output json </dev/null | jq -c '.projects[]'
+    done >"$work/projects.jsonl"
+
   # --- レコードを組み立てる。ECS のホストは ec2_instance の ecs に入れる
   jq -c -n \
     --arg region "$region" \
@@ -139,12 +147,20 @@ snapshot() {
     --slurpfile ssm "$work/ssm.json" \
     --slurpfile patterns "$patterns_file" \
     --slurpfile services "$work/services.jsonl" \
-    --slurpfile container_instances "$work/container-instances.jsonl" "$jq_lib"'
-    def tag($k): first(.Tags[]? | select(.Key == $k) | .Value) // null;
-
+    --slurpfile container_instances "$work/container-instances.jsonl" \
+    --slurpfile projects "$work/projects.jsonl" \
+    --slurpfile codebuild_images "$codebuild_images_file" "$jq_lib"'
     def os_from_ami_name($name):
       if $name == null then null
       else first($patterns[0][] | select(.pattern as $p | $name | test($p)) | .os) // null
+      end;
+
+    # CodeBuild が提供するイメージは名前から OS がわかる。自前のイメージ（ECR など）はわからない
+    def os_from_codebuild_image($image):
+      if $image == null then null
+      else
+        first($codebuild_images[0][] | select(.pattern as $p | $image | test($p)) | .os)
+        // (if $image | startswith("aws/codebuild/") then "Unknown" else "Custom Image" end)
       end;
 
     ([$images[].Images[]] | map({key: .ImageId, value: .}) | from_entries) as $image_by_id
@@ -169,7 +185,6 @@ snapshot() {
             region: $region,
             collected_at: $collected_at,
             instance_id: .InstanceId,
-            name: tag("Name"),
             state: .State.Name,
             instance_type: .InstanceType,
             architecture: .Architecture,
@@ -177,7 +192,7 @@ snapshot() {
             base_os_source: $os_source,
             image_id: .ImageId,
             launch_time: (.LaunchTime | utc_iso),
-            tags: (.Tags // [] | from_entries),
+            tags: (.Tags // [] | map(select(.Key != "Name")) | from_entries),
             ecs: (
               if $ci == null then null
               else {
@@ -211,6 +226,54 @@ snapshot() {
               .loadBalancers[]?
               | {target_group_arn: .targetGroupArn, container_name: .containerName, container_port: .containerPort}
             ],
+            errors: []
+          }
+      ),
+      (
+        $projects[]
+        | {
+            record_type: "codebuild_project",
+            account_id: (.arn | split(":")[4]),
+            region: $region,
+            collected_at: $collected_at,
+            project_name: .name,
+            project_arn: .arn,
+            description: .description,
+            environment_type: .environment.type,
+            image: .environment.image,
+            base_os: os_from_codebuild_image(.environment.image),
+            compute_type: .environment.computeType,
+            privileged_mode: .environment.privilegedMode,
+            image_pull_credentials_type: .environment.imagePullCredentialsType,
+            service_role: .serviceRole,
+            source_type: .source.type,
+            source_location: .source.location,
+            source_version: .sourceVersion,
+            webhook: (
+              if .webhook == null then null
+              else {build_type: .webhook.buildType, filter_group_count: (.webhook.filterGroups // [] | length)}
+              end
+            ),
+            vpc: (
+              if (.vpcConfig.vpcId // "") == "" then null
+              else {
+                vpc_id: .vpcConfig.vpcId,
+                subnets: (.vpcConfig.subnets // []),
+                security_group_ids: (.vpcConfig.securityGroupIds // [])
+              }
+              end
+            ),
+            timeout_in_minutes: .timeoutInMinutes,
+            queued_timeout_in_minutes: .queuedTimeoutInMinutes,
+            concurrent_build_limit: .concurrentBuildLimit,
+            artifacts_type: .artifacts.type,
+            cache_type: .cache.type,
+            cloudwatch_logs: .logsConfig.cloudWatchLogs.status,
+            s3_logs: .logsConfig.s3Logs.status,
+            encryption_key: .encryptionKey,
+            created_at: (.created | utc_iso),
+            last_modified_at: (.lastModified | utc_iso),
+            tags: (.tags // [] | from_entries),
             errors: []
           }
       )'

@@ -46,19 +46,19 @@ AWS_PROFILE=prod AWS_REGION=ap-northeast-1 .venv/bin/python ec2_inventory.py > .
 
 ```bash
 # Amazon Linux 2 以前で動いているインスタンス
-jq -r 'select(.base_os | test("^Amazon Linux( 2)?$")) | [.instance_id, .name, .base_os, .base_os_source] | @tsv' ec2.jsonl
+jq -r 'select(.base_os | test("^Amazon Linux( 2)?$")) | [.instance_id, .base_os, .base_os_source] | @tsv' ec2.jsonl
 
 # OS を推定でしか判定できなかったもの（SSM の報告が無い）
-jq -r 'select(.base_os_source != "ssm") | [.instance_id, .name, .base_os_source, .image.name] | @tsv' ec2.jsonl
+jq -r 'select(.base_os_source != "ssm") | [.instance_id, .base_os_source, .image.name] | @tsv' ec2.jsonl
 
 # IMDSv2 を必須にしていないもの
-jq -r 'select(.imds_http_tokens != "required") | [.instance_id, .name] | @tsv' ec2.jsonl
+jq -r 'select(.imds_http_tokens != "required") | [.instance_id] | @tsv' ec2.jsonl
 
 # AMI が登録解除済み、または非推奨日を過ぎたもの
-jq -r 'select(.image == null or (.image.deprecation_time != null and .image.deprecation_time < (now | todate))) | [.instance_id, .name, .image_id] | @tsv' ec2.jsonl
+jq -r 'select(.image == null or (.image.deprecation_time != null and .image.deprecation_time < (now | todate))) | [.instance_id, .image_id] | @tsv' ec2.jsonl
 
 # SSM の管理対象になっていない、または接続が切れているもの
-jq -r 'select(.ssm == null or .ssm.ping_status != "Online") | [.instance_id, .name, (.ssm.ping_status // "未登録")] | @tsv' ec2.jsonl
+jq -r 'select(.ssm == null or .ssm.ping_status != "Online") | [.instance_id, (.ssm.ping_status // "未登録")] | @tsv' ec2.jsonl
 ```
 
 ## 必要な IAM 権限
@@ -90,7 +90,6 @@ AMI は ID を指定して引くと、登録解除済みの AMI が 1 つでも�
 | 項目 | 内容 | 例 |
 |---|---|---|
 | `instance_id` | インスタンス ID | `"i-0123456789abcdef0"` |
-| `name` | `Name` タグ | `"web-1"` |
 | `state` | `pending` / `running` / `stopping` / `stopped` / `shutting-down` | `"running"` |
 | `instance_type` | インスタンスタイプ | `"t3.medium"` |
 | `architecture` | `x86_64` / `arm64` | `"x86_64"` |
@@ -110,7 +109,7 @@ AMI は ID を指定して引くと、登録解除済みの AMI が 1 つでも�
 | `auto_scaling_group` | 所属する Auto Scaling グループ（`aws:autoscaling:groupName` タグから） | |
 | `launch_template` | 起動に使った起動テンプレートの `{id, version}`（`aws:ec2launchtemplate:*` タグから） | |
 | `ssm` | SSM エージェントの `{ping_status, agent_version, platform_type, last_ping_at}`。SSM の管理対象でなければ `null` | |
-| `tags` | すべてのタグ（キー → 値） | `{"Name": "web-1", "env": "prod"}` |
+| `tags` | `Name` 以外のタグ（キー → 値） | `{"env": "prod", "role": "web"}` |
 | `errors` | 取得に失敗したもの。`{operation, code, message}` のリスト | `[]` |
 
 ### ベース OS の判定

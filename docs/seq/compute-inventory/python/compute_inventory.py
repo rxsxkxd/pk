@@ -21,6 +21,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 PATTERNS_PATH = Path(__file__).resolve().parent.parent / "ami-os-patterns.json"
+CODEBUILD_IMAGES_PATH = Path(__file__).resolve().parent.parent / "codebuild-image-os.json"
 # 終了済み（terminated）は除く
 LIVE_STATES = ["pending", "running", "stopping", "stopped", "shutting-down"]
 # 混み合っているときは SDK が自分で間隔を空ける
@@ -71,10 +72,12 @@ class Snapshot:
         self.ec2 = s.client("ec2", config=CLIENT_CONFIG)
         self.ssm = s.client("ssm", config=CLIENT_CONFIG)
         self.ecs = s.client("ecs", config=CLIENT_CONFIG)
+        self.codebuild = s.client("codebuild", config=CLIENT_CONFIG)
         self.region = s.region_name
         self.ec2_filters = ec2_filters
         self.clusters = clusters
         self.patterns = json.loads(PATTERNS_PATH.read_text())
+        self.codebuild_images = json.loads(CODEBUILD_IMAGES_PATH.read_text())
 
     def run(self, out):
         self.common = {"region": self.region, "collected_at": now_iso()}
@@ -100,6 +103,8 @@ class Snapshot:
                 ))
         for service in services:
             write(out, self.service_record(service))
+        for project in self.fetch_projects():
+            write(out, self.project_record(project))
 
     def describe_services(self, cluster):
         arns = paginate(self.ecs, "list_services", "serviceArns", cluster=cluster)
@@ -137,7 +142,7 @@ class Snapshot:
             return {}, error_entry(e)
 
     def ec2_record(self, account_id, inst, image, ssm, ssm_error, container_instance):
-        tags = {t["Key"]: t["Value"] for t in inst.get("Tags") or []}
+        tags = {t["Key"]: t["Value"] for t in inst.get("Tags") or [] if t["Key"] != "Name"}
         os_name, os_source = self.base_os(inst, image, ssm)
         cluster, ci = container_instance or (None, None)
         return {
@@ -145,7 +150,6 @@ class Snapshot:
             "account_id": account_id,
             **self.common,
             "instance_id": inst["InstanceId"],
-            "name": tags.get("Name"),
             "state": (inst.get("State") or {}).get("Name"),
             "instance_type": inst.get("InstanceType"),
             "architecture": inst.get("Architecture"),
@@ -199,6 +203,68 @@ class Snapshot:
             ],
             "errors": [],
         }
+
+    def fetch_projects(self):
+        """プロジェクト名を 100 件ずつまとめて定義を引く。"""
+        names = paginate(self.codebuild, "list_projects", "projects")
+        return [
+            p for chunk in chunked(names, 100)
+            for p in self.codebuild.batch_get_projects(names=chunk)["projects"]
+        ]
+
+    def project_record(self, project):
+        env = project.get("environment") or {}
+        vpc = project.get("vpcConfig") or {}
+        webhook = project.get("webhook")
+        logs = project.get("logsConfig") or {}
+        return {
+            "record_type": "codebuild_project",
+            "account_id": project["arn"].split(":")[4],
+            **self.common,
+            "project_name": project.get("name"),
+            "project_arn": project["arn"],
+            "description": project.get("description"),
+            "environment_type": env.get("type"),
+            "image": env.get("image"),
+            "base_os": self.codebuild_os(env.get("image")),
+            "compute_type": env.get("computeType"),
+            "privileged_mode": env.get("privilegedMode"),
+            "image_pull_credentials_type": env.get("imagePullCredentialsType"),
+            "service_role": project.get("serviceRole"),
+            "source_type": (project.get("source") or {}).get("type"),
+            "source_location": (project.get("source") or {}).get("location"),
+            "source_version": project.get("sourceVersion"),
+            "webhook": {
+                "build_type": webhook.get("buildType"),
+                "filter_group_count": len(webhook.get("filterGroups") or []),
+            } if webhook is not None else None,
+            "vpc": {
+                "vpc_id": vpc["vpcId"],
+                "subnets": vpc.get("subnets") or [],
+                "security_group_ids": vpc.get("securityGroupIds") or [],
+            } if vpc.get("vpcId") else None,
+            "timeout_in_minutes": project.get("timeoutInMinutes"),
+            "queued_timeout_in_minutes": project.get("queuedTimeoutInMinutes"),
+            "concurrent_build_limit": project.get("concurrentBuildLimit"),
+            "artifacts_type": (project.get("artifacts") or {}).get("type"),
+            "cache_type": (project.get("cache") or {}).get("type"),
+            "cloudwatch_logs": (logs.get("cloudWatchLogs") or {}).get("status"),
+            "s3_logs": (logs.get("s3Logs") or {}).get("status"),
+            "encryption_key": project.get("encryptionKey"),
+            "created_at": utc_iso(project.get("created")),
+            "last_modified_at": utc_iso(project.get("lastModified")),
+            "tags": {t["key"]: t.get("value") for t in project.get("tags") or []},
+            "errors": [],
+        }
+
+    def codebuild_os(self, image):
+        """CodeBuild が提供するイメージは名前から OS がわかる。自前のイメージ（ECR など）はわからない。"""
+        if image is None:
+            return None
+        for p in self.codebuild_images:
+            if re.search(p["pattern"], image):
+                return p["os"]
+        return "Unknown" if image.startswith("aws/codebuild/") else "Custom Image"
 
 
 # ------------------------------------------------------------ detail

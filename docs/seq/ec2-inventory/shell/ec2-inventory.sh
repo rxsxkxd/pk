@@ -84,7 +84,6 @@ jq -c -n \
   | tag("aws:ec2launchtemplate:id") as $lt_id
   | {
       instance_id: .InstanceId,
-      name: tag("Name"),
       state: .State.Name,
       instance_type: .InstanceType,
       architecture: .Architecture,
@@ -129,6 +128,6 @@ jq -c -n \
         }
         end
       ),
-      tags: (.Tags // [] | from_entries),
+      tags: (.Tags // [] | map(select(.Key != "Name")) | from_entries),
       errors: [$ssm_error | select(. != null)]
     }'

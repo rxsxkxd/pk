@@ -90,9 +90,7 @@ jq -c -n \
       memory,
       memory_reservation: .memoryReservation,
       port_mappings: [.portMappings[]? | {container_port: .containerPort, host_port: .hostPort, protocol}],
-      log_driver: .logConfiguration.logDriver,
-      environment_variable_keys: ([.environment[]?.name] | sort),
-      secret_names: ([.secrets[]?.name] | sort)
+      log_driver: .logConfiguration.logDriver
     };
 
   ($task_definitions | map({key: .arn, value: .}) | from_entries) as $td_by_arn

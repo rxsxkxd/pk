@@ -57,12 +57,11 @@ def fetch_ssm(ssm):
 
 
 def record(inst, image, ssm, ssm_error, patterns):
-    tags = {t["Key"]: t["Value"] for t in inst.get("Tags") or []}
+    tags = {t["Key"]: t["Value"] for t in inst.get("Tags") or [] if t["Key"] != "Name"}
     os_name, os_source = base_os(inst, image, ssm, patterns)
     lt_id = tags.get("aws:ec2launchtemplate:id")
     return {
         "instance_id": inst["InstanceId"],
-        "name": tags.get("Name"),
         "state": (inst.get("State") or {}).get("Name"),
         "instance_type": inst.get("InstanceType"),
         "architecture": inst.get("Architecture"),

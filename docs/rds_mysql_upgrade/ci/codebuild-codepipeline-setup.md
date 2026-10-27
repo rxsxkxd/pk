@@ -27,19 +27,19 @@ CodePipeline（サービス・環境ごとに 1 本）
 
 ## 0. CodeBuild の動作環境コンテナと追加導入物
 
-AWS 上の 3 プロジェクトは、CloudFormation テンプレートで AWS 管理イメージ `aws/codebuild/standard:7.0` を指定する。このイメージは Ubuntu 22.04 の CodeBuild managed image である。AWS CLI を含む CodeBuild の標準ツール群はイメージ側のものを利用し、buildspec から AWS CLI を追加インストールしない。ローカルの CodeBuild Local Agent 用だけは、軽量な [Dockerfile.codebuild-runner](Dockerfile.codebuild-runner) を使用できる。AWS 上の CodeBuild image はこの代替 image に変更しない。
+AWS 上のプロジェクトは、CloudFormation テンプレートで AWS 管理イメージ `aws/codebuild/standard:8.0`（Ubuntu 24.04）を指定する。**ReadApprovals だけは `standard:7.0`（Ubuntu 22.04）**である（理由は下の注記）。AWS CLI を含む CodeBuild の標準ツール群はイメージ側のものを利用し、buildspec から AWS CLI を追加インストールしない。ローカルの CodeBuild Local Agent 用だけは、軽量な [Dockerfile.codebuild-runner](Dockerfile.codebuild-runner) を使用できる。AWS 上の CodeBuild image はこの代替 image に変更しない。
 
-> **`standard:8.0`（Ubuntu 24.04）にはしない。**8.0 へ切り替えたところ、`Prepare` ステージの `ReadApprovals` だけが、buildspec の最後のコマンド（承認状態の `echo`）まで実行した後に完了せず、ビルドのタイムアウトまで止まり続けた。同じ 8.0 で `BuildReportTool` と `PrecheckParameterGroup` は完了し、7.0 へ戻すと解消した。buildspec のシェルから `set -eu` を外しても直らなかった。
+> **ReadApprovals だけは `standard:8.0` にしない。**8.0 へ切り替えたところ、`Prepare` ステージの `ReadApprovals` だけが、buildspec の最後のコマンド（承認状態の `echo`）まで実行した後に完了せず、ビルドのタイムアウトまで止まり続けた。同じ 8.0 で `BuildReportTool` と `PrecheckParameterGroup` は完了し、7.0 へ戻すと解消した。buildspec のシェルから `set -eu` を外しても直らなかった。
 >
 > 原因は未特定である。`ReadApprovals` にしか無いのは `exported-variables`（パイプライン変数の公開。CodeBuild のエージェントがビルドの終わりに値を回収する）と、出力 artifact が無いことで、前者が最も疑わしい。7.0 と 8.0 の Dockerfile（[aws-codebuild-docker-images](https://github.com/aws/aws-codebuild-docker-images)）を比べた限りでは、シェルの起動やエントリポイントに違いは無く、Ruby 3.4.10・Go 1.25 も同じ版が入っている。
 >
-> 8.0 へ移すときは、先に `ReadApprovals` のプロジェクトを単体で切り分ける（`aws codebuild start-build --source-type-override NO_SOURCE --image-override aws/codebuild/standard:8.0 --buildspec-override ...` で、`exported-variables` の有無だけを変えた最小の buildspec を比べる。止まったフェーズは `aws codebuild batch-get-builds` の `phases` で確かめる）。8.0 と `exported-variables` の組み合わせだけで止まるなら AWS サポートへ報告する。
+> ReadApprovals も 8.0 へ移すときは、先にそのプロジェクトを単体で切り分ける（`aws codebuild start-build --source-type-override NO_SOURCE --image-override aws/codebuild/standard:8.0 --buildspec-override ...` で、`exported-variables` の有無だけを変えた最小の buildspec を比べる。止まったフェーズは `aws codebuild batch-get-builds` の `phases` で確かめる）。8.0 と `exported-variables` の組み合わせだけで止まるなら AWS サポートへ報告する。
 
 | Project | CodeBuild ベースイメージ | buildspec が選択・導入するもの | Docker 利用 | 実行する最終処理 |
 |---|---|---|---|---|
-| BuildGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.11` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 3 を実行 |
-| VerifyGreen | `aws/codebuild/standard:7.0` | `rbenv local 3.4.11` と `runtime-versions: golang: 1.25`（jq は image 同梱） | 不要、`PrivilegedMode: false` | BuildReportTool がビルドした Go バイナリを受け取り、Ruby スクリプトから実行 |
-| Switchover | `aws/codebuild/standard:7.0` | `rbenv local 3.4.11` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 5 を実行 |
+| BuildGreen | `aws/codebuild/standard:8.0` | `rbenv local 3.4.11` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 3 を実行 |
+| VerifyGreen | `aws/codebuild/standard:8.0` | `rbenv local 3.4.11` と `runtime-versions: golang: 1.26`（jq は image 同梱） | 不要、`PrivilegedMode: false` | BuildReportTool がビルドした Go バイナリを受け取り、Ruby スクリプトから実行 |
+| Switchover | `aws/codebuild/standard:8.0` | `rbenv local 3.4.11` で Ruby を選ぶ（jq は image 同梱） | 不要、`PrivilegedMode: false` | Ruby スクリプトと AWS CLI で Step 5 を実行 |
 
 ### 共通コンテナ
 
@@ -56,9 +56,9 @@ AWS 用と Local Agent 用で buildspec を分けない。**設定 YAML の読�
 
 **`rbenv local` は cwd（`CODEBUILD_SRC_DIR`）へ `.ruby-version` を書く。**ローカルで buildspec を試すと作業ツリーにこのファイルが残るため `.gitignore` 済みである。ファイルを作らせたくない場合は `export RBENV_VERSION=3.4.11` でも同じ効果になる。
 
-VerifyGreen だけは `runtime-versions: golang: 1.25` を指定する。Docker を使わずに Go レポート生成器を同一イメージ内でビルドするためである。
+VerifyGreen だけは `runtime-versions: golang: 1.26` を指定する。Docker を使わずに Go レポート生成器を同一イメージ内でビルドするためである。
 
-> **指定したバージョンが image に無ければ、`rbenv local` はその場で失敗する**（`rbenv: version '3.4.11' not installed`）。別の Ruby で黙って動くより安全側である。利用できる版は `rbenv versions` で確認する。`golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブを image が提供するバージョンへ下げる。
+> **指定したバージョンが image に無ければ、`rbenv local` はその場で失敗する**（`rbenv: version '3.4.11' not installed`）。別の Ruby で黙って動くより安全側である。利用できる版は `rbenv versions` で確認する。`golang: 1.26` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブを image が提供するバージョンへ下げる。
 
 ```bash
 ruby --version   # YAML / JSON は標準ライブラリなので追加導入は無い
@@ -72,7 +72,7 @@ VerifyGreen だけは Go バイナリを使う。**Docker は使わず、ビル�
 
 ```text
 ci/codebuild/build-report-tool.yml   ← ビルドだけ。AWS を呼ばない
-  ├─ install:  runtime-versions: golang: 1.25
+  ├─ install:  runtime-versions: golang: 1.26
   └─ build:    CGO_ENABLED=0 go build ... -o .tools/green-report/... ./scripts/<コマンド名>
                → artifact: .tools/green-report/generate_green_verification_report
 
@@ -97,6 +97,8 @@ CodePipeline は `Prepare` ステージの `BuildReportTool` アクションの�
 
 **Go module の取得先（`proxy.golang.org`）へ到達する必要があるのは `BuildReportToolProject` だけである。**イメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定。buildspec で明示している）が必要なツールチェーンを取得するため、その経路も要る。このプロジェクトは VPC 設定を与えないので、VPC 内の経路整備は不要である。
 
+**ビルドに使う Go は、可能なら 1.26.10 へ切り替える。**`build-report-tool.yml` の install フェーズは、`runtime-versions: golang: 1.26` で選ばれた Go の上から、イメージ同梱の goenv を更新し（`git pull`）、`goenv install --skip-existing 1.26.10` と `goenv global 1.26.10` で切り替える（CodeBuild 自身も `runtime-versions` を `goenv global` で実現しているので、後から上書きできる）。**どの手順も失敗してよい。**goenv の更新・Go の取得のどれかが失敗したら、理由を出して 1.26（イメージ同梱の版）のままビルドする。Go 1.26.10 の取得（数十 MB）と goenv の更新は毎回のビルドで外部ネットワークを使う。Local Agent で使う `golang:1.25` のイメージには goenv が無いので、ローカル検証ではこの切り替えは素通りになる。
+
 ### VerifyGreen を RDS のある VPC 内で実行する
 
 > 構成の全体像と、どこで落ちるかの一覧は [Step 4 の分離と VPC 配置](verify-green-vpc-architecture.md) に図でまとめてある。SG の具体的な設定手順は [VerifyGreen の セキュリティグループ設定](verify-green-security-group-setup.md) にある（**テンプレートは SG を作らない**）。
@@ -110,7 +112,7 @@ VerifyGreenSubnetIds=subnet-aaaa,subnet-bbbb        # 検証専用。RDS へ到�
 VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティグループ設定」で作る SG
 ```
 
-**イメージの指定は要らない。**`VerifyGreen` は `aws/codebuild/standard:7.0` 固定で、テンプレートはカスタムイメージを受け付けない。
+**イメージの指定は要らない。**`VerifyGreen` は `aws/codebuild/standard:8.0` 固定で、テンプレートはカスタムイメージを受け付けない。
 
 `VpcId` が空なら `VerifyGreen` も VPC 外で動き、AWS API による検証だけを行う（既定）。
 
@@ -143,11 +145,11 @@ VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティ
 
 private subnet では apt リポジトリへ到達できないため、**buildspec は `apt-get` を呼ばない。**実効値の収集は `collect_green_runtime_values`（静的リンクの Go バイナリ）が行う。`BuildReportTool` がレポート生成器と一緒にビルドし、artifact で渡す。
 
-**そのため `VerifyGreen` のイメージは `aws/codebuild/standard:7.0` 固定である。**同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。**テンプレートからはカスタムイメージの指定（`VerifyGreenImage` パラメータ、`ImagePullCredentialsType`、ECR 読み取り権限）を削除した。**
+**そのため `VerifyGreen` のイメージは `aws/codebuild/standard:8.0` 固定である。**同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。**テンプレートからはカスタムイメージの指定（`VerifyGreenImage` パラメータ、`ImagePullCredentialsType`、ECR 読み取り権限）を削除した。**
 
 > 以前の方式（MySQL クライアント入りのイメージを ECR へ置く）で使っていた [Dockerfile.verify-green](Dockerfile.verify-green) は、**参考として残してあるが未使用である。**テンプレートから指定する経路は無い。
 
-> イメージが提供する managed runtime の Go バージョンは AWS の更新で変わる。`runtime-versions: golang: 1.25` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブをイメージが提供するバージョンへ下げる。
+> イメージが提供する managed runtime の Go バージョンは AWS の更新で変わる。`runtime-versions: golang: 1.26` が解決できない場合は、より新しい CodeBuild image を選ぶか、`go.mod` の `go` ディレクティブをイメージが提供するバージョンへ下げる。
 
 ### 任意の MySQL 実効値収集時だけ追加されるもの
 

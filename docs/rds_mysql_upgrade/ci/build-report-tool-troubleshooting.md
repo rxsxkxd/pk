@@ -67,7 +67,7 @@ flowchart TD
 
 **`go version` の出力が無い場合**はここ。buildspec のコマンドが 1 つも実行されていない。
 
-### I1: `Unknown runtime version named '1.25' of golang`
+### I1: `Unknown runtime version named '1.26' of golang`
 
 **意味**：`runtime-versions` に書いた Go のバージョンを、そのビルドイメージが持っていない。**イメージごとに選べるバージョンは決まっている。**
 
@@ -75,14 +75,14 @@ flowchart TD
 # ci/codebuild/build-report-tool.yml
 install:
   runtime-versions:
-    golang: 1.25        # ← このイメージが対応していなければ即座に失敗する
+    golang: 1.26        # ← このイメージが対応していなければ即座に失敗する
 ```
 
 現在の指定はこうなっている。
 
 | 項目 | 値 |
 |---|---|
-| イメージ | `aws/codebuild/standard:7.0` |
+| イメージ | `aws/codebuild/standard:8.0` |
 | `runtime-versions: golang` | `1.25` |
 | `go.mod` の `go` ディレクティブ | `1.25` |
 | `GOTOOLCHAIN` | `auto` |
@@ -91,7 +91,7 @@ install:
 
 | 対処 | 内容 | 外部到達 |
 |---|---|---|
-| **A: イメージを新しくする** | `Image` を `golang: 1.25` に対応したものへ変更する | 不要 |
+| **A: イメージを新しくする** | `Image` を `golang: 1.26` に対応したものへ変更する | 不要 |
 | **B: `runtime-versions` を下げる** | イメージが持つ版（例 `1.21`）にし、`GOTOOLCHAIN=auto` に `go.mod` の 1.25 を満たさせる | **必要**（`proxy.golang.org` からツールチェーンを取得する） |
 
 対応バージョンは AWS のドキュメント「CodeBuild に用意されているランタイム」で確認する。イメージは更新されるので、**このドキュメントに一覧を固定して書かない。**
@@ -120,7 +120,7 @@ Source:
 
 `CLIENT_ERROR: Unable to pull customer's container image` など。
 
-**やること**：テンプレートは全プロジェクトで `aws/codebuild/standard:7.0`（マネージドイメージ）を固定しており、**カスタムイメージを指定する経路は無い**。この症状が出るならイメージ名が書き換えられているので、テンプレートを確認する。
+**やること**：テンプレートは `aws/codebuild/standard:8.0`（ReadApprovals だけ `standard:7.0`。どちらもマネージドイメージ）を固定しており、**カスタムイメージを指定する経路は無い**。この症状が出るならイメージ名が書き換えられているので、テンプレートを確認する。
 
 ### I4: 起動時に Elastic Network Interface を作れない
 
@@ -252,7 +252,7 @@ go: download go1.25: ... dial tcp: i/o timeout
 
 **やること**：
 
-1. `runtime-versions` を `go.mod` の `go` ディレクティブ以上にして、取得自体を起こさない（[I1](#i1-unknown-runtime-version-named-125-of-golang) の A）
+1. `runtime-versions` を `go.mod` の `go` ディレクティブ以上にして、取得自体を起こさない（[I1](#i1-unknown-runtime-version-named-126-of-golang) の A）
 2. どうしても取得が必要なら `proxy.golang.org` へ到達できるようにする。**`BuildReportToolProject` に `VpcConfig` が付いていないことを確認する**（VPC 外なら CodeBuild は既定で外へ出られる）
 3. 組織のプロキシがある場合は `HTTPS_PROXY` を `env.variables` で渡す
 

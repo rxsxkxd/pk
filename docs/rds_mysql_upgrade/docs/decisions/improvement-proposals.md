@@ -77,7 +77,7 @@
 
 ### C-1. CodeBuild イメージ `standard:7.0` の先行き
 
-- **現状**: `standard:8.0` に切り替えると ReadApprovals だけが完了せずにタイムアウトしたため、7.0 に戻している。原因は未特定で、そのプロジェクトにしか無い `exported-variables` が疑わしい（経緯と切り分け手順は `ci/codebuild-codepipeline-setup.md`）。7.0 は Ubuntu 22.04 で、いずれ非推奨になる。
+- **現状**: `standard:8.0` に切り替えると ReadApprovals だけが完了せずにタイムアウトしたため、**ReadApprovals だけを 7.0 に残し、ほかのプロジェクトは 8.0 にした**（2026-10-27）。原因は未特定で、そのプロジェクトにしか無い `exported-variables` が疑わしい（経緯と切り分け手順は `ci/codebuild-codepipeline-setup.md`）。7.0 は Ubuntu 22.04 で、いずれ非推奨になる。
 - **提案**: 次のどちらかを計画的に行う。
   1. 切り分けの実験（`exported-variables` の有無だけを変えた最小の buildspec を 8.0 で比べる）を行い、8.0 と `exported-variables` の組み合わせの問題なら AWS サポートへ報告する
   2. `exported-variables` を使わない設計へ変える。Switchover ステージの入場条件（`#{Approvals.SWITCHOVER_APPROVED}`）をやめ、承認の確認を `switchover.rb` に一本化する。代償として、`switchover: pending` でも手動承認のボタンが表示される（押しても何も起きない）
@@ -133,4 +133,4 @@
 | 使われていないオプション（`--profile`・`--runtime-values-file`・`BUILD_APPROVED`）の削除 | シェルの削減効果が小さい |
 | BuildReportTool を BuildGreen と並列に動かす | 縮むのは 30 秒程度。準備が失敗したなら AWS に何も触れていない、という性質を優先する |
 | `scripts/resolve_go_module_root.sh` の Ruby 化 | BuildReportTool のローカル検証イメージ `golang:1.25` が Ruby を持たない |
-| CodeBuild イメージを `standard:8.0` へ | ReadApprovals がタイムアウトするため（C-1） |
+| ReadApprovals のイメージを `standard:8.0` へ | タイムアウトするため（C-1）。ほかのプロジェクトは 8.0 にした |

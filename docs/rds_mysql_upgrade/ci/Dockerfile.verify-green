@@ -4,14 +4,14 @@
 # このイメージは **以前の方式** の資材である。**現在どこからも使われていない。**
 # CloudFormation テンプレートからカスタムイメージを指定する経路は削除済みで
 # （VerifyGreenImage パラメータ・ImagePullCredentialsType・ECR 読み取り権限を撤去）、
-# VerifyGreen は aws/codebuild/standard:7.0 固定で動く。
+# VerifyGreen は aws/codebuild/standard:8.0 固定で動く。
 #
 # 旧方式: MySQL クライアントを同梱したイメージを ECR へ置き、VerifyGreen に指定する
 # 現方式: 実効値の収集を静的リンクの Go バイナリで行う
 #         （scripts/collect_green_runtime_values/。BuildReportTool がビルドし artifact で渡す。
 #          RDS のトラストストアも go:embed で内蔵する）
 #
-# 不要になった理由: aws/codebuild/standard:7.0 は jq・rbenv（Ruby 3.4.10 を含む）・
+# 不要になった理由: aws/codebuild/standard:8.0 は jq・rbenv（Ruby 3.4.10 を含む）・
 # AWS CLI v2 を持っており、**欠けていたのは mysql クライアントだけだった。**
 # それを Go に置き換えたことで、カスタムイメージも ECR も NAT も要らなくなった。
 #
@@ -25,7 +25,7 @@
 # VerifyGreen（Step 4）を RDS のある private subnet で実行するためのビルドイメージ。
 #
 # **このイメージが必要なのは mysql_verification.enabled: true のときだけである。**
-# 既定（false）なら AWS API による検証だけなので、aws/codebuild/standard:7.0 で足りる。
+# 既定（false）なら AWS API による検証だけなので、aws/codebuild/standard:8.0 で足りる。
 #
 # private subnet では apt リポジトリへ到達できないため、実行時に導入せず
 # ここへ同梱する。buildspec 側も apt-get を呼ばない（ci/codebuild/verify-green.yml）。

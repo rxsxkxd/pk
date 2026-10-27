@@ -55,6 +55,7 @@ buildspec はリポジトリの中にあるので、手順はコミットごと�
 - 単体テストは外に通信しない。画像解析サーバーは偽物（Go の `stubVerifier`）か、テストの中で立てるローカルのサーバー（`httptest`）、SPA の `fetch` は `vi.stubGlobal` で差し替えている。外への通信を止めた状態で全件通ることを確かめた（2026-10-22。macOS の `sandbox-exec`）
 - 外に出るのは、依存の取得（`npm ci`、Go のモジュール）と、次の Go 本体の取得だけ
 - 環境: CodeBuild の ARM のイメージ `aws/codebuild/amazonlinux-aarch64-standard:4.0`。Node.js は 24、Go は 1.26 まで入っている。`go.mod` の `go` 行（今は 1.27.3）がそれより新しいので、`GOTOOLCHAIN=auto` で go コマンドに Go 本体を取らせる（チェックサムで検証される）。イメージに `go.mod` の版が入ったら、`runtime-versions` を上げて `GOTOOLCHAIN` を外せる（[MAINTENANCE.md](../MAINTENANCE.md)）
+- install の段で、イメージに入っている goenv を更新し（`git pull`）、goenv の版と選ばれている Go の版を表示する。続けて goenv で Go 1.26.10 を入れて切り替える。更新・取得・切り替えのどれかが失敗しても、ビルドは止めずに `runtime-versions` の Go のまま進める。`go.mod` が 1.27.3 を求めるので、テストとビルドに使う Go は切り替えたあとも 1.27.3（切り替わるのは、1.27.3 を取りにいく元の go コマンド）
 - 次の段に渡すもの: `go/bin/ticketqr.zip`、`web/dist/`、`cd/`（Deploy の段のスクリプト）
 
 ## 4. Deploy の段（差し替えだけ）

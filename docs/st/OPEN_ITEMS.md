@@ -18,7 +18,7 @@
 | 上限を超えた画像への API Gateway の応答 | Lambda まで届かない大きさ（約 4.5MB 超・10MB 超）のときのステータスと本文。結果を見て SPA の扱いを決める（3.3） | web/DEPLOY.md 12章、DESIGN.md 5章の経路ごとの上限の表 |
 | API Gateway HTTP API の HTTP/2 | execute-api のエンドポイントが HTTP/2 で応答するか（アップロードの進み具合を出す場合に要る。4章の保留） | web/DESIGN.md 2.3 |
 | AWS 上へのデプロイ | 次のものを AWS 上で動かしていない: SAM のテンプレート（API・スタブ・ダミーの解析サーバー）、ネットワークのテンプレート、CloudFront の統合の構成、発行の上限（quota-guard）、WAF の Web ACL | infra/sam/README.md、infra/PROD_DEPLOY.md、notes/tickets-network.md 4.1、web/DEPLOY.md 3.2・13章、analyzer-stub/DESIGN.md 7章、dummy-analyzer/README.md |
-| CD パイプライン | `pipeline.yaml` のスタックを AWS 上で作っていない。CodeBuild の上で `GOTOOLCHAIN=auto` が `go.mod` の Go を取れること、GitHub との接続（CodeConnections）、Deploy の段の権限が足りることも未確認 | cd/README.md 9章、infra/CD_PIPELINE.md |
+| CD パイプライン | `pipeline.yaml` のスタックを AWS 上で作っていない。CodeBuild の上で `GOTOOLCHAIN=auto` が `go.mod` の Go を取れること、goenv の更新と Go 1.26.10 の導入が通ること、GitHub との接続（CodeConnections）、Deploy の段の権限が足りることも未確認 | cd/README.md 9章、infra/CD_PIPELINE.md |
 | GitHub 上での CI | 単体テストだけに絞ったワークフロー（2026-10-23）は、手元の act でだけ流した（成功）。GitHub 上ではまだ動かしていない（専用のリポジトリへの push 前）。スタブの CI は act でも未確認 | ci/README.md 5章 |
 | 本番環境向けの検証 | PROD_VERIFICATION.md の手順（ダミーの解析サーバーを含む）を AWS 上で流していない | PROD_VERIFICATION.md、TEST_PROCEDURES.md |
 | テストの未実施の項目 | TEST_RESULT.md で実施日が空の項目 | TEST_RESULT.md、TEST_PROCEDURES.md |

@@ -145,7 +145,7 @@ VerifyGreenSecurityGroupIds=sg-xxxxxxxx            # 下記「セキュリティ
 
 private subnet では apt リポジトリへ到達できないため、**buildspec は `apt-get` を呼ばない。**実効値の収集は `collect_green_runtime_values`（静的リンクの Go バイナリ）が行う。`BuildReportTool` がレポート生成器と一緒にビルドし、artifact で渡す。
 
-**そのため `VerifyGreen` のイメージは `aws/codebuild/standard:8.0` 固定である。**同イメージは jq・rbenv（Ruby 3.4.10）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。**テンプレートからはカスタムイメージの指定（`VerifyGreenImage` パラメータ、`ImagePullCredentialsType`、ECR 読み取り権限）を削除した。**
+**そのため `VerifyGreen` のイメージは `aws/codebuild/standard:8.0` 固定である。**同イメージは jq・rbenv（Ruby 3.4.11）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。**テンプレートからはカスタムイメージの指定（`VerifyGreenImage` パラメータ、`ImagePullCredentialsType`、ECR 読み取り権限）を削除した。**
 
 > 以前の方式（MySQL クライアント入りのイメージを ECR へ置く）で使っていた [Dockerfile.verify-green](Dockerfile.verify-green) は、**参考として残してあるが未使用である。**テンプレートから指定する経路は無い。
 

@@ -11,7 +11,7 @@
 #         （scripts/collect_green_runtime_values/。BuildReportTool がビルドし artifact で渡す。
 #          RDS のトラストストアも go:embed で内蔵する）
 #
-# 不要になった理由: aws/codebuild/standard:8.0 は jq・rbenv（Ruby 3.4.10 を含む）・
+# 不要になった理由: aws/codebuild/standard:8.0 は jq・rbenv（Ruby 3.4.11 を含む）・
 # AWS CLI v2 を持っており、**欠けていたのは mysql クライアントだけだった。**
 # それを Go に置き換えたことで、カスタムイメージも ECR も NAT も要らなくなった。
 #

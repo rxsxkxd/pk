@@ -176,7 +176,7 @@ flowchart LR
     class VG inside
 ```
 
-**これで VerifyGreen 側に必要なものが既定イメージだけで揃う。**`aws/codebuild/standard:8.0` は jq・rbenv（Ruby 3.4.10 を含む）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。
+**これで VerifyGreen 側に必要なものが既定イメージだけで揃う。**`aws/codebuild/standard:8.0` は jq・rbenv（Ruby 3.4.11 を含む）・AWS CLI v2 を持っており、足りなかったのは mysql クライアントだけだったためである。
 
 TLS は **VERIFY_CA 相当**である。証明書チェーンは検証し、ホスト名は検証しない（mysql クライアントの `--ssl-mode=VERIFY_CA` と同じ）。RDS のトラストストアはバイナリへ焼き込んであるので、**実行側に CA ファイルを置く必要がない**。
 

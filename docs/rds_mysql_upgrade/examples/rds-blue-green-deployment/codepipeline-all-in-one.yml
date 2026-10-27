@@ -882,7 +882,7 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         # **既定イメージで足りる。**必要なものはすべて揃っている。
-        #   jq / rbenv（Ruby 3.4.10）/ AWS CLI v2 … このイメージに同梱
+        #   jq / rbenv（Ruby 3.4.11）/ AWS CLI v2 … このイメージに同梱
         #   レポート生成器と実効値収集バイナリ … BuildReportTool の artifact から受け取る
         # MySQL クライアントは使わない（収集は静的リンクの Go バイナリが行う）ため、
         # カスタムイメージも ECR からの pull も要らない。

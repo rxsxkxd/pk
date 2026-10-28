@@ -96,6 +96,8 @@ Passenger 以外のアプリケーションサーバー（Puma・Unicorn・Pitch
 
 ## 特定のポートのアクセス制限
 
+今の環境（AL2）に入れる暫定対応は、層ごとに別のドキュメントにした: [OS（iptables ＋ ipset、または firewalld）](../notes/ec2-operations/access-restriction-os-firewall.md)、[Apache](../notes/ec2-operations/access-restriction-apache.md)、[アプリ（Rails）](../notes/ec2-operations/access-restriction-rails-app.md)。
+
 ### 要件の読み方
 
 「特定のポートに、国内以外・特定の IP 以外からアクセスがあったらブロックする」を、**特定のポートは「日本の IP」か「許可した IP」からだけ受け付け、それ以外は破棄する**と読む。

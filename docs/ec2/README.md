@@ -107,7 +107,13 @@ docs/ec2/
 │       ├── userdata-cfn-init-privileges.md    # 補足: UserData・cfn-init の実行権限
 │       ├── shell-environment-customization.md # 補足: bash プロンプト等のシェル環境の自動設定
 │       ├── ssm-session-manager-operations.md  # SSM Session Manager による EC2 運用
-│       └── amazon-linux-2023-operations-tips.md # Amazon Linux 2023 の運用のチップス（セキュリティ更新の扱いなど）
+│       ├── amazon-linux-2023-operations-tips.md # Amazon Linux 2023 の運用のチップス（セキュリティ更新の扱いなど）
+│       ├── access-restriction-os-firewall.md  # 暫定対応: OS（iptables ＋ ipset、または firewalld）で国内だけに絞る
+│       ├── access-restriction-os-firewall-work-plan.md # 上の iptables ＋ ipset の案の作業計画
+│       ├── access-restriction-rollout-script-design.md # 設計: 複数台に入れるスクリプト（チェックポイントで区切る）
+│       ├── firewalld-overview.md          # 補足: firewalld とは何か（利点と、向いている場面）
+│       ├── access-restriction-apache.md       # 暫定対応: Apache で国内だけに絞る（mod_maxminddb）
+│       └── access-restriction-rails-app.md    # 暫定対応: アプリ（Rails 4.2）で国内だけに絞る（Rack::Attack）
 │
 └── samples/
     └── nginx-passenger-rails/         # 学習用サンプル（nginx + Passenger + Rails の CloudFormation。リリースの仕組みとは無関係）

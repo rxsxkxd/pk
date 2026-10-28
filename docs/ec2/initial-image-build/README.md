@@ -41,6 +41,7 @@
 - [EC2 Image Builder の仕組み（AMI ができるまで）](./ec2-image-builder-how-it-works.md)
 - [Docker の定義: Amazon Linux 2023 と Ruby 3.4](./docker/al2023-ruby3.4/README.md)（Docker の方式で下回りを定義・再現するもの。Ruby 3.4 の最新のパッチバージョンを ruby-build で入れる）
 - [EC2 Image Builder の定義: Amazon Linux 2023 と Ruby 3.4（下書き・未検証）](./image-builder/al2023-ruby3.4/README.md)（同じ土台の AMI を Image Builder で作る CloudFormation のテンプレートと、Docker の定義との違い）
-- [Docker の定義: AL2023 のパッケージ ruby3.4（未検証）](./docker/al2023-ruby3.4-dnf/README.md) と [EC2 Image Builder の定義: AL2023 のパッケージ ruby3.4（下書き・未検証）](./image-builder/al2023-ruby3.4-dnf/README.md)（比較のため、`dnf install ruby3.4` で Ruby 3.4.8 を入れる定義。土台の構成の Ruby の入れ方 A）
+- [Docker の定義: AL2023 のパッケージ ruby3.4](./docker/al2023-ruby3.4-dnf/README.md) と [EC2 Image Builder の定義: AL2023 のパッケージ ruby3.4（下書き・未検証）](./image-builder/al2023-ruby3.4-dnf/README.md)（比較のため、`dnf install ruby3.4` で Ruby 3.4.8 を入れる定義。土台の構成の Ruby の入れ方 A）
+- [Docker の定義: mise のビルド済みの Ruby 3 系の最新（試すためのもの・未検証）](./docker/al2023-ruby3.4-mise/README.md)（mise で jdx/ruby のビルド済みの Ruby を取得する。3 つの入れ方の比較）
 - [メモ: AMI 作成に EC2 Image Builder を使う案（未採用）](../notes/ami-publish/ami-build-image-builder-options-memo.md)（中段の AMI の作成を置き換える案として検討したもの。Image Builder の特徴と課題）
 - [開発手順: AMI から開発用のインスタンスを起動し、ファイルを S3 に集める](../instance-provisioning/development-collect-files-from-ami.md)（既存の AMI から設定ファイルを集める手順。最初のイメージに入れる内容の調査に使える）

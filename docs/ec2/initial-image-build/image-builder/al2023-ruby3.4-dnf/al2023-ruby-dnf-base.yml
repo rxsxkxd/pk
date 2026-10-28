@@ -132,15 +132,15 @@ Resources:
                     - set -euo pipefail
                     - dnf install -y "{{ RubyPackageSpec }}" ruby3.4-devel gcc make openssl-devel libyaml-devel zlib-devel libffi-devel
                     - dnf clean all
-              # ruby / gem / bundle などの版の付かない名前を ruby3.4 に向ける。
-              # ruby 以外の道具は、入れただけでは登録されないことがあるため、なければ登録する
+              # gem / bundle などの版の付かない名前を ruby3.4 に向ける。ruby はパッケージが登録する（指す先は /usr/bin/ruby3.4-mri）。
+              # gem などはパッケージが ruby の従属のリンクとして登録しようとするが、登録されないため、同じ形で足す
+              # （Docker の定義で 2023.12.20261026 を使って確認）
               - name: ConfigureAlternatives
                 action: ExecuteBash
                 inputs:
                   commands:
                     - set -euo pipefail
-                    - alternatives --set ruby /usr/bin/ruby3.4
-                    - for tool in gem bundle bundler erb racc rdoc ri; do if [ -x "/usr/bin/ruby3.4-${tool}" ] && [ ! -e "/usr/bin/${tool}" ]; then alternatives --install "/usr/bin/${tool}" "${tool}" "/usr/bin/ruby3.4-${tool}" 34; fi; done
+                    - for tool in gem bundle bundler erb rdoc ri; do if [ -x "/usr/bin/ruby3.4-${tool}" ] && [ ! -e "/usr/bin/${tool}" ]; then alternatives --add-slave ruby /usr/bin/ruby3.4-mri "/usr/bin/${tool}" "${tool}" "/usr/bin/ruby3.4-${tool}"; fi; done
               - name: ConfigureEnvironment
                 action: ExecuteBash
                 inputs:
@@ -157,8 +157,8 @@ Resources:
                   commands:
                     - set -euo pipefail
                     - ruby -v | grep -F "{{ RubyVersionPattern }}"
-                    - ruby -e 'require "openssl"; require "psych"; require "zlib"; puts OpenSSL::OPENSSL_LIBRARY_VERSION'
-                    - ruby -e 'if defined?(RubyVM::YJIT) then puts "YJIT is available" else puts "YJIT is not available" end'
+                    - ruby -e 'require "openssl"; require "psych"; require "zlib"; require "fiddle"; puts OpenSSL::OPENSSL_LIBRARY_VERSION'
+                    - ruby --yjit -e 'exit RubyVM::YJIT.enabled?'
                     - gem -v
                     - bundle -v
           # できた AMI から起動したテスト用のインスタンスで確かめる
@@ -170,7 +170,8 @@ Resources:
                   commands:
                     - set -euo pipefail
                     - bash -lc 'ruby -v | grep -F "{{ RubyVersionPattern }}"'
-                    - bash -lc 'ruby -e "require %q(openssl); require %q(psych); require %q(zlib)"'
+                    - bash -lc 'ruby -e "require %q(openssl); require %q(psych); require %q(zlib); require %q(fiddle)"'
+                    - bash -lc 'ruby --yjit -e "exit RubyVM::YJIT.enabled?"'
                     - bash -lc 'ruby -e "exit(Encoding.default_external == Encoding::UTF_8)"'
                     - bash -lc 'bundle -v'
 

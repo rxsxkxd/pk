@@ -10,6 +10,7 @@ EC2 の運用・自動化に関する**日本語の設計ドキュメント群**
 - `*-memo.md` は**採用しなかった・保留中の選択肢の備忘録**。採用済みの設計として扱わない
 - 図は Mermaid。見やすさのため縦向き（`flowchart TD`）と `%%{init: ...}%%` の文字サイズ指定を使っている箇所がある
 - `samples/nginx-passenger-rails/` は独立した学習用サンプルで、`ami-publish` とは無関係
+- **今の前提（2026-10-28 から）: 今の構成（AL2・Apache・Passenger・Rails 4.2・Ruby 2.7.7）の AL2023 での作り直しは緊急の対応。Rails 6 以上のことは一切考えない**（検討・提案・ドキュメントに含めない）。アプリの側を上げる話は Rails 5.x までに限る。Ruby 3 には Rails 6.1 以上が要るので、Ruby も 2.7 系が前提になる。検討の内容は `initial-image-build/existing-system-rebuild-on-al2023.md`
 - リリースの流れは段階ごとにフォルダを並べている: 起点 `initial-image-build/`（ソースからの最初のイメージの作成。未着手）→ 前段 `release-verification/` → 中段 `ami-publish/` → 後段 `instance-provisioning/`。フェーズの番号は開発の優先順位で、**フェーズ 1 = 中段（実装済み）、フェーズ 2 = 後段、フェーズ 3 = 前段（リリース検証の自動化）**。流れの順番とは一致しない。全体像とフォルダ構成は `README.md`
 
 ## ami-publish の全体像

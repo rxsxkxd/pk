@@ -36,6 +36,8 @@
 
 - [作業計画](./work-plan.md)（用意する成果 R1〜R7 と、作業 W0〜W6）
 - [土台の構成: Amazon Linux 2023 と Ruby / Rails](./base-image-composition.md)（OS とミドルウェアについて決めたことと、層の分け方）
+- [検討: 今の構成（AL2・Apache・Passenger・Rails 4.2・Ruby 2.7.7）を AL2023 で作り直せるか](./existing-system-rebuild-on-al2023.md)（なるべくそのまま作り直す見込みと確認事項、特定のポートを国内と特定の IP に絞る制限の入れ方）
+- [検討: 今の構成のアプリケーションサーバーの選択肢](./existing-system-app-server-options.md)（Passenger・Puma・Unicorn・Pitchfork を、Rails 4.2・Ruby 2.7 で使えるかと、変わる量で比べたもの）
 - [更新のサイクル](./update-cycles.md)（AL2023 の更新、ライブパッチ、土台の作り直し、アプリのリリースの関係を図で示したもの）
 - [土台の構成（アプリが Go の場合）: Amazon Linux 2023 と Go](./base-image-composition-go.md)（比較のための検討。Ruby / Rails の場合との違いと、構成全体への影響）
 - [EC2 Image Builder の仕組み（AMI ができるまで）](./ec2-image-builder-how-it-works.md)

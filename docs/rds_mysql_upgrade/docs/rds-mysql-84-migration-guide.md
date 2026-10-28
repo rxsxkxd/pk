@@ -37,7 +37,7 @@
 - [ ] 空きストレージが 2 GiB 以上
 - [ ] Secrets Manager マネージドパスワード / Zero-ETL / クロスリージョンリードレプリカ を使っていない（使用中なら一時解除）
 - [ ] **インスタンスクラスが latest-generation / current-generation であること**（MySQL 5.7/8.0/8.4 は前世代クラスでの作成不可。前世代のままだと Blue/Green 作成自体が失敗するため、先に `modify-db-instance` でクラス変更が必要）
-- [ ] RDS Proxy を使っている場合、Blue を事前にプロキシへ登録済みであること（Blue/Green 作成後の新規登録はブロックされる。既存デプロイがある状態での登録もブロックされる）
+- [ ] Amazon RDS Proxy を使っている場合、Blue を事前にその RDS Proxy へ登録済みであること（Blue/Green 作成後の新規登録はブロックされる。既存デプロイがある状態での登録もブロックされる）
 - [ ] IAM データベース認証を使っている場合、切替後に Green へ接続できるよう、IAM ポリシーの `Resource` に Blue・Green 双方の ARN を含めておく（Green 用に後から追加が必要）
 
 #### `binlog_format` と Blue/Green レプリケーションの関係
@@ -544,7 +544,7 @@ aws rds delete-db-instance \
 | 10 | binlog が purge されて切り戻し経路を張れない | 事前に `binlog retention hours` を 24 以上に |
 | 11 | 逆レプリを張らずに時間が経過し、切り戻し不能になる | 切替直後に逆レプリを確立するか、切り戻し不可を許容する判断を明示的に行う |
 | 12 | Blue が前世代インスタンスクラス（t2/m4/r4 系等）のままで Blue/Green 作成が失敗する | 事前に `modify-db-instance` で latest-generation / current-generation クラスへ変更 |
-| 13 | RDS Proxy を使っているのに未登録、または既存 Blue/Green デプロイがある状態で登録しようとしてブロックされる | Blue/Green 作成**前**に Blue をプロキシへ登録しておく |
+| 13 | Amazon RDS Proxy を使っているのに未登録、または既存 Blue/Green デプロイがある状態で登録しようとしてブロックされる | Blue/Green 作成**前**に Blue を RDS Proxy へ登録しておく |
 | 14 | IAM データベース認証利用時、切替後に Green への接続で認可エラーになる | IAM ポリシーの `Resource` に Green の ARN も事前に追加しておく |
 
 ---

@@ -30,7 +30,7 @@
 | 0-1-10 | [要判断] | Secrets Manager 管理パスワード | `describe-db-instances` の `ManageMasterUserPassword`／`MasterUserSecret` | 利用中なら、Blue/Green の制約と一時解除・再設定の手順を確認済み。 |
 | 0-1-11 | [要判断] | Zero-ETL 統合 | `describe-integrations` の `SourceArn`／`TargetArn` | 利用中なら、Blue/Green の制約と一時解除・再設定の手順を確認済み。 |
 | 0-1-12 | [要判断] | クロスリージョンリードレプリカ | `describe-db-instances` の `ReadReplicaDBInstanceIdentifiers` | 利用中なら、Blue/Green の制約と一時解除・再設定の手順を確認済み。 |
-| 0-1-13 | [要判断] | RDS Proxy | `describe-db-proxies`、`describe-db-proxy-targets` の `RdsResourceId` | 利用時は Blue が事前に対象 Proxy へ登録済みであること。Blue/Green 作成後に新規登録できない制約を関係者が認識していること。 |
+| 0-1-13 | [要判断] | Amazon RDS Proxy | `describe-db-proxies`、`describe-db-proxy-targets` の `RdsResourceId` | 利用時は Blue が事前に対象の Amazon RDS Proxy へ登録済みであること。ProxySQL など自前のプロキシはこの項目の対象外（検出もしない）。Blue/Green 作成後に新規登録できない制約を関係者が認識していること。 |
 | 0-1-14 | [要判断] | IAM DB 認証 | `describe-db-instances` の `IAMDatabaseAuthenticationEnabled` | 利用時は、切替後の Green 接続用 DB リソース ID／ARN を IAM ポリシーに追加する手順と権限が準備済み。 |
 
 ## 確認コマンド

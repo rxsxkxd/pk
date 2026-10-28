@@ -101,7 +101,8 @@ func Collect(options CollectOptions) error {
 		"--engine-version", options.TargetEngineVersion); err != nil {
 		return err
 	}
-	// [0-1-13] リージョン内の RDS Proxy と、各 Proxy の登録ターゲット。
+	// [0-1-13] リージョン内の Amazon RDS Proxy と、各 Proxy の登録ターゲット。
+	// AWS の API で見えるのは Amazon RDS Proxy だけで、ProxySQL など自前のプロキシは対象外。
 	var proxies struct {
 		DBProxies []struct {
 			DBProxyName string `json:"DBProxyName"`
@@ -464,14 +465,14 @@ func Evaluate(dir string) (*Evaluation, error) {
 	resourceID := text(instance["DbiResourceId"])
 	registered := contains(pick(proxyTargets, "RdsResourceId"), resourceID)
 	proxyNames := strings.Join(pick(proxies, "DBProxyName"), ", ")
-	proxyDetail := "Proxy=" + proxyNames + "。対象 Blue の登録なし"
+	proxyDetail := "Amazon RDS Proxy=" + proxyNames + "。対象 Blue はどの RDS Proxy のターゲットにも未登録"
 	switch {
 	case len(proxies) == 0:
-		proxyDetail = "このリージョンに Proxy なし"
+		proxyDetail = "このリージョンに Amazon RDS Proxy なし"
 	case registered:
-		proxyDetail = "対象 Blue は Proxy ターゲットに登録済み（" + proxyNames + "）"
+		proxyDetail = "対象 Blue は Amazon RDS Proxy のターゲットに登録済み（" + proxyNames + "）"
 	}
-	add(verdict(len(proxies) == 0 || registered, "REVIEW"), "0-1-13 RDS Proxy", proxyDetail, "db-proxies.json / db-proxy-targets-*.json")
+	add(verdict(len(proxies) == 0 || registered, "REVIEW"), "0-1-13 Amazon RDS Proxy", proxyDetail, "db-proxies.json / db-proxy-targets-*.json")
 
 	iamAuth := truthy(instance["IAMDatabaseAuthenticationEnabled"])
 	iamDetail := "無効"

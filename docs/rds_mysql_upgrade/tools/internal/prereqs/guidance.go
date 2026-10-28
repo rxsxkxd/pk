@@ -32,7 +32,7 @@ var guidanceByItem = map[string]guidance{
 	"0-1-10": {"利用していない、または Blue/Green の制約と一時解除・再設定の手順を確認済み", "Secrets Manager 管理パスワードの制約を確認し、手順を用意する", precheckDoc},
 	"0-1-11": {"利用していない、または Blue/Green の制約と一時解除・再設定の手順を確認済み", "Zero-ETL 統合の制約を確認し、手順を用意する", precheckDoc},
 	"0-1-12": {"利用していない、または Blue/Green の制約と一時解除・再設定の手順を確認済み", "クロスリージョンリードレプリカの扱いを確認し、手順を用意する", precheckDoc},
-	"0-1-13": {"Proxy が無い、または Blue が事前に対象 Proxy へ登録済み", "Blue/Green 作成後は新規登録できないため、作成前に登録し、制約を関係者と共有する", precheckDoc},
+	"0-1-13": {"Amazon RDS Proxy が無い、または Blue が事前に対象の Amazon RDS Proxy へ登録済み（ProxySQL など自前のプロキシは対象外）", "Blue/Green 作成後は Amazon RDS Proxy へ新規登録できないため、RDS Proxy 経由で使う DB は作成前に登録し、制約を関係者と共有する。RDS Proxy に登録されておらず、アプリも RDS Proxy を通していなければ影響しない", precheckDoc},
 	"0-1-14": {"無効、または切替後の Green 用 DB リソース ID / ARN を IAM ポリシーへ追加する手順と権限が準備済み", "IAM ポリシーの更新手順を用意する", precheckDoc},
 	"0-2": {"ユーザースキーマに InnoDB 以外のテーブルが無い（`mysql` スキーマのシステムテーブルは対象外）",
 		"MyISAM は binlog レプリケーションで整合性が保証されないため `ALTER TABLE <db>.<table> ENGINE=InnoDB` で変換する。それ以外のエンジンは用途を確認する", guideDoc + " の 0-2"},

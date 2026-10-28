@@ -504,6 +504,7 @@ func (e *Evaluation) notes() []string {
 	}
 	remarks = append(remarks,
 		"MySQL Shell のアップグレードチェッカーと RDS 組み込みのプリチェックは検査項目が一致しない。RDS 固有の項目（FLOAT / DOUBLE の AUTO_INCREMENT、非包摂的用語、memcached、空き容量、sys スキーマ）は Shell では出ないため、スナップショット復元機で試験アップグレードを 1 回通し `PrePatchCompatibility.log` を確認する",
+		"0-1-13 が見るのは Amazon RDS Proxy だけである。ProxySQL・HAProxy など自前で動かしているプロキシや、アプリ側の接続プールは検出しない。使っている場合は、切替時に既存の接続が切れたあと再接続し、DNS を引き直して新しい DB へつながるか（DNS のキャッシュや IP の固定指定が無いか）を別途確かめる",
 		"このチェックは Blue/Green を**作成できるか**を見るものである。アプリケーションの互換性（実行 SQL・クライアントライブラリ）は移行ガイドの 0-4・0-5 で別に確認する",
 	)
 	lines = append(lines, "### 注意点", "")

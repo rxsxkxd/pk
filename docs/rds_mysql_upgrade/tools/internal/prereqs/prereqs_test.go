@@ -51,6 +51,60 @@ func mutate(t *testing.T, file string, change func(map[string]any)) string {
 	return dir
 }
 
+// 0-1-13 は Amazon RDS Proxy の話であることが、項目名・詳細・補足から読み取れること
+// （ProxySQL など自前のプロキシと取り違えさせない）。
+func TestRDSProxyWording(t *testing.T) {
+	withProxy := func(t *testing.T, registered bool) *Evaluation {
+		t.Helper()
+		dir := mutate(t, "db-proxies.json", func(d map[string]any) {
+			d["DBProxies"] = []any{map[string]any{"DBProxyName": "test-proxy"}}
+		})
+		target := "db-other"
+		if registered {
+			var instance map[string]any
+			content, _ := os.ReadFile(filepath.Join(dir, "db-instance.json"))
+			_ = json.Unmarshal(content, &instance)
+			target = text(object(list(instance, "DBInstances")[0])["DbiResourceId"])
+		}
+		targets := `{"Targets":[{"RdsResourceId":"` + target + `","Type":"RDS_INSTANCE"}]}`
+		if err := os.WriteFile(filepath.Join(dir, "db-proxy-targets-0.json"), []byte(targets), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		evaluation, err := Evaluate(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return evaluation
+	}
+
+	unregistered := resultOf(t, withProxy(t, false), "0-1-13")
+	if unregistered.Status != "REVIEW" || unregistered.Item != "0-1-13 Amazon RDS Proxy" ||
+		!strings.Contains(unregistered.Detail, "Amazon RDS Proxy=test-proxy。対象 Blue はどの RDS Proxy のターゲットにも未登録") {
+		t.Errorf("未登録: %+v", unregistered)
+	}
+	evaluation := withProxy(t, true)
+	if got := resultOf(t, evaluation, "0-1-13"); got.Status != "PASS" || !strings.Contains(got.Detail, "Amazon RDS Proxy のターゲットに登録済み") {
+		t.Errorf("登録済み: %+v", got)
+	}
+	report := evaluation.Report()
+	for _, want := range []string{
+		"0-1-13 が見るのは Amazon RDS Proxy だけである。ProxySQL・HAProxy など自前で動かしているプロキシ",
+		"Amazon RDS Proxy が無い、または Blue が事前に対象の Amazon RDS Proxy へ登録済み（ProxySQL など自前のプロキシは対象外）",
+	} {
+		if !strings.Contains(report, want) {
+			t.Errorf("レポートに %q が無い", want)
+		}
+	}
+	none := mutate(t, "metadata.json", func(map[string]any) {})
+	noProxy, err := Evaluate(none)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resultOf(t, noProxy, "0-1-13"); got.Detail != "このリージョンに Amazon RDS Proxy なし" {
+		t.Errorf("Proxy なし: %+v", got)
+	}
+}
+
 func status(t *testing.T, dir, item string) string {
 	t.Helper()
 	evaluation, err := Evaluate(dir)

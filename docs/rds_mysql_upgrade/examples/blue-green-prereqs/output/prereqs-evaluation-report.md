@@ -29,7 +29,7 @@
 | PASS | 0-1-10 Secrets Manager 管理パスワード | 利用なし | `db-instance.json` |
 | PASS | 0-1-11 Zero-ETL 統合 | 関連統合なし | `integrations.json` |
 | PASS | 0-1-12 クロスリージョンリードレプリカ | 検出なし | `db-instance.json` |
-| PASS | 0-1-13 RDS Proxy | このリージョンに Proxy なし | `db-proxies.json / db-proxy-targets-*.json` |
+| PASS | 0-1-13 Amazon RDS Proxy | このリージョンに Amazon RDS Proxy なし | `db-proxies.json / db-proxy-targets-*.json` |
 | PASS | 0-1-14 IAM DB 認証 | 無効 | `db-instance.json` |
 | PASS | 0-2 InnoDB 以外のテーブル | ユーザースキーマに InnoDB 以外のテーブルなし | `blue-mysql-state.json` |
 | REVIEW | 0-3 アップグレードチェッカー | Error=0 / Warning=20 / Notice=2（target=8.4.9）。検出内容を確認し、実際に移行を妨げるものだけを解消する（Error も含めて自動では止めない） | `blue-upgrade-check.json` |
@@ -195,6 +195,7 @@ Blue へ接続して集めた、AWS API では見えない情報である。0-1-
 ### 注意点
 
 - MySQL Shell のアップグレードチェッカーと RDS 組み込みのプリチェックは検査項目が一致しない。RDS 固有の項目（FLOAT / DOUBLE の AUTO_INCREMENT、非包摂的用語、memcached、空き容量、sys スキーマ）は Shell では出ないため、スナップショット復元機で試験アップグレードを 1 回通し `PrePatchCompatibility.log` を確認する
+- 0-1-13 が見るのは Amazon RDS Proxy だけである。ProxySQL・HAProxy など自前で動かしているプロキシや、アプリ側の接続プールは検出しない。使っている場合は、切替時に既存の接続が切れたあと再接続し、DNS を引き直して新しい DB へつながるか（DNS のキャッシュや IP の固定指定が無いか）を別途確かめる
 - このチェックは Blue/Green を**作成できるか**を見るものである。アプリケーションの互換性（実行 SQL・クライアントライブラリ）は移行ガイドの 0-4・0-5 で別に確認する
 
 ### 項目ごとの補足
@@ -213,7 +214,7 @@ Blue へ接続して集めた、AWS API では見えない情報である。0-1-
 | PASS | 0-1-10 Secrets Manager 管理パスワード | 利用していない、または Blue/Green の制約と一時解除・再設定の手順を確認済み | Secrets Manager 管理パスワードの制約を確認し、手順を用意する | `docs/phase-0-precheck.md` |
 | PASS | 0-1-11 Zero-ETL 統合 | 利用していない、または Blue/Green の制約と一時解除・再設定の手順を確認済み | Zero-ETL 統合の制約を確認し、手順を用意する | `docs/phase-0-precheck.md` |
 | PASS | 0-1-12 クロスリージョンリードレプリカ | 利用していない、または Blue/Green の制約と一時解除・再設定の手順を確認済み | クロスリージョンリードレプリカの扱いを確認し、手順を用意する | `docs/phase-0-precheck.md` |
-| PASS | 0-1-13 RDS Proxy | Proxy が無い、または Blue が事前に対象 Proxy へ登録済み | Blue/Green 作成後は新規登録できないため、作成前に登録し、制約を関係者と共有する | `docs/phase-0-precheck.md` |
+| PASS | 0-1-13 Amazon RDS Proxy | Amazon RDS Proxy が無い、または Blue が事前に対象の Amazon RDS Proxy へ登録済み（ProxySQL など自前のプロキシは対象外） | Blue/Green 作成後は Amazon RDS Proxy へ新規登録できないため、RDS Proxy 経由で使う DB は作成前に登録し、制約を関係者と共有する。RDS Proxy に登録されておらず、アプリも RDS Proxy を通していなければ影響しない | `docs/phase-0-precheck.md` |
 | PASS | 0-1-14 IAM DB 認証 | 無効、または切替後の Green 用 DB リソース ID / ARN を IAM ポリシーへ追加する手順と権限が準備済み | IAM ポリシーの更新手順を用意する | `docs/phase-0-precheck.md` |
 | PASS | 0-2 InnoDB 以外のテーブル | ユーザースキーマに InnoDB 以外のテーブルが無い（`mysql` スキーマのシステムテーブルは対象外） | MyISAM は binlog レプリケーションで整合性が保証されないため `ALTER TABLE <db>.<table> ENGINE=InnoDB` で変換する。それ以外のエンジンは用途を確認する | `docs/rds-mysql-84-migration-guide.md の 0-2` |
 | REVIEW | 0-3 アップグレードチェッカー | MySQL Shell のアップグレードチェッカーの検出が 0 件（検出があればレベルを問わず人が確認する。STOP にはしない） | 検出内容を 1 件ずつ確認し、実際に移行を妨げるもの（主に Error）は移行ガイドの対処表に従って解消する。問題にならないと判断したものは理由を記録する。**本番ではなくスナップショット復元機で実行し**、RDS 固有の項目は試験アップグレードの `PrePatchCompatibility.log` で確認する | `docs/rds-mysql-84-migration-guide.md の 0-3` |

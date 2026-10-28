@@ -2,6 +2,8 @@
 
 > 位置付け: Ruby の入れ方の 3 つ目の候補として、**mise でビルド済みの Ruby（バイナリ）を取得する**方法を試すための定義。土台のイメージは [AL2023 のパッケージの定義](../al2023-ruby3.4-dnf/README.md) と同じリリースに digest で固定している。**まだビルドしていない**。
 >
+> 同じ入れ方の EC2 Image Builder の定義: [EC2 Image Builder の定義（mise）](../../image-builder/al2023-ruby3.4-mise/README.md)（下書き・保留）
+>
 > 作成日: 2026-10-28
 
 ## 3 つの入れ方

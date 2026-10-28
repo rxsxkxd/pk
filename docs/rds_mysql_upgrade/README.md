@@ -4,6 +4,8 @@ AWS RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行するため�
 
 ## まず読むもの
 
+**初めて 1 つの DB を移行する作業者は、[チュートリアル: 1 つの DB を MySQL 8.0 から 8.4 へ移行する](tutorial-migrate-one-db.md) から始める。**作業者が行う 4 ステップ（成立条件チェック → パイプラインで Green を作る → 検証レポートの確認 → 切替）だけを、順に追えるようにまとめてある。
+
 **実際に移行を動かすための手順は次の 2 本である。**この 2 本で完結する。
 
 1. **[operations-environment-setup.md](operations-environment-setup.md)** — オペレーション編 1／2: 環境構築。CloudFormation でパイプラインを作るまでの事前作業と手順。**一度だけ**

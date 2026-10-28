@@ -2,6 +2,7 @@
 
     python3 -m port_guard_rollout backup  [--profile P] [--region R] [--check-only] [--yes] < instance-ids.txt
     python3 -m port_guard_rollout install --ports 8443 [--allow-file allow.txt] [--via ssh|ssm] [SSH のオプション] [--dry-run] [--check-only] [--yes] < instance-ids.txt
+    python3 -m port_guard_rollout enable [--via ssh|ssm] [SSH のオプション] [--revert-minutes 10] [--port-map 443:8443] [--dry-run] [--check-only] [--yes] < instance-ids.txt
     python3 -m port_guard_rollout ssm-agent [SSH のオプション] [--wait-online 秒] [--no-aws] [--check-only] [--yes] < instance-ids.txt
 """
 
@@ -9,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import backup, install, ssm_agent
+from . import backup, enable, install, ssm_agent
 from .awscli import AwsCli
 from .runcommand import RunCommandClient
 from .ssh import SshClient
@@ -74,6 +75,25 @@ def main(argv=None):
     ssm_parser.add_argument("--no-aws", action="store_true",
                             help="AWS を見ない（接続先をすべて書き、登録の状態の確認も行わない。手元の再現の環境で試すとき）")
 
+    enable_parser = subparsers.add_parser(
+        "enable",
+        help="遮断を有効にする（自動で元に戻る予約を入れてから有効にし、確かめて確定する）。"
+             "インスタンスごとに確かめながら 1 台ずつ進める",
+    )
+    add_common_arguments(enable_parser)
+    add_ssh_arguments(enable_parser)
+    enable_parser.add_argument("--via", choices=["ssh", "ssm"], default="ssh", help="実行の手段（既定 ssh）")
+    enable_parser.add_argument("--dry-run", action="store_true", help="確かめて、行う予定の処理を表示するだけ")
+    enable_parser.add_argument("--revert-minutes", type=int, default=10,
+                               help="有効にしてから、確定しなければ自動で元に戻るまでの時間（既定 10 分）")
+    enable_parser.add_argument("--port-map", action="append", default=[], metavar="PORT:LOCAL_PORT",
+                               help="作業者の PC からつながるかを確かめるときに使うポート（手元の再現の環境のように、"
+                                    "転送しているとき。例 443:8443）")
+    enable_parser.add_argument("--connect-timeout", type=int, default=5, help="つながるかの確認の待ち時間（秒）")
+    enable_parser.add_argument("--probe", action="append", default=[], metavar="PORT:KIND",
+                               help="ポートごとの確かめ方（tcp / ssh / http / tls）。既定は 22: ssh、80・8080: http、"
+                                    "443・8443: tls、ほか: tcp（何度でも指定できる）")
+
     args = parser.parse_args(argv)
     aws = AwsCli(profile=args.profile, region=args.region)
     if args.command == "backup":
@@ -89,6 +109,21 @@ def main(argv=None):
             jp_min_entries=args.jp_min_entries, address=args.address, via=args.via,
             check_in_jp=args.check_in_jp, check_outside=args.check_outside,
             assume_yes=args.yes, check_only=args.check_only, dry_run=args.dry_run, script_out=args.script_out,
+        )
+    if args.command == "enable":
+        if args.via == "ssm":
+            remote = RunCommandClient(aws)
+        else:
+            remote = SshClient(user=args.ssh_user, key=args.ssh_key, options=args.ssh_option)
+        port_map = dict(item.split(":", 1) for item in args.port_map)
+        probes = dict(item.split(":", 1) for item in args.probe)
+        bad = [k for k in probes.values() if k not in enable.PROBE_KINDS]
+        if bad:
+            parser.error(f"--probe の種類は {', '.join(enable.PROBE_KINDS)} のどれか（{', '.join(bad)}）")
+        return enable.run(
+            aws, remote, sys.stdin, sys.stdout, via=args.via, address=args.address,
+            revert_minutes=args.revert_minutes, port_map=port_map, connect_timeout=args.connect_timeout, probes=probes,
+            assume_yes=args.yes, check_only=args.check_only, dry_run=args.dry_run,
         )
     if args.command == "ssm-agent":
         ssh = SshClient(user=args.ssh_user, key=args.ssh_key, options=args.ssh_option)

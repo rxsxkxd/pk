@@ -81,6 +81,9 @@ docs/ec2/
 ├── ami-publish/                       # 中段（フェーズ 1）: AMI と起動テンプレートの用意（Go の仕組み生成ツールと Ruby の AMI 公開ツール）
 ├── instance-provisioning/             # 後段（フェーズ 2）: 起動テンプレートを使ったインスタンスの構築（未実装。役割と参照だけ）
 │
+│  ── 今の環境（AL2）への暫定対応の道具 ──
+├── port-guard-rollout/                # 国内だけに絞る設定（iptables ＋ ipset）を複数台に入れる道具（Go。未実装。設計は notes/ec2-operations/）と、試す相手になる今の構成に近いインスタンスの Docker の定義（al2-instance/）
+│
 │  ── リリースの仕組みの設計ドキュメント ──
 ├── ami-build-pipeline.md              # 全体の設計（リリース検証 → AMI 化 → 起動テンプレート）
 ├── ami-publish-development-plan.md    # 中段の開発計画（決定事項 D1〜D10 の正本）

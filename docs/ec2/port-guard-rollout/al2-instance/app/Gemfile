@@ -1,0 +1,9 @@
+source 'https://rubygems.org'
+
+# 今のアプリは rails の 4-2-stable を git で取っているが、ここでは RubyGems の 4.2 系の最後の版を使う。
+# Passenger で動かすのに要る部分（railties と actionpack）だけを入れる
+gem 'railties', '4.2.11.3'
+gem 'actionpack', '4.2.11.3'
+
+# Ruby 2.7 に同梱の bigdecimal 2.0 には BigDecimal.new がなく、Rails 4.2 が起動しないため、1.4 系に固定する
+gem 'bigdecimal', '1.4.4'

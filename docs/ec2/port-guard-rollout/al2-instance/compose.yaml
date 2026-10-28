@@ -1,0 +1,20 @@
+# 今の構成に近いインスタンス（Amazon Linux 2・Apache・Passenger・Rails 4.2・Ruby 2.7.7）を手元で動かす。
+# 説明は同じフォルダの README.md。
+services:
+  al2-instance:
+    build:
+      context: .
+    image: port-guard-rollout/al2-instance:local
+    hostname: al2-instance
+    ports:
+      - "8080:80"
+      - "8443:443"
+    # iptables と ipset をコンテナの中で試すため（コンテナのネットワークの中だけに効く）
+    cap_add:
+      - NET_ADMIN
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s

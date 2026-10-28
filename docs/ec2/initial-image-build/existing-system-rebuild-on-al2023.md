@@ -239,6 +239,8 @@ SetEnvIf MM_COUNTRY_CODE ^JP$ FROM_JAPAN
 
 今のサーバーでは確かめていない。資料と、ruby-build の動き方からの推定である。下の「推定を確かめる方法」で確定させる。
 
+**再現の環境での確認（2026-10-28）**: 今の構成に近いインスタンスを Docker で再現し（[al2-instance](../port-guard-rollout/al2-instance/README.md)）、この推定どおりであることを確かめた（Apache・Ruby・Passenger がすべて OpenSSL 1.0.2k を使い、TLS 1.3 を使えない）。あわせて、**AL2 の既定の MPM は prefork で、`mod_http2` を読み込んでいても HTTP/2 は効かない**ことも確かめた。今のサーバーでも、MPM を変えていなければ同じはずである。
+
 ### OpenSSL の使われ方
 
 AL2 の標準の OpenSSL は **1.0.2k**（`openssl-1.0.2k-fips`）である。1.1.1 は `openssl11` という別のパッケージで、入れても標準の OpenSSL は置き換わらない。

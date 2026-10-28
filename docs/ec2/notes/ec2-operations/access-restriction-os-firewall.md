@@ -361,7 +361,7 @@ set -euo pipefail
 source /etc/port-guard/port-guard.conf
 ALLOW_FILE=/etc/port-guard/allow.txt
 JP_FILE=/etc/port-guard/jp.txt
-JP_MIN_ENTRIES=1000   # これより少なければ、取得の失敗とみなして入れ替えない
+JP_MIN_ENTRIES="${JP_MIN_ENTRIES:-1000}"   # これより少なければ、取得の失敗とみなして入れ替えない（port-guard.conf で変えられる）
 
 # ファイルの中身で集合を作り直す（一時的な集合に入れてから swap する）
 load_set() {

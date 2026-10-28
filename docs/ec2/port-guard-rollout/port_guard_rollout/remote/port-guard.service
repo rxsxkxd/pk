@@ -1,0 +1,12 @@
+[Unit]
+Description=Restrict specific ports to Japan and allowed IP addresses
+After=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/port-guard-apply
+
+[Install]
+WantedBy=multi-user.target

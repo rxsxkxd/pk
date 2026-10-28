@@ -24,13 +24,16 @@ ARG RUBYGEMS_VERSION=3.4.22
 # アプリと rbenv の持ち主（今のインスタンスと同じ）
 ARG APP_USER=centos
 
-# AL2 の EC2 の AMI に最初から入っているものに近づける（iptables のコマンドと SSM Agent は入れておき、
-# ipset・iptables-services・firewalld は入れない）
+# 今のインスタンスに近づける。iptables のコマンドと SSH のサーバーは入れ、
+# SSM Agent・ipset・iptables-services・firewalld は入れない（今のインスタンスは SSH で直接入っていて、SSM Agent はない見込み）
 RUN yum install -y \
       sudo cronie iptables iproute procps-ng shadow-utils hostname which findutils \
       tar gzip bzip2 curl openssl \
-      amazon-ssm-agent \
- && yum clean all
+      openssh-server \
+ && yum clean all \
+ && ssh-keygen -A \
+ && sed -i -e 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' \
+           -e 's/^#\?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config
 
 # Apache（今のインスタンスと同じ版。HTTPD_VERSION と MOD_HTTP2_VERSION を空にすると、リポジトリの最新）
 RUN v="${HTTPD_VERSION:+-${HTTPD_VERSION}}" \
@@ -49,7 +52,8 @@ RUN yum install -y \
 RUN useradd -m "${APP_USER}" \
  && echo "${APP_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${APP_USER}" \
  && chmod 440 "/etc/sudoers.d/${APP_USER}" \
- && chmod 711 "/home/${APP_USER}"
+ && chmod 711 "/home/${APP_USER}" \
+ && install -d -m 700 -o "${APP_USER}" -g "${APP_USER}" "/home/${APP_USER}/.ssh"
 
 USER ${APP_USER}
 ENV HOME=/home/${APP_USER}
@@ -84,6 +88,7 @@ RUN cd app \
  && mkdir -p log tmp public
 
 USER root
+ENV HOME=/root
 
 # Apache の設定（Passenger の読み込みは、今のインスタンスの設定と同じ形のパスにする）
 COPY httpd/passenger.conf.template /tmp/passenger.conf.template
@@ -104,5 +109,7 @@ RUN sed -e "s|@APP_USER@|${APP_USER}|g" \
 COPY entrypoint.sh /usr/local/sbin/entrypoint.sh
 RUN chmod 755 /usr/local/sbin/entrypoint.sh
 
-EXPOSE 80 443
+ENV APP_USER=${APP_USER}
+
+EXPOSE 22 80 443
 CMD ["/usr/local/sbin/entrypoint.sh"]

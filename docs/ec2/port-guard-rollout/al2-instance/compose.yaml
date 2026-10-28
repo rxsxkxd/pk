@@ -7,8 +7,12 @@ services:
     image: port-guard-rollout/al2-instance:local
     hostname: al2-instance
     ports:
+      - "2222:22"
       - "8080:80"
       - "8443:443"
+    volumes:
+      # SSH でログインするための公開鍵（ssh/ に置いた *.pub を、起動時に centos の authorized_keys にする）
+      - ./ssh:/run/ssh:ro
     # iptables と ipset をコンテナの中で試すため（コンテナのネットワークの中だけに効く）
     cap_add:
       - NET_ADMIN

@@ -4,6 +4,7 @@
     python3 -m port_guard_rollout backup-check --backup-label 2026-10 [--profile P] [--region R] < instance-ids.txt
     python3 -m port_guard_rollout install --backup-label 2026-10 [--allow-file allow.txt] [--via ssh|ssm] [SSH のオプション] [--dry-run] [--check-only] [--yes] < instance-ids.txt
     python3 -m port_guard_rollout enable --backup-label 2026-10 [--via ssh|ssm] [SSH のオプション] [--revert-minutes 10] [--port-map 443:8443] [--dry-run] [--check-only] [--yes] < instance-ids.txt
+    python3 -m port_guard_rollout ssm-role [--instance-profile port-guard-ssm] [--wait-online 秒] [--check-only] [--yes] < instance-ids.txt
     python3 -m port_guard_rollout ssm-agent --backup-label 2026-10 [SSH のオプション] [--wait-online 秒] [--no-aws] [--check-only] [--yes] < instance-ids.txt
 """
 
@@ -11,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import backup, backup_check, enable, install, ssm_agent
+from . import backup, backup_check, enable, install, ssm_agent, ssm_role
 from .awscli import AwsCli
 from .backups import make_checker
 from .runcommand import RunCommandClient
@@ -99,6 +100,17 @@ def main(argv=None):
     install_parser.add_argument("--check-outside", action="append", default=[], metavar="IP",
                                 help="どちらの集合にも入っていないはずの IP（海外の IP など。何度でも指定できる）")
 
+    role_parser = subparsers.add_parser(
+        "ssm-role",
+        help="IAM ロールが未設定のインスタンスに、SSM 用のインスタンスプロファイルを関連付ける（すでにロールがある台には何もしない）。"
+             "インスタンスの ID を標準入力から 1 行に 1 つ渡す",
+    )
+    add_common_arguments(role_parser)
+    role_parser.add_argument("--instance-profile", default=ssm_role.DEFAULT_PROFILE,
+                             help=f"関連付けるインスタンスプロファイル（既定 {ssm_role.DEFAULT_PROFILE}。先に作っておく）")
+    role_parser.add_argument("--wait-online", type=int, default=0, metavar="SECONDS",
+                             help="関連付けた後、SSM に登録される（Online）のを待つ時間（既定 0 = 待たない）")
+
     ssm_parser = subparsers.add_parser(
         "ssm-agent",
         help="SSH で入り、SSM Agent を入れて有効にし、AWS に登録されたか（Online）を確かめる。"
@@ -168,6 +180,9 @@ def main(argv=None):
             assume_yes=args.yes, check_only=args.check_only, dry_run=args.dry_run,
             backup_check=backup_checker(enable_parser, args, aws),
         )
+    if args.command == "ssm-role":
+        return ssm_role.run(aws, sys.stdin, sys.stdout, profile_name=args.instance_profile,
+                            wait_seconds=args.wait_online, assume_yes=args.yes, check_only=args.check_only)
     if args.command == "ssm-agent":
         ssh = SshClient(user=args.ssh_user, key=args.ssh_key, options=args.ssh_option)
         return ssm_agent.run(

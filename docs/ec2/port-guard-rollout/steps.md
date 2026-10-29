@@ -108,6 +108,7 @@ python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids
 |---|---|
 | すべて | `ec2:DescribeInstances`、`ec2:DescribeImages`（バックアップの確認） |
 | `backup` | `ec2:CreateImage`、`ec2:CreateTags` |
+| `ssm-role` | `ec2:DescribeIamInstanceProfileAssociations`、`ec2:AssociateIamInstanceProfile`、`iam:GetInstanceProfile`、`iam:PassRole`（関連付けるロールだけ）、`ssm:DescribeInstanceInformation`（`--wait-online` のとき） |
 | `ssm-agent` | `ssm:DescribeInstanceInformation` |
 | `--via ssm` のとき | `ssm:DescribeInstanceInformation`、`ssm:SendCommand`（`AWS-RunShellScript`。対象のインスタンスだけに絞る）、`ssm:GetCommandInvocation` |
 
@@ -141,6 +142,63 @@ python3 -m port_guard_rollout backup --backup-label 2026-10 < instance-ids.txt
 | `--backup-label` に使える文字 | 英数字と空白・`_ . : / = + @ -`、128 文字まで |
 
 次の手順は、AMI の作成が終わって（`available`）から、12 時間以内に行う。**作成が終わったかは `backup-check` で確かめる**（`python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids.txt`。全台が「操作できる」になれば次へ進める）。終わりに表示される `aws ec2 describe-images ...` でも見られる。
+
+## 2-0. SSM 用の IAM ロールの関連付け（`ssm-role`）
+
+SSM Agent が入っていても、インスタンスに IAM ロール（インスタンスプロファイル）がなければ SSM に登録されない（コンソールでは「IAM ロール: -」）。**IAM ロールが未設定のインスタンスにだけ**、SSM 用のインスタンスプロファイルを関連付ける。AWS の API だけで行い、SSH は使わない。関連付けは OS のディスクを変えず、再起動も要らない。
+
+```bash
+python3 -m port_guard_rollout ssm-role --check-only < instance-ids.txt   # 確かめるだけ
+python3 -m port_guard_rollout ssm-role --wait-online 300 < instance-ids.txt
+```
+
+| 段階 | 内容 |
+|---|---|
+| 前提 | 関連付けるインスタンスプロファイル（既定 `port-guard-ssm`。`--instance-profile` で変えられる）が、先に作ってあること。なければ、作るための AWS CLI のコマンド（ロールの作成、`AmazonSSMManagedInstanceCore` の付与、インスタンスプロファイルの作成とロールの追加）を表示して止まる。道具はインスタンスプロファイルを作らない |
+| 確認（読み取りだけ） | インスタンスがあるか、状態が `running` か `stopped` か、インスタンスプロファイルが関連付けられているか |
+| 分けて表示 | 「関連付ける（未設定）」「何もしない（すでに IAM ロールがある）」「対象外（理由つき）」 |
+| 関連付け | 1 台ずつ順に `associate-iam-instance-profile`。直前にもう一度、関連付けられていないことを確かめる。`associated` になるのを待つ |
+| 登録の確認 | `--wait-online`（既定 0 = 待たない）を付けると、SSM に登録される（`Online`）のを待つ |
+
+IAM ロールとインスタンスプロファイルの関係:
+
+```mermaid
+%%{init: {"themeVariables": {"fontSize": "16px"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 50}}}%%
+flowchart LR
+    P1["ポリシー<br>AmazonSSMManagedInstanceCore"]
+    P2["ほかのポリシー<br>（必要なら足せる。複数可）"]
+    R["IAM ロール<br>port-guard-ssm<br>（権限の入れ物）"]
+    IP["インスタンスプロファイル<br>port-guard-ssm<br>（ロールを EC2 に渡す入れ物）"]
+    A["インスタンス A"]
+    B["インスタンス B"]
+    C["インスタンス C"]
+    OLD["既存のインスタンスプロファイル<br>（ほかの用途のロール）"]
+    D["インスタンス D<br>（すでに IAM ロールがある）"]
+
+    P1 -->|"複数付けられる"| R
+    P2 -.-> R
+    R -->|"1 つだけ入る"| IP
+    IP -->|"何台にでも関連付けられる"| A
+    IP --> B
+    IP --> C
+    OLD --> D
+    IP -. "2 つ目は関連付けられない（1 台に 1 つ）" .-x D
+
+    classDef policy fill:#f5f3ff,stroke:#7c3aed
+    classDef role fill:#fff7ed,stroke:#c2410c
+    classDef profile fill:#ecfdf3,stroke:#15803d
+    classDef other fill:#f3f4f6,stroke:#6b7280
+    classDef ec2 fill:#eff6ff,stroke:#1d4ed8
+    class P1,P2 policy
+    class R role
+    class IP profile
+    class OLD other
+    class A,B,C,D ec2
+```
+
+SVG 版: [IAM ロールとインスタンスプロファイルの関係](images/iam-instance-profile.svg)（`python3 images/make_iam_svg.py images` で作り直せる）
+
+**すでに IAM ロールがあるインスタンスには何もしない**（そのロールに `AmazonSSMManagedInstanceCore` を足すことは、この道具では行わない。必要なら別に手で行う）。1 台のインスタンスに関連付けられるインスタンスプロファイルは 1 つだけ、1 つのインスタンスプロファイルに入れられるロールも 1 つだけなので、付け替えもしない。
 
 ## 2. SSM Agent の導入（`ssm-agent`）
 

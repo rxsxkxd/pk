@@ -20,7 +20,7 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 
 流れの図は [手順の「流れ」](./steps.md#流れ)（Mermaid）にある。SVG 版: [全体の流れ](images/flow-overall.svg)、[enable のインスタンスごとの流れ](images/flow-enable.svg)。
 
-コマンドは `backup` → `backup-check`（補助）→ `ssm-agent` → `install` → `enable` の順に使う。
+コマンドは `backup` → `backup-check`（補助）→ `ssm-role`（IAM ロールが未設定の台に SSM 用のインスタンスプロファイルを関連付ける）→ `ssm-agent`（SSM Agent がない・止まっている台）→ `install` → `enable` の順に使う。
 
 ```bash
 cd port-guard-rollout
@@ -52,7 +52,7 @@ python3 -m unittest discover -s tests
 |---|---|
 | `port_guard_rollout/` | 道具の本体（Python）。`awscli.py`（AWS CLI を呼ぶ）、`ssh.py`（SSH で root として処理を実行する）、`runcommand.py`（SSM の Run Command で root として処理を実行する）、`ssm_agent.py`（SSM Agent の導入）、`targets.py`（標準入力の読み込み）、`console.py`（確認）、`backups.py`（操作の前のバックアップの確認）、`backup.py`（バックアップ）、`backup_check.py`（バックアップがあるかを確かめるだけ）、`install.py`（ipset の導入と設定）、`enable.py`（遮断の有効化）、`__main__.py`（コマンドの入り口） |
 | `port_guard_rollout/remote/` | インスタンスに送るもの。`check.sh`（確認）、`install.sh`（導入と設定）、`ssm-check.sh`・`ssm-install.sh`（SSM Agent の確認と導入）、`enable-check.sh`・`enable-apply.sh`・`enable-confirm.sh`・`enable-revert.sh`（遮断の有効化の確認・有効化・確定・元に戻す）、サーバーに置く `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
-| `images/` | フローの図（SVG）と、それを作り直すスクリプト `make_svg.py`（`python3 images/make_svg.py images`）。アクセス制限の構成の図 `access-architecture.svg`（作るスクリプトは `make_access_svg.py`） |
+| `images/` | フローの図（SVG）と、それを作り直すスクリプト `make_svg.py`（`python3 images/make_svg.py images`）。アクセス制限の構成の図 `access-architecture.svg`（作るスクリプトは `make_access_svg.py`）。IAM ロールとインスタンスプロファイルの関係の図 `iam-instance-profile.svg`（`make_iam_svg.py`） |
 | `tests/` | テスト（標準の `unittest`） |
 | [`al2-instance/`](./al2-instance/README.md) | 今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンスを手元で再現する Docker の定義。道具を試す相手にする。開発用のアカウントの、本番とは別の VPC に EC2 として作るための [EC2 Image Builder の定義](./al2-instance/image-builder/README.md)（下書き・未検証）も置いている |
 | [`outside-probe/`](./outside-probe/docker/README.md) | 海外からの確認の拠点（チェック用のクライアント。AL2023）の定義。`port-guard-probe`（確認の処理）、[Docker の定義](./outside-probe/docker/README.md)（手元で試す用）、[EC2 Image Builder の定義](./outside-probe/image-builder/README.md)（別のリージョンで使う AMI） |

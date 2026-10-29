@@ -137,6 +137,22 @@ class RunTest(unittest.TestCase):
         self.stdin = io.StringIO("i-00000001\n")
         self.assertEqual(self.run_check(), 0)
 
+    def test_ng_out_lists_instances_for_ssm_agent(self):
+        import os
+        import tempfile
+
+        from ssm_setup.targets import read_targets
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "ng.txt")
+            self.assertEqual(self.run_check(ng_out=path), 1)
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        self.assertIn("i-00000003  # SSM の登録が 未登録（Online でない）", text)
+        targets, invalid = read_targets(io.StringIO(text))
+        self.assertEqual([t.instance_id for t in targets], ["i-00000003", "i-00000004", "i-00000009"])
+        self.assertEqual(invalid, [])
+
     def test_missing_plugin(self):
         self.assertEqual(self.run_check(plugin_available=False), 2)
         self.assertIn("--via run-command", self.out.getvalue())

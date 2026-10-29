@@ -1,10 +1,10 @@
 # ssm-setup — SSM を使えるようにする道具（フェーズ 1）
 
-> 状態: コマンド（`backup`・`backup-check`・`ssm-role`・`ssm-agent`・`ssm-check`）がそろっている。`ssm-agent` の SSH の部分は手元の再現の環境で確かめた。実際の AWS ではまだ動かしていない。
+> 状態: コマンド（`ssm-role`・`ssm-check`・`backup`・`backup-check`・`ssm-agent`）がそろっている。`ssm-agent` の SSH の部分は手元の再現の環境で確かめた。実際の AWS ではまだ動かしていない。
 
 ## 役割
 
-今の環境（Amazon Linux 2）の運用中のインスタンスを、**SSM（Session Manager・Run Command）で入れる状態にする**。IAM ロール（インスタンスプロファイル）が未設定の台に SSM 用のインスタンスプロファイルを関連付け、SSM Agent がない・止まっている台に SSH で入れて有効にし、最後に SSM で実際に入れるかを確かめる。作業者の PC で動き、AWS CLI のコマンドと SSH を使う。
+今の環境（Amazon Linux 2）の運用中のインスタンスを、**SSM（Session Manager・Run Command）で入れる状態にする**。ほとんどの台は SSM Agent が入って動いていて、IAM ロール（インスタンスプロファイル）がないだけと見込んでいる。そのため、まず未設定の台に SSM 用のインスタンスプロファイルを関連付けて、SSM で実際に入れるかを確かめ、**それでも入れない台だけ**にバックアップを取ってから、SSH で SSM Agent を入れて有効にする。作業者の PC で動き、AWS CLI のコマンドと SSH を使う。
 
 80・443 番を国内だけに絞る設定（iptables ＋ ipset）を入れる [port-guard-rollout](../port-guard-rollout/README.md) の**前のフェーズ**として、作業を完全に分けている。port-guard-rollout は、このフェーズの `ssm-check` で「入れる」になった台を、SSM で操作する。
 
@@ -18,7 +18,7 @@
 
 流れの図は [手順の「流れ」](./steps.md#流れ)（Mermaid）にある。SVG 版: [SSM の有効化の流れ](images/flow-ssm-setup.svg)、[IAM ロールとインスタンスプロファイルの関係](images/iam-instance-profile.svg)。
 
-コマンドは `backup` → `backup-check`（補助）→ `ssm-role`（IAM ロールが未設定の台に SSM 用のインスタンスプロファイルを関連付ける）→ `ssm-agent`（SSM Agent がない・止まっている台）→ `ssm-check`（ポリシー・`Online`・SSM で実際に入れるかを確かめる）の順に使う。
+コマンドは `ssm-role`（IAM ロールが未設定の台に SSM 用のインスタンスプロファイルを関連付ける）→ `ssm-check --ng-out ng.txt`（ポリシー・`Online`・SSM で実際に入れるかを確かめ、入れない台の一覧を書き出す）→ 入れない台だけ `backup` → `backup-check`（補助）→ `ssm-agent`（SSM Agent がない・止まっている台）→ `ssm-check`（もう一度）の順に使う。
 
 ```bash
 cd ssm-setup

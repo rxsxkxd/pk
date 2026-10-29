@@ -53,7 +53,7 @@
 | C. そのまま（動いている） | 何もしない | インスタンスプロファイルを付ければ、すぐに `--via ssm` を試せる。`ssm-agent` は「何もしない」になる |
 | D. Image Builder の `UninstallAfterBuild: true` で、AMI から外す | レシピの `AdditionalInstanceConfiguration` を変える | A と同じ状態の AMI になる。ただし、AL2 のように**最初から入っている** SSM Agent も外すのかは**未確認**（Image Builder が自分で入れたものだけを外す、という読み方もできる） |
 
-既定は **A** を勧める。本番の状態にいちばん近く、フェーズ 1（ssm-setup の `ssm-role` → `ssm-agent` → `ssm-check`）→ フェーズ 2（`install --via ssm` → `enable --via ssm`）の流れを最初から試せる。B と C は、ほかの分類や経路を試すときに、同じ AMI から起動のしかたを変えるだけで作れる。
+既定は **A** を勧める。本番の状態にいちばん近く、フェーズ 1（ssm-setup の `ssm-role` → `ssm-check` → `backup` → `ssm-agent` → `ssm-check`）→ フェーズ 2（`install --via ssm` → `enable --via ssm`）の流れを最初から試せる。B と C は、ほかの分類や経路を試すときに、同じ AMI から起動のしかたを変えるだけで作れる。
 
 ## 作り方
 
@@ -138,9 +138,9 @@ ssh centos@<パブリック IP> 'curl -s http://localhost/health'
 
 | # | コマンド | 確かめること |
 |---|---|---|
-| 1 | フェーズ 1: `backup`・`backup-check --backup-label <値>` | AMI が作られ、タグ `BackupLabel` が付く。作成が終わる（`available`）まで「操作できない（作成中）」、終わったら「操作できる」になる |
-| 2 | フェーズ 1: `ssm-role --instance-profile <用意したもの>` → `ssm-agent --backup-label <値> --ssh-key <鍵>` | 関連付けができ、案 A なら「インストール」になり、入って `Online` になる |
-| 3 | フェーズ 1: `ssm-check`（`--via session` と `--via run-command` の両方） | 「入れる」になる |
+| 1 | フェーズ 1: `ssm-role --instance-profile <用意したもの>` → `ssm-check --ng-out ng.txt` | 関連付けができる。案 A（SSM Agent を消した）なら「入れない」になり、`ng.txt` に載る。案 C なら「入れる」になる |
+| 2 | フェーズ 1: `backup`・`backup-check --backup-label <値> < ng.txt` → `ssm-agent --backup-label <値> --ssh-key <鍵> < ng.txt` | AMI が作られ、作成が終わったら「操作できる」になる。案 A なら「インストール」になり、入って `Online` になる |
+| 3 | フェーズ 1: もう一度 `ssm-check`（`--via session` と `--via run-command` の両方） | 「入れる」になる |
 | 4 | フェーズ 2: `backup`・`backup-check` → `install --backup-label <値> --allow-file <一覧> --check-in-jp <作業者の IP> --check-outside <拠点の IP>`（`--via ssh` と `--via ssm` の両方） | 集合ができ、遮断はまだ効いていない |
 | 5 | フェーズ 2: `enable --backup-label <値>`（`--via ssh` と `--via ssm` の両方） | インスタンスごとの確認、自動で元に戻る予約、作業者の PC からの確認、確定。**systemd があるので、`systemctl enable --now port-guard` と、再起動の後にルールと集合が戻ることも試せる** |
 | 6 | 海外からの確認 | [海外の確認の拠点](../../outside-probe.md) から、遮断の前は届き、後は届かないこと |

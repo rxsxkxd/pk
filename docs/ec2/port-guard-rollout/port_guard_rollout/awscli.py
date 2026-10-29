@@ -51,3 +51,4 @@ class AwsCli:
             raise AwsCliError(command, completed.returncode, completed.stderr)
         output = completed.stdout.strip()
         return json.loads(output) if output else None
+

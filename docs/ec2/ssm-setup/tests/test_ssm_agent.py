@@ -3,8 +3,8 @@
 import io
 import unittest
 
-from port_guard_rollout import ssm_agent
-from port_guard_rollout.ssh import SshResult, parse_output
+from ssm_setup import ssm_agent
+from ssm_setup.ssh import SshResult, parse_output
 
 BASE = {"os": "Amazon Linux release 2 (Karoo)", "systemd": "running", "imds": "yes",
         "instance_profile": "yes", "region": "ap-northeast-1", "ssm_endpoint": "reachable"}

@@ -4,15 +4,13 @@
     python3 -m port_guard_rollout backup-check --backup-label 2026-10 [--profile P] [--region R] < instance-ids.txt
     python3 -m port_guard_rollout install --backup-label 2026-10 [--allow-file allow.txt] [--via ssh|ssm] [SSH のオプション] [--dry-run] [--check-only] [--yes] < instance-ids.txt
     python3 -m port_guard_rollout enable --backup-label 2026-10 [--via ssh|ssm] [SSH のオプション] [--revert-minutes 10] [--port-map 443:8443] [--dry-run] [--check-only] [--yes] < instance-ids.txt
-    python3 -m port_guard_rollout ssm-role [--instance-profile port-guard-ssm] [--wait-online 秒] [--check-only] [--yes] < instance-ids.txt
-    python3 -m port_guard_rollout ssm-agent --backup-label 2026-10 [SSH のオプション] [--wait-online 秒] [--no-aws] [--check-only] [--yes] < instance-ids.txt
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-from . import backup, backup_check, enable, install, ssm_agent, ssm_role
+from . import backup, backup_check, enable, install
 from .awscli import AwsCli
 from .backups import make_checker
 from .runcommand import RunCommandClient
@@ -69,7 +67,7 @@ def main(argv=None):
 
     check_parser = subparsers.add_parser(
         "backup-check",
-        help="バックアップがあるかを確かめるだけ（読み取りだけ）。ssm-agent・install・enable の操作の前の確認と同じ条件で、"
+        help="バックアップがあるかを確かめるだけ（読み取りだけ）。install・enable の操作の前の確認と同じ条件で確かめる。"
              "インスタンスの ID を標準入力から 1 行に 1 つ渡す",
     )
     check_parser.add_argument("--profile", help="AWS CLI のプロファイル（省略すると AWS CLI の既定）")
@@ -90,7 +88,7 @@ def main(argv=None):
     add_ssh_arguments(install_parser)
     add_backup_check_arguments(install_parser)
     install_parser.add_argument("--via", choices=["ssh", "ssm"], default="ssh",
-                                help="実行の手段（既定 ssh。ssm は SSM Agent が動いて Online のインスタンスだけ）")
+                                help="実行の手段（既定 ssh。ssm は SSM で入れるインスタンスだけ。SSM の有効化は ../ssm-setup）")
     install_parser.add_argument("--dry-run", action="store_true",
                                 help="確かめて、行う予定の処理と前回の設定から変わることを表示するだけで、変更しない")
     install_parser.add_argument("--script-out", metavar="PATH",
@@ -99,30 +97,6 @@ def main(argv=None):
                                 help="日本の集合に入っているはずの IP（確認用。何度でも指定できる）")
     install_parser.add_argument("--check-outside", action="append", default=[], metavar="IP",
                                 help="どちらの集合にも入っていないはずの IP（海外の IP など。何度でも指定できる）")
-
-    role_parser = subparsers.add_parser(
-        "ssm-role",
-        help="IAM ロールが未設定のインスタンスに、SSM 用のインスタンスプロファイルを関連付ける（すでにロールがある台には何もしない）。"
-             "インスタンスの ID を標準入力から 1 行に 1 つ渡す",
-    )
-    add_common_arguments(role_parser)
-    role_parser.add_argument("--instance-profile", default=ssm_role.DEFAULT_PROFILE,
-                             help=f"関連付けるインスタンスプロファイル（既定 {ssm_role.DEFAULT_PROFILE}。先に作っておく）")
-    role_parser.add_argument("--wait-online", type=int, default=0, metavar="SECONDS",
-                             help="関連付けた後、SSM に登録される（Online）のを待つ時間（既定 0 = 待たない）")
-
-    ssm_parser = subparsers.add_parser(
-        "ssm-agent",
-        help="SSH で入り、SSM Agent を入れて有効にし、AWS に登録されたか（Online）を確かめる。"
-             "標準入力に `<インスタンスの ID> [<SSH の接続先>]` を 1 行に 1 台で渡す",
-    )
-    add_common_arguments(ssm_parser)
-    add_ssh_arguments(ssm_parser)
-    add_backup_check_arguments(ssm_parser)
-    ssm_parser.add_argument("--wait-online", type=int, default=300, metavar="SECONDS",
-                            help="Online になるのを待つ時間（既定 300 秒）")
-    ssm_parser.add_argument("--no-aws", action="store_true",
-                            help="AWS を見ない（接続先をすべて書き、登録の状態の確認も行わない。手元の再現の環境で試すとき）")
 
     enable_parser = subparsers.add_parser(
         "enable",
@@ -179,16 +153,6 @@ def main(argv=None):
             revert_minutes=args.revert_minutes, port_map=port_map, connect_timeout=args.connect_timeout, probes=probes,
             assume_yes=args.yes, check_only=args.check_only, dry_run=args.dry_run,
             backup_check=backup_checker(enable_parser, args, aws),
-        )
-    if args.command == "ssm-role":
-        return ssm_role.run(aws, sys.stdin, sys.stdout, profile_name=args.instance_profile,
-                            wait_seconds=args.wait_online, assume_yes=args.yes, check_only=args.check_only)
-    if args.command == "ssm-agent":
-        ssh = SshClient(user=args.ssh_user, key=args.ssh_key, options=args.ssh_option)
-        return ssm_agent.run(
-            aws, ssh, sys.stdin, sys.stdout, address=args.address, use_aws=not args.no_aws,
-            wait_seconds=args.wait_online, assume_yes=args.yes, check_only=args.check_only,
-            backup_check=backup_checker(ssm_parser, args, aws),
         )
     return 2
 

@@ -48,12 +48,12 @@
 
 | 案 | 内容 | 試せる port-guard の場面 |
 |---|---|---|
-| **A. 起動のときの UserData で消す（勧める既定）** | `yum remove -y amazon-ssm-agent` | 本番と同じ「入っていない」状態から、`ssm-agent`（分類 B: インストール）を試せる |
+| **A. 起動のときの UserData で消す（勧める既定）** | `yum remove -y amazon-ssm-agent` | 本番と同じ「入っていない」状態から、ssm-setup の `ssm-agent`（分類 B: インストール）を試せる |
 | B. 起動のときに止めて、起動時の有効化も外す | `systemctl disable --now amazon-ssm-agent` | `ssm-agent` の分類 C（有効化と起動）を試せる |
 | C. そのまま（動いている） | 何もしない | インスタンスプロファイルを付ければ、すぐに `--via ssm` を試せる。`ssm-agent` は「何もしない」になる |
 | D. Image Builder の `UninstallAfterBuild: true` で、AMI から外す | レシピの `AdditionalInstanceConfiguration` を変える | A と同じ状態の AMI になる。ただし、AL2 のように**最初から入っている** SSM Agent も外すのかは**未確認**（Image Builder が自分で入れたものだけを外す、という読み方もできる） |
 
-既定は **A** を勧める。本番の状態にいちばん近く、`ssm-agent` → `install --via ssm` → `enable --via ssm` の流れを最初から試せる。B と C は、ほかの分類や経路を試すときに、同じ AMI から起動のしかたを変えるだけで作れる。
+既定は **A** を勧める。本番の状態にいちばん近く、フェーズ 1（ssm-setup の `ssm-role` → `ssm-agent` → `ssm-check`）→ フェーズ 2（`install --via ssm` → `enable --via ssm`）の流れを最初から試せる。B と C は、ほかの分類や経路を試すときに、同じ AMI から起動のしかたを変えるだけで作れる。
 
 ## 作り方
 
@@ -134,15 +134,15 @@ ssh centos@<パブリック IP> 'curl -s http://localhost/health'
 
 ## port-guard-rollout を試す流れ
 
-作業者の PC の `port-guard-rollout/` で、開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。手順の詳細は [手順](../../steps.md)。
+開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。1〜3 はフェーズ 1 として `ssm-setup/` で `python3 -m ssm_setup` を、4〜7 はフェーズ 2 として `port-guard-rollout/` で `python3 -m port_guard_rollout` を使う。バックアップはフェーズごとに取る。手順の詳細は [ssm-setup の手順](../../../ssm-setup/steps.md) と [port-guard-rollout の手順](../../steps.md)。
 
 | # | コマンド | 確かめること |
 |---|---|---|
-| 1 | `backup --backup-label <値>` | AMI が作られ、タグ `BackupLabel` が付く |
-| 2 | `backup-check --backup-label <値>` | 作成が終わる（`available`）まで「操作できない（作成中）」、終わったら「操作できる」になる |
-| 3 | `ssm-agent --backup-label <値> --ssh-key <鍵>` | 案 A なら「インストール」になり、入る。インスタンスプロファイルを付けていれば `Online` になる |
-| 4 | `install --backup-label <値> --allow-file <一覧> --check-in-jp <作業者の IP> --check-outside <拠点の IP>`（`--via ssh` と `--via ssm` の両方） | 集合ができ、遮断はまだ効いていない |
-| 5 | `enable --backup-label <値>`（`--via ssh` と `--via ssm` の両方） | インスタンスごとの確認、自動で元に戻る予約、作業者の PC からの確認、確定。**systemd があるので、`systemctl enable --now port-guard` と、再起動の後にルールと集合が戻ることも試せる** |
+| 1 | フェーズ 1: `backup`・`backup-check --backup-label <値>` | AMI が作られ、タグ `BackupLabel` が付く。作成が終わる（`available`）まで「操作できない（作成中）」、終わったら「操作できる」になる |
+| 2 | フェーズ 1: `ssm-role --instance-profile <用意したもの>` → `ssm-agent --backup-label <値> --ssh-key <鍵>` | 関連付けができ、案 A なら「インストール」になり、入って `Online` になる |
+| 3 | フェーズ 1: `ssm-check`（`--via session` と `--via run-command` の両方） | 「入れる」になる |
+| 4 | フェーズ 2: `backup`・`backup-check` → `install --backup-label <値> --allow-file <一覧> --check-in-jp <作業者の IP> --check-outside <拠点の IP>`（`--via ssh` と `--via ssm` の両方） | 集合ができ、遮断はまだ効いていない |
+| 5 | フェーズ 2: `enable --backup-label <値>`（`--via ssh` と `--via ssm` の両方） | インスタンスごとの確認、自動で元に戻る予約、作業者の PC からの確認、確定。**systemd があるので、`systemctl enable --now port-guard` と、再起動の後にルールと集合が戻ることも試せる** |
 | 6 | 海外からの確認 | [海外の確認の拠点](../../outside-probe.md) から、遮断の前は届き、後は届かないこと |
 | 7 | 破棄の記録 | [破棄の記録](../../iptables-ipset.md#破棄の記録) の場所に `port-guard drop:` の行が出ること（EC2 なのでカーネルのログに出る） |
 

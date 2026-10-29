@@ -1,7 +1,7 @@
 """操作の前のバックアップ（AMI）の確認。
 
 backup で作った AMI には、Purpose・SourceInstanceId・BackupLabel（作業者が指定したバックアップ作業のタイミング）のタグが付く。
-ssm-agent・install・enable は、インスタンスごとに次の 3 つがそろった AMI があるときだけ操作する。
+install・enable は、インスタンスごとに次の 3 つがそろった AMI があるときだけ操作する。
 - BackupLabel のタグが、指定した値と一致する
 - 作成が終わっている（State が available。AMI の作成は非同期で進むため）
 - 作成の時刻が、確かめた時点から 12 時間以内

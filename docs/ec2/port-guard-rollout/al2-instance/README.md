@@ -121,7 +121,7 @@ AL2 では、`mod_http2` が Apache とは別の版の番号で出ている。�
 | ipset の導入、集合の作成と中身の入れ替え、iptables のルールの追加と削除（`NET_ADMIN` があるので、コンテナのネットワークの中だけに効く） | systemd のユニットの起動・有効化・再起動の後の復元 |
 | 許可する IP の集合で、手元（Mac）からの接続を許可・遮断できるか | 国の判定（接続元が Docker の IP になるため） |
 | 「事前の確認」のスクリプトの、パッケージ・ルール・集合の確認の部分 | SSM の Run Command・Session Manager、AWS の API を使う処理（AMI の作成など） |
-| SSH でのログインと、SSH を通した処理（「SSM の準備」の全台の確認、SSM Agent のインストール） | SSM Agent の登録（`Online`）と、その後の動作の確認 |
+| SSH でのログインと、SSH を通した処理（[ssm-setup](../../ssm-setup/README.md) の `ssm-agent` の確認と、SSM Agent のインストール） | SSM Agent の登録（`Online`）と、その後の動作の確認 |
 | cron での定期の更新 | x86_64 での動作（手元は arm64） |
 
 ipset と iptables の照合は、コンテナではなく Docker Desktop の仮想マシンのカーネルが行う。ipset のカーネルのモジュールが使えるかは、port-guard の処理を試すときに確かめる。

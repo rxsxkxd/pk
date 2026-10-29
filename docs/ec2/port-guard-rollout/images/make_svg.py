@@ -82,19 +82,19 @@ def overall():
     X, W, H = 190, 420, 58
     cx = X + W / 2
     rows = {
-        "prep": 60, "backup": 150, "check": 240, "ssm": 340, "install": 430,
+        "pre": 60, "prep": 150, "backup": 240, "check": 330, "install": 430,
         "probe1": 520, "enable": 610, "probe2": 700, "watch": 790,
     }
+    s.box(X, rows["pre"], W, H, ["前提: SSM の有効化が済んでいる"], "done", ["ssm-setup の ssm-check で「入れる」になった台が対象"])
     s.box(X, rows["prep"], W, H, ["0. 準備"], "done", ["対象の一覧・許可する IP・--backup-label を決める"])
     s.box(X, rows["backup"], W, H, ["1. backup"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
     s.box(X, rows["check"], W, H, ["backup-check（補助）"], "check", ["作成済み（available）で 12 時間以内か"])
-    s.box(X, rows["ssm"], W, H, ["2. ssm-agent（SSH）"], "command", ["SSM Agent を入れて Online にする"])
-    s.box(X, rows["install"], W, H, ["3. install（SSH か SSM）"], "command", ["ipset と設定を入れ、集合を作る（遮断はまだ効かない）"])
+    s.box(X, rows["install"], W, H, ["2. install（SSM か SSH）"], "command", ["ipset と設定を入れ、集合を作る（遮断はまだ効かない）"])
     s.box(X, rows["probe1"], W, H, ["拠点から port-guard-probe（手で）"], "manual", ["届く（reachable）ことを確かめる"])
-    s.box(X, rows["enable"], W, H, ["4. enable（インスタンスごと）"], "command", ["自動で戻る予約 → 遮断 → 確かめて確定（別の図）"])
+    s.box(X, rows["enable"], W, H, ["3. enable（インスタンスごと）"], "command", ["自動で戻る予約 → 遮断 → 確かめて確定（別の図）"])
     s.box(X, rows["probe2"], W, H, ["拠点から port-guard-probe（手で）"], "manual", ["時間切れ（timeout）になることを確かめる"])
-    s.box(X, rows["watch"], W, H, ["5. 見守りと片付け"], "done", ["破棄の記録を見る・古い AMI を消す"])
-    order = ["prep", "backup", "check", "ssm", "install", "probe1", "enable", "probe2", "watch"]
+    s.box(X, rows["watch"], W, H, ["4. 見守りと片付け"], "done", ["破棄の記録を見る・古い AMI を消す"])
+    order = ["pre", "prep", "backup", "check", "install", "probe1", "enable", "probe2", "watch"]
     for a, b in zip(order, order[1:]):
         label = "そろった" if a == "check" else None
         s.edge([(cx, rows[a] + H), (cx, rows[b])], label, (cx + 8, rows[a] + H + 22))
@@ -108,11 +108,12 @@ def overall():
     s.text(112, rows["backup"] + 70, "12 時間を", anchor="end")
     s.text(112, rows["backup"] + 88, "過ぎたら", anchor="end")
     s.text(112, rows["backup"] + 106, "作り直す", anchor="end")
-    # 2〜4 の注記
-    top, bottom = rows["ssm"], rows["enable"] + H
+    # install・enable の注記
+    top, bottom = rows["install"], rows["enable"] + H
     s.bracket([(X + W + 20, top), (X + W + 30, top), (X + W + 30, bottom), (X + W + 20, bottom)])
-    s.parts.append(f'<rect class="box note" x="{X + W + 45}" y="{top + 60}" width="190" height="96"/>')
-    for i, line in enumerate(["2〜4 は、操作の前に", "バックアップを自動で", "確かめる（台ごと、", "操作の直前にも）"]):
+    s.parts.append(f'<rect class="box note" x="{X + W + 45}" y="{top + 60}" width="190" height="115"/>')
+    lines = ["install・enable は、", "操作の前にバックアップ", "を自動で確かめる", "（台ごと、", "操作の直前にも）"]
+    for i, line in enumerate(lines):
         s.text(X + W + 140, top + 86 + i * 19, line, anchor="middle")
     s.legend(650, 60, [("command", "道具のコマンド"), ("check", "確認（道具）"), ("manual", "作業者が手で行う"),
                        ("done", "準備・待ち・片付け")])

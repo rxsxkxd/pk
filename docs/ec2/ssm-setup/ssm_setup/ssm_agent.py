@@ -1,6 +1,6 @@
 """SSM Agent のインストールと有効化（設計の「SSM の準備」）。
 
-流れ（バックアップ・install と同じ形）:
+流れ（ほかのコマンドと同じ形）:
 1. 標準入力から対象のインスタンスを読む（`<インスタンスの ID> [<SSH の接続先>]`）
 2. SSH の接続先を決める（書かれていなければ、AWS CLI でインスタンスの IP を引く）
 3. 1 台ずつ、SSH で入って SSM Agent の状態を確かめ（読み取りだけ）、AWS の側の登録の状態も見て、
@@ -15,12 +15,14 @@
 
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .awscli import AwsCliError
 from .backups import apply_check
 from .console import confirm
-from .install import remote_file
 from .targets import read_targets, resolve_ssh_target
+
+REMOTE_DIR = Path(__file__).parent / "remote"
 
 INSTALL = "インストール"
 ENABLE = "有効化と起動"
@@ -32,12 +34,16 @@ class Host:
     instance_id: str
     ssh_target: str = ""
     name: str = ""
-    state: dict = field(default_factory=dict)  # 今の状態（ssm-check.sh の結果）
+    state: dict = field(default_factory=dict)  # 今の状態（agent-check.sh の結果）
     ping_status: str = ""  # AWS の側の登録の状態（Online / ConnectionLost / 未登録。AWS を見ないときは空）
     action: str = ""  # 行うこと（空なら何もしない）
     reasons: list = field(default_factory=list)  # 対応できない理由
     notes: list = field(default_factory=list)  # 知らせておくこと
     backup: str = ""  # 確かめたバックアップ（AMI の ID と作成の時刻）
+
+
+def remote_file(name):
+    return (REMOTE_DIR / name).read_text(encoding="utf-8")
 
 
 def fetch_ping_status(aws, instance_id):
@@ -54,7 +60,7 @@ def fetch_ping_status(aws, instance_id):
 
 
 def decide(host, result, use_aws):
-    """ssm-check.sh の結果と登録の状態から、行うことと、対応できない理由を決める。"""
+    """agent-check.sh の結果と登録の状態から、行うことと、対応できない理由を決める。"""
     if result.connection_failed:
         host.reasons.append(f"SSH で入れない（{result.error_summary(1)}）")
         return
@@ -157,7 +163,7 @@ def run(aws, ssh, stdin, out, address="public", use_aws=True, wait_seconds=300,
 
     print(f"{len(targets)} 台を確かめる（SSH で入って、SSM Agent の状態を読むだけ）", file=out)
     hosts = []
-    check_script = remote_file("ssm-check.sh")
+    check_script = remote_file("agent-check.sh")
     for target in targets:
         host = Host(target.instance_id, target.ssh_target)
         apply_check(backup_check, host)
@@ -187,7 +193,7 @@ def run(aws, ssh, stdin, out, address="public", use_aws=True, wait_seconds=300,
             print("中止した", file=out)
             return 0
 
-    install_script = remote_file("ssm-install.sh")
+    install_script = remote_file("agent-install.sh")
     print("\n== SSM Agent のインストール・有効化・起動（1 台ずつ順に行う）", file=out)
     done, failed = [], 0
     for index, host in enumerate(todo, start=1):

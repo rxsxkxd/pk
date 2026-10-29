@@ -82,7 +82,8 @@ docs/ec2/
 ├── instance-provisioning/             # 後段（フェーズ 2）: 起動テンプレートを使ったインスタンスの構築（未実装。役割と参照だけ）
 │
 │  ── 今の環境（AL2）への暫定対応の道具 ──
-├── port-guard-rollout/                # 80・443 番を国内だけに絞る設定（iptables ＋ ipset）を複数台に入れる道具（Python と AWS CLI。手順の正本は steps.md）と、試す相手になる今の構成に近いインスタンスの Docker の定義（al2-instance/）
+├── ssm-setup/                         # 暫定対応のフェーズ 1: 運用中のインスタンスを SSM で入れる状態にする道具（IAM ロールの関連付け、SSM Agent の導入、SSM で入れるかの確認。Python と AWS CLI。手順の正本は steps.md）
+├── port-guard-rollout/                # 暫定対応のフェーズ 2: 80・443 番を国内だけに絞る設定（iptables ＋ ipset）を複数台に入れる道具（Python と AWS CLI。手順の正本は steps.md）と、試す相手になる今の構成に近いインスタンスの Docker の定義（al2-instance/）
 │
 │  ── リリースの仕組みの設計ドキュメント ──
 ├── ami-build-pipeline.md              # 全体の設計（リリース検証 → AMI 化 → 起動テンプレート）

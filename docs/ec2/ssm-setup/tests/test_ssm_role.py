@@ -3,8 +3,8 @@
 import io
 import unittest
 
-from port_guard_rollout import ssm_role
-from port_guard_rollout.awscli import AwsCliError
+from ssm_setup import ssm_role
+from ssm_setup.awscli import AwsCliError
 
 
 def aws_error(code):

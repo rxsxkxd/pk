@@ -1,11 +1,11 @@
 """IAM ロールとインスタンスプロファイルの関係の図（iam-instance-profile.svg）を作る。
 
-    cd port-guard-rollout && python3 images/make_iam_svg.py images
+    cd ssm-setup && python3 images/make_iam_svg.py images
 
 - 1 つのインスタンスプロファイルに入れられるロールは 1 つだけ（ポリシーは 1 つのロールに複数付けられる）
 - 1 つのインスタンスプロファイルは、何台のインスタンスにでも関連付けられる
 - 1 台のインスタンスに関連付けられるインスタンスプロファイルは 1 つだけ
-steps.md の「2-0」の Mermaid の図と中身をそろえて直す。
+steps.md の「2. SSM 用の IAM ロールの関連付け」の Mermaid の図と中身をそろえて直す。
 """
 
 import sys

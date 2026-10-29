@@ -79,11 +79,13 @@ class RunTest(unittest.TestCase):
     def setUp(self):
         self.aws = FakeAws(
             instances={"i-00000001": "running", "i-00000002": "running", "i-00000003": "running",
-                       "i-00000004": "stopped"},
+                       "i-00000004": "stopped", "i-00000005": "running", "i-00000006": "running"},
             associations={
                 "i-00000001": "arn:aws:iam::1:instance-profile/port-guard-ssm",
                 "i-00000002": "arn:aws:iam::1:instance-profile/app/existing",
                 "i-00000004": "arn:aws:iam::1:instance-profile/port-guard-ssm",
+                "i-00000005": "arn:aws:iam::1:instance-profile/port-guard-ssm",
+                "i-00000006": "arn:aws:iam::1:instance-profile/app/existing",
             },
             profiles={"port-guard-ssm": ["port-guard-ssm"], "existing": ["app-role"]},
             policies={"port-guard-ssm": [CORE_ARN], "app-role": ["arn:aws:iam::1:policy/app-ssm"]},
@@ -91,7 +93,7 @@ class RunTest(unittest.TestCase):
             session_ok={"i-00000001", "i-00000002"},
         )
         self.runner = FakeRunner(ok={"i-00000001"})
-        self.stdin = io.StringIO("i-00000001\ni-00000002\ni-00000003\ni-00000004\ni-00000009\n")
+        self.stdin = io.StringIO("i-00000001\ni-00000002\ni-00000003\ni-00000004\ni-00000005\ni-00000006\ni-00000009\n")
         self.out = io.StringIO()
 
     def run_check(self, **kwargs):
@@ -104,8 +106,9 @@ class RunTest(unittest.TestCase):
         # Online の 2 台だけ接続を試す（Online でない台・止まっている台・ない台には試さない）
         self.assertEqual(self.aws.sessions, [("i-00000001", "AWS-StartNonInteractiveCommand"),
                                              ("i-00000002", "AWS-StartNonInteractiveCommand")])
-        self.assertIn("== 入れる（Online で、Session Manager でつながった。2 台）", output)
-        self.assertIn("== 入れない（3 台）", output)
+        self.assertIn("== 入れる（Online で、Session Manager でつながった。2 台）→ フェーズ 2 の対象", output)
+        self.assertIn("== 入れない: SSM Agent で直す見込み（1 台）", output)
+        self.assertIn("== 入れない: 手で直す（4 台。ssm-agent では直らない見込み）", output)
         # 独自のポリシーで入れる台は、付いていないことを知らせるが不合格にはしない
         self.assertIn("AmazonSSMManagedInstanceCore が付いていない（要確認。付いているもの: app-ssm", output)
         self.assertIn("インスタンスプロファイル: existing（ロール: app-role）", output)
@@ -113,7 +116,10 @@ class RunTest(unittest.TestCase):
         self.assertIn("SSM の登録が 未登録（Online でない）", output)
         self.assertIn("状態が stopped", output)
         self.assertIn("インスタンスが見つからない", output)
-        self.assertIn("結果: 入れる 2 台、入れない 3 台（AmazonSSMManagedInstanceCore が付いていないもの 1 台）", output)
+        self.assertIn("見るところ: インスタンスプロファイルがない。ssm-role を見直す", output)
+        self.assertIn("見るところ: ロールに AmazonSSMManagedInstanceCore が付いていない", output)
+        self.assertIn("結果: 入れる 2 台、SSM Agent で直す 1 台、手で直す 4 台（AmazonSSMManagedInstanceCore が付いていないもの 2 台）",
+                      output)
         self.assertEqual(self.runner.sent, [])
 
     def test_run_command_route(self):
@@ -125,8 +131,13 @@ class RunTest(unittest.TestCase):
 
     def test_session_failure_is_reported(self):
         self.aws.session_ok = {"i-00000001"}
+        self.stdin = io.StringIO("i-00000001\ni-00000002\n")
         self.run_check()
-        self.assertIn("Session Manager でつながらない（An error occurred (AccessDeniedException)", self.out.getvalue())
+        output = self.out.getvalue()
+        self.assertIn("Session Manager でつながらない（An error occurred (AccessDeniedException)", output)
+        # Online なのにつながらない台は、ssm-agent では直らないので手で直す
+        self.assertIn("== 入れない: 手で直す（1 台", output)
+        self.assertIn("見るところ: 登録はできている", output)
 
     def test_policy_is_read_once_per_role(self):
         self.stdin = io.StringIO("i-00000001\ni-00000004\n")
@@ -137,21 +148,28 @@ class RunTest(unittest.TestCase):
         self.stdin = io.StringIO("i-00000001\n")
         self.assertEqual(self.run_check(), 0)
 
-    def test_ng_out_lists_instances_for_ssm_agent(self):
+    def test_ok_out_and_ng_out(self):
         import os
         import tempfile
 
         from ssm_setup.targets import read_targets
 
         with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "ng.txt")
-            self.assertEqual(self.run_check(ng_out=path), 1)
-            with open(path, encoding="utf-8") as f:
-                text = f.read()
-        self.assertIn("i-00000003  # SSM の登録が 未登録（Online でない）", text)
-        targets, invalid = read_targets(io.StringIO(text))
-        self.assertEqual([t.instance_id for t in targets], ["i-00000003", "i-00000004", "i-00000009"])
+            ok_path, ng_path = os.path.join(directory, "ok.txt"), os.path.join(directory, "ng.txt")
+            self.assertEqual(self.run_check(ok_out=ok_path, ng_out=ng_path), 1)
+            with open(ok_path, encoding="utf-8") as f:
+                ok_text = f.read()
+            with open(ng_path, encoding="utf-8") as f:
+                ng_text = f.read()
+        # 入れる台はフェーズ 2 へ
+        self.assertEqual([t.instance_id for t in read_targets(io.StringIO(ok_text))[0]], ["i-00000001", "i-00000002"])
+        # ssm-agent に渡すのは、SSM Agent で直る見込みの台だけ（手で直す台は # で残る）
+        targets, invalid = read_targets(io.StringIO(ng_text))
+        self.assertEqual([t.instance_id for t in targets], ["i-00000005"])
         self.assertEqual(invalid, [])
+        self.assertIn("i-00000005  # SSM の登録が 未登録（Online でない）", ng_text)
+        self.assertIn("# i-00000003  # SSM の登録が 未登録（Online でない）  見るところ: インスタンスプロファイルがない", ng_text)
+        self.assertIn("# i-00000004  # 状態が stopped", ng_text)
 
     def test_missing_plugin(self):
         self.assertEqual(self.run_check(plugin_available=False), 2)

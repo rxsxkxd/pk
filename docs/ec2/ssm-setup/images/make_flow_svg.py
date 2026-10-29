@@ -78,27 +78,33 @@ class Svg:
 
 
 def flow():
-    s = Svg(1030, 790, "ssm-setup: SSM の有効化の流れ")
+    s = Svg(1070, 960, "ssm-setup: SSM の有効化の流れ")
     X, W, H = 260, 420, 58
     cx = X + W / 2
     R = X + W + 70  # 右の列
-    rows = {"prep": 60, "role": 150, "ssmcheck": 240, "backup": 340, "check": 430, "agent": 530}
+    lane = R + 220  # 「入れる」の通り道
+    rows = {"prep": 60, "role": 150, "ssmcheck": 240, "backup": 350, "check": 440, "agent": 540,
+            "recheck": 640, "manual": 750}
     s.box(X, rows["prep"], W, H, ["0. 準備"], "done", ["対象の一覧・インスタンスプロファイルを用意する"])
     s.box(X, rows["role"], W, H, ["1. ssm-role（AWS の API だけ）"], "command",
           ["IAM ロールが未設定の台にインスタンスプロファイルを関連付ける"])
-    s.box(X, rows["ssmcheck"], W, H, ["2. ssm-check"], "check", ["ポリシー・Online・SSM でつながるかを確かめる"])
-    s.box(X, rows["backup"], W, H, ["3. backup（入れない台だけ）"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
+    s.box(X, rows["ssmcheck"], W, H, ["2. ssm-check"], "check", ["入れる・SSM Agent で直す・手で直す に分ける"])
+    s.box(X, rows["backup"], W, H, ["3. backup（ng.txt の台だけ）"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
     s.box(X, rows["check"], W, H, ["backup-check（補助）"], "check", ["作成済み（available）で 12 時間以内か"])
-    s.box(X, rows["agent"], W, H, ["4. ssm-agent（SSH）"], "command", ["SSM Agent を入れて Online にする"])
-    order = ["prep", "role", "ssmcheck", "backup", "check", "agent"]
-    labels = {"ssmcheck": "入れない（--ng-out の一覧）", "check": "そろった"}
+    s.box(X, rows["agent"], W, H, ["4. ssm-agent（SSH）"], "command", ["SSM Agent を入れる・有効にする・起動し直す"])
+    s.box(X, rows["recheck"], W, H, ["5. ssm-check（もう一度。ng.txt の台）"], "check", ["入れる・入れない に分ける"])
+    s.box(X, rows["manual"], W, H, ["手で直す"], "manual", ["理由と「見るところ」を見て直し、ssm-check で確かめる"])
+    order = ["prep", "role", "ssmcheck", "backup", "check", "agent", "recheck", "manual"]
+    labels = {"ssmcheck": "SSM Agent で直す（ng.txt）", "check": "そろった", "recheck": "入れない（ng2.txt）"}
     for a, b in zip(order, order[1:]):
-        s.edge([(cx, rows[a] + H), (cx, rows[b])], labels.get(a), (cx + 8, rows[a] + H + 26))
-    # 入れる台はフェーズ 2 へ
-    s.box(R, rows["ssmcheck"], 260, H, ["フェーズ 2 へ（port-guard-rollout）"], "done", ["SSM で入れる台に iptables ＋ ipset"])
-    s.edge([(X + W, rows["ssmcheck"] + 29), (R, rows["ssmcheck"] + 29)], "入れる", (X + W + 12, rows["ssmcheck"] + 21))
+        s.edge([(cx, rows[a] + H), (cx, rows[b])], labels.get(a), (cx + 8, rows[a] + H + 30))
+    # 入れる台はフェーズ 2 へ（2 と 5 の両方から）
+    s.box(R, rows["recheck"], 290, H, ["フェーズ 2 へ（port-guard-rollout）"], "done", ["ok.txt と ok2.txt の台に iptables ＋ ipset"])
+    s.edge([(X + W, rows["ssmcheck"] + 29), (lane, rows["ssmcheck"] + 29), (lane, rows["recheck"])],
+           "入れる（ok.txt）", (X + W + 8, rows["ssmcheck"] + 21))
+    s.edge([(X + W, rows["recheck"] + 29), (R, rows["recheck"] + 29)], "入れる", (X + W + 12, rows["recheck"] + 21))
     # まだ作成中なら待つ
-    s.box(R, rows["check"], 180, H, ["作成を待つ"], "done", ["（pending）"])
+    s.box(R, rows["check"], 160, H, ["作成を待つ"], "done", ["（pending）"])
     s.edge([(X + W, rows["check"] + 20), (R, rows["check"] + 20)], "まだ", (X + W + 8, rows["check"] + 14))
     s.edge([(R, rows["check"] + 40), (X + W, rows["check"] + 40)])
     # 12 時間を過ぎたら 3 からやり直す
@@ -106,17 +112,17 @@ def flow():
     s.text(192, rows["backup"] + 64, "12 時間を", anchor="end")
     s.text(192, rows["backup"] + 82, "過ぎたら", anchor="end")
     s.text(192, rows["backup"] + 100, "作り直す", anchor="end")
-    # ssm-agent の後に、もう一度確かめる
-    s.edge([(X, rows["agent"] + 29), (40, rows["agent"] + 29), (40, rows["ssmcheck"] + 29), (X, rows["ssmcheck"] + 29)])
-    s.text(48, rows["agent"] + 22, "5. もう一度確かめる")
-    # それでも入れない台
-    s.box(R, rows["agent"], 260, H, ["5 の後も入れない台"], "manual", ["理由を見て手で直す（道具では行わない）"])
+    # 2 で「手で直す」になった台（ng.txt に # で残る）
+    s.edge([(X, rows["ssmcheck"] + 29), (40, rows["ssmcheck"] + 29), (40, rows["manual"] + 29), (X, rows["manual"] + 29)])
+    s.text(48, rows["ssmcheck"] + 21, "手で直す")
+    s.text(48, rows["ssmcheck"] + 50, "（ng.txt に")
+    s.text(48, rows["ssmcheck"] + 68, "# で残る）")
     s.legend(R, 60, [("command", "道具のコマンド"), ("check", "確認（道具）"), ("manual", "作業者が手で行う"),
                      ("done", "準備・待ち・次のフェーズ")])
-    s.text(20, 650, "ほとんどの台は、SSM Agent は入って動いていて、IAM ロールがないだけと見込んでいる。まずインスタンスプロファイルを関連付けて確かめ、")
-    s.text(20, 672, "それでも入れない台だけに SSM Agent を入れる。バックアップが要るのは、インスタンスの中を変える ssm-agent だけなので、")
-    s.text(20, 694, "ssm-check で入れなかった台だけに取る（ssm-role はインスタンスプロファイルを関連付けるだけ、ssm-check は確かめるだけ）。")
-    s.text(20, 716, "ssm-check --ng-out で書き出した一覧を、そのまま backup・backup-check・ssm-agent の標準入力に渡す。どの手順も、OS の再起動は要らない。")
+    s.text(20, 850, "ほとんどの台は、SSM Agent は入って動いていて、IAM ロールがないだけと見込んでいる。まずインスタンスプロファイルを関連付けて確かめ、")
+    s.text(20, 872, "SSM Agent で直る見込みの台（running・インスタンスプロファイルとロールの権限がある・Online でない）だけにバックアップを取って SSM Agent を入れる。")
+    s.text(20, 894, "それ以外の入れない台（止まっている、権限がない、Online なのにつながらない、など）は手で直す。バックアップが要るのは ssm-agent だけ。")
+    s.text(20, 916, "ssm-check --ok-out / --ng-out で書き出した一覧を、そのまま次のコマンドの標準入力に渡す。どの手順も、OS の再起動は要らない。")
     return s.render()
 
 out = sys.argv[1]

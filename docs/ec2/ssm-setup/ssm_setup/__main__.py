@@ -1,7 +1,7 @@
 """ssm-setup のコマンド（SSM の有効化）。
 
     python3 -m ssm_setup ssm-role [--instance-profile port-guard-ssm] [--wait-online 秒] [--check-only] [--yes] < instance-ids.txt
-    python3 -m ssm_setup ssm-check [--via session|run-command] [--connect-timeout 秒] [--ng-out ng.txt] [--profile P] [--region R] < instance-ids.txt
+    python3 -m ssm_setup ssm-check [--via session|run-command] [--connect-timeout 秒] [--ok-out ok.txt] [--ng-out ng.txt] [--profile P] [--region R] < instance-ids.txt
     python3 -m ssm_setup backup --backup-label 2026-10 [--profile P] [--region R] [--check-only] [--yes] < instance-ids.txt
     python3 -m ssm_setup backup-check --backup-label 2026-10 [--profile P] [--region R] < instance-ids.txt
     python3 -m ssm_setup ssm-agent --backup-label 2026-10 [SSH のオプション] [--wait-online 秒] [--no-aws] [--check-only] [--yes] < instance-ids.txt
@@ -98,9 +98,12 @@ def main(argv=None):
                                        "run-command = Run Command）")
     ssm_check_parser.add_argument("--connect-timeout", type=int, default=60, metavar="SECONDS",
                                   help="1 台の接続の確認の待ち時間（既定 60 秒）")
+    ssm_check_parser.add_argument("--ok-out", metavar="PATH",
+                                  help="「入れる」台のインスタンスの ID を、このファイルに 1 行に 1 つ書き出す"
+                                       "（フェーズ 2 の port-guard-rollout の標準入力に渡せる）")
     ssm_check_parser.add_argument("--ng-out", metavar="PATH",
-                                  help="「入れない」台のインスタンスの ID を、このファイルに 1 行に 1 つ書き出す"
-                                       "（backup・ssm-agent の標準入力に渡せる）")
+                                  help="「SSM Agent で直す」台のインスタンスの ID を、このファイルに 1 行に 1 つ書き出す"
+                                       "（backup・ssm-agent の標準入力に渡せる。「手で直す」台は行の先頭を # にして残す）")
 
     ssm_parser = subparsers.add_parser(
         "ssm-agent",
@@ -126,7 +129,7 @@ def main(argv=None):
                             wait_seconds=args.wait_online, assume_yes=args.yes, check_only=args.check_only)
     if args.command == "ssm-check":
         return ssm_check.run(aws, RunCommandClient(aws), sys.stdin, sys.stdout, via=args.via,
-                             timeout=args.connect_timeout, ng_out=args.ng_out)
+                             timeout=args.connect_timeout, ok_out=args.ok_out, ng_out=args.ng_out)
     if args.command == "ssm-agent":
         ssh = SshClient(user=args.ssh_user, key=args.ssh_key, options=args.ssh_option)
         return ssm_agent.run(

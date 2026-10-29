@@ -12,9 +12,15 @@
         人がログインするときと同じ経路を通る。作業者の PC に session-manager-plugin が要る
       - run-command: Run Command（`aws ssm send-command` の AWS-RunShellScript）。install・enable の
         `--via ssm` と同じ経路
-3. 「入れる」（Online で、接続できた）と「入れない」（理由つき）に分けて表示する
-4. --ng-out を付けると、「入れない」台のインスタンスの ID を 1 行に 1 つ書き出す（理由は # の後ろ）。
-   そのまま backup・ssm-agent の標準入力に渡せる（# から後は読み飛ばされる）
+3. 次の 3 つに分けて表示する（classify）
+   - 入れる: Online で、接続できた → フェーズ 2（port-guard-rollout）の対象
+   - SSM Agent で直す: running で、インスタンスプロファイルがあり、ロールに AmazonSSMManagedInstanceCore が
+     付いているのに、Online でない → ssm-agent（入れる・有効にする・起動し直す）で直る見込み
+   - 手で直す: それ以外（止まっている、インスタンスプロファイルがない、ロールに権限がない見込み、
+     Online なのに接続できない、など）→ ssm-agent では直らない
+4. --ok-out で「入れる」台の一覧を、--ng-out で「SSM Agent で直す」台の一覧を書き出す（1 行に 1 台）。
+   --ng-out には「手で直す」台も、行の先頭を # にして理由と一緒に書く（読み飛ばされるので、
+   そのまま backup・backup-check・ssm-agent の標準入力に渡せる）
 
 接続の確認はインスタンスで echo を動かすだけで、設定は変えない（セッションやコマンドの履歴は AWS の側に残る）。
 """
@@ -30,6 +36,8 @@ CORE_POLICY = "AmazonSSMManagedInstanceCore"
 SESSION_PLUGIN = "session-manager-plugin"
 VIA_CHOICES = ("session", "run-command")
 
+OK, AGENT, MANUAL = "入れる", "SSM Agent で直す", "手で直す"
+
 
 @dataclass
 class Host:
@@ -43,10 +51,36 @@ class Host:
     agent_version: str = ""
     connection: str = ""  # 接続の確認の結果（表示用）
     problems: list = field(default_factory=list)  # 入れない理由
+    category: str = ""  # OK・AGENT・MANUAL（classify で決める）
+    hint: str = ""  # 手で直すときに見るところ
 
     @property
     def ok(self):
         return not self.problems
+
+
+def classify(host):
+    """入れる・SSM Agent で直す・手で直す、に分ける（ssm-agent で直る見込みがあるものだけを AGENT にする）。"""
+    if host.ok:
+        host.category = OK
+        return
+    host.category = MANUAL
+    if host.state != "running":
+        host.hint = "インスタンスの状態を見る（ssm-agent は running の台しか扱えない）"
+    elif host.ping_status == "Online":
+        host.hint = ("登録はできている。接続の経路（ssmmessages への送信の 443 番）、作業者の権限（ssm:StartSession など）、"
+                     "SSM Agent の版を見る")
+    elif host.ping_status.startswith("不明"):
+        host.hint = "登録の状態を読めない。作業者の権限（ssm:DescribeInstanceInformation）を見る"
+    elif not host.profile:
+        host.hint = "インスタンスプロファイルがない。ssm-role を見直す"
+    elif not host.roles:
+        host.hint = "インスタンスプロファイルにロールが入っていない"
+    elif host.policy.startswith(f"{CORE_POLICY} が付いていない"):
+        host.hint = (f"ロールに {CORE_POLICY} が付いていない（すでにあるロールなら、手で足すかを決める。"
+                     "独自のポリシーで足りているのに Online でないなら、SSM Agent を疑い、一覧に戻す）")
+    else:
+        host.category = AGENT
 
 
 def profile_name_of(arn):
@@ -213,17 +247,34 @@ def print_host(host, out):
         print(f"      接続: {host.connection}", file=out)
     for problem in host.problems:
         print(f"      理由: {problem}", file=out)
+    if host.hint:
+        print(f"      見るところ: {host.hint}", file=out)
 
 
-def write_ng_list(path, hosts):
-    """「入れない」台の一覧を書き出す（backup・ssm-agent の標準入力の形。理由は # の後ろ）。"""
+def write_ok_list(path, hosts):
+    """「入れる」台の一覧を書き出す（フェーズ 2 の標準入力の形）。"""
     with open(path, "w", encoding="utf-8") as f:
-        f.write("# ssm-check で入れなかった台（backup・ssm-agent の標準入力に渡せる）\n")
+        f.write("# ssm-check で入れた台（port-guard-rollout の標準入力に渡せる）\n")
         for host in hosts:
+            f.write(f"{host.instance_id}  # {host.name}\n" if host.name else f"{host.instance_id}\n")
+
+
+def write_ng_list(path, agent, manual):
+    """「SSM Agent で直す」台の一覧を書き出す（backup・ssm-agent の標準入力の形。理由は # の後ろ）。
+
+    「手で直す」台は、行の先頭を # にして残す（読み飛ばされる）。直した後に ssm-agent に回すなら、# を外す。
+    """
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# ssm-check で入れず、SSM Agent で直す見込みの台（backup・backup-check・ssm-agent の標準入力に渡せる）\n")
+        for host in agent:
             f.write(f"{host.instance_id}  # {' / '.join(host.problems)}\n")
+        if manual:
+            f.write("\n# 手で直す台（ssm-agent では直らない見込み。行の先頭が # なので読み飛ばされる）\n")
+            for host in manual:
+                f.write(f"# {host.instance_id}  # {' / '.join(host.problems)}  見るところ: {host.hint}\n")
 
 
-def run(aws, runner, stdin, out, via="session", timeout=60, ng_out=None, plugin_available=None,
+def run(aws, runner, stdin, out, via="session", timeout=60, ok_out=None, ng_out=None, plugin_available=None,
         make_marker=lambda: f"ssm-setup-check-{secrets.token_hex(4)}"):
     """終了コードを返す（0: すべての台に入れる、1: 入れない台がある、2: 入力・道具の問題）。"""
     if not aws.available():
@@ -249,22 +300,29 @@ def run(aws, runner, stdin, out, via="session", timeout=60, ng_out=None, plugin_
         print(f"  確認中: {target.instance_id}", file=out)
         hosts.append(inspect(aws, runner, target.instance_id, via, timeout, policy_cache, make_marker))
 
-    ok = [h for h in hosts if h.ok]
-    ng = [h for h in hosts if not h.ok]
-    print(f"\n== 入れる（Online で、{route} でつながった。{len(ok)} 台）", file=out)
+    for host in hosts:
+        classify(host)
+    ok = [h for h in hosts if h.category == OK]
+    agent = [h for h in hosts if h.category == AGENT]
+    manual = [h for h in hosts if h.category == MANUAL]
+    print(f"\n== 入れる（Online で、{route} でつながった。{len(ok)} 台）→ フェーズ 2 の対象", file=out)
     for host in ok:
         print_host(host, out)
-    print(f"\n== 入れない（{len(ng)} 台）", file=out)
-    for host in ng:
+    print(f"\n== 入れない: SSM Agent で直す見込み（{len(agent)} 台）→ backup・ssm-agent", file=out)
+    for host in agent:
+        print_host(host, out)
+    print(f"\n== 入れない: 手で直す（{len(manual)} 台。ssm-agent では直らない見込み）", file=out)
+    for host in manual:
         print_host(host, out)
 
     no_policy = [h for h in hosts if h.policy.startswith(f"{CORE_POLICY} が付いていない")]
-    print(f"\n== 結果: 入れる {len(ok)} 台、入れない {len(ng)} 台"
+    print(f"\n== 結果: 入れる {len(ok)} 台、SSM Agent で直す {len(agent)} 台、手で直す {len(manual)} 台"
           f"（{CORE_POLICY} が付いていないもの {len(no_policy)} 台）", file=out)
-    if ng:
-        print("入れないときに見る場所: インスタンスプロファイルとロールのポリシー、SSM Agent が動いているか、"
-              "送信の 443 番が通るか、作業者の権限（ssm:StartSession など）", file=out)
+    if ok_out:
+        write_ok_list(ok_out, ok)
+        print(f"入れる台の一覧を書き出した: {ok_out}（{len(ok)} 台。フェーズ 2 の標準入力に渡せる）", file=out)
     if ng_out:
-        write_ng_list(ng_out, ng)
-        print(f"入れない台の一覧を書き出した: {ng_out}（{len(ng)} 台。backup・ssm-agent の標準入力に渡せる）", file=out)
-    return 1 if ng else 0
+        write_ng_list(ng_out, agent, manual)
+        print(f"SSM Agent で直す台の一覧を書き出した: {ng_out}（{len(agent)} 台。backup・ssm-agent の標準入力に渡せる。"
+              f"手で直す {len(manual)} 台は # で残した）", file=out)
+    return 0 if not agent and not manual else 1

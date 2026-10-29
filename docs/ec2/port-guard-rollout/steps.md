@@ -9,24 +9,45 @@
 | 項目 | 内容 |
 |---|---|
 | 方式 | OS の iptables ＋ ipset |
-| 絞るポート | **80 番と 443 番だけ**。SSH の 22 番は絞らない（ほかのシステムからの SSH の接続がありうるため） |
+| 絞るポート | **80 番と 443 番だけ**。SSH の 22 番は**既定では絞らない**（ほかのシステムからの SSH の接続がありうるため。外部からの SSH は、基本はセキュリティグループで弾く前提）。必要になったときだけ、`install --include-ssh` で 22 番も対象にできる |
 | 受け付ける相手 | 日本の IP の範囲と、許可する IP の一覧 |
 | インスタンスでの操作 | SSM（Session Manager・Run Command）の導入を前提にする。SSM Agent がない台は SSH で入れる |
 | 作業の前提 | 各操作の前に、決めたバックアップ作業のタイミングのバックアップ（AMI）が、作成済みで 12 時間以内のものとしてあること |
 
 ## 流れ
 
-| # | 手順 | コマンド | 変わるもの |
-|---|---|---|---|
-| 0 | 準備 | — | なし |
-| 1 | バックアップ | `backup` | AMI を作る（インスタンスは変えない） |
-| （補助） | バックアップの確認 | `backup-check` | なし（バックアップがあるかを確かめるだけ） |
-| 2 | SSM Agent の導入 | `ssm-agent` | SSM Agent を入れて動かす |
-| 3 | ipset の導入と設定 | `install` | ipset と port-guard の設定を入れ、集合を作る。**遮断はまだ効かない** |
-| 4 | 遮断の有効化 | `enable` | 80・443 番の遮断が効く。インスタンスごとに確かめながら 1 台ずつ |
-| 5 | 見守りと片付け | — | — |
+```mermaid
+%%{init: {"themeVariables": {"fontSize": "16px"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 40}}}%%
+flowchart TD
+    Prep["0. 準備<br>対象の一覧・許可する IP・--backup-label を決める"]
+    Backup["1. backup<br>AMI を作る（再起動しない・完了は待たない）"]
+    Check{"backup-check（補助）<br>作成済み（available）で 12 時間以内か"}
+    Wait["作成を待つ<br>（pending）"]
+    Ssm["2. ssm-agent（SSH）<br>SSM Agent を入れて Online にする"]
+    Install["3. install（SSH か SSM）<br>ipset と設定を入れ、集合を作る（遮断はまだ効かない）"]
+    Probe1["拠点から port-guard-probe（手で）<br>届く（reachable）ことを確かめる"]
+    Enable["4. enable（インスタンスごと）<br>自動で戻る予約 → 遮断 → 確かめて確定（下の図）"]
+    Probe2["拠点から port-guard-probe（手で）<br>時間切れ（timeout）になることを確かめる"]
+    Watch["5. 見守りと片付け<br>破棄の記録を見る・古い AMI を消す"]
 
-どの手順も、OS の再起動は要らず、Apache とアプリも再起動しない。
+    Prep --> Backup --> Check
+    Check -->|まだ| Wait --> Check
+    Check -->|12 時間を過ぎたら作り直す| Backup
+    Check -->|そろった| Ssm --> Install --> Probe1 --> Enable --> Probe2 --> Watch
+
+    classDef command fill:#e8f0fe,stroke:#1a56db
+    classDef check fill:#fff4e5,stroke:#c2410c
+    classDef manual fill:#ecfdf3,stroke:#15803d,stroke-dasharray:6 4
+    classDef done fill:#f1f5f9,stroke:#475569
+    class Backup,Ssm,Install,Enable command
+    class Check check
+    class Probe1,Probe2 manual
+    class Prep,Wait,Watch done
+```
+
+青: 道具のコマンド、橙: 確認（道具）、緑の破線: 作業者が手で行う、灰: 準備・待ち・片付け。2〜4 は、操作の前にバックアップを自動で確かめる（台ごと、操作の直前にも）。どの手順も、OS の再起動は要らず、Apache とアプリも再起動しない。
+
+SVG 版: [全体の流れ](images/flow-overall.svg)（`python3 images/make_svg.py images` で作り直す）
 
 ## 共通の使い方
 
@@ -164,6 +185,7 @@ python3 -m port_guard_rollout install --via ssm --backup-label 2026-10 --allow-f
 
 | オプション | 内容 |
 |---|---|
+| `--include-ssh` | 22 番（SSH）も対象にする（ポートは 22・80・443 になる）。遮断を有効にした後は、日本の IP か許可する IP の一覧にある相手からしか SSH で入れないので、ほかのシステムから SSH で入っている相手が日本の IP でなければ、許可する IP の一覧に入れておく（確認の画面にも注意を出す） |
 | `--allow-file` | 許可する IP の一覧。省略すると空。**サーバーの `allow.txt` は、この中身で丸ごと置き換える**（足し合わせない） |
 | `--jp-min-entries` | 日本の IP の範囲の最低件数（既定 1000。これより少なければ取得の失敗とみなす） |
 | `--check-in-jp`・`--check-outside` | 確認に使う IP（何度でも指定できる） |
@@ -175,6 +197,52 @@ python3 -m port_guard_rollout install --via ssm --backup-label 2026-10 --allow-f
 
 全台を確かめて有効にできるものの一覧を出し、その後は**インスタンスごとにチェックポイントを設けて** 1 台ずつ進める。
 
+```mermaid
+%%{init: {"themeVariables": {"fontSize": "16px"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 40}}}%%
+flowchart TD
+    List["全台を確かめて、一覧を表示<br>有効にできる台・できない台（理由つき）"]
+    Ask{"この台を有効にしますか？<br>y: 進める / n: 飛ばす / q: 残りを止める"}
+    Skip["飛ばす"]
+    Quit["残りを止めて終わる"]
+    BackupCheck{"バックアップを確かめる<br>作成済み・12 時間以内か（操作の直前）"}
+    NoBackup["行わない（失敗）"]
+    Revert["自動で元に戻る予約<br>10 分後に遮断のルールを消す（systemd-run）"]
+    Apply["遮断のルールを入れる<br>systemctl enable --now port-guard"]
+    Reach{"インスタンスに引き続き入れるか<br>SSH または SSM"}
+    AutoBack["10 分後に予約で自動的に戻る"]
+    Respond{"作業者の PC から 80・443 に応答があるか<br>80: HTTP の応答 / 443: TLS の接続"}
+    Back["すぐに元に戻す"]
+    Confirm["予約を取り消して確定<br>予約のプロセスが消えたことも確かめる"]
+    Next["次の台へ"]
+
+    List --> Ask
+    Ask -->|n| Skip --> Next
+    Ask -->|q| Quit
+    Ask -->|y| BackupCheck
+    BackupCheck -->|なし| NoBackup --> Next
+    BackupCheck -->|あり| Revert --> Apply --> Reach
+    Reach -->|入れない| AutoBack --> Next
+    Reach -->|入れる| Respond
+    Respond -->|応答なし| Back --> Next
+    Respond -->|応答あり| Confirm --> Next
+    Next -->|次の台| Ask
+
+    classDef command fill:#e8f0fe,stroke:#1a56db
+    classDef check fill:#fff4e5,stroke:#c2410c
+    classDef ok fill:#dcfce7,stroke:#15803d
+    classDef ng fill:#fee2e2,stroke:#b91c1c
+    classDef done fill:#f1f5f9,stroke:#475569
+    class Revert,Apply command
+    class List,Ask,BackupCheck,Reach,Respond check
+    class Confirm ok
+    class NoBackup,AutoBack,Back ng
+    class Skip,Quit,Next done
+```
+
+海外からの確認は、確定した後に作業者が拠点で `port-guard-probe` を手で実行する（この図の外。[海外からの確認の拠点](./outside-probe.md#確かめる流れ作業者が手で行う)）。
+
+SVG 版: [enable のインスタンスごとの流れ](images/flow-enable.svg)
+
 ```bash
 python3 -m port_guard_rollout enable --backup-label 2026-10 --dry-run < instance-ids.txt
 python3 -m port_guard_rollout enable --backup-label 2026-10 --ssh-key ~/.ssh/<鍵> < instance-ids.txt
@@ -183,24 +251,25 @@ python3 -m port_guard_rollout enable --via ssm --backup-label 2026-10 < instance
 
 | 段階 | 内容 |
 |---|---|
-| 確認（読み取りだけ） | `install` と同じ確認に加えて、port-guard が入っていること、ポートの設定が 80・443 であること、日本の IP の範囲の一覧が最低件数以上あること |
+| 確認（読み取りだけ） | `install` と同じ確認に加えて、port-guard が入っていること、ポートの設定が 80・443（`--include-ssh` で入れたときは 22・80・443）であること、日本の IP の範囲の一覧が最低件数以上あること |
 | インスタンスごとのチェックポイント | その台の内容を表示し、`y`（進める）・`n`（飛ばす）・`q`（残りを止める）を聞く。前の台の結果を見てから次の台に答える |
 | 有効化 | 今の iptables のルールを `/var/lib/port-guard/` に控える → **`--revert-minutes`（既定 10 分）の後に自動で元に戻る予約**を入れる（`systemd-run`）→ `systemctl enable --now port-guard`（ルールと集合が入り、起動時にも入る） |
 | 確認 | インスタンスに引き続き入れるか（SSH または SSM）。作業者の PC から 80・443 番に届いて相手が応答するか（80: HTTP の応答、443: TLS の接続。途中の転送や代理の仕組みが接続を受け付けてしまう誤判定を避けるため、TCP の接続だけでは判定しない） |
+| 海外からの確認 | 道具では行わない。作業者が、[海外からの確認の拠点](./outside-probe.md#確かめる流れ作業者が手で行う)で `port-guard-probe` を、`enable` の前（届くこと）と、確定した後（時間切れになること）に実行して確かめる |
 | 確定・元に戻す | すべて合格 → 予約を取り消して**確定**（予約のプロセスが消えたことも確かめる）。不合格 → **すぐに元に戻す**（ルールを外し、ユニットを無効にし、予約を取り消す）。インスタンスに入れなくなった → 予約で自動的に元に戻る |
 
 | オプション | 内容 |
 |---|---|
 | `--revert-minutes` | 確定しなければ自動で元に戻るまでの時間（既定 10 分） |
 | `--connect-timeout` | 届くかの確認の待ち時間（既定 5 秒） |
-| `--probe PORT:KIND` | ポートごとの確かめ方（`tcp`・`http`・`tls`）。既定は 80: `http`、443: `tls` |
+| `--probe PORT:KIND` | ポートごとの確かめ方（`tcp`・`ssh`・`http`・`tls`）。既定は 22: `ssh`（SSH のサーバーの応答）、80: `http`、443: `tls` |
 | `--port-map PORT:LOCAL_PORT` | 作業者の PC から確かめるときに使うポート（手元の再現の環境のように、転送しているとき） |
 
 ## 5. 見守りと片付け
 
 | # | 作業 | 内容 |
 |---|---|---|
-| 5-1 | 数日の見守り | 破棄の記録と回数（[確かめ方](./iptables-ipset.md#確かめる)）を見て、止めてはいけない相手（外部サービス、監視など）が止まっていないか。利用者からの「つながらない」の連絡に注意する |
+| 5-1 | 数日の見守り | 破棄の記録と回数（[破棄の記録](./iptables-ipset.md#破棄の記録)）を見て、止めてはいけない相手（外部サービス、監視など）が止まっていないか。利用者からの「つながらない」の連絡に注意する |
 | 5-2 | 記録 | 何を変えたか（入れたパッケージとファイル、ユニット）と、確認の結果を残す |
 | 5-3 | バックアップの片付け | 落ち着いたら、1 の AMI とスナップショットを消す（タグ `Purpose=port-guard-rollout-backup` と `BackupLabel` で探せる） |
 

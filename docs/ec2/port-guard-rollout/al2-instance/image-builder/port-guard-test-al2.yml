@@ -1,0 +1,621 @@
+AWSTemplateFormatVersion: "2010-09-09"
+# 下書き（未検証）。EC2 Image Builder で、今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近い
+# テスト用のインスタンスの AMI を作る。開発用のアカウントの、本番とは別の VPC で使う。
+# 説明は同じフォルダの README.md。手順は ../Dockerfile と揃えている（アプリは ../app/ と同じ中身を埋め込んでいる）。
+# このテンプレートは generate.py で作ったもの（手で直さない）。アプリや Apache の設定を変えたら、generate.py で作り直す。
+Description: Test instance AMI like the current AL2 instances for port-guard-rollout (EC2 Image Builder)
+
+Parameters:
+  NamePrefix:
+    Type: String
+    Default: port-guard-test-al2
+    Description: Image Builder の資源と AMI の名前の先頭
+  ComponentVersion:
+    Type: String
+    Default: 1.0.0
+    Description: コンポーネントの版（2 つ共通）。コンポーネントの中身を変えたら上げる（同じ版のまま中身は変えられない）
+  RecipeVersion:
+    Type: String
+    Default: 1.0.0
+    Description: イメージのレシピの版。レシピ・コンポーネントの版・親イメージのどれかを変えたら上げる
+  ParentImage:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-kernel-5.10-hvm-x86_64-gp2
+    Description: 親イメージ（Amazon Linux 2、x86_64）の AMI を指す SSM のパラメーター。デプロイした時点の AMI に決まる
+  InstanceType:
+    Type: String
+    Default: t3a.medium
+    Description: ビルドとテストに使うインスタンスタイプ（x86_64。本番の t3a に合わせる）
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: 開発用の VPC の、インターネットに出られるサブネット（yum のリポジトリ、GitHub、rubygems.org、cache.ruby-lang.org から取得する）
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: 受信なし、送信は TCP 80・443 を許可したセキュリティグループ
+  LogBucketName:
+    Type: String
+    Default: ""
+    Description: ビルドのログを置く S3 バケット。空ならログを S3 に置かない
+
+Conditions:
+  HasLogBucket:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: LogBucketName
+          - ""
+
+Resources:
+  # ビルド用・テスト用のインスタンスのロール
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/EC2InstanceProfileForImageBuilder
+      Policies:
+        Fn::If:
+          - HasLogBucket
+          - - PolicyName: put-build-logs
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Action: s3:PutObject
+                    Resource:
+                      Fn::Sub: arn:${AWS::Partition}:s3:::${LogBucketName}/image-builder/${NamePrefix}/*
+          - Ref: AWS::NoValue
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: InstanceRole
+
+  # Apache・Ruby・Passenger（今のインスタンスと同じ版と置き場所）
+  SystemComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name:
+        Fn::Sub: ${NamePrefix}-system
+      Version:
+        Ref: ComponentVersion
+      Platform: Linux
+      SupportedOsVersions:
+        - Amazon Linux 2
+      Description: Apache, Ruby (rbenv) and Passenger like the current AL2 instances
+      Data: |
+        name: port-guard-test-al2-system
+        description: Apache, Ruby (rbenv) and Passenger like the current AL2 instances
+        schemaVersion: 1.0
+        parameters:
+          - HttpdVersion:
+              type: string
+              default: 2.4.56
+              description: Apache の版（今のインスタンスに合わせる）
+          - ModHttp2Version:
+              type: string
+              default: 1.15.19-1.amzn2.0.2
+              description: Apache 2.4.56 と組み合わせられる mod_http2 の版
+          - RubyVersion:
+              type: string
+              default: 2.7.7
+          - RubyApiVersion:
+              type: string
+              default: 2.7.0
+              description: gem の置き場所の版（Ruby 2.7 系は 2.7.0）
+          - PassengerVersion:
+              type: string
+              default: 6.0.18
+          - RbenvRelease:
+              type: string
+              default: 1.3.2
+          - RubyBuildVersion:
+              type: string
+              default: "20261023"
+          - RubygemsVersion:
+              type: string
+              default: 3.4.22
+              description: Ruby 2.7 で使える最後の RubyGems
+          - BundlerVersion:
+              type: string
+              default: 2.4.22
+              description: Ruby 2.7 で使える最後の Bundler
+        phases:
+          - name: build
+            steps:
+              # Apache は版を指定して入れる。mod_http2 は Apache と別の版の番号なので、2.4.56 と組み合わせられる版を指定する。
+              # iptables のコマンドは入れ、ipset・iptables-services・firewalld は入れない（今のインスタンスに合わせる）
+              - name: InstallPackages
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - |
+                      yum install -y \
+                        sudo cronie iptables iproute procps-ng shadow-utils hostname which findutils \
+                        tar gzip bzip2 xz curl openssl \
+                        gcc gcc-c++ make patch \
+                        openssl-devel zlib-devel readline-devel libyaml-devel libffi-devel \
+                        libcurl-devel apr-devel apr-util-devel \
+                        "httpd-{{ HttpdVersion }}" "httpd-tools-{{ HttpdVersion }}" "httpd-devel-{{ HttpdVersion }}" \
+                        "mod_ssl-{{ HttpdVersion }}" "mod_http2-{{ ModHttp2Version }}"
+                    - yum clean all
+              # アプリと rbenv の持ち主（今のインスタンスと同じ centos。sudo をパスワードなしで使える）
+              - name: CreateUser
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - id centos >/dev/null 2>&1 || useradd -m centos
+                    - echo 'centos ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/centos
+                    - chmod 440 /etc/sudoers.d/centos
+                    - chmod 711 /home/centos
+                    - install -d -m 700 -o centos -g centos /home/centos/.ssh
+              # rbenv と ruby-build で Ruby を入れる（/home/centos/.rbenv）。centos で実行する
+              - name: InstallRuby
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - |
+                      cat > /tmp/port-guard-test-ruby.sh <<'EOS'
+                      set -euo pipefail
+                      cd "$HOME"
+                      mkdir -p .rbenv/plugins/ruby-build
+                      curl -fsSL "https://github.com/rbenv/rbenv/archive/refs/tags/v{{ RbenvRelease }}.tar.gz" | tar -xz --strip-components=1 -C .rbenv
+                      curl -fsSL "https://github.com/rbenv/ruby-build/archive/refs/tags/v{{ RubyBuildVersion }}.tar.gz" | tar -xz --strip-components=1 -C .rbenv/plugins/ruby-build
+                      RUBY_CONFIGURE_OPTS="--disable-install-doc" .rbenv/bin/rbenv install -s "{{ RubyVersion }}"
+                      .rbenv/bin/rbenv global "{{ RubyVersion }}"
+                      grep -q 'rbenv init' .bashrc || printf '%s\n' 'export PATH="$HOME/.rbenv/bin:$PATH"' 'eval "$(rbenv init - bash)"' >> .bashrc
+                      EOS
+                    - sudo -u centos -H bash /tmp/port-guard-test-ruby.sh
+                    - rm -f /tmp/port-guard-test-ruby.sh
+              # RubyGems と Bundler を Ruby 2.7 で使える最後の版に、Passenger を今のインスタンスと同じ版にし、Apache のモジュールを作る
+              - name: InstallPassenger
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - |
+                      cat > /tmp/port-guard-test-passenger.sh <<'EOS'
+                      set -euo pipefail
+                      export PATH="$HOME/.rbenv/shims:$HOME/.rbenv/bin:$PATH"
+                      gem update --system "{{ RubygemsVersion }}" --no-document
+                      gem install bundler -v "{{ BundlerVersion }}" --no-document
+                      gem install passenger -v "{{ PassengerVersion }}" --no-document
+                      rbenv rehash
+                      passenger-install-apache2-module --auto --languages ruby
+                      EOS
+                    - sudo -u centos -H bash /tmp/port-guard-test-passenger.sh
+                    - rm -f /tmp/port-guard-test-passenger.sh
+              # Passenger の読み込み（今のインスタンスと同じパス）と、HTTP・HTTPS の仮想ホスト
+              - name: ConfigureApache
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - |
+                      cat > /etc/httpd/conf.d/passenger.conf <<'EOS'
+                      # 今のインスタンスの設定と同じ形（rbenv の Ruby の gem の中の Passenger を読み込む）
+                      LoadModule passenger_module /home/centos/.rbenv/versions/{{ RubyVersion }}/lib/ruby/gems/{{ RubyApiVersion }}/gems/passenger-{{ PassengerVersion }}/buildout/apache2/mod_passenger.so
+                      
+                      <IfModule mod_passenger.c>
+                        PassengerRoot /home/centos/.rbenv/versions/{{ RubyVersion }}/lib/ruby/gems/{{ RubyApiVersion }}/gems/passenger-{{ PassengerVersion }}
+                        PassengerDefaultRuby /home/centos/.rbenv/versions/{{ RubyVersion }}/bin/ruby
+                      </IfModule>
+                      EOS
+                    - |
+                      cat > /etc/httpd/conf.d/app.conf <<'EOS'
+                      # Rails のアプリを Passenger で動かす仮想ホスト（HTTP と HTTPS）
+                      <VirtualHost *:80>
+                        ServerName localhost
+                        DocumentRoot /home/centos/app/public
+                        PassengerAppEnv production
+                      
+                        <Directory /home/centos/app/public>
+                          AllowOverride all
+                          Options -MultiViews
+                          Require all granted
+                        </Directory>
+                      </VirtualHost>
+                      
+                      <VirtualHost *:443>
+                        ServerName localhost
+                        Protocols h2 http/1.1
+                        DocumentRoot /home/centos/app/public
+                        PassengerAppEnv production
+                      
+                        SSLEngine on
+                        SSLCertificateFile /etc/pki/tls/certs/localhost.crt
+                        SSLCertificateKeyFile /etc/pki/tls/private/localhost.key
+                      
+                        <Directory /home/centos/app/public>
+                          AllowOverride all
+                          Options -MultiViews
+                          Require all granted
+                        </Directory>
+                      </VirtualHost>
+                      EOS
+                    - |
+                      if [ ! -f /etc/pki/tls/certs/localhost.crt ]; then
+                        openssl req -x509 -nodes -newkey rsa:2048 -days 3650 -subj "/CN=localhost" \
+                          -keyout /etc/pki/tls/private/localhost.key -out /etc/pki/tls/certs/localhost.crt
+                      fi
+                    - httpd -t
+          # スナップショットを撮る前に、ビルド用のインスタンスで確かめる
+          - name: validate
+            steps:
+              - name: CheckSystem
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - httpd -v | grep -F "Apache/{{ HttpdVersion }}"
+                    - httpd -V | grep -E "Server MPM. +prefork"
+                    - ldd /usr/lib64/httpd/modules/mod_ssl.so | grep -F libssl.so.10
+                    - "sudo -u centos -H /home/centos/.rbenv/versions/{{ RubyVersion }}/bin/ruby -ropenssl -e 'exit(OpenSSL::OPENSSL_LIBRARY_VERSION.include?(\"1.0.2k\"))'"
+                    - sudo -u centos -H /home/centos/.rbenv/versions/{{ RubyVersion }}/bin/passenger-config --version | grep -F "{{ PassengerVersion }}"
+                    - "! rpm -q ipset iptables-services firewalld"
+
+  # 最小の Rails 4.2 のアプリ（コンポーネントの Data は 16,000 文字までなので、システムとアプリで分けている）
+  AppComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name:
+        Fn::Sub: ${NamePrefix}-app
+      Version:
+        Ref: ComponentVersion
+      Platform: Linux
+      SupportedOsVersions:
+        - Amazon Linux 2
+      Description: Minimal Rails 4.2 app served by Apache and Passenger
+      Data: |
+        name: port-guard-test-al2-app
+        description: Minimal Rails 4.2 app served by Apache and Passenger
+        schemaVersion: 1.0
+        parameters:
+          - BundlerVersion:
+              type: string
+              default: 2.4.22
+        phases:
+          - name: build
+            steps:
+              # 最小の Rails 4.2 のアプリ（../app/ と同じ中身）を /home/centos/app に置く
+              - name: PlaceApp
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/Gemfile)"
+                      cat > /home/centos/app/Gemfile <<'EOS'
+                      source 'https://rubygems.org'
+                      
+                      # 今のアプリは rails の 4-2-stable を git で取っているが、ここでは RubyGems の 4.2 系の最後の版を使う。
+                      # Passenger で動かすのに要る部分（railties と actionpack）だけを入れる
+                      gem 'railties', '4.2.11.3'
+                      gem 'actionpack', '4.2.11.3'
+                      
+                      # Ruby 2.7 に同梱の bigdecimal 2.0 には BigDecimal.new がなく、Rails 4.2 が起動しないため、1.4 系に固定する
+                      gem 'bigdecimal', '1.4.4'
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/Gemfile.lock)"
+                      cat > /home/centos/app/Gemfile.lock <<'EOS'
+                      GEM
+                        remote: https://rubygems.org/
+                        specs:
+                          actionpack (4.2.11.3)
+                            actionview (= 4.2.11.3)
+                            activesupport (= 4.2.11.3)
+                            rack (~> 1.6)
+                            rack-test (~> 0.6.2)
+                            rails-dom-testing (~> 1.0, >= 1.0.5)
+                            rails-html-sanitizer (~> 1.0, >= 1.0.2)
+                          actionview (4.2.11.3)
+                            activesupport (= 4.2.11.3)
+                            builder (~> 3.1)
+                            erubis (~> 2.7.0)
+                            rails-dom-testing (~> 1.0, >= 1.0.5)
+                            rails-html-sanitizer (~> 1.0, >= 1.0.3)
+                          activesupport (4.2.11.3)
+                            i18n (~> 0.7)
+                            minitest (~> 5.1)
+                            thread_safe (~> 0.3, >= 0.3.4)
+                            tzinfo (~> 1.1)
+                          bigdecimal (1.4.4)
+                          builder (3.3.0)
+                          concurrent-ruby (1.3.8)
+                          crass (1.0.8)
+                          erubis (2.7.0)
+                          i18n (0.9.5)
+                            concurrent-ruby (~> 1.0)
+                          loofah (2.25.2)
+                            crass (~> 1.0.2)
+                            nokogiri (>= 1.12.0)
+                          mini_portile2 (2.8.9)
+                          minitest (5.26.1)
+                          nokogiri (1.15.7)
+                            mini_portile2 (~> 2.8.2)
+                            racc (~> 1.4)
+                          racc (1.8.1)
+                          rack (1.6.13)
+                          rack-test (0.6.3)
+                            rack (>= 1.0)
+                          rails-deprecated_sanitizer (1.0.4)
+                            activesupport (>= 4.2.0.alpha)
+                          rails-dom-testing (1.0.9)
+                            activesupport (>= 4.2.0, < 5.0)
+                            nokogiri (~> 1.6)
+                            rails-deprecated_sanitizer (>= 1.0.1)
+                          rails-html-sanitizer (1.7.1)
+                            loofah (~> 2.25, >= 2.25.2)
+                            nokogiri (>= 1.15.7, != 1.16.7, != 1.16.6, != 1.16.5, != 1.16.4, != 1.16.3, != 1.16.2, != 1.16.1, != 1.16.0.rc1, != 1.16.0)
+                          railties (4.2.11.3)
+                            actionpack (= 4.2.11.3)
+                            activesupport (= 4.2.11.3)
+                            rake (>= 0.8.7)
+                            thor (>= 0.18.1, < 2.0)
+                          rake (13.4.2)
+                          thor (1.5.0)
+                          thread_safe (0.3.6)
+                          tzinfo (1.2.11)
+                            thread_safe (~> 0.1)
+                      
+                      PLATFORMS
+                        ruby
+                      
+                      DEPENDENCIES
+                        actionpack (= 4.2.11.3)
+                        bigdecimal (= 1.4.4)
+                        railties (= 4.2.11.3)
+                      
+                      BUNDLED WITH
+                         2.4.22
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/config.ru)"
+                      cat > /home/centos/app/config.ru <<'EOS'
+                      require ::File.expand_path('../config/environment', __FILE__)
+                      run Rails.application
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/config/boot.rb)"
+                      cat > /home/centos/app/config/boot.rb <<'EOS'
+                      ENV['BUNDLE_GEMFILE'] ||= File.expand_path('../../Gemfile', __FILE__)
+                      
+                      require 'bundler/setup'
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/config/application.rb)"
+                      cat > /home/centos/app/config/application.rb <<'EOS'
+                      require File.expand_path('../boot', __FILE__)
+                      
+                      require 'action_controller/railtie'
+                      
+                      Bundler.require(*Rails.groups)
+                      
+                      module App
+                        class Application < Rails::Application
+                          # 試すためのアプリなので、秘密の値は固定にする（本物のアプリでは環境ごとに設定する）
+                          config.secret_key_base = ENV.fetch('SECRET_KEY_BASE', 'port-guard-rollout-al2-instance-only-for-local-testing')
+                        end
+                      end
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/config/environment.rb)"
+                      cat > /home/centos/app/config/environment.rb <<'EOS'
+                      require File.expand_path('../application', __FILE__)
+                      
+                      Rails.application.initialize!
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/config/environments/production.rb)"
+                      cat > /home/centos/app/config/environments/production.rb <<'EOS'
+                      Rails.application.configure do
+                        config.cache_classes = true
+                        config.eager_load = true
+                        config.consider_all_requests_local = false
+                        config.serve_static_files = false
+                        config.log_level = :info
+                      end
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/config/environments/development.rb)"
+                      cat > /home/centos/app/config/environments/development.rb <<'EOS'
+                      Rails.application.configure do
+                        config.cache_classes = false
+                        config.eager_load = false
+                        config.consider_all_requests_local = true
+                      end
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/config/routes.rb)"
+                      cat > /home/centos/app/config/routes.rb <<'EOS'
+                      Rails.application.routes.draw do
+                        root 'health#show'
+                        get 'health' => 'health#show'
+                      end
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/app/controllers/application_controller.rb)"
+                      cat > /home/centos/app/app/controllers/application_controller.rb <<'EOS'
+                      class ApplicationController < ActionController::Base
+                      end
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/app/controllers/health_controller.rb)"
+                      cat > /home/centos/app/app/controllers/health_controller.rb <<'EOS'
+                      require 'openssl'
+                      
+                      # 動いている構成（Ruby、Rails、OpenSSL、接続元の IP）を返す
+                      class HealthController < ApplicationController
+                        def show
+                          render plain: [
+                            "ruby: #{RUBY_VERSION}",
+                            "rails: #{Rails.version}",
+                            "openssl: #{OpenSSL::OPENSSL_LIBRARY_VERSION}",
+                            "remote_addr: #{request.env['REMOTE_ADDR']}",
+                            ''
+                          ].join("\n")
+                        end
+                      end
+                      EOS
+                    - |
+                      install -d -o centos -g centos "$(dirname /home/centos/app/public/robots.txt)"
+                      cat > /home/centos/app/public/robots.txt <<'EOS'
+                      User-agent: *
+                      Disallow: /
+                      EOS
+                    - chown -R centos:centos /home/centos/app
+              # x86_64 ではビルド済みの nokogiri が AL2 で動くので、force_ruby_platform は付けない
+              - name: BundleInstall
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - |
+                      cat > /tmp/port-guard-test-bundle.sh <<'EOS'
+                      set -euo pipefail
+                      export PATH="$HOME/.rbenv/shims:$HOME/.rbenv/bin:$PATH"
+                      cd "$HOME/app"
+                      bundle _{{ BundlerVersion }}_ install --jobs 4
+                      mkdir -p log tmp public
+                      EOS
+                    - sudo -u centos -H bash /tmp/port-guard-test-bundle.sh
+                    - rm -f /tmp/port-guard-test-bundle.sh
+              - name: EnableHttpd
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - systemctl enable httpd
+                    - systemctl restart httpd
+          - name: validate
+            steps:
+              - name: CheckApp
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - systemctl is-enabled httpd
+                    - 'curl -fsS http://localhost/health | grep -F "ruby: 2.7.7"'  # 「: 」を含むので、行全体を引用符で囲む
+                    - 'curl -fsS http://localhost/health | grep -F "openssl: OpenSSL 1.0.2k"'  # 「: 」を含むので、行全体を引用符で囲む
+                    - 'curl -fsSk https://localhost/health | grep -F "rails: 4.2.11.3"'  # 「: 」を含むので、行全体を引用符で囲む
+          # できた AMI から起動したテスト用のインスタンスで確かめる（起動時に httpd が動いていること）
+          - name: test
+            steps:
+              - name: CheckOnNewInstance
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - set -euo pipefail
+                    - systemctl is-active httpd
+                    - httpd -V | grep -E "Server MPM. +prefork"
+                    - ldd /usr/lib64/httpd/modules/mod_ssl.so | grep -F libssl.so.10
+                    - 'curl -fsS http://localhost/health | grep -F "openssl: OpenSSL 1.0.2k"'  # 「: 」を含むので、行全体を引用符で囲む
+                    - curl -fsSk -o /dev/null -w '%{http_code}' https://localhost/health | grep -Fx 200
+                    - "! rpm -q ipset iptables-services firewalld"
+
+  ImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      Name:
+        Ref: NamePrefix
+      Version:
+        Ref: RecipeVersion
+      ParentImage:
+        Ref: ParentImage
+      Components:
+        - ComponentArn:
+            Fn::GetAtt:
+              - SystemComponent
+              - Arn
+        - ComponentArn:
+            Fn::GetAtt:
+              - AppComponent
+              - Arn
+      AdditionalInstanceConfiguration:
+        SystemsManagerAgent:
+          UninstallAfterBuild: false
+
+  InfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      Name:
+        Ref: NamePrefix
+      InstanceProfileName:
+        Ref: InstanceProfile
+      InstanceTypes:
+        - Ref: InstanceType
+      SubnetId:
+        Ref: SubnetId
+      SecurityGroupIds:
+        - Ref: SecurityGroupId
+      TerminateInstanceOnFailure: true
+      InstanceMetadataOptions:
+        HttpTokens: required
+      Logging:
+        Fn::If:
+          - HasLogBucket
+          - S3Logs:
+              S3BucketName:
+                Ref: LogBucketName
+              S3KeyPrefix:
+                Fn::Sub: image-builder/${NamePrefix}
+          - Ref: AWS::NoValue
+
+  DistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name:
+        Ref: NamePrefix
+      Distributions:
+        - Region:
+            Ref: AWS::Region
+          AmiDistributionConfiguration:
+            Name:
+              Fn::Sub: "${NamePrefix}-{{ imagebuilder:buildDate }}"
+            AmiTags:
+              Purpose: port-guard-rollout-test-instance
+              Environment: development
+              Layer: test-instance
+              RecipeVersion:
+                Ref: RecipeVersion
+
+  ImagePipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      Name:
+        Ref: NamePrefix
+      ImageRecipeArn:
+        Fn::GetAtt:
+          - ImageRecipe
+          - Arn
+      InfrastructureConfigurationArn:
+        Fn::GetAtt:
+          - InfrastructureConfiguration
+          - Arn
+      DistributionConfigurationArn:
+        Fn::GetAtt:
+          - DistributionConfiguration
+          - Arn
+      ImageTestsConfiguration:
+        ImageTestsEnabled: true
+        TimeoutMinutes: 60
+      EnhancedImageMetadataEnabled: true
+      Status: ENABLED
+
+Outputs:
+  ImagePipelineArn:
+    Value:
+      Fn::GetAtt:
+        - ImagePipeline
+        - Arn

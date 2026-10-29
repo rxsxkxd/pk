@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="990" viewBox="0 0 920 990" role="img">
+
+  <style>
+    .bg { fill: #ffffff; }
+    .box { stroke-width: 1.5; rx: 8; }
+    .command { fill: #e8f0fe; stroke: #1a56db; }
+    .check { fill: #fff4e5; stroke: #c2410c; }
+    .manual { fill: #ecfdf3; stroke: #15803d; stroke-dasharray: 6 4; }
+    .done { fill: #f1f5f9; stroke: #475569; }
+    .ok { fill: #dcfce7; stroke: #15803d; }
+    .ng { fill: #fee2e2; stroke: #b91c1c; }
+    .note { fill: #fafafa; stroke: #9ca3af; stroke-dasharray: 3 3; }
+    text { font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif; fill: #111827; }
+    .t { font-size: 15px; }
+    .s { font-size: 12.5px; fill: #374151; }
+    .lbl { font-size: 12.5px; fill: #1f2937; }
+    .title { font-size: 18px; font-weight: bold; }
+    .edge { stroke: #374151; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    .bracket { stroke: #6b7280; stroke-width: 1.4; fill: none; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="920" height="990"/>
+  <text class="title" x="20" y="30">enable: インスタンスごとの流れ</text>
+  <rect class="box check" x="130" y="60" width="420" height="58"/>
+  <text class="t" x="340.0" y="84.5" text-anchor="middle">全台を確かめて、一覧を表示</text>
+  <text class="s" x="340.0" y="103.5" text-anchor="middle">有効にできる台・できない台（理由つき）</text>
+  <rect class="box check" x="130" y="160" width="420" height="58"/>
+  <text class="t" x="340.0" y="184.5" text-anchor="middle">この台を有効にしますか？</text>
+  <text class="s" x="340.0" y="203.5" text-anchor="middle">y: 進める / n: 飛ばす / q: 残りを止める</text>
+  <rect class="box check" x="130" y="260" width="420" height="58"/>
+  <text class="t" x="340.0" y="284.5" text-anchor="middle">バックアップを確かめる</text>
+  <text class="s" x="340.0" y="303.5" text-anchor="middle">作成済み・12 時間以内か（操作の直前）</text>
+  <rect class="box command" x="130" y="360" width="420" height="58"/>
+  <text class="t" x="340.0" y="384.5" text-anchor="middle">自動で元に戻る予約</text>
+  <text class="s" x="340.0" y="403.5" text-anchor="middle">10 分後に遮断のルールを消す（systemd-run）</text>
+  <rect class="box command" x="130" y="460" width="420" height="58"/>
+  <text class="t" x="340.0" y="484.5" text-anchor="middle">遮断のルールを入れる</text>
+  <text class="s" x="340.0" y="503.5" text-anchor="middle">systemctl enable --now port-guard</text>
+  <rect class="box check" x="130" y="560" width="420" height="58"/>
+  <text class="t" x="340.0" y="584.5" text-anchor="middle">インスタンスに引き続き入れるか</text>
+  <text class="s" x="340.0" y="603.5" text-anchor="middle">SSH または SSM</text>
+  <rect class="box check" x="130" y="660" width="420" height="58"/>
+  <text class="t" x="340.0" y="684.5" text-anchor="middle">作業者の PC から 80・443 に応答があるか</text>
+  <text class="s" x="340.0" y="703.5" text-anchor="middle">80: HTTP の応答 / 443: TLS の接続</text>
+  <rect class="box ok" x="130" y="760" width="420" height="58"/>
+  <text class="t" x="340.0" y="784.5" text-anchor="middle">予約を取り消して確定</text>
+  <text class="s" x="340.0" y="803.5" text-anchor="middle">予約のプロセスが消えたことも確かめる</text>
+  <rect class="box done" x="130" y="860" width="420" height="58"/>
+  <text class="t" x="340.0" y="894.0" text-anchor="middle">次の台へ</text>
+  <path class="edge" d="M 340.0 118 L 340.0 160"/>
+  <path class="edge" d="M 340.0 218 L 340.0 260"/>
+  <text class="lbl" x="348.0" y="242" text-anchor="start">y</text>
+  <path class="edge" d="M 340.0 318 L 340.0 360"/>
+  <text class="lbl" x="348.0" y="342" text-anchor="start">あり</text>
+  <path class="edge" d="M 340.0 418 L 340.0 460"/>
+  <path class="edge" d="M 340.0 518 L 340.0 560"/>
+  <path class="edge" d="M 340.0 618 L 340.0 660"/>
+  <text class="lbl" x="348.0" y="642" text-anchor="start">入れる</text>
+  <path class="edge" d="M 340.0 718 L 340.0 760"/>
+  <text class="lbl" x="348.0" y="742" text-anchor="start">応答あり</text>
+  <path class="edge" d="M 340.0 818 L 340.0 860"/>
+  <rect class="box done" x="650" y="146" width="250" height="42"/>
+  <text class="t" x="775.0" y="172.0" text-anchor="middle">飛ばす</text>
+  <path class="edge" d="M 550 167.0 L 650 167.0"/>
+  <text class="lbl" x="558" y="161.0" text-anchor="start">n</text>
+  <rect class="box done" x="650" y="194" width="250" height="42"/>
+  <text class="t" x="775.0" y="220.0" text-anchor="middle">残りを止めて終わる</text>
+  <path class="edge" d="M 550 215.0 L 650 215.0"/>
+  <text class="lbl" x="558" y="209.0" text-anchor="start">q</text>
+  <rect class="box ng" x="650" y="246" width="250" height="42"/>
+  <text class="t" x="775.0" y="272.0" text-anchor="middle">行わない（失敗）</text>
+  <path class="edge" d="M 550 267.0 L 650 267.0"/>
+  <text class="lbl" x="558" y="261.0" text-anchor="start">なし</text>
+  <rect class="box ng" x="650" y="546" width="250" height="42"/>
+  <text class="t" x="775.0" y="572.0" text-anchor="middle">10 分後に予約で自動的に戻る</text>
+  <path class="edge" d="M 550 567.0 L 650 567.0"/>
+  <text class="lbl" x="558" y="561.0" text-anchor="start">入れない</text>
+  <rect class="box ng" x="650" y="646" width="250" height="42"/>
+  <text class="t" x="775.0" y="672.0" text-anchor="middle">すぐに元に戻す</text>
+  <path class="edge" d="M 550 667.0 L 650 667.0"/>
+  <text class="lbl" x="558" y="661.0" text-anchor="start">応答なし</text>
+  <path class="edge" d="M 130 889.0 L 70 889.0 L 70 189.0 L 130 189.0"/>
+  <text class="s" x="62" y="820" text-anchor="end">次の台</text>
+  <text class="s" x="20" y="950" text-anchor="start">右の「飛ばす」「行わない」「戻る」「戻す」の後も、次の台へ進む（「残りを止めて終わる」を除く）。</text>
+  <text class="s" x="20" y="972" text-anchor="start">海外からの確認は、確定した後に作業者が拠点で port-guard-probe を手で実行する（この図の外）。</text>
+</svg>

@@ -4,7 +4,7 @@
 
 ## 役割
 
-今の環境（Amazon Linux 2・Apache・Passenger・Rails 4.2）の運用中のインスタンスに、**80・443 番を国内（日本）と許可した IP だけに絞る設定**（OS の iptables ＋ ipset）を、**複数台まとめて**入れる。SSH の 22 番は絞らない。作業者の PC で動き、AWS CLI のコマンドと、SSH または SSM の Run Command で各インスタンスを操作する。
+今の環境（Amazon Linux 2・Apache・Passenger・Rails 4.2）の運用中のインスタンスに、**80・443 番を国内（日本）と許可した IP だけに絞る設定**（OS の iptables ＋ ipset）を、**複数台まとめて**入れる。SSH の 22 番は既定では絞らない（外部からの SSH はセキュリティグループで弾く前提。必要なら `install --include-ssh` で対象にできる）。作業者の PC で動き、AWS CLI のコマンドと、SSH または SSM の Run Command で各インスタンスを操作する。
 
 AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../initial-image-build/existing-system-rebuild-on-al2023.md)）とは別の、**暫定対応**のための道具である。
 
@@ -13,19 +13,14 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 | ドキュメント | 内容 |
 |---|---|
 | [手順](./steps.md) | **作業の手順の正本**。確定した内容、流れ、各コマンドの使い方、バックアップの確認、元に戻す方法、手元での試し方 |
-| [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md) | インスタンスに入れる仕組みの詳細。事前の確認、効き始める時点、手で確かめる・外す方法、気を付けること（Let's Encrypt の更新への影響など） |
+| [構成の提案: 海外からの確認の拠点](./outside-probe.md) | 遮断の後に「海外からつながらない」ことを確かめる接続元（AWS の別のリージョンの AL2023 のインスタンス）の構成、確認の処理 `port-guard-probe` の使い方と、作業者が手で確かめる流れ |
+| [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md) | インスタンスに入れる仕組みの詳細。**アクセス制限の構成の図**（[SVG](images/access-architecture.svg)。VPC・セキュリティグループ・OS・httpd・Rails・SSM）、事前の確認、効き始める時点、手で確かめる・外す方法、気を付けること（Let's Encrypt の更新への影響など） |
 
 ## 流れ
 
-| # | コマンド | 内容 |
-|---|---|---|
-| 1 | `backup` | バックアップ（AMI。`--backup-label` でバックアップ作業のタイミングのタグを付ける） |
-| （補助） | `backup-check` | バックアップがあるかを確かめるだけ（2〜4 の操作の前の確認と同じ条件。読み取りだけ） |
-| 2 | `ssm-agent` | SSM Agent の導入（SSH で） |
-| 3 | `install` | ipset の導入と設定（遮断はまだ効かせない。SSH か SSM） |
-| 4 | `enable` | 遮断の有効化（インスタンスごとに確かめながら。自動で元に戻る予約つき。SSH か SSM） |
+流れの図は [手順の「流れ」](./steps.md#流れ)（Mermaid）にある。SVG 版: [全体の流れ](images/flow-overall.svg)、[enable のインスタンスごとの流れ](images/flow-enable.svg)。
 
-2〜4 は、`--backup-label` のバックアップ（作成済みで 12 時間以内）があるインスタンスだけを操作する。
+コマンドは `backup` → `backup-check`（補助）→ `ssm-agent` → `install` → `enable` の順に使う。
 
 ```bash
 cd port-guard-rollout
@@ -57,8 +52,10 @@ python3 -m unittest discover -s tests
 |---|---|
 | `port_guard_rollout/` | 道具の本体（Python）。`awscli.py`（AWS CLI を呼ぶ）、`ssh.py`（SSH で root として処理を実行する）、`runcommand.py`（SSM の Run Command で root として処理を実行する）、`ssm_agent.py`（SSM Agent の導入）、`targets.py`（標準入力の読み込み）、`console.py`（確認）、`backups.py`（操作の前のバックアップの確認）、`backup.py`（バックアップ）、`backup_check.py`（バックアップがあるかを確かめるだけ）、`install.py`（ipset の導入と設定）、`enable.py`（遮断の有効化）、`__main__.py`（コマンドの入り口） |
 | `port_guard_rollout/remote/` | インスタンスに送るもの。`check.sh`（確認）、`install.sh`（導入と設定）、`ssm-check.sh`・`ssm-install.sh`（SSM Agent の確認と導入）、`enable-check.sh`・`enable-apply.sh`・`enable-confirm.sh`・`enable-revert.sh`（遮断の有効化の確認・有効化・確定・元に戻す）、サーバーに置く `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
+| `images/` | フローの図（SVG）と、それを作り直すスクリプト `make_svg.py`（`python3 images/make_svg.py images`）。アクセス制限の構成の図 `access-architecture.svg`（作るスクリプトは `make_access_svg.py`） |
 | `tests/` | テスト（標準の `unittest`） |
-| [`al2-instance/`](./al2-instance/README.md) | 今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンスを手元で再現する Docker の定義。道具を試す相手にする |
+| [`al2-instance/`](./al2-instance/README.md) | 今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンスを手元で再現する Docker の定義。道具を試す相手にする。開発用のアカウントの、本番とは別の VPC に EC2 として作るための [EC2 Image Builder の定義](./al2-instance/image-builder/README.md)（下書き・未検証）も置いている |
+| [`outside-probe/`](./outside-probe/docker/README.md) | 海外からの確認の拠点（チェック用のクライアント。AL2023）の定義。`port-guard-probe`（確認の処理）、[Docker の定義](./outside-probe/docker/README.md)（手元で試す用）、[EC2 Image Builder の定義](./outside-probe/image-builder/README.md)（別のリージョンで使う AMI） |
 
 ## 関連ドキュメント
 

@@ -9,14 +9,20 @@
 | 項目 | 内容 |
 |---|---|
 | 方式 | OS の **iptables ＋ ipset** |
-| 絞るポート | **80 番と 443 番だけ**（道具が固定で設定する） |
-| 絞らないポート | **SSH の 22 番**（ほかのシステムからの SSH の接続がありうるため）。ほかのポートも今までどおり |
+| 絞るポート | **80 番と 443 番だけ**（道具が設定する） |
+| 絞らないポート | **SSH の 22 番は既定では絞らない**（ほかのシステムからの SSH の接続がありうるため。外部からの SSH は、基本はセキュリティグループで弾く前提）。必要になったときだけ `install --include-ssh` で対象にできる（`PORT_GUARD_PORTS=22,80,443`）。ほかのポートは今までどおり |
 | 受け付ける相手 | 日本の IP の範囲（APNIC の割り当ての統計）と、許可する IP の一覧 |
 | 受け付けない相手 | それ以外。破棄（`DROP`）する |
 | インスタンスでの操作 | SSM（Session Manager・Run Command）の導入を前提にする。SSM Agent がない台は SSH で入れる |
 | 一覧の中身 | `install` を実行した時点のもの（日本の IP の範囲も、許可する IP も） |
 
 ## 仕組み
+
+![アクセス制限の構成: VPC・サブネット・セキュリティグループ・OS の iptables ＋ ipset・httpd・Rails・SSM](images/access-architecture.svg)
+
+今の構成では、**80・443 番は OS の iptables ＋ ipset** で国内と許可した IP に絞り、**22 番はセキュリティグループ**で弾き、**外からのログインは SSM**（Session Manager）で行う。図は [`images/make_access_svg.py`](images/make_access_svg.py) で作り直せる（構成を変えたら、図とこの節をそろえて直す）。
+
+OS の中の判定の流れ:
 
 ```
 接続 → INPUT チェーン
@@ -301,7 +307,7 @@ sudo iptables -L PORT_GUARD -n -v --line-numbers   # 各ルールに当たった
 sudo iptables -S INPUT | grep PORT_GUARD           # 遮断が有効か（INPUT からの参照）
 sudo ipset list -t port_guard_jp                   # 集合の件数（Number of entries）
 sudo ipset test port_guard_jp 1.0.16.1             # ある IP が日本の集合に入っているか
-sudo journalctl -k | grep 'port-guard drop'        # 破棄した接続の記録（/var/log/messages にも出る）
+sudo journalctl -k | grep 'port-guard drop'        # 破棄した接続の記録（詳しくは「破棄の記録」）
 ```
 
 外からの確認は、許可した IP、日本の一般の回線、海外の 3 か所から行う。
@@ -326,6 +332,104 @@ sudo ipset destroy port_guard_jp && sudo ipset destroy port_guard_allow
 
 `enable` の途中で確認に合格しなかったときは、道具がすぐにルールを外す。インスタンスに入れなくなったときは、`enable` が入れた予約（既定 10 分後）でルールが外れる。
 
+## 破棄の記録
+
+破棄した接続を、どこで・どう確かめるかをまとめる。資料（iptables・ipset・カーネル・rsyslog・AWS の文書、カーネル 5.10 のソース）からの整理で、AL2 の実機では確かめていない。「未確認」と書いた点は、実機で確かめてから使う。
+
+### 記録の出る場所
+
+`PORT_GUARD` のチェーンは、破棄の前に `-m limit --limit 10/min -j LOG --log-prefix "port-guard drop: "` で記録する。`-j LOG` は**カーネルのログ**に書く（重要度は warning）。
+
+| 場所 | 内容 |
+|---|---|
+| `journalctl -k`・`dmesg -T` | カーネルのログなので、ここに必ず出る |
+| `/var/log/messages` | rsyslog が journald から受け取って書く。AL2 では rsyslog が入っている、と見ている（資料が食い違っていて、**実機で `rpm -q rsyslog` で確かめる**） |
+
+1 行の形（カーネル 5.10 の書式から組み立てた例。実機の出力を写したものではない）:
+
+```
+Oct 29 10:00:00 ip-10-0-1-23 kernel: port-guard drop: IN=eth0 OUT= MAC=... SRC=198.51.100.7 DST=10.0.1.23 LEN=60 TOS=0x00 PREC=0x00 TTL=48 ID=54321 DF PROTO=TCP SPT=51234 DPT=443 WINDOW=64240 RES=0x00 SYN URGP=0
+```
+
+`SRC` が接続元、`DPT` が 80 か 443 か。
+
+### 数の数え方
+
+| 点 | 内容 |
+|---|---|
+| 記録は間引いている | 1 分に 10 件まで（`--limit-burst` は既定の 5）。上限を超えた分は記録されずに破棄される |
+| 記録されなかった数 | **DROP の規則のパケット数 − LOG の規則のパケット数**（`sudo iptables -L PORT_GUARD -n -v -x --line-numbers`） |
+| 数の単位 | パケット。接続の数ではない（接続元は SYN を再送するので、1 回の接続の試みが数パケットになる） |
+| 間引きの単位 | 接続元をまとめて全体で 1 つの上限。騒がしい接続元が 1 つあると、記録の枠を使い切る |
+| 数が 0 に戻るとき | `iptables -Z`、ルールの入れ直し、再起動 |
+
+**ipset 自身は記録を持たない**。集合の項目ごとに数える機能（作るときの `counters`）はあるが、破棄されるのは集合に入っていない接続元なので、どの項目の数も増えず、破棄の記録には使えない（数えられるのは、許可した側の項目に当たった回数だけ。port-guard の集合は `counters` を付けずに作っている）。
+
+### 量とディスク
+
+| 点 | 内容 |
+|---|---|
+| 量 | 間引きにより、最大で 1 日約 14,400 行（1 行 250 バイトほどとして数 MB）の見込み |
+| rsyslog の受け取りの上限 | journald から読むときの上限（既定で 600 秒に 2 万件）があり、超えた分は捨てられる。上の量ならまず届かないが、ほかのログと合算の上限。AL2 の rsyslog での既定値は**未確認** |
+| 保存とローテーション | `/var/log/messages` は logrotate の設定に従う。journald の保存先（ディスクか、メモリか）は、`/var/log/journal` があるかで決まる（AL2 での実際は**未確認**） |
+
+### 別のファイルに分けるとき（任意）
+
+rsyslog の振り分けで、`port-guard drop:` の行だけを別のファイルに出し、`/var/log/messages` には入れないようにできる（試していない）。
+
+```
+# /etc/rsyslog.d/port-guard.conf
+:msg, contains, "port-guard drop: " /var/log/port-guard.log
+& stop
+```
+
+別のファイルにしたら、logrotate の設定も足す。専用の記録の仕組み（`NFLOG` ＋ `ulogd`）は、AL2 で `ulogd` が手に入るか確かめられなかった（**未確認**）。
+
+### インスタンスの外で見る
+
+| 方法 | 内容 |
+|---|---|
+| CloudWatch エージェント | `/var/log/messages`（または上の別のファイル）を CloudWatch Logs に送れる。`filters` で `port-guard drop:` の行だけに絞れる。journald から直接集める設定もある（2026-08 から。AL2 の systemd 219 で動くかは**未確認**） |
+| VPC フローログ | **OS で破棄したものは「拒否」として見分けられない**。セキュリティグループで拒否したものは REJECT として記録されるが、OS で破棄した通信はセキュリティグループを通っているので ACCEPT として残ると考えられる（AWS の文書に明記はなく、推測） |
+
+### 手元の再現の環境（Docker）での注意
+
+コンテナの中の `-j LOG` は、既定では**何も記録しない**。Linux は、コンテナごとの通信の区切り（ネットワーク名前空間）の中からの記録を既定で止めている（`net.netfilter.nf_log_all_netns=0`。コンテナの中からは変えられない）。[`al2-instance`](./al2-instance/README.md) で破棄を確かめるときは、ログではなく規則のパケット数（`iptables -L PORT_GUARD -n -v -x`）で判定する。EC2 の上では記録される。
+
+参考に、Amazon Linux 2023 は rsyslog が既定で入っておらず、`/var/log/messages` もない。`journalctl -k` で見る。
+
+### 確かめるコマンド（AL2）
+
+```bash
+# 記録の仕組みの状態
+rpm -q rsyslog; systemctl is-active rsyslog systemd-journald
+grep -nE 'imjournal|imklog|ratelimit|/var/log/messages' /etc/rsyslog.conf /etc/rsyslog.d/*.conf
+
+# 記録の行
+sudo grep 'port-guard drop: ' /var/log/messages | tail -50
+sudo journalctl -k --since today | grep 'port-guard drop: '
+sudo dmesg -T | grep 'port-guard drop: ' | tail
+
+# 接続元ごとの件数（記録された分だけ）
+sudo grep -o 'port-guard drop: .*' /var/log/messages | grep -o 'SRC=[^ ]*' | sort | uniq -c | sort -rn | head
+
+# 数（記録されなかった数 = DROP の pkts − LOG の pkts）
+sudo iptables -L PORT_GUARD -n -v -x --line-numbers
+
+# 量とディスク
+journalctl --disk-usage; df -h /var/log; cat /etc/logrotate.d/syslog
+```
+
+### 出典
+
+- [iptables-extensions の man](https://ipset.netfilter.org/iptables-extensions.man.html)（LOG、limit、NFLOG、set のマッチ）
+- [ipset の man](https://ipset.netfilter.org/ipset.man.html)（counters。記録の機能はない）
+- [カーネル 5.10 の nf_log_common.c](https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/net/netfilter/nf_log_common.c?h=v5.10.200)（1 行の書式）、[netfilter の sysctl の文書](https://docs.kernel.org/networking/netfilter-sysctl.html)（`nf_log_all_netns`）
+- [rsyslog の imjournal](https://rsyslog.readthedocs.io/en/stable/configuration/modules/imjournal.html)（受け取りの上限）、[rsyslog の振り分け](https://docs.rsyslog.com/doc/configuration/filters.html)
+- [AL2023 の journald](https://docs.aws.amazon.com/linux/al2023/ug/journald.html)（AL2 との違い）
+- [CloudWatch エージェントの設定ファイル](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Agent-Configuration-File-Details.html)
+- [VPC フローログの項目](https://docs.aws.amazon.com/vpc/latest/userguide/flow-log-records.html)、[例](https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs-records-examples.html)
+
 ## 気を付けること
 
 | 点 | 内容 |
@@ -335,5 +439,5 @@ sudo ipset destroy port_guard_jp && sudo ipset destroy port_guard_allow
 | 破棄 | 破棄（`DROP`）は応答を返さないので、相手には「つながらない（タイムアウト）」に見える |
 | IPv6 | 対象は IPv4 だけ。インスタンスに IPv6 のアドレスがあり、セキュリティグループが IPv6 を通しているなら、IPv6 では絞られない |
 | セキュリティグループとの関係 | セキュリティグループで 80・443 番を開けていることが前提（セキュリティグループで止まった接続は、OS まで届かない） |
-| 記録の量 | 破棄の記録は 1 分に 10 件までに絞っている。攻撃が多いと、記録は一部だけになる。数は `iptables -L PORT_GUARD -n -v` の回数で見る |
+| 記録の量 | 破棄の記録は 1 分に 10 件までに絞っている。攻撃が多いと、記録は一部だけになる。詳しくは「[破棄の記録](#破棄の記録)」 |
 | 再起動 | systemd のユニット（`port-guard.service`）が起動時にルールと集合を入れ直す（`enable` で起動時に有効にする） |

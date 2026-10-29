@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+"""対象のポートに届いて、相手が応答するかを確かめる（海外からの確認の拠点で使う）。
+
+    port-guard-probe <対象の IP かホスト名> <ポート>:<確かめ方> [...] [--timeout 秒]
+    例: port-guard-probe 203.0.113.10 80:http 443:tls
+        port-guard-probe 203.0.113.10 22:ssh --timeout 3
+
+確かめ方（port_guard_rollout/enable.py の can_connect と同じ判定）:
+    tcp   TCP の接続ができれば届いたとみなす（弱い確認）
+    ssh   SSH のサーバーの最初の応答（SSH-...）を受け取る
+    http  HTTP の応答（HTTP/...）が返る
+    tls   TLS の接続（握手）が終わる（証明書は確かめない）
+
+結果（ポートごと）:
+    reachable    届いて、相手が応答した
+    timeout      時間切れ（途中で破棄された。port-guard の遮断はこれになる）
+    refused      接続を拒否された（相手まで届いたが、そのポートで待ち受けていない、または拒否の応答）
+    no-response  TCP の接続はできたが、相手が決まった応答をしなかった（途中の転送や代理の仕組みが接続だけ受け付けた、など）
+    error        そのほか（名前を引けない、経路がない、など）
+
+出力は人が読める行と、道具が読む "PG <キー>=<値>" の行（例 PG probe_80=timeout）。
+終了コード: 0 = すべて reachable、1 = 届かないものがある、2 = 使い方の誤り。
+Python の標準のライブラリだけを使う（Amazon Linux 2023 の python3 3.9 で動くこと）。
+"""
+
+import argparse
+import socket
+import ssl
+import sys
+
+KINDS = ("tcp", "ssh", "http", "tls")
+LABELS = {
+    "reachable": "届く",
+    "timeout": "時間切れ（破棄された）",
+    "refused": "拒否された",
+    "no-response": "接続はできたが応答がない",
+    "error": "そのほかの問題",
+}
+
+
+def probe(address, port, kind, timeout):
+    """戻り値は (結果, 詳しい内容)。結果は reachable / timeout / refused / no-response / error。"""
+    try:
+        sock = socket.create_connection((address, port), timeout=timeout)
+    except socket.timeout:
+        return "timeout", f"{timeout} 秒で接続できなかった"
+    except ConnectionRefusedError:
+        return "refused", "接続を拒否された"
+    except OSError as error:
+        return "error", str(error)
+
+    with sock:
+        sock.settimeout(timeout)
+        try:
+            if kind == "ssh":
+                banner = sock.recv(64)
+                if banner.startswith(b"SSH-"):
+                    return "reachable", banner.split(b"\r\n")[0].decode("ascii", "replace")
+                return "no-response", "SSH のサーバーの応答がない"
+            if kind == "http":
+                sock.sendall(f"HEAD / HTTP/1.0\r\nHost: {address}\r\n\r\n".encode("ascii"))
+                head = sock.recv(64)
+                if head.startswith(b"HTTP/"):
+                    return "reachable", head.split(b"\r\n")[0].decode("ascii", "replace")
+                return "no-response", "HTTP の応答がない"
+            if kind == "tls":
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE  # 証明書ではなく、相手が応答するかだけを見る
+                with context.wrap_socket(sock, server_hostname=address) as tls:
+                    return "reachable", tls.version() or "TLS"
+            return "reachable", "TCP の接続ができた"
+        except (socket.timeout, ssl.SSLError, OSError) as error:
+            return "no-response", str(error) or type(error).__name__
+
+
+def parse_spec(value):
+    port, _, kind = value.partition(":")
+    if not port.isdigit() or not 1 <= int(port) <= 65535 or kind not in KINDS:
+        raise argparse.ArgumentTypeError(f"<ポート>:<{'|'.join(KINDS)}> の形で書く（{value}）")
+    return int(port), kind
+
+
+def main(argv=None, out=sys.stdout):
+    parser = argparse.ArgumentParser(
+        prog="port-guard-probe",
+        description="対象のポートに届いて、相手が応答するかを確かめる",
+    )
+    parser.add_argument("target", help="対象の IP かホスト名")
+    parser.add_argument("specs", nargs="+", type=parse_spec, metavar="PORT:KIND",
+                        help=f"ポートと確かめ方（{', '.join(KINDS)}）。例 80:http 443:tls")
+    parser.add_argument("--timeout", type=float, default=5.0, help="待ち時間（秒。既定 5）")
+    args = parser.parse_args(argv)
+
+    print(f"PG target={args.target}", file=out)
+    all_reachable = True
+    for port, kind in args.specs:
+        result, detail = probe(args.target, port, kind, args.timeout)
+        all_reachable = all_reachable and result == "reachable"
+        print(f"  {args.target}:{port}（{kind}）: {LABELS[result]}  {detail}", file=out)
+        print(f"PG probe_{port}={result}", file=out)
+    return 0 if all_reachable else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

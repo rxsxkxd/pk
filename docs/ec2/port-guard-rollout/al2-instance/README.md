@@ -3,6 +3,8 @@
 > 位置付け: [port-guard-rollout](../README.md)（国内だけに絞る設定を複数台に入れる道具）を試す相手として、**今の構成（Amazon Linux 2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンス**を Docker で再現する。
 >
 > 確認日: 2026-10-28（手元の arm64 の Mac の Docker Desktop で、ビルド・起動・下の「確かめた構成」まで確認した）
+>
+> 同じ構成を、開発用のアカウントの本番とは別の VPC に EC2 として作るための定義: [EC2 Image Builder の定義](./image-builder/README.md)（下書き・未検証）
 
 ## フォルダの中身
 

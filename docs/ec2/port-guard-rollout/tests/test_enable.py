@@ -78,6 +78,12 @@ class ClassifyTest(unittest.TestCase):
         self.assertIn("一覧が少ない", self.classify({"jp_file_entries": "10"}).reasons[0])
         self.assertIn("80,443 ではない", self.classify({"ports_current": "22,443"}).reasons[0])
 
+    def test_ssh_is_allowed_only_as_22_80_443(self):
+        host = self.classify({"ports_current": "22,80,443"})
+        self.assertTrue(host.enableable)
+        self.assertIn("22 番（SSH）も対象", host.notes)
+        self.assertEqual(enable.DEFAULT_PROBES["22"], "ssh")
+
 
 class RunTest(unittest.TestCase):
     def setUp(self):

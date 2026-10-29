@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="980" viewBox="0 0 1260 980" role="img">
+
+  <style>
+    .bg { fill: #ffffff; }
+    text { font-family: "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif; fill: #111827; }
+    .title { font-size: 20px; font-weight: bold; }
+    .h { font-size: 15px; font-weight: bold; }
+    .t { font-size: 14px; }
+    .s { font-size: 12.5px; fill: #374151; }
+    .lbl { font-size: 12.5px; font-weight: bold; }
+    .aws { fill: #fffaf0; stroke: #d97706; stroke-width: 1.5; }
+    .vpc { fill: #f5f3ff; stroke: #7c3aed; stroke-width: 1.5; }
+    .subnet { fill: #eef6ff; stroke: #2563eb; stroke-width: 1.2; stroke-dasharray: 6 4; }
+    .sg { fill: #fff5f5; stroke: #dc2626; stroke-width: 2.2; stroke-dasharray: 10 5; }
+    .ec2 { fill: #ffffff; stroke: #374151; stroke-width: 1.5; }
+    .os { fill: #fef3c7; stroke: #b45309; stroke-width: 1.5; }
+    .app { fill: #e0f2fe; stroke: #0369a1; stroke-width: 1.2; }
+    .agent { fill: #ecfdf3; stroke: #15803d; stroke-width: 1.2; }
+    .actor { fill: #f9fafb; stroke: #6b7280; stroke-width: 1.2; }
+    .ssm { fill: #ecfdf3; stroke: #15803d; stroke-width: 1.5; }
+    .ok { stroke: #16a34a; stroke-width: 2.4; fill: none; marker-end: url(#ok); }
+    .ng { stroke: #dc2626; stroke-width: 2.4; fill: none; }
+    .ssmline { stroke: #15803d; stroke-width: 2.2; fill: none; stroke-dasharray: 7 4; marker-end: url(#ssm); }
+    .okt { fill: #15803d; }
+    .ngt { fill: #b91c1c; }
+    .x { stroke: #dc2626; stroke-width: 4; }
+  </style>
+  <defs>
+    <marker id="ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#16a34a"/>
+    </marker>
+    <marker id="ssm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1260" height="980"/>
+  <text class="title" x="20" y="34" text-anchor="start">port-guard: アクセス制限の構成（今の構成）</text>
+  <rect class="aws" x="310" y="60" width="930" height="900" rx="14"/>
+  <text class="h" x="330" y="88" text-anchor="start">AWS（対象のインスタンスのリージョン）</text>
+  <rect class="vpc" x="330" y="100" width="630" height="780" rx="12"/>
+  <text class="h" x="350" y="126" text-anchor="start">VPC</text>
+  <rect class="subnet" x="350" y="138" width="590" height="724" rx="10"/>
+  <text class="h" x="370" y="162" text-anchor="start">公開のサブネット（パブリック IP）</text>
+  <rect class="sg" x="370" y="176" width="550" height="670" rx="10"/>
+  <text class="h" x="390" y="202" text-anchor="start">セキュリティグループ（インスタンスの外の壁）</text>
+  <text class="s" x="390" y="224" text-anchor="start">受信: 22 番 → インターネットからは許可しない（ここで弾く）</text>
+  <text class="s" x="390" y="242" text-anchor="start">受信: 80・443 番 → 0.0.0.0/0 を許可</text>
+  <text class="s" x="390" y="260" text-anchor="start">送信: 443 番（SSM の窓口など）を許可</text>
+  <rect class="ec2" x="400" y="290" width="500" height="540" rx="10"/>
+  <text class="h" x="420" y="316" text-anchor="start">EC2 インスタンス（Amazon Linux 2）</text>
+  <rect class="os" x="420" y="330" width="460" height="196" rx="8"/>
+  <text class="h" x="438" y="354" text-anchor="start">OS: iptables ＋ ipset（port-guard）</text>
+  <text class="t" x="438" y="378" text-anchor="start">80・443 番 → PORT_GUARD のチェーンで判定</text>
+  <text class="s" x="438" y="399" text-anchor="start">・日本の IP の範囲（port_guard_jp）→ 受け付ける</text>
+  <text class="s" x="438" y="420" text-anchor="start">・許可する IP（port_guard_allow）→ 受け付ける</text>
+  <text class="s" x="438" y="441" text-anchor="start">・それ以外 → 破棄（記録: port-guard drop:）</text>
+  <text class="t" x="438" y="462" text-anchor="start">22 番などほかのポート → 何もしない（今までどおり）</text>
+  <text class="s" x="438" y="483" text-anchor="start">一覧は install を実行した時点のもの</text>
+  <rect class="app" x="420" y="546" width="460" height="70" rx="8"/>
+  <text class="h" x="650" y="572" text-anchor="middle">httpd（Apache 2.4.56）</text>
+  <text class="s" x="650" y="591" text-anchor="middle">mod_ssl（443 番の TLS）・mod_passenger 6.0.18</text>
+  <rect class="app" x="420" y="634" width="460" height="64" rx="8"/>
+  <text class="h" x="650" y="660" text-anchor="middle">Rails 4.2（Ruby 2.7.7）</text>
+  <text class="s" x="650" y="679" text-anchor="middle">Passenger が起動するアプリのプロセス</text>
+  <rect class="agent" x="420" y="726" width="460" height="84" rx="8"/>
+  <text class="h" x="650" y="752" text-anchor="middle">SSM Agent</text>
+  <text class="s" x="650" y="771" text-anchor="middle">インスタンスから AWS の窓口へ、送信の 443 番で接続を張る</text>
+  <text class="s" x="650" y="790" text-anchor="middle">（受信の口は要らない）</text>
+  <rect class="ssm" x="990" y="690" width="230" height="130" rx="10"/>
+  <text class="h" x="1105" y="720" text-anchor="middle">AWS Systems Manager</text>
+  <text class="s" x="1105" y="739" text-anchor="middle">Session Manager・Run Command</text>
+  <text class="s" x="1105" y="758" text-anchor="middle">（AWS のサービス。VPC の外）</text>
+  <text class="s" x="1105" y="662" text-anchor="middle">SSM Agent から</text>
+  <text class="s" x="1105" y="678" text-anchor="middle">送信の 443 番で接続</text>
+  <rect class="actor" x="20" y="200" width="270" height="64" rx="10"/>
+  <text class="h" x="155" y="227" text-anchor="middle">インターネット（だれでも）</text>
+  <text class="s" x="155" y="246" text-anchor="middle">SSH（22 番）での接続</text>
+  <rect class="actor" x="20" y="360" width="270" height="64" rx="10"/>
+  <text class="h" x="155" y="387" text-anchor="middle">日本の利用者</text>
+  <text class="s" x="155" y="406" text-anchor="middle">日本の IP、または許可する IP</text>
+  <rect class="actor" x="20" y="450" width="270" height="64" rx="10"/>
+  <text class="h" x="155" y="477" text-anchor="middle">海外からの接続</text>
+  <text class="s" x="155" y="496" text-anchor="middle">海外の確認の拠点を含む</text>
+  <rect class="actor" x="20" y="716" width="270" height="64" rx="10"/>
+  <text class="h" x="155" y="743" text-anchor="middle">作業者の PC</text>
+  <text class="s" x="155" y="762" text-anchor="middle">AWS CLI・Session Manager</text>
+  <path class="ng" d="M 290 232 L 362 232"/>
+  <line class="x" x1="361" y1="223" x2="379" y2="241"/>
+  <line class="x" x1="361" y1="241" x2="379" y2="223"/>
+  <text class="lbl ngt" x="298" y="224" text-anchor="start">22 番</text>
+  <text class="lbl ngt" x="155" y="288" text-anchor="middle">→ セキュリティグループで弾く</text>
+  <path class="ok" d="M 290 392 L 420 392"/>
+  <text class="lbl okt" x="298" y="384" text-anchor="start">80・443</text>
+  <path class="ok" d="M 650 526 L 650 546"/>
+  <path class="ok" d="M 650 616 L 650 634"/>
+  <path class="ng" d="M 290 482 L 412 482"/>
+  <line class="x" x1="411" y1="473" x2="429" y2="491"/>
+  <line class="x" x1="411" y1="491" x2="429" y2="473"/>
+  <text class="lbl ngt" x="298" y="474" text-anchor="start">80・443</text>
+  <text class="lbl ngt" x="155" y="538" text-anchor="middle">→ OS で破棄（相手には時間切れ）</text>
+  <path class="ssmline" d="M 155 780 L 155 905 L 1105 905 L 1105 822"/>
+  <text class="lbl okt" x="330" y="935" text-anchor="start">ログイン・操作は SSM で行う（aws ssm start-session / send-command。HTTPS）。22 番は開けない</text>
+  <path class="ssmline" d="M 880 768 L 988 768"/>
+  <text class="h" x="20" y="600" text-anchor="start">凡例</text>
+  <path class="ok" d="M 20 624 L 70 624"/>
+  <text class="s" x="80" y="629" text-anchor="start">受け付ける</text>
+  <path class="ng" d="M 20 650 L 62 650"/>
+  <line class="x" x1="60" y1="644" x2="72" y2="656"/>
+  <line class="x" x1="60" y1="656" x2="72" y2="644"/>
+  <text class="s" x="80" y="655" text-anchor="start">弾く・破棄する</text>
+  <path class="ssmline" d="M 20 676 L 70 676"/>
+  <text class="s" x="80" y="681" text-anchor="start">SSM の経路</text>
+</svg>

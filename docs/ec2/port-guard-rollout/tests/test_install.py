@@ -179,6 +179,12 @@ class RunTest(unittest.TestCase):
         self.assertEqual([c[1] for c in remote.calls if c[0] == "install"], ["i-00000001"])
         self.assertIn("SSM で操作できない（ConnectionLost）", self.out.getvalue())
 
+    def test_include_ssh_shows_caution(self):
+        code = install.run(NoAws(), self.ssh, self.stdin, self.out, ports=install.TARGET_PORTS_WITH_SSH, dry_run=True)
+        self.assertEqual(code, 0)
+        self.assertIn("PORT_GUARD_PORTS=22,80,443", self.out.getvalue())
+        self.assertIn("22 番（SSH）も対象にする", self.out.getvalue())
+
     def test_needs_aws_when_target_is_missing(self):
         self.stdin = io.StringIO("i-00000001\n")
         self.assertEqual(self.run_install(confirm_func=lambda q: True), 2)

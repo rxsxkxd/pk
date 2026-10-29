@@ -78,10 +78,12 @@ def main(argv=None):
 
     install_parser = subparsers.add_parser(
         "install",
-        help="SSH か SSM の Run Command で、ipset の導入と設定を行う（対象は 80・443 番。遮断はまだ効かせない）。"
+        help="SSH か SSM の Run Command で、ipset の導入と設定を行う（対象は 80・443 番。--include-ssh で 22 番も。遮断はまだ効かせない）。"
              "標準入力に `<インスタンスの ID> [<SSH の接続先>]` を 1 行に 1 台で渡す",
     )
     add_common_arguments(install_parser)
+    install_parser.add_argument("--include-ssh", action="store_true",
+                                help="22 番（SSH）も対象にする（既定は 80・443 番だけ。外部からの SSH はセキュリティグループで弾く前提）")
     install_parser.add_argument("--allow-file", type=Path, help="許可する IP の一覧のファイル（1 行 1 件、CIDR 可、# から後はコメント）")
     install_parser.add_argument("--jp-min-entries", type=int, default=1000, help="日本の IP の範囲の最低件数（既定 1000）")
     add_ssh_arguments(install_parser)
@@ -144,6 +146,7 @@ def main(argv=None):
             remote = SshClient(user=args.ssh_user, key=args.ssh_key, options=args.ssh_option)
         return install.run(
             aws, remote, sys.stdin, sys.stdout, allow_text=allow_text,
+            ports=install.TARGET_PORTS_WITH_SSH if args.include_ssh else install.TARGET_PORTS,
             jp_min_entries=args.jp_min_entries, address=args.address, via=args.via,
             check_in_jp=args.check_in_jp, check_outside=args.check_outside,
             assume_yes=args.yes, check_only=args.check_only, dry_run=args.dry_run, script_out=args.script_out,

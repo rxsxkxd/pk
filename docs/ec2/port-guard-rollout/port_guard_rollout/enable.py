@@ -9,8 +9,8 @@
    - 確かめる: インスタンスに引き続き入れるか（SSH または SSM）、作業者の PC（日本）から対象のポートにつながるか
    - すべて合格なら予約を取り消して確定する。不合格ならすぐに元に戻す。インスタンスに入れなくなったら、予約で自動的に戻る
 
-ポートはインスタンスの設定（install で置いた /etc/port-guard/port-guard.conf）から読み、80・443 番であることを確かめる。
-SSH の 22 番は対象にしない（ほかのシステムからの SSH の接続がありうるため）。
+ポートはインスタンスの設定（install で置いた /etc/port-guard/port-guard.conf）から読み、80・443 番（--include-ssh で
+入れたときは 22・80・443 番）であることを確かめる。22 番は既定では対象にしない（外部からの SSH はセキュリティグループで弾く前提）。
 """
 
 import shlex
@@ -21,7 +21,7 @@ from datetime import datetime
 
 from .backups import apply_check
 from .console import ask
-from .install import TARGET_PORTS, VIA_LABELS, classify, remote_file
+from .install import ALLOWED_PORT_SETS, SSH_CAUTION, VIA_LABELS, classify, remote_file
 from .targets import read_targets, resolve_ssh_target
 
 PROCEED, SKIP, QUIT = "y", "n", "q"
@@ -54,7 +54,7 @@ def connect_host(host):
 
 # ポートごとの確かめ方の既定。TCP の接続だけでは、途中の転送や代理の仕組みが接続を受け付けてしまい、
 # 遮断されていても「つながる」と誤って判定することがあるので、相手が実際に応答するところまで確かめる
-DEFAULT_PROBES = {"80": "http", "8080": "http", "443": "tls", "8443": "tls"}
+DEFAULT_PROBES = {"22": "ssh", "80": "http", "8080": "http", "443": "tls", "8443": "tls"}
 PROBE_KINDS = ("tcp", "ssh", "http", "tls")
 
 
@@ -94,8 +94,10 @@ def classify_for_enable(host, result):
         return
     if not host.ports:
         host.reasons.append("対象のポートの設定がない（先に install を行う）")
-    elif ",".join(host.ports) != TARGET_PORTS:
-        host.reasons.append(f"ポートの設定が {TARGET_PORTS} ではない（{','.join(host.ports)}。install をやり直す）")
+    elif ",".join(host.ports) not in ALLOWED_PORT_SETS:
+        host.reasons.append(f"ポートの設定が {' か '.join(ALLOWED_PORT_SETS)} ではない（{','.join(host.ports)}。install をやり直す）")
+    elif "22" in host.ports:
+        host.notes.append("22 番（SSH）も対象")
     jp_min = int(s.get("jp_min_entries", "1000") or 1000)
     jp_file = int(s.get("jp_file_entries", "0") or 0)
     if jp_file < jp_min:
@@ -221,13 +223,15 @@ def run(aws, remote, stdin, out, via="ssh", address="public", revert_minutes=10,
         print(f"  2. {revert_minutes} 分後に遮断のルールを消す予約を入れる（systemd-run。systemd がなければ切り離したプロセス）", file=out)
         print("  3. systemctl enable --now port-guard（systemd がなければ port-guard-apply を直接実行）", file=out)
         print(f"  4. 確かめる: {VIA_LABELS[via]} で入れるか、作業者の PC から対象のポートに届いて相手が応答するか"
-              f"（80・8080: HTTP の応答、443・8443: TLS の接続、ほか: TCP の接続）", file=out)
+              f"（22: SSH の応答、80・8080: HTTP の応答、443・8443: TLS の接続、ほか: TCP の接続）", file=out)
         print("  5. 合格なら予約を取り消して確定、不合格ならすぐに元に戻す", file=out)
         return 0
     if not ok:
         print("\n有効にできるインスタンスがないので、終わる", file=out)
         return 1
 
+    if any("22" in h.ports for h in ok):
+        print(f"\n注意: {SSH_CAUTION}", file=out)
     run_id = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
     print(f"\n== 遮断の有効化（{VIA_LABELS[via]} で、1 台ずつ。インスタンスごとに確かめる。実行の ID: {run_id}）", file=out)
     results = {}

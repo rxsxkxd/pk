@@ -26,8 +26,14 @@ REMOTE_DIR = Path(__file__).parent / "remote"
 
 VIA_LABELS = {"ssh": "SSH", "ssm": "SSM の Run Command"}
 
-# 絞るポート（HTTP と HTTPS だけ。SSH の 22 番は、ほかのシステムからの接続がありうるので対象にしない）
+SSH_CAUTION = ("22 番（SSH）も対象にする。遮断を有効にした後は、日本の IP か許可する IP の一覧にある相手からしか SSH で入れない。"
+               "ほかのシステムから SSH で入っている相手が日本の IP でなければ、許可する IP の一覧に入れておく")
+
+# 絞るポート。既定は HTTP と HTTPS だけ。SSH の 22 番は、ほかのシステムからの接続がありうるので既定では対象にせず、
+# 外部からの SSH はセキュリティグループで弾く前提にする。必要になったときだけ --include-ssh で 22 番も対象にできる
 TARGET_PORTS = "80,443"
+TARGET_PORTS_WITH_SSH = "22,80,443"
+ALLOWED_PORT_SETS = (TARGET_PORTS, TARGET_PORTS_WITH_SSH)
 
 # SSM の Run Command で送る処理の大きさの目安（これを超えたら知らせる。上限の正確な値は未確認）
 SSM_SCRIPT_WARN_BYTES = 48_000
@@ -164,6 +170,8 @@ def print_plan(out, ports, allow, jp_min_entries, script, via, script_out):
     print("  4. /usr/local/sbin/port-guard-apply、port-guard-update-jp、/etc/systemd/system/port-guard.service を置く"
           "（systemd が動いていれば daemon-reload。enable はしない）", file=out)
     print("  5. port-guard-update-jp で日本の IP の範囲を取り、集合を作る（遮断のルールは入れない）", file=out)
+    if "22" in ports.split(","):
+        print(f"  注意: {SSH_CAUTION}", file=out)
     size = len(script.encode("utf-8"))
     print(f"  送る処理の大きさ: {size} バイト", file=out)
     if via == "ssm" and len(_b64(script)) > SSM_SCRIPT_WARN_BYTES:
@@ -249,6 +257,8 @@ def run(aws, remote, stdin, out, ports=TARGET_PORTS, allow_text="", jp_min_entri
         print("\n入れられるインスタンスがないので、終わる", file=out)
         return 1
 
+    if "22" in ports.split(","):
+        print(f"\n注意: {SSH_CAUTION}", file=out)
     if not assume_yes:
         answer = confirm_func(
             f"\n上の {len(ok)} 台に、ipset の導入と設定（ポート {ports}。遮断はまだ効かせない）を"

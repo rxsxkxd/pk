@@ -1,6 +1,7 @@
 """port-guard-rollout のコマンド。
 
     python3 -m port_guard_rollout backup --backup-label 2026-10 [--profile P] [--region R] [--check-only] [--yes] < instance-ids.txt
+    python3 -m port_guard_rollout backup-check --backup-label 2026-10 [--profile P] [--region R] < instance-ids.txt
     python3 -m port_guard_rollout install --backup-label 2026-10 [--allow-file allow.txt] [--via ssh|ssm] [SSH のオプション] [--dry-run] [--check-only] [--yes] < instance-ids.txt
     python3 -m port_guard_rollout enable --backup-label 2026-10 [--via ssh|ssm] [SSH のオプション] [--revert-minutes 10] [--port-map 443:8443] [--dry-run] [--check-only] [--yes] < instance-ids.txt
     python3 -m port_guard_rollout ssm-agent --backup-label 2026-10 [SSH のオプション] [--wait-online 秒] [--no-aws] [--check-only] [--yes] < instance-ids.txt
@@ -10,7 +11,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import backup, enable, install, ssm_agent
+from . import backup, backup_check, enable, install, ssm_agent
 from .awscli import AwsCli
 from .backups import make_checker
 from .runcommand import RunCommandClient
@@ -64,6 +65,16 @@ def main(argv=None):
     backup_parser.add_argument("--backup-label", required=True, metavar="LABEL",
                                help="バックアップ作業のタイミング（任意の値。例 2026-10、2026-10-29）。AMI とスナップショットのタグ"
                                     " BackupLabel に付け、ほかの操作の前の確認に使う")
+
+    check_parser = subparsers.add_parser(
+        "backup-check",
+        help="バックアップがあるかを確かめるだけ（読み取りだけ）。ssm-agent・install・enable の操作の前の確認と同じ条件で、"
+             "インスタンスの ID を標準入力から 1 行に 1 つ渡す",
+    )
+    check_parser.add_argument("--profile", help="AWS CLI のプロファイル（省略すると AWS CLI の既定）")
+    check_parser.add_argument("--region", help="リージョン（省略すると AWS CLI の既定）")
+    check_parser.add_argument("--backup-label", required=True, metavar="LABEL",
+                              help="バックアップ作業のタイミング（backup で指定した値）")
 
     install_parser = subparsers.add_parser(
         "install",
@@ -123,6 +134,8 @@ def main(argv=None):
     aws = AwsCli(profile=args.profile, region=args.region)
     if args.command == "backup":
         return backup.run(aws, sys.stdin, sys.stdout, args.backup_label, assume_yes=args.yes, check_only=args.check_only)
+    if args.command == "backup-check":
+        return backup_check.run(aws, sys.stdin, sys.stdout, args.backup_label)
     if args.command == "install":
         allow_text = args.allow_file.read_text(encoding="utf-8") if args.allow_file else "# 許可する IP（なし）\n"
         if args.via == "ssm":

@@ -20,6 +20,7 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 | # | コマンド | 内容 |
 |---|---|---|
 | 1 | `backup` | バックアップ（AMI。`--backup-label` でバックアップ作業のタイミングのタグを付ける） |
+| （補助） | `backup-check` | バックアップがあるかを確かめるだけ（2〜4 の操作の前の確認と同じ条件。読み取りだけ） |
 | 2 | `ssm-agent` | SSM Agent の導入（SSH で） |
 | 3 | `install` | ipset の導入と設定（遮断はまだ効かせない。SSH か SSM） |
 | 4 | `enable` | 遮断の有効化（インスタンスごとに確かめながら。自動で元に戻る予約つき。SSH か SSM） |
@@ -54,7 +55,7 @@ python3 -m unittest discover -s tests
 
 | フォルダ | 内容 |
 |---|---|
-| `port_guard_rollout/` | 道具の本体（Python）。`awscli.py`（AWS CLI を呼ぶ）、`ssh.py`（SSH で root として処理を実行する）、`runcommand.py`（SSM の Run Command で root として処理を実行する）、`ssm_agent.py`（SSM Agent の導入）、`targets.py`（標準入力の読み込み）、`console.py`（確認）、`backups.py`（操作の前のバックアップの確認）、`backup.py`（バックアップ）、`install.py`（ipset の導入と設定）、`enable.py`（遮断の有効化）、`__main__.py`（コマンドの入り口） |
+| `port_guard_rollout/` | 道具の本体（Python）。`awscli.py`（AWS CLI を呼ぶ）、`ssh.py`（SSH で root として処理を実行する）、`runcommand.py`（SSM の Run Command で root として処理を実行する）、`ssm_agent.py`（SSM Agent の導入）、`targets.py`（標準入力の読み込み）、`console.py`（確認）、`backups.py`（操作の前のバックアップの確認）、`backup.py`（バックアップ）、`backup_check.py`（バックアップがあるかを確かめるだけ）、`install.py`（ipset の導入と設定）、`enable.py`（遮断の有効化）、`__main__.py`（コマンドの入り口） |
 | `port_guard_rollout/remote/` | インスタンスに送るもの。`check.sh`（確認）、`install.sh`（導入と設定）、`ssm-check.sh`・`ssm-install.sh`（SSM Agent の確認と導入）、`enable-check.sh`・`enable-apply.sh`・`enable-confirm.sh`・`enable-revert.sh`（遮断の有効化の確認・有効化・確定・元に戻す）、サーバーに置く `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
 | `tests/` | テスト（標準の `unittest`） |
 | [`al2-instance/`](./al2-instance/README.md) | 今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンスを手元で再現する Docker の定義。道具を試す相手にする |

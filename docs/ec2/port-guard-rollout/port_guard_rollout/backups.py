@@ -7,6 +7,7 @@ ssm-agent・install・enable は、インスタンスごとに次の 3 つがそ
 - 作成の時刻が、確かめた時点から 12 時間以内
 """
 
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +16,14 @@ from .awscli import AwsCliError
 PURPOSE_TAG = "port-guard-rollout-backup"
 LABEL_TAG = "BackupLabel"
 MAX_AGE = timedelta(hours=12)
+
+# バックアップ作業のタイミング（タグの値）に使える文字と長さ
+LABEL_PATTERN = re.compile(r"^[A-Za-z0-9 _.:/=+@-]{1,128}$")
+LABEL_RULE = "英数字と空白・_ . : / = + @ - だけで、128 文字まで（例 2026-10、2026-10-29）"
+
+
+def valid_label(label):
+    return bool(LABEL_PATTERN.match(label or ""))
 
 
 @dataclass
@@ -28,6 +37,14 @@ class BackupCheck:
 def parse_time(value):
     """AMI の CreationDate（例 2026-10-29T08:31:29.000Z）を、タイムゾーンつきの日時にする。"""
     return datetime.strptime(value.replace("Z", "+0000"), "%Y-%m-%dT%H:%M:%S.%f%z")
+
+
+def age_and_remaining(created, now=None, max_age=MAX_AGE):
+    """作成の時刻（CreationDate）から、作成からの経過時間と、期限（12 時間）までの残り時間を時間の単位で返す。"""
+    now = now or datetime.now(timezone.utc)
+    elapsed = now - parse_time(created)
+    hours = elapsed.total_seconds() / 3600
+    return hours, max_age.total_seconds() / 3600 - hours
 
 
 def find_backup(aws, instance_id, label, now=None, max_age=MAX_AGE):

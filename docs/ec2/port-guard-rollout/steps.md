@@ -20,6 +20,7 @@
 |---|---|---|---|
 | 0 | 準備 | — | なし |
 | 1 | バックアップ | `backup` | AMI を作る（インスタンスは変えない） |
+| （補助） | バックアップの確認 | `backup-check` | なし（バックアップがあるかを確かめるだけ） |
 | 2 | SSM Agent の導入 | `ssm-agent` | SSM Agent を入れて動かす |
 | 3 | ipset の導入と設定 | `install` | ipset と port-guard の設定を入れ、集合を作る。**遮断はまだ効かない** |
 | 4 | 遮断の有効化 | `enable` | 80・443 番の遮断が効く。インスタンスごとに確かめながら 1 台ずつ |
@@ -58,6 +59,12 @@ i-0fedcba9876543210  10.0.1.23     # 接続先を直接書く（host、host:port
 | タイミングが一致 | AMI のタグ `BackupLabel` が、指定した値と同じ（`Purpose=port-guard-rollout-backup`、`SourceInstanceId` も一致） |
 | 作成が終わっている | `State` が `available`（AMI の作成は非同期で進むので、作成中（`pending`）のものは使わない） |
 | 12 時間以内 | 作成の時刻が、確かめた時点から 12 時間以内 |
+
+同じ条件で、確かめるだけのコマンドもある（読み取りだけ。何も変えない）。操作できるもの（AMI の ID、作成の時刻、作成から何時間たったか、期限まであと何時間か）と、操作できないもの（理由つき）を分けて表示する。終了コードは、0: すべての台にバックアップがある、1: ないものがある、2: 入力・道具の問題。
+
+```bash
+python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids.txt
+```
 
 手元の再現の環境（AWS にない偽物のインスタンス）で試すときだけ、`--skip-backup-check` で確かめずに進められる。
 
@@ -112,7 +119,7 @@ python3 -m port_guard_rollout backup --backup-label 2026-10 < instance-ids.txt
 | AMI とスナップショットのタグ | `Name`、`Purpose=port-guard-rollout-backup`、`SourceInstanceId`、`SourceInstanceName`、`BackupRunId`、`BackupLabel`（`--backup-label` の値） |
 | `--backup-label` に使える文字 | 英数字と空白・`_ . : / = + @ -`、128 文字まで |
 
-次の手順は、AMI の作成が終わって（`available`）から、12 時間以内に行う。進み具合は、終わりに表示される `aws ec2 describe-images ...` で確かめる。
+次の手順は、AMI の作成が終わって（`available`）から、12 時間以内に行う。**作成が終わったかは `backup-check` で確かめる**（`python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids.txt`。全台が「操作できる」になれば次へ進める）。終わりに表示される `aws ec2 describe-images ...` でも見られる。
 
 ## 2. SSM Agent の導入（`ssm-agent`）
 

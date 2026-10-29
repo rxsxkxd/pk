@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .awscli import AwsCliError
-from .backups import LABEL_TAG, PURPOSE_TAG
+from .backups import LABEL_RULE, LABEL_TAG, PURPOSE_TAG, valid_label
 from .console import confirm
 from .targets import read_targets
 
@@ -25,8 +25,6 @@ BACKUP_STATES = {"running", "stopped"}
 _AMI_NAME_DISALLOWED = re.compile(r"[^A-Za-z0-9()\[\]./'@_-]+")
 AMI_NAME_MAX_LENGTH = 128
 
-# バックアップ作業のタイミング（タグの値）に使える文字と長さ
-LABEL_PATTERN = re.compile(r"^[A-Za-z0-9 _.:/=+@-]{1,128}$")
 
 
 @dataclass
@@ -161,8 +159,8 @@ def print_candidates(candidates, out):
 
 def run(aws, stdin, out, label, assume_yes=False, check_only=False, confirm_func=confirm, now=None):
     """バックアップの流れ全体。終了コードを返す（0: すべて成功、1: 失敗あり、2: 入力・確認の問題）。"""
-    if not LABEL_PATTERN.match(label or ""):
-        print("--backup-label: 英数字と空白・_ . : / = + @ - だけで、128 文字まで（例 2026-10、2026-10-29）", file=out)
+    if not valid_label(label):
+        print(f"--backup-label: {LABEL_RULE}", file=out)
         return 2
     if not aws.available():
         print("aws のコマンドが見つからない（AWS CLI を入れて、PATH を通す）", file=out)

@@ -18,12 +18,16 @@ import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .backups import apply_check
 from .console import confirm
 from .targets import read_targets, resolve_ssh_target
 
 REMOTE_DIR = Path(__file__).parent / "remote"
 
 VIA_LABELS = {"ssh": "SSH", "ssm": "SSM の Run Command"}
+
+# 絞るポート（HTTP と HTTPS だけ。SSH の 22 番は、ほかのシステムからの接続がありうるので対象にしない）
+TARGET_PORTS = "80,443"
 
 # SSM の Run Command で送る処理の大きさの目安（これを超えたら知らせる。上限の正確な値は未確認）
 SSM_SCRIPT_WARN_BYTES = 48_000
@@ -38,6 +42,7 @@ class Host:
     reasons: list = field(default_factory=list)  # 入れられない理由
     notes: list = field(default_factory=list)  # 入れられるが知らせておくこと
     changes: list = field(default_factory=list)  # 前回の設定から変わること
+    backup: str = ""  # 確かめたバックアップ（AMI の ID と作成の時刻）
 
     @property
     def installable(self):
@@ -141,6 +146,8 @@ def print_hosts(hosts, out, via):
     for h in ok:
         notes = f"  注意: {' / '.join(h.notes)}" if h.notes else ""
         print(f"  {h.instance_id}  {h.name or ''}  {target_of(h, via)}  {h.state.get('os', '')}{notes}", file=out)
+        if h.backup:
+            print(f"      バックアップ: {h.backup}", file=out)
         if h.changes:
             print(f"      前回の設定から変わること: {' / '.join(h.changes)}", file=out)
     print(f"\n== 入れられないインスタンス（{len(ng)} 台）", file=out)
@@ -188,9 +195,9 @@ def evaluate(result, check_in_jp, check_outside):
     return problems
 
 
-def run(aws, remote, stdin, out, ports, allow_text="", jp_min_entries=1000, address="public", via="ssh",
+def run(aws, remote, stdin, out, ports=TARGET_PORTS, allow_text="", jp_min_entries=1000, address="public", via="ssh",
         check_in_jp=(), check_outside=(), assume_yes=False, check_only=False, dry_run=False, script_out=None,
-        confirm_func=confirm):
+        backup_check=None, confirm_func=confirm):
     """終了コードを返す（0: すべて成功、1: 失敗または対象外あり、2: 入力・確認・道具の問題）。
 
     remote は、via が "ssh" なら SshClient、"ssm" なら RunCommandClient。
@@ -217,9 +224,10 @@ def run(aws, remote, stdin, out, ports, allow_text="", jp_min_entries=1000, addr
     check_script = remote_file("check.sh")
     for target in targets:
         host = Host(target.instance_id, target.ssh_target if via == "ssh" else "")
-        if via == "ssh":
+        apply_check(backup_check, host)
+        if host.installable and via == "ssh":
             resolve_ssh_target(aws, host, address)
-        else:
+        elif host.installable:
             ping = remote.ping_status(host.instance_id)
             if ping != "Online":
                 host.reasons.append(f"SSM で操作できない（{ping}）")
@@ -256,6 +264,10 @@ def run(aws, remote, stdin, out, ports, allow_text="", jp_min_entries=1000, addr
     failed = 0
     for index, host in enumerate(ok, start=1):
         print(f"  [{index}/{len(ok)}] {host.instance_id}  {target_of(host, via)}", file=out)
+        if not apply_check(backup_check, host):
+            failed += 1
+            print(f"      行わない: {host.reasons[-1]}", file=out)
+            continue
         result = remote.run_script(target_of(host, via), script)
         for step in result.steps:
             print(f"      - {step}", file=out)
@@ -270,6 +282,6 @@ def run(aws, remote, stdin, out, ports, allow_text="", jp_min_entries=1000, addr
 
     print(f"\n== 結果: 完了 {len(ok) - failed} 台、失敗 {failed} 台、対象外 {len(hosts) - len(ok)} 台", file=out)
     if failed < len(ok):
-        print("集合の中身（日本の IP の範囲と許可する IP）は今回の実行の時点のもの。定期の更新（cron）はまだ置いていないので、"
-              "このあと遮断を有効にすると、この時点の一覧がそのまま使われる（新しくするには、もう一度 install を実行する）", file=out)
+        print("集合の中身（日本の IP の範囲と許可する IP）は今回の実行の時点のもの。このあと遮断を有効にすると、"
+              "この時点の一覧がそのまま使われる（新しくするには、有効にする前にもう一度 install を実行する）", file=out)
     return 1 if failed or len(ok) < len(hosts) else 0

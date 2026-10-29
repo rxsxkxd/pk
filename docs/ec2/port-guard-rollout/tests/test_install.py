@@ -100,8 +100,8 @@ class ClassifyTest(unittest.TestCase):
 
 class BuildScriptTest(unittest.TestCase):
     def test_script_has_values_and_body(self):
-        script = install.build_install_script("22,8443", "203.0.113.10\n", 1000, ["203.0.113.10"], [])
-        self.assertTrue(script.startswith("PG_PORTS=22,8443\n"))
+        script = install.build_install_script("80,443", "203.0.113.10\n", 1000, ["203.0.113.10"], [])
+        self.assertTrue(script.startswith("PG_PORTS=80,443\n"))
         self.assertIn("PG_CHECK_IN_JP=203.0.113.10\n", script)
         self.assertIn("PG_APPLY_B64=", script)
         self.assertIn('step "パッケージ（ipset、python3）"', script)
@@ -135,7 +135,7 @@ class RunTest(unittest.TestCase):
         return [c[1] for c in self.ssh.calls if c[0] == "install"]
 
     def run_install(self, **kwargs):
-        return install.run(NoAws(), self.ssh, self.stdin, self.out, ports="8443",
+        return install.run(NoAws(), self.ssh, self.stdin, self.out,
                            check_in_jp=["203.0.113.10"], check_outside=["198.51.100.1"], **kwargs)
 
     def test_installs_serially_after_confirmation(self):
@@ -158,12 +158,12 @@ class RunTest(unittest.TestCase):
     def test_dry_run_shows_plan_and_changes_without_installing(self):
         self.ssh.checks["host1"] = result({**CLEAN_STATE, "port_guard_installed": "yes",
                                            "ports_current": "443", "allow_current": "198.51.100.0/24,203.0.113.10"})
-        code = install.run(NoAws(), self.ssh, self.stdin, self.out, ports="8443",
+        code = install.run(NoAws(), self.ssh, self.stdin, self.out,
                            allow_text="203.0.113.10\n192.0.2.1 # new\n", dry_run=True)
         self.assertEqual(code, 0)
         self.assertEqual(self.installs(), [])
         output = self.out.getvalue()
-        self.assertIn("ポート 443 → 8443", output)
+        self.assertIn("ポート 443 → 80,443", output)
         self.assertIn("許可する IP を足す: 192.0.2.1", output)
         self.assertIn("許可する IP を消す: 198.51.100.0/24", output)
         self.assertIn("dry 実行", output)
@@ -174,7 +174,7 @@ class RunTest(unittest.TestCase):
             ping={"i-00000001": "Online", "i-00000002": "ConnectionLost"},
         )
         stdin = io.StringIO("i-00000001\ni-00000002\n")
-        code = install.run(NoAws(), remote, stdin, self.out, ports="8443", via="ssm", confirm_func=lambda q: True)
+        code = install.run(NoAws(), remote, stdin, self.out, via="ssm", confirm_func=lambda q: True)
         self.assertEqual(code, 1)  # i-00000002 は SSM で操作できない
         self.assertEqual([c[1] for c in remote.calls if c[0] == "install"], ["i-00000001"])
         self.assertIn("SSM で操作できない（ConnectionLost）", self.out.getvalue())

@@ -82,7 +82,7 @@ docs/ec2/
 ├── instance-provisioning/             # 後段（フェーズ 2）: 起動テンプレートを使ったインスタンスの構築（未実装。役割と参照だけ）
 │
 │  ── 今の環境（AL2）への暫定対応の道具 ──
-├── port-guard-rollout/                # 国内だけに絞る設定（iptables ＋ ipset）を複数台に入れる道具（Python と AWS CLI。未実装。設計は notes/ec2-operations/）と、試す相手になる今の構成に近いインスタンスの Docker の定義（al2-instance/）
+├── port-guard-rollout/                # 80・443 番を国内だけに絞る設定（iptables ＋ ipset）を複数台に入れる道具（Python と AWS CLI。手順の正本は steps.md）と、試す相手になる今の構成に近いインスタンスの Docker の定義（al2-instance/）
 │
 │  ── リリースの仕組みの設計ドキュメント ──
 ├── ami-build-pipeline.md              # 全体の設計（リリース検証 → AMI 化 → 起動テンプレート）
@@ -112,8 +112,8 @@ docs/ec2/
 │       ├── ssm-session-manager-operations.md  # SSM Session Manager による EC2 運用
 │       ├── amazon-linux-2023-operations-tips.md # Amazon Linux 2023 の運用のチップス（セキュリティ更新の扱いなど）
 │       ├── access-restriction-os-firewall.md  # 暫定対応: OS（iptables ＋ ipset、または firewalld）で国内だけに絞る
-│       ├── access-restriction-os-firewall-work-plan.md # 上の iptables ＋ ipset の案の作業計画
-│       ├── access-restriction-rollout-script-design.md # 設計: 複数台に入れるスクリプト（チェックポイントで区切る）
+│       ├── access-restriction-os-firewall-work-plan.md # 上の iptables ＋ ipset の案の作業計画（port-guard-rollout/steps.md に移した）
+│       ├── access-restriction-rollout-script-design.md # 設計: 複数台に入れるスクリプト（検討の経緯。確定した手順は port-guard-rollout/steps.md）
 │       ├── firewalld-overview.md          # 補足: firewalld とは何か（利点と、向いている場面）
 │       ├── access-restriction-apache.md       # 暫定対応: Apache で国内だけに絞る（mod_maxminddb）
 │       └── access-restriction-rails-app.md    # 暫定対応: アプリ（Rails 4.2）で国内だけに絞る（Rack::Attack）

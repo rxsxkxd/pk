@@ -9,7 +9,7 @@
 5. 1 台ずつ順に、SSM Agent を入れて、起動時に有効にして起動し直す
 6. AWS の側で登録されたか（`Online`）を、決めた時間まで待って確かめる
 
-インスタンスプロファイルや IAM の権限の付与は行わない（設計の C3。試すのは保留）。
+インスタンスプロファイルや IAM の権限の付与は行わない（別の作業）。
 権限のないインスタンスは、入れても `Online` にならないことを表示する。
 """
 
@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, field
 
 from .awscli import AwsCliError
+from .backups import apply_check
 from .console import confirm
 from .install import remote_file
 from .targets import read_targets, resolve_ssh_target
@@ -36,6 +37,7 @@ class Host:
     action: str = ""  # 行うこと（空なら何もしない）
     reasons: list = field(default_factory=list)  # 対応できない理由
     notes: list = field(default_factory=list)  # 知らせておくこと
+    backup: str = ""  # 確かめたバックアップ（AMI の ID と作成の時刻）
 
 
 def fetch_ping_status(aws, instance_id):
@@ -103,6 +105,8 @@ def print_hosts(hosts, out):
         notes = f"  注意: {' / '.join(h.notes)}" if h.notes else ""
         print(f"  {h.instance_id}  {h.name}  {h.ssh_target}  {h.action}"
               f"（今の SSM Agent: {version}、登録: {h.ping_status or '見ていない'}）{notes}", file=out)
+        if h.backup:
+            print(f"      バックアップ: {h.backup}", file=out)
     print(f"\n== 何もしない（すでに使える。{len(ready)} 台）", file=out)
     for h in ready:
         print(f"  {h.instance_id}  {h.name}  {h.ssh_target}  登録: {h.ping_status or '見ていない'}", file=out)
@@ -132,7 +136,7 @@ def wait_online(aws, hosts, out, timeout, interval=10, sleep=time.sleep, clock=t
 
 
 def run(aws, ssh, stdin, out, address="public", use_aws=True, wait_seconds=300,
-        assume_yes=False, check_only=False, confirm_func=confirm, sleep=time.sleep):
+        assume_yes=False, check_only=False, backup_check=None, confirm_func=confirm, sleep=time.sleep):
     """終了コードを返す（0: すべて成功、1: 失敗・対応できないもの・Online にならないものあり、2: 入力・確認・道具の問題）。"""
     if not ssh.available():
         print("ssh のコマンドが見つからない", file=out)
@@ -156,7 +160,8 @@ def run(aws, ssh, stdin, out, address="public", use_aws=True, wait_seconds=300,
     check_script = remote_file("ssm-check.sh")
     for target in targets:
         host = Host(target.instance_id, target.ssh_target)
-        if use_aws:
+        apply_check(backup_check, host)
+        if use_aws and not host.reasons:
             resolve_ssh_target(aws, host, address)
         if not host.reasons:
             if use_aws:
@@ -187,6 +192,10 @@ def run(aws, ssh, stdin, out, address="public", use_aws=True, wait_seconds=300,
     done, failed = [], 0
     for index, host in enumerate(todo, start=1):
         print(f"  [{index}/{len(todo)}] {host.instance_id}  {host.ssh_target}  {host.action}", file=out)
+        if not apply_check(backup_check, host):
+            failed += 1
+            print(f"      行わない: {host.reasons[-1]}", file=out)
+            continue
         result = ssh.run_script(host.ssh_target, install_script)
         for step in result.steps:
             print(f"      - {step}", file=out)

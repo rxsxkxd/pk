@@ -11,7 +11,7 @@ EC2 の運用・自動化に関する**日本語の設計ドキュメント群**
 - 図は Mermaid。見やすさのため縦向き（`flowchart TD`）と `%%{init: ...}%%` の文字サイズ指定を使っている箇所がある
 - `samples/nginx-passenger-rails/` は独立した学習用サンプルで、`ami-publish` とは無関係
 - **今の前提（2026-10-28 から）: 今の構成（AL2・Apache・Passenger・Rails 4.2・Ruby 2.7.7）の AL2023 での作り直しは緊急の対応。Rails 6 以上のことは一切考えない**（検討・提案・ドキュメントに含めない）。アプリの側を上げる話は Rails 5.x までに限る。Ruby 3 には Rails 6.1 以上が要るので、Ruby も 2.7 系が前提になる。検討の内容は `initial-image-build/existing-system-rebuild-on-al2023.md`
-- `port-guard-rollout/` は、今の環境（AL2）の運用中のインスタンスに、特定のポートを国内だけに絞る設定（iptables ＋ ipset）を複数台まとめて入れる道具（Python。AWS の操作は AWS CLI のコマンドを呼ぶ。未実装）。決定事項 D10（作業者の PC の道具は Go）は ami-publish の方針で、この道具には当てはめない。リリースの流れの段階とは別の暫定対応。設計は `notes/ec2-operations/access-restriction-rollout-script-design.md`
+- `port-guard-rollout/` は、今の環境（AL2）の運用中のインスタンスに、**80・443 番だけ**を国内と許可した IP に絞る設定（iptables ＋ ipset）を複数台まとめて入れる道具（Python の標準のライブラリだけ。AWS の操作は AWS CLI のコマンドを呼ぶ。インスタンスでは SSH か SSM の Run Command）。SSH の 22 番は絞らない。決定事項 D10（作業者の PC の道具は Go）は ami-publish の方針で、この道具には当てはめない。リリースの流れの段階とは別の暫定対応。手順の正本は `port-guard-rollout/steps.md`、仕組みは `port-guard-rollout/iptables-ipset.md`。確定した内容以外の事項（cron、権限の付与など）は道具に入れない。テストは `cd port-guard-rollout && python3 -m unittest discover -s tests`（AWS・SSH には接続しない）
 - リリースの流れは段階ごとにフォルダを並べている: 起点 `initial-image-build/`（ソースからの最初のイメージの作成。未着手）→ 前段 `release-verification/` → 中段 `ami-publish/` → 後段 `instance-provisioning/`。フェーズの番号は開発の優先順位で、**フェーズ 1 = 中段（実装済み）、フェーズ 2 = 後段、フェーズ 3 = 前段（リリース検証の自動化）**。流れの順番とは一致しない。全体像とフォルダ構成は `README.md`
 
 ## ami-publish の全体像

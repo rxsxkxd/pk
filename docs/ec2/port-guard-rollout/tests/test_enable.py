@@ -12,10 +12,10 @@ READY = {
     "iptables_services_installed": "no", "iptables_enabled": "none", "ipset_installed": "yes",
     "ipset_sets": "port_guard_jp,port_guard_allow", "iptables_other_rules": "0", "port_guard_jump": "0",
     "port_guard_installed": "yes", "python3": "yes", "docker_active": "inactive",
-    "ports_current": "443", "allow_current": "203.0.113.10", "jp_min_entries": "1000",
+    "ports_current": "80,443", "allow_current": "203.0.113.10", "jp_min_entries": "1000",
     "jp_file_entries": "4738", "jp_set_entries": "4738", "allow_set_entries": "1", "revert_pending": "",
 }
-APPLIED = {"revert": "systemd:port-guard-auto-revert-x", "unit": "enabled", "ports": "443", "jump": "1",
+APPLIED = {"revert": "systemd:port-guard-auto-revert-x", "unit": "enabled", "ports": "80,443", "jump": "1",
            "chain_rules": "5", "jp_set_entries": "4738", "allow_set_entries": "1"}
 
 
@@ -70,12 +70,13 @@ class ClassifyTest(unittest.TestCase):
     def test_ready(self):
         host = self.classify({})
         self.assertTrue(host.enableable)
-        self.assertEqual(host.ports, ["443"])
+        self.assertEqual(host.ports, ["80", "443"])
 
     def test_not_installed_or_already_enabled_or_short_list(self):
         self.assertIn("先に install", self.classify({"port_guard_installed": "no"}).reasons[0])
         self.assertEqual(self.classify({"port_guard_jump": "1"}).reasons, ["遮断がすでに有効になっている"])
         self.assertIn("一覧が少ない", self.classify({"jp_file_entries": "10"}).reasons[0])
+        self.assertIn("80,443 ではない", self.classify({"ports_current": "22,443"}).reasons[0])
 
 
 class RunTest(unittest.TestCase):
@@ -118,8 +119,8 @@ class RunTest(unittest.TestCase):
         remote = FakeRemote(checks={"h1": result(READY), "user@h1:2222": result(READY)})
         seen = []
         enable.run(NoAws(), remote, io.StringIO("i-00000001 user@h1:2222\n"), self.out, assume_yes=True,
-                   port_map={"443": "8443"}, connect=lambda a, p, t, k: seen.append((a, p, k)) or True)
-        self.assertEqual(seen, [("h1", 8443, "tls")])
+                   port_map={"80": "8080", "443": "8443"}, connect=lambda a, p, t, k: seen.append((a, p, k)) or True)
+        self.assertEqual(seen, [("h1", 8080, "http"), ("h1", 8443, "tls")])
         out = io.StringIO()
         code = enable.run(NoAws(), remote, io.StringIO("i-00000001 h1\n"), out, dry_run=True)
         self.assertEqual(code, 0)
@@ -140,9 +141,12 @@ class ProbeTest(unittest.TestCase):
         def handle():
             conn, _ = server.accept()
             with conn:
-                if reply is not None:
-                    conn.sendall(reply)
-                conn.recv(100)
+                try:
+                    if reply is not None:
+                        conn.sendall(reply)
+                    conn.recv(100)
+                except OSError:
+                    pass  # 確認の側が先に切ることがある
 
         threading.Thread(target=handle, daemon=True).start()
         self.addCleanup(server.close)

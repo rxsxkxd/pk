@@ -119,7 +119,7 @@ class RunTest(unittest.TestCase):
         return [c for c in self.aws.calls if c[1] == "create-image" and "--dry-run" not in c]
 
     def test_creates_images_serially_after_confirmation(self):
-        code = backup.run(self.aws, self.stdin, self.out, confirm_func=lambda q: True, now=self.now)
+        code = backup.run(self.aws, self.stdin, self.out, "2026-10", confirm_func=lambda q: True, now=self.now)
         self.assertEqual(code, 1)  # 1 台は対象外、1 台は失敗
         creates = self.creates()
         self.assertEqual([c[c.index("--instance-id") + 1] for c in creates], ["i-00000001", "i-00000002"])
@@ -127,24 +127,29 @@ class RunTest(unittest.TestCase):
         tag_arg = next(a for a in creates[0] if a.startswith("--tag-specifications="))
         tags = json.loads(tag_arg.split("=", 1)[1])
         self.assertEqual({t["ResourceType"] for t in tags}, {"image", "snapshot"})
+        self.assertIn({"Key": "BackupLabel", "Value": "2026-10"}, tags[0]["Tags"])
         output = self.out.getvalue()
         self.assertIn("開始  i-00000001 → ami-00000001", output)
         self.assertIn("失敗  i-00000002", output)
         self.assertIn("見つからない", output)
 
+    def test_rejects_bad_label(self):
+        self.assertEqual(backup.run(self.aws, self.stdin, self.out, "本番 10 月", confirm_func=lambda q: True), 2)
+        self.assertEqual(self.creates(), [])
+
     def test_stops_when_declined(self):
-        code = backup.run(self.aws, self.stdin, self.out, confirm_func=lambda q: False)
+        code = backup.run(self.aws, self.stdin, self.out, "2026-10", confirm_func=lambda q: False)
         self.assertEqual(code, 0)
         self.assertEqual(self.creates(), [])
         self.assertIn("中止した", self.out.getvalue())
 
     def test_requires_terminal_or_yes(self):
-        code = backup.run(self.aws, self.stdin, self.out, confirm_func=lambda q: None)
+        code = backup.run(self.aws, self.stdin, self.out, "2026-10", confirm_func=lambda q: None)
         self.assertEqual(code, 2)
         self.assertEqual(self.creates(), [])
 
     def test_check_only_does_not_create(self):
-        code = backup.run(self.aws, self.stdin, self.out, check_only=True)
+        code = backup.run(self.aws, self.stdin, self.out, "2026-10", check_only=True)
         self.assertEqual(code, 0)
         self.assertEqual(self.creates(), [])
 

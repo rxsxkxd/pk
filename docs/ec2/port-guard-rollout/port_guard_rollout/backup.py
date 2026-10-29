@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .awscli import AwsCliError
+from .backups import LABEL_TAG, PURPOSE_TAG
 from .console import confirm
 from .targets import read_targets
 
@@ -24,7 +25,8 @@ BACKUP_STATES = {"running", "stopped"}
 _AMI_NAME_DISALLOWED = re.compile(r"[^A-Za-z0-9()\[\]./'@_-]+")
 AMI_NAME_MAX_LENGTH = 128
 
-PURPOSE_TAG = "port-guard-rollout-backup"
+# バックアップ作業のタイミング（タグの値）に使える文字と長さ
+LABEL_PATTERN = re.compile(r"^[A-Za-z0-9 _.:/=+@-]{1,128}$")
 
 
 @dataclass
@@ -114,7 +116,7 @@ def image_name(candidate, run_id):
     return name[-AMI_NAME_MAX_LENGTH:].lstrip("-")
 
 
-def create_backup(aws, candidate, run_id):
+def create_backup(aws, candidate, run_id, label):
     name = image_name(candidate, run_id)
     tags = [
         {"Key": "Name", "Value": name},
@@ -122,6 +124,7 @@ def create_backup(aws, candidate, run_id):
         {"Key": "SourceInstanceId", "Value": candidate.instance_id},
         {"Key": "SourceInstanceName", "Value": candidate.name},
         {"Key": "BackupRunId", "Value": run_id},
+        {"Key": LABEL_TAG, "Value": label},
     ]
     tag_specifications = [
         {"ResourceType": "image", "Tags": tags},
@@ -133,7 +136,7 @@ def create_backup(aws, candidate, run_id):
             "--instance-id", candidate.instance_id,
             # 値が "-" で始まってもオプションと取り違えないよう、"--名前=値" の形で渡す
             f"--name={name}",
-            f"--description=Backup of {candidate.instance_id} before port guard (run {run_id})",
+            f"--description=Backup of {candidate.instance_id} before port guard (label {label}, run {run_id})",
             "--no-reboot",
             f"--tag-specifications={json.dumps(tag_specifications, ensure_ascii=False)}",
         )
@@ -156,8 +159,11 @@ def print_candidates(candidates, out):
     return ok
 
 
-def run(aws, stdin, out, assume_yes=False, check_only=False, confirm_func=confirm, now=None):
+def run(aws, stdin, out, label, assume_yes=False, check_only=False, confirm_func=confirm, now=None):
     """バックアップの流れ全体。終了コードを返す（0: すべて成功、1: 失敗あり、2: 入力・確認の問題）。"""
+    if not LABEL_PATTERN.match(label or ""):
+        print("--backup-label: 英数字と空白・_ . : / = + @ - だけで、128 文字まで（例 2026-10、2026-10-29）", file=out)
+        return 2
     if not aws.available():
         print("aws のコマンドが見つからない（AWS CLI を入れて、PATH を通す）", file=out)
         return 2
@@ -194,10 +200,11 @@ def run(aws, stdin, out, assume_yes=False, check_only=False, confirm_func=confir
             return 0
 
     run_id = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
-    print(f"\n== バックアップ（実行の ID: {run_id}。1 台ずつ順に行う）", file=out)
+    print(f"\n== バックアップ（バックアップ作業のタイミング: {label}、実行の ID: {run_id}。1 台ずつ順に行う。"
+          "すでにバックアップがあっても、新しく作る）", file=out)
     results = []
     for index, candidate in enumerate(ok, start=1):
-        result = create_backup(aws, candidate, run_id)
+        result = create_backup(aws, candidate, run_id, label)
         results.append(result)
         if result.error:
             print(f"  [{index}/{len(ok)}] 失敗  {candidate.instance_id}  {result.error}", file=out)
@@ -209,7 +216,8 @@ def run(aws, stdin, out, assume_yes=False, check_only=False, confirm_func=confir
     print(f"\n== 結果: 開始 {len(succeeded)} 台、失敗 {len(failed)} 台、対象外 {len(candidates) - len(ok)} 台", file=out)
     if succeeded:
         image_ids = " ".join(r.image_id for r in succeeded)
-        print("AMI の作成は完了を待っていない（取り始めた時点の中身が残る）。進み具合は次で確かめる:", file=out)
+        print("AMI の作成は完了を待っていない（取り始めた時点の中身が残る）。ほかの操作は、作成が終わって（available）から、"
+              "12 時間以内に、同じ --backup-label を指定して行う。進み具合は次で確かめる:", file=out)
         print(f"  aws ec2 describe-images --image-ids {image_ids} "
               "--query 'Images[].[ImageId,State,Name]' --output table", file=out)
     return 1 if failed or len(ok) < len(candidates) else 0

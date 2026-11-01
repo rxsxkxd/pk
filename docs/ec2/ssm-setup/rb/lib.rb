@@ -3,7 +3,7 @@
 require 'json'
 require 'open3'
 
-# rb/ の道具の共通の部品。AWS CLI のコマンドを呼んで JSON を読む（AWS SDK は使わない。標準のライブラリだけ）。
+# rb/ の道具の共通の部品（port-guard-rollout/rb/lib.rb の写し）。AWS CLI のコマンドを呼んで JSON を読む（AWS SDK は使わない。標準のライブラリだけ）。
 # 認証情報・リージョンは、AWS CLI の設定（AWS_PROFILE・AWS_REGION など）をそのまま使う。Ruby 2.6 以上で動く。
 module Tools
   class AwsError < StandardError; end

@@ -1,0 +1,6 @@
+# frozen_string_literal: true
+
+# rb/ の道具は標準のライブラリだけで動く。ここに入れるのは、書き方の確認の rubocop だけ
+source 'https://rubygems.org'
+
+gem 'rubocop', '~> 1.91', require: false

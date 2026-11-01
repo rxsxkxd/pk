@@ -15,6 +15,7 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 | ドキュメント | 内容 |
 |---|---|
 | [手順](./steps.md) | **作業の手順の正本**。確定した内容、フェーズの分け方、流れ、各コマンドの使い方、バックアップの確認、元に戻す方法、手元での試し方 |
+| [install・enable の処理の流れ（sh 版・Ruby 版）](./install-enable-flow.md) | 機能を絞った sh 版（`sh/`）と Ruby 版（`rb/`）の、コマンドの中の処理の流れ（Mermaid）と、Python 版との違い。未検証 |
 | [構成の提案: 海外からの確認の拠点](./outside-probe.md) | 遮断の後に「海外からつながらない」ことを確かめる接続元（AWS の別のリージョンの AL2023 のインスタンス）の構成、確認の処理 `port-guard-probe` の使い方と、作業者が手で確かめる流れ |
 | [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md) | インスタンスに入れる仕組みの詳細。**アクセス制限の構成の図**（[SVG](images/access-architecture.svg)。VPC・セキュリティグループ・OS・httpd・Rails・SSM）、事前の確認、効き始める時点、手で確かめる・外す方法、気を付けること（Let's Encrypt の更新への影響など） |
 
@@ -40,7 +41,7 @@ python3 -m port_guard_rollout_backup <コマンド> --help
 | AWS の操作 | **作業者の PC に入っている AWS CLI のコマンドを呼ぶ**（AWS SDK は使わない）。認証情報・プロファイル・リージョンは AWS CLI の設定をそのまま使う |
 | インスタンスでの実行 | SSM の Run Command（AWS CLI の `aws ssm send-command`。`--via ssm`）か、SSH（作業者の PC の `ssh` を呼ぶ）。SSM の有効化はフェーズ 1（ssm-setup）で行う |
 | ssm-setup との共通の部品 | `py/port_guard_rollout/` の `awscli.py`・`targets.py`・`console.py`・`ssh.py`・`runcommand.py`・`flow.py` と、`py/port_guard_rollout_backup/` の `backups.py`・`backup.py`・`check.py` は、ssm-setup に写しがある（フォルダをまたいで読み込まないため）。片方を直したら、もう片方も要るかを見る |
-| サーバーに入れる中身 | 設定・スクリプト・systemd のユニットはシェルのファイル（`remote/`。Python 版と sh 版で共用）として道具と一緒に置き、SSH や Run Command で送る処理の中に埋め込む |
+| サーバーに入れる中身 | 設定・スクリプト・systemd のユニットはシェルのファイル（`remote/`。Python 版・sh 版・Ruby 版で共用）として道具と一緒に置き、SSH や Run Command で送る処理の中に埋め込む |
 
 ## テスト
 
@@ -57,10 +58,11 @@ python3 -m unittest discover -s tests
 |---|---|
 | `py/port_guard_rollout/` | Python 版の道具の本体。`awscli.py`（AWS CLI を呼ぶ）、`ssh.py`（SSH で root として処理を実行する）、`runcommand.py`（SSM の Run Command で root として処理を実行する）、`targets.py`（標準入力の読み込み）、`console.py`（確認）、`flow.py`（コマンドの共通の流れ。各コマンドは「確かめる（plan）」と「行う（apply）」だけを書き、入力・前提の確認・表示・確認・1 台ごとの失敗の扱い・終了コードはここで行う。`install`・`backup` が使う。`enable` は 1 台ごとに確かめながら進めるので、部品だけを使う）、`install.py`（ipset の導入と設定）、`enable.py`（遮断の有効化）、`__main__.py`（コマンドの入り口） |
 | `py/port_guard_rollout_backup/` | バックアップ（Python 版。`python3 -m port_guard_rollout_backup`）。`backup.py`（AMI を作る）、`check.py`（バックアップがあるかを確かめるだけ）、`backups.py`（タグの決まりと、`install`・`enable` が操作の前に行う確認）、`__main__.py`（コマンドの入り口）。AWS CLI の呼び出しなどは `port_guard_rollout/` の部品を使い、`port_guard_rollout/` からは操作の前の確認（`backups.py`）だけを使う |
-| `remote/` | インスタンスに送るもの（Python 版と sh 版で共用）。`install-preflight.sh`・`enable-preflight.sh`（sh 版が送る前の確認）、`check.sh`（確認）、`install.sh`（導入と設定）、`enable-check.sh`・`enable-apply.sh`・`enable-confirm.sh`・`enable-revert.sh`（遮断の有効化の確認・有効化・確定・元に戻す）、サーバーに置く `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
+| `remote/` | インスタンスに送るもの（Python 版・sh 版・Ruby 版で共用）。`install-preflight.sh`・`enable-preflight.sh`（sh 版・Ruby 版が送る前の確認）、`check.sh`（確認）、`install.sh`（導入と設定）、`enable-check.sh`・`enable-apply.sh`・`enable-confirm.sh`・`enable-revert.sh`（遮断の有効化の確認・有効化・確定・元に戻す）、サーバーに置く `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
 | `images/` | フローの図（SVG）と、それを作り直すスクリプト `make_svg.py`（`python3 images/make_svg.py images`）。アクセス制限の構成の図 `access-architecture.svg`（作るスクリプトは `make_access_svg.py`） |
 | `py/tests/` | Python 版のテスト（標準の `unittest`） |
-| `sh/` | sh 版（`install.sh`・`enable.sh`・`lib.sh`。SSM の Run Command だけで、機能を絞って 50 行以内。事前の確認は `remote/` の `*-preflight.sh` でインスタンスの側で行う）。未検証 |
+| `sh/` | sh 版（`install.sh`・`enable.sh`・`lib.sh`。SSM の Run Command だけで、機能を絞って 50 行以内。事前の確認は `remote/` の `*-preflight.sh` でインスタンスの側で行う）。[処理の流れ](./install-enable-flow.md)。未検証 |
+| `rb/` | Ruby 版（`install.rb`・`enable.rb`・`port_guard.rb`・`lib.rb`。sh 版と同じく SSM の Run Command だけ。標準のライブラリだけで、書き方の確認の rubocop だけ `Gemfile` で入れる）。[処理の流れ](./install-enable-flow.md)。未検証 |
 | [`al2-instance/`](./al2-instance/README.md) | 今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンスを手元で再現する Docker の定義。道具を試す相手にする（フェーズ 1 の ssm-setup の `ssm-agent` からも使う）。開発用のアカウントの、本番とは別の VPC に EC2 として作るための [EC2 Image Builder の定義](./al2-instance/image-builder/README.md)（下書き・未検証）も置いている |
 | [`outside-probe/`](./outside-probe/docker/README.md) | 海外からの確認の拠点（チェック用のクライアント。AL2023）の定義。`port-guard-probe`（確認の処理）、[Docker の定義](./outside-probe/docker/README.md)（手元で試す用）、[EC2 Image Builder の定義](./outside-probe/image-builder/README.md)（別のリージョンで使う AMI） |
 

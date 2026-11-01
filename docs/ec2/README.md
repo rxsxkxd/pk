@@ -85,6 +85,7 @@ docs/ec2/
 ├── ssm-setup/                         # 暫定対応のフェーズ 1: 運用中のインスタンスを SSM で入れる状態にする道具（IAM ロールの関連付け、SSM Agent の導入、SSM で入れるかの確認。AWS CLI を呼ぶ道具を py/・sh/・rb/ に言語ごとに置く。手順の正本は steps.md）
 ├── port-guard-rollout/                # 暫定対応のフェーズ 2: 80・443 番を国内だけに絞る設定（iptables ＋ ipset）を複数台に入れる道具（AWS CLI を呼ぶ道具を py/・sh/・rb/ に言語ごとに置き、インスタンスに送るものは remote/ で共用。手順の正本は steps.md）と、試す相手になる今の構成に近いインスタンスの Docker の定義（al2-instance/）
 ├── sg-ssh-restrict/                 # セキュリティグループの 22 番（SSH）を許可する範囲に絞る Ruby の道具（規則を直す・付け替えるの 2 通り。説明は README.md）
+├── al2-update/                      # 運用中の AL2 のインスタンスで OS のパッケージを yum で複数台まとめて更新する Ruby の道具（更新の確認、バックアップ、1 台ずつの更新。インスタンスに送るものは remote/。説明は README.md）
 │
 │  ── リリースの仕組みの設計ドキュメント ──
 ├── ami-build-pipeline.md              # 全体の設計（リリース検証 → AMI 化 → 起動テンプレート）

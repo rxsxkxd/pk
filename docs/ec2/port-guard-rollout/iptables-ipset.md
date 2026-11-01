@@ -1,6 +1,6 @@
 # iptables ＋ ipset の仕組みと確認（port-guard）
 
-> 位置付け: `port-guard-rollout` がインスタンスに入れる仕組み（iptables ＋ ipset）の詳細。道具での手順は [手順](./steps.md)。もとは [暫定対応: OS で絞る（note）](../notes/ec2-operations/access-restriction-os-firewall.md) にあった iptables ＋ ipset の記述を、確定した内容に合わせてここに移した。
+> 位置付け: `port-guard-rollout` がインスタンスに入れる仕組み（iptables ＋ ipset）の詳細。道具での手順は [手順](./steps.md)、入れた後の運用は [運用の手順](./operations.md)、iptables・ipset そのものの説明は [iptables と ipset の基本](./iptables-ipset-basics.md)。もとは [暫定対応: OS で絞る（note）](../notes/ec2-operations/access-restriction-os-firewall.md) にあった iptables ＋ ipset の記述を、確定した内容に合わせてここに移した。
 >
 > 更新日: 2026-10-29
 

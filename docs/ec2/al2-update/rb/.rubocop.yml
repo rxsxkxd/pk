@@ -1,0 +1,5 @@
+# rb/ の道具は macOS に入っている Ruby（2.6）でも動かすため、2.6 として確かめる
+AllCops:
+  TargetRubyVersion: 2.6
+  NewCops: enable
+  SuggestExtensions: false

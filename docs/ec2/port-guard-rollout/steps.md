@@ -1,6 +1,6 @@
 # 手順: 80・443 番を国内だけに絞る設定を、複数台に入れる
 
-> 位置付け: `port-guard-rollout` を使った作業（フェーズ 2）の手順の**正本**。前のフェーズ（SSM の有効化）の手順は [ssm-setup の手順](../ssm-setup/steps.md)。インスタンスに入れる仕組み（iptables ＋ ipset）の詳細は [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md)。もとは README の「使い方」と、note の [作業計画](../notes/ec2-operations/access-restriction-os-firewall-work-plan.md) にあった内容を、確定した内容に合わせてここに移した。
+> 位置付け: `port-guard-rollout` を使った作業（フェーズ 2）の手順の**正本**。前のフェーズ（SSM の有効化）の手順は [ssm-setup の手順](../ssm-setup/steps.md)。インスタンスに入れる仕組み（iptables ＋ ipset）の詳細は [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md)、入れた後の運用は [運用の手順](./operations.md)。もとは README の「使い方」と、note の [作業計画](../notes/ec2-operations/access-restriction-os-firewall-work-plan.md) にあった内容を、確定した内容に合わせてここに移した。
 >
 > 更新日: 2026-10-29
 
@@ -263,6 +263,7 @@ python3 -m port_guard_rollout enable --backup-label 2026-10 --ssh-key ~/.ssh/<�
 | 4-1 | 数日の見守り | 破棄の記録と回数（[破棄の記録](./iptables-ipset.md#破棄の記録)）を見て、止めてはいけない相手（外部サービス、監視など）が止まっていないか。利用者からの「つながらない」の連絡に注意する |
 | 4-2 | 記録 | 何を変えたか（入れたパッケージとファイル、ユニット）と、確認の結果を残す |
 | 4-3 | バックアップの片付け | 落ち着いたら、1 の AMI とスナップショットを消す（タグ `Purpose=port-guard-rollout-backup` と `BackupLabel` で探せる） |
+| 4-4 | その後の運用 | 許可する IP の入れ替え、日本の範囲の取り直し、「つながらない」と言われたときの調べ方などは [運用の手順](./operations.md) |
 
 ## 元に戻す
 

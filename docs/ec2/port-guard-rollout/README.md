@@ -15,6 +15,8 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 | ドキュメント | 内容 |
 |---|---|
 | [手順](./steps.md) | **作業の手順の正本**。確定した内容、フェーズの分け方、流れ、各コマンドの使い方、バックアップの確認、元に戻す方法、手元での試し方 |
+| [運用の手順](./operations.md) | **入れて遮断を有効にした後**の運用。状態を見る、許可する IP を足す・消す、日本の IP の範囲を新しくする、「つながらない」と言われたとき、一時的に外す・戻す、再起動と AMI から作った台、決めること。道具（`install`・`enable`）は有効にした後の台には使えないので、インスタンスの中のスクリプトを SSM の Run Command で流す |
+| [iptables と ipset の基本](./iptables-ipset-basics.md) | iptables と ipset **そのもの**の説明。表とチェーン、ルールの評価のされ方、行き先と条件、接続の追跡と port-guard への影響、集合の型とコマンド、中身の入れ替え（swap）、再起動の後に残す方法、ほかの仕組み（セキュリティグループ・firewalld・Docker・IPv6）との関係 |
 | [install・enable の処理の流れ（sh 版・Ruby 版）](./install-enable-flow.md) | 機能を絞った sh 版（`sh/`）と Ruby 版（`rb/`）の、コマンドの中の処理の流れ（Mermaid）と、Python 版との違い。未検証 |
 | [構成の提案: 海外からの確認の拠点](./outside-probe.md) | 遮断の後に「海外からつながらない」ことを確かめる接続元（AWS の別のリージョンの AL2023 のインスタンス）の構成、確認の処理 `port-guard-probe` の使い方と、作業者が手で確かめる流れ |
 | [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md) | インスタンスに入れる仕組みの詳細。**アクセス制限の構成の図**（[SVG](images/access-architecture.svg)。VPC・セキュリティグループ・OS・httpd・Rails・SSM）、事前の確認、効き始める時点、手で確かめる・外す方法、気を付けること（Let's Encrypt の更新への影響など） |

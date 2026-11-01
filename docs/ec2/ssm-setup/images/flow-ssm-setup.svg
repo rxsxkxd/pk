@@ -39,7 +39,7 @@
   <text class="t" x="470.0" y="374.5" text-anchor="middle">3. backup（ng.txt の台だけ）</text>
   <text class="s" x="470.0" y="393.5" text-anchor="middle">AMI を作る（再起動しない・完了は待たない）</text>
   <rect class="box check" x="260" y="440" width="420" height="58"/>
-  <text class="t" x="470.0" y="464.5" text-anchor="middle">backup-check（補助）</text>
+  <text class="t" x="470.0" y="464.5" text-anchor="middle">check（補助）</text>
   <text class="s" x="470.0" y="483.5" text-anchor="middle">作成済み（available）で 12 時間以内か</text>
   <rect class="box command" x="260" y="540" width="420" height="58"/>
   <text class="t" x="470.0" y="564.5" text-anchor="middle">4. ssm-agent（SSH）</text>

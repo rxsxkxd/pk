@@ -11,7 +11,7 @@
 | **1. SSM の有効化（この手順）** | `ssm-setup/` | IAM ロール（インスタンスプロファイル）の関連付け、SSM Agent の導入、SSM で入れるかの確認 | AWS の API と SSH（SSM Agent の導入だけ） |
 | 2. 国内だけに絞る設定の導入 | [`port-guard-rollout/`](../port-guard-rollout/README.md) | iptables ＋ ipset の導入と、遮断の有効化 | SSM（`--via ssm`）。SSH も使える |
 
-フェーズ 2 は、このフェーズの最後の `ssm-check` で「入れる」になった台を対象にする。2 つのフェーズは、別の日に、別の作業として行える。
+フェーズ 2 は、このフェーズの `ssm-connect-check` で「入れる」になった台を対象にする。2 つのフェーズは、別の日に、別の作業として行える。
 
 - **バックアップはフェーズごとに取る**。AMI のタグ `Purpose` で分けている（このフェーズは `ssm-setup-backup`、フェーズ 2 は `port-guard-rollout-backup`）。それぞれのフェーズの道具は、自分のフェーズのバックアップだけを確かめる
 - 道具も別にしている（`python3 -m ssm_setup` と `python3 -m port_guard_rollout`）。AWS CLI の呼び出しや SSH などの共通の部品は、それぞれのフォルダに写して持つ
@@ -23,17 +23,20 @@
 flowchart TD
     Prep["0. 準備<br>対象の一覧・インスタンスプロファイルを用意する"]
     Role["1. ssm-role（AWS の API だけ）<br>IAM ロールが未設定の台にインスタンスプロファイルを関連付ける"]
-    SsmCheck{"2. ssm-check<br>入れる・SSM Agent で直す・手で直す に分ける"}
+    SsmCheck{"2-1. ssm-check（権限と AWS の上の状態だけ）<br>SSM 有効・SSM Agent で直す・手で直す に分ける"}
+    Connect{"2-2. ssm-connect-check（実接続だけ）<br>echo を流して 入れる・入れない に分ける"}
     Backup["3. backup（ng.txt の台だけ）<br>AMI を作る（再起動しない・完了は待たない）"]
-    Check{"backup-check（補助）<br>作成済み（available）で 12 時間以内か"}
+    Check{"check（補助）<br>作成済み（available）で 12 時間以内か"}
     Wait["作成を待つ<br>（pending）"]
     Agent["4. ssm-agent（SSH）<br>SSM Agent を入れる・有効にする・起動し直す"]
-    Recheck{"5. ssm-check（もう一度。ng.txt の台）<br>入れる・入れない に分ける"}
-    Manual["手で直す<br>理由と「見るところ」を見て直し、ssm-check で確かめる"]
+    Recheck{"5. ssm-check → ssm-connect-check<br>（もう一度。ng.txt の台）"}
+    Manual["手で直す<br>理由と「見るところ」を見て直し、ssm-check・ssm-connect-check で確かめる"]
     Next["フェーズ 2 へ（port-guard-rollout）<br>ok.txt と ok2.txt の台に iptables ＋ ipset"]
 
     Prep --> Role --> SsmCheck
-    SsmCheck -->|"入れる（ok.txt）"| Next
+    SsmCheck -->|"SSM 有効（enabled.txt）"| Connect
+    Connect -->|"入れる（ok.txt）"| Next
+    Connect -->|"入れない（connect-ng.txt）"| Manual
     SsmCheck -->|"SSM Agent で直す（ng.txt）"| Backup --> Check
     SsmCheck -->|"手で直す（ng.txt に # で残る）"| Manual
     Check -->|まだ| Wait --> Check
@@ -47,7 +50,7 @@ flowchart TD
     classDef manual fill:#ecfdf3,stroke:#15803d,stroke-dasharray:6 4
     classDef done fill:#f1f5f9,stroke:#475569
     class Role,Backup,Agent command
-    class SsmCheck,Check,Recheck check
+    class SsmCheck,Connect,Check,Recheck check
     class Manual manual
     class Prep,Wait,Next done
 ```
@@ -56,19 +59,19 @@ flowchart TD
 
 ほとんどの台は、SSM Agent が最初から入って動いていて（AL2 の AMI には入っている）、IAM ロール（インスタンスプロファイル）がないだけと見込んでいる。そのため、**まずインスタンスプロファイルを関連付けて確かめ、SSM Agent で直る見込みの台だけに SSM Agent を入れる**。
 
-- `ssm-check` は、台を「入れる」「SSM Agent で直す」「手で直す」の 3 つに分ける（分け方は [2](#2-ssm-で入れるかの確認ssm-check)）
-- バックアップが要るのは、インスタンスの中を変える `ssm-agent` だけ。`ssm-role` はインスタンスプロファイルを関連付けるだけ（OS のディスクを変えない）、`ssm-check` は確かめるだけなので、バックアップは要らない。**バックアップは「SSM Agent で直す」台だけに取る**
-- `ssm-check --ok-out ok.txt --ng-out ng.txt` で書き出した一覧を、そのまま次のコマンドの標準入力に渡す（`ng.txt` → `backup`・`backup-check`・`ssm-agent`、`ok.txt` → フェーズ 2）
+- 確かめるのは 2 段に分けている。`ssm-check` は権限と AWS の上の状態だけを見て（インスタンスには何も送らない）、台を「SSM 有効」「SSM Agent で直す」「手で直す」の 3 つに分ける。`ssm-connect-check` は事前の確認をせず、「SSM 有効」の台に `echo` を流して、実際に入れるかだけを見る（分け方は 2）
+- バックアップが要るのは、インスタンスの中を変える `ssm-agent` だけ。`ssm-role` はインスタンスプロファイルを関連付けるだけ（OS のディスクを変えない）、`ssm-check`・`ssm-connect-check` は確かめるだけなので、バックアップは要らない。**バックアップは「SSM Agent で直す」台だけに取る**
+- 書き出した一覧を、そのまま次のコマンドの標準入力に渡す（`ssm-check` の `enabled.txt` → `ssm-connect-check`、`ng.txt` → `backup`・`check`・`ssm-agent`。`ssm-connect-check` の `ok.txt` → フェーズ 2）
 - どの手順も、OS の再起動は要らない
 
 SVG 版: [SSM の有効化の流れ](images/flow-ssm-setup.svg)（`python3 images/make_flow_svg.py images` で作り直す）
 
 ## 共通の使い方
 
-コマンドは `ssm-setup/` で実行する。
+コマンドは `ssm-setup/py/` で実行する（Python 版。sh 版は `sh/`、Ruby 版は `rb/`。[処理の流れ](./role-check-flow.md)）。
 
 ```bash
-cd ssm-setup
+cd ssm-setup/py
 python3 -m ssm_setup --help
 python3 -m ssm_setup <コマンド> --help
 ```
@@ -91,7 +94,7 @@ i-0fedcba9876543210  10.0.1.23     # 接続先を直接書く（host、host:port
 3. 試行するかを確かめる。答えは端末（`/dev/tty`）から読む（標準入力は対象の一覧に使うため）。端末がない環境では `--yes` を付けないと止まる
 4. 1 台ずつ順に行う
 
-`--check-only` を付けると、1・2 だけを行う。`backup-check` と `ssm-check` は確かめるだけのコマンドなので、試行の確認はない。
+`--check-only` を付けると、1・2 だけを行う。`check`（バックアップ）と `ssm-check`・`ssm-connect-check` は確かめるだけのコマンドなので、試行の確認はない。
 
 ### バックアップの確認
 
@@ -103,37 +106,38 @@ i-0fedcba9876543210  10.0.1.23     # 接続先を直接書く（host、host:port
 | 作成が終わっている | `State` が `available`（AMI の作成は非同期で進むので、作成中（`pending`）のものは使わない） |
 | 12 時間以内 | 作成の時刻が、確かめた時点から 12 時間以内 |
 
-同じ条件で、確かめるだけのコマンドもある（`backup-check`。読み取りだけ）。操作できるもの（AMI の ID、作成の時刻、作成から何時間たったか、期限まであと何時間か）と、操作できないもの（理由つき）を分けて表示する。
+同じ条件で、確かめるだけのコマンドもある（バックアップのコマンドの `check`。読み取りだけ）。操作できるもの（AMI の ID、作成の時刻、作成から何時間たったか、期限まであと何時間か）と、操作できないもの（理由つき）を分けて表示する。
 
 ```bash
-python3 -m ssm_setup backup-check --backup-label 2026-10 < ng.txt
+python3 -m ssm_setup_backup check --backup-label 2026-10 < ng.txt
 ```
 
 手元の再現の環境（AWS にない偽物のインスタンス）で試すときだけ、`--skip-backup-check` で確かめずに進められる。
 
 ### 終了コード
 
-0: すべて成功（または中止した・確かめただけ）、1: 失敗した、または操作できないインスタンスがあった、2: 入力・確認・道具の問題。`ssm-check` は、0: すべての台に入れる、1: 入れない台がある、2: 入力・道具の問題。
+0: すべて成功（または中止した・確かめただけ）、1: 失敗した、または操作できないインスタンスがあった、2: 入力・確認・道具の問題。`ssm-check` は、0: すべての台が SSM 有効、1: そうでない台がある、2: 入力・道具の問題。`ssm-connect-check` は、0: すべての台に入れる、1: 入れない台がある、2: 入力・道具の問題。`ssm-role` は、4 の権限状態の確認で問題があっても 1。
 
 ### 前提と権限
 
-作業者の PC に Python 3、AWS CLI（v2）、`ssh`（`ssm-agent`）、session-manager-plugin（`ssm-check` の既定の確かめ方）が入っていること。認証情報・プロファイル・リージョンは AWS CLI の設定と、`--profile`・`--region`。
+作業者の PC に Python 3、AWS CLI（v2）、`ssh`（`ssm-agent`）、session-manager-plugin（`ssm-connect-check` の既定の確かめ方）が入っていること。認証情報・プロファイル・リージョンは AWS CLI の設定と、`--profile`・`--region`。
 
 | 手順 | 作業者の IAM に要る権限 |
 |---|---|
 | すべて | `ec2:DescribeInstances`、`ec2:DescribeImages`（バックアップの確認） |
 | `backup` | `ec2:CreateImage`、`ec2:CreateTags` |
-| `ssm-role` | `ec2:DescribeIamInstanceProfileAssociations`、`ec2:AssociateIamInstanceProfile`、`iam:GetInstanceProfile`、`iam:PassRole`（関連付けるロールだけ）、`ssm:DescribeInstanceInformation`（`--wait-online` のとき） |
+| `ssm-role` | `ec2:DescribeIamInstanceProfileAssociations`、`ec2:AssociateIamInstanceProfile`、`iam:GetInstanceProfile`、`iam:ListAttachedRolePolicies`（権限状態の確認）、`iam:PassRole`（関連付けるロールだけ） |
 | `ssm-agent` | `ssm:DescribeInstanceInformation` |
-| `ssm-check` | `ec2:DescribeIamInstanceProfileAssociations`、`iam:GetInstanceProfile`、`iam:ListAttachedRolePolicies`、`iam:ListRolePolicies`、`ssm:DescribeInstanceInformation`。接続の確認に、`ssm:StartSession`（`AWS-StartNonInteractiveCommand`。既定の `--via session`）と `ssm:TerminateSession`、または `ssm:SendCommand`（`AWS-RunShellScript`）と `ssm:GetCommandInvocation`（`--via run-command`） |
+| `ssm-check` | `ec2:DescribeIamInstanceProfileAssociations`、`iam:GetInstanceProfile`、`iam:ListAttachedRolePolicies`、`iam:ListRolePolicies`、`ssm:DescribeInstanceInformation` |
+| `ssm-connect-check` | `ssm:StartSession`（`AWS-StartNonInteractiveCommand`。既定の `--via session`）と `ssm:TerminateSession`、または `ssm:SendCommand`（`AWS-RunShellScript`）と `ssm:GetCommandInvocation`（`--via run-command`） |
 
 ## 0. 準備
 
 | # | 作業 | 内容 |
 |---|---|---|
-| 0-1 | 対象の一覧 | インスタンスの ID の一覧（`instance-ids.txt`）。`ssm-agent` に渡す一覧は `ssm-check --ng-out` で、フェーズ 2 に渡す一覧は `ssm-check --ok-out` で作る（SSH の接続先は AWS CLI でインスタンスの IP を引く。直接書くときは 2 列目に足す） |
+| 0-1 | 対象の一覧 | インスタンスの ID の一覧（`instance-ids.txt`）。`ssm-agent` に渡す一覧は `ssm-check --ng-out` で、フェーズ 2 に渡す一覧は `ssm-connect-check --ok-out` で作る（SSH の接続先は AWS CLI でインスタンスの IP を引く。直接書くときは 2 列目に足す） |
 | 0-2 | バックアップ作業のタイミング | `--backup-label` に使う値を決める（例 `2026-10`、`2026-10-29`）。3 で使う |
-| 0-3 | インスタンスプロファイル | `AmazonSSMManagedInstanceCore` を付けたロールと、それを入れたインスタンスプロファイルを用意しておく（すでにあればその名前を `--instance-profile` で渡す）。なければ `ssm-role` が作るためのコマンドを表示する |
+| 0-3 | インスタンスプロファイル | `AmazonSSMManagedInstanceCore` を付けたロールと、それを入れたインスタンスプロファイルを用意しておく（その名前を `--instance-profile` で渡す）。道具は作らない |
 | 0-4 | 作業者の道具と権限 | Python 3、AWS CLI、`ssh`、session-manager-plugin、上の権限、SSH の鍵 |
 | 0-5 | 通り道 | インスタンスから AWS の窓口（`ssm`・`ssmmessages`・`ec2messages`）へ、送信の 443 番が通ること（セキュリティグループ、ネットワーク ACL、経路）。`ssm-agent` の相手（`ssm-check` で「SSM Agent で直す」になった台）には、作業者の PC から SSH で入れること |
 | 0-6 | 段階 | まず影響の小さい 1 台で最後まで通してから、残りに広げる |
@@ -144,16 +148,21 @@ SSM Agent が入っていても、インスタンスに IAM ロール（イン�
 
 ```bash
 python3 -m ssm_setup ssm-role --check-only < instance-ids.txt   # 確かめるだけ
-python3 -m ssm_setup ssm-role --instance-profile <用意したインスタンスプロファイル> --wait-online 300 < instance-ids.txt
+python3 -m ssm_setup ssm-role --instance-profile <用意したインスタンスプロファイル> < instance-ids.txt
 ```
 
 | 段階 | 内容 |
 |---|---|
-| 前提 | 関連付けるインスタンスプロファイル（既定 `port-guard-ssm`。`--instance-profile` で変えられる）が、先に作ってあること。なければ、作るための AWS CLI のコマンド（ロールの作成、`AmazonSSMManagedInstanceCore` の付与、インスタンスプロファイルの作成とロールの追加）を表示して止まる。道具はインスタンスプロファイルを作らない |
-| 確認（読み取りだけ） | インスタンスがあるか、状態が `running` か `stopped` か、インスタンスプロファイルが関連付けられているか |
-| 分けて表示 | 「関連付ける（未設定）」「何もしない（すでに IAM ロールがある）」「対象外（理由つき）」 |
-| 関連付け | 1 台ずつ順に `associate-iam-instance-profile`。直前にもう一度、関連付けられていないことを確かめる。`associated` になるのを待つ |
-| 登録の確認 | `--wait-online`（既定 0 = 待たない）を付けると、SSM に登録される（`Online`）のを待つ |
+流れは「インスタンスの存在チェック → ロールの状態チェック → ロールの付与 → 権限状態の確認」の 4 段（Ruby 版の `rb/ssm_role.rb` と同じ）。
+
+| 段 | 内容 |
+|---|---|
+| 前提 | 関連付けるインスタンスプロファイル（既定 `port-guard-ssm`。`--instance-profile` で変えられる）が、先に作ってあること。付与する台があるのに、その名前のものがなければ止まる。道具はインスタンスプロファイルを作らない |
+| 1. インスタンスの存在チェック（読み取りだけ） | インスタンスがあるか、状態が `running` か `stopped` か。それ以外は「対象外（理由つき）」。一覧の台をまとめて 1 回で読む（AWS のフィルターの値の上限があるので、一度に渡すのは 200 台まで） |
+| 2. ロールの状態チェック（読み取りだけ） | インスタンスプロファイルが関連付けられているか。あれば「何もしない」、なければ「付与する」 |
+| 3. ロールの付与 | 確認の後、1 台ずつ順に `associate-iam-instance-profile`。確かめた後にほかの人が関連付けていたら、AWS の側が拒む（失敗と表示される） |
+| 4. 権限状態の確認 | 付与した台の関連付けが残っているか、そのインスタンスプロファイルのロールに `AmazonSSMManagedInstanceCore` が付いているか。どちらかが満たされなければ終了コード 1 |
+| その後 | SSM への登録（`Online`）は待たない。数分置いてから、2 の `ssm-check` でまとめて確かめる |
 
 IAM ロールとインスタンスプロファイルの関係:
 
@@ -195,60 +204,78 @@ SVG 版: [IAM ロールとインスタンスプロファイルの関係](images/
 
 **すでに IAM ロールがあるインスタンスには何もしない**（そのロールに `AmazonSSMManagedInstanceCore` を足すことは、この道具では行わない。必要なら別に手で行う）。1 台のインスタンスに関連付けられるインスタンスプロファイルは 1 つだけ、1 つのインスタンスプロファイルに入れられるロールも 1 つだけなので、付け替えもしない。
 
-## 2. SSM で入れるかの確認（`ssm-check`）
+## 2. SSM が使える状態かの確認（`ssm-check` → `ssm-connect-check`）
 
-`ssm-role` の後に、**SSM で実際に入れるか**を全台で確かめる。設定は変えない（接続の確認でインスタンスに `echo` を流すだけ。セッションやコマンドの履歴は AWS の側に残る）。SSH は使わない。ここで「入れる」になった台が、フェーズ 2 の対象になる。
+`ssm-role` の後に、全台を 2 段で確かめる。どちらも設定は変えない。SSH は使わない。最後に「入れる」になった台が、フェーズ 2 の対象になる。
+
+| 段 | コマンド | 確かめること | インスタンスに送るもの |
+|---|---|---|---|
+| 2-1 | `ssm-check` | 権限と、AWS の上のインスタンスの状態が SSM を使える形か | なし |
+| 2-2 | `ssm-connect-check` | 実際に入れるか。**事前の確認はしない**（2-1 の `--ok-out` の一覧を渡す） | `echo` だけ（セッションやコマンドの履歴は AWS の側に残る） |
 
 ```bash
-python3 -m ssm_setup ssm-check --ok-out ok.txt --ng-out ng.txt < instance-ids.txt                     # Session Manager で確かめる（既定）
-python3 -m ssm_setup ssm-check --via run-command --ok-out ok.txt --ng-out ng.txt < instance-ids.txt   # Run Command で確かめる
+python3 -m ssm_setup ssm-check --ok-out enabled.txt --ng-out ng.txt < instance-ids.txt
+python3 -m ssm_setup ssm-connect-check --ok-out ok.txt --ng-out connect-ng.txt < enabled.txt                      # Session Manager で確かめる（既定）
+python3 -m ssm_setup ssm-connect-check --via run-command --ok-out ok.txt --ng-out connect-ng.txt < enabled.txt    # Run Command で確かめる
 ```
+
+### 2-1. 権限と AWS の上の状態（`ssm-check`）
 
 | 確かめること | 内容 |
 |---|---|
 | 1. インスタンスプロファイル | 関連付けられているインスタンスプロファイルと、その中のロール |
-| 2. ポリシー | そのロールに `AmazonSSMManagedInstanceCore` が付いているか（付いていなければ、付いているポリシーとインラインのポリシーの名前を並べる）。**参考の情報で、これだけでは不合格にしない**（独自のポリシーで足りていることがあるため） |
-| 3. 登録 | SSM に登録されて `Online` か、SSM Agent のバージョン。`running` でない台、`Online` でない台は、4 を行わずに「入れない」にする |
-| 4. 接続 | 害のないコマンド（`echo`）を 1 回だけ流し、返ってくるか（`--connect-timeout`、既定 60 秒） |
-
-| `--via` | 接続の確かめ方 |
-|---|---|
-| `session`（既定） | Session Manager（`aws ssm start-session --document-name AWS-StartNonInteractiveCommand`）。人がログインするときと同じ経路（インスタンスの `ssmmessages` の権限、作業者の `ssm:StartSession`）を確かめられる。**作業者の PC に session-manager-plugin が要る**（なければ始める前に止まる） |
-| `run-command` | Run Command（`aws ssm send-command` の `AWS-RunShellScript`）。フェーズ 2 の `install`・`enable` の `--via ssm` と同じ経路。プラグインは要らないが、Session Manager の経路は確かめられない |
+| 2. ポリシー | そのロールに `AmazonSSMManagedInstanceCore` が付いているか（付いていなければ、付いているポリシーとインラインのポリシーの名前を並べる）。**`Online` の台では参考の情報で、これだけでは不合格にしない**（独自のポリシーで足りていることがあるため） |
+| 3. 登録 | SSM に登録されて `Online` か、SSM Agent のバージョン |
 
 結果は次の 3 つに分けて表示し、`AmazonSSMManagedInstanceCore` が付いていない台の数も出す。「手で直す」台には、理由に加えて「見るところ」も出す。
 
 | 分け方 | 条件 | 次に行うこと |
 |---|---|---|
-| 入れる | `Online` で、接続できた | フェーズ 2 の対象（`--ok-out` の一覧） |
+| SSM 有効 | `Online` | 2-2 の `ssm-connect-check`（`--ok-out` の一覧） |
 | SSM Agent で直す | `running` で、インスタンスプロファイルがあり、ロールに `AmazonSSMManagedInstanceCore` が付いているのに、`Online` でない | 3・4（`--ng-out` の一覧）。`ssm-agent` が、入れる・有効にする・起動し直すで直す見込み |
-| 手で直す | それ以外の入れない台: `running` でない・見つからない、インスタンスプロファイルがない、ロールに `AmazonSSMManagedInstanceCore` が付いていない、`Online` なのに接続できない、登録の状態を読めない | 理由と「見るところ」を見て手で直す（`ssm-agent` では直らない見込み） |
+| 手で直す | それ以外: `running` でない・見つからない、インスタンスプロファイルがない、ロールに `AmazonSSMManagedInstanceCore` が付いていない、登録の状態を読めない | 理由と「見るところ」を見て手で直す（`ssm-agent` では直らない見込み） |
 
 ロールに `AmazonSSMManagedInstanceCore` が付いていない台は、独自のポリシーで足りていて SSM Agent の側に問題があることもある。そう判断したら、`ng.txt` のその行の先頭の `#` を外して 3・4 に回す。
 
 | オプション | 書き出すもの |
 |---|---|
-| `--ok-out` | 「入れる」台のインスタンスの ID を 1 行に 1 つ（フェーズ 2 の標準入力に渡せる） |
+| `--ok-out` | 「SSM 有効」の台のインスタンスの ID を 1 行に 1 つ（2-2 の標準入力に渡す） |
 | `--ng-out` | 「SSM Agent で直す」台のインスタンスの ID を 1 行に 1 つ（理由は `#` の後ろ）。「手で直す」台も、行の先頭を `#` にして理由・見るところと一緒に残す。`#` から後は読み飛ばされるので、そのまま 3・4 の標準入力に渡せる |
 
 ```
-# ssm-check で入れず、SSM Agent で直す見込みの台（backup・backup-check・ssm-agent の標準入力に渡せる）
+# ssm-check で SSM 有効でなく、SSM Agent で直す見込みの台（ssm_setup_backup の backup・check と ssm-agent の標準入力に渡せる）
 i-0123456789abcdef0  # SSM の登録が 未登録（Online でない）
 
 # 手で直す台（ssm-agent では直らない見込み。行の先頭が # なので読み飛ばされる）
 # i-0fedcba9876543210  # SSM の登録が 未登録（Online でない）  見るところ: インスタンスプロファイルがない。ssm-role を見直す
 ```
 
-関連付けの直後は、SSM Agent が新しい認証情報を拾うまで数分かかることがある（試し直しの間隔が延びていると、それ以上）。`ssm-role --wait-online` で待ってから確かめるか、少し時間を置いてもう一度確かめる。動いているのに登録されない台は、4 の `ssm-agent` が「起動し直し」で直す。
+関連付けの直後は、SSM Agent が新しい認証情報を拾うまで数分かかることがある（試し直しの間隔が延びていると、それ以上）。少し時間を置いてから確かめる（「SSM Agent で直す」になった台も、時間を置いてもう一度確かめると「SSM 有効」になることがある）。動いているのに登録されない台は、4 の `ssm-agent` が「起動し直し」で直す。
+
+### 2-2. 実接続（`ssm-connect-check`）
+
+2-1 で「SSM 有効」になった台（`enabled.txt`）に、害のないコマンド（`echo`）を 1 回だけ流し、返ってくるかを見る（`--connect-timeout`、既定 60 秒）。状態・ロール・登録の確認はしない。
+
+| `--via` | 接続の確かめ方 |
+|---|---|
+| `session`（既定） | Session Manager（`aws ssm start-session --document-name AWS-StartNonInteractiveCommand`）。人がログインするときと同じ経路（インスタンスの `ssmmessages` の権限、作業者の `ssm:StartSession`）を確かめられる。**作業者の PC に session-manager-plugin が要る**（なければ始める前に止まる） |
+| `run-command` | Run Command（`aws ssm send-command` の `AWS-RunShellScript`）。フェーズ 2 の `install`・`enable` の `--via ssm` と同じ経路。プラグインは要らないが、Session Manager の経路は確かめられない |
+
+| オプション | 書き出すもの |
+|---|---|
+| `--ok-out` | 入れた台のインスタンスの ID を 1 行に 1 つ（フェーズ 2 の標準入力に渡せる） |
+| `--ng-out` | 入れなかった台のインスタンスの ID を、理由と一緒に 1 行に 1 つ。行の先頭を `#` にしていないので、直した後にそのまま渡し直せる |
+
+入れない台（`SSM 有効` なのに `echo` が返らない）は、`ssm-agent` では直らない見込みなので、手で直す。見るところは、`ssmmessages`・`ec2messages` への送信の 443 番、作業者の権限（`ssm:StartSession`・`ssm:SendCommand`）、SSM Agent の版。
 
 ## 3. SSM Agent で直す台のバックアップ（`backup`）
 
-`ssm-check` で「SSM Agent で直す」になった台（`--ng-out` の一覧）だけ、インスタンスごとに AMI を作る（`create-image --no-reboot`。再起動しない）。**すでにバックアップがあっても、新しく作る**。作成は完了を待たない（取り始めた時点の中身が残る）。
+`ssm-check` で「SSM Agent で直す」になった台（`--ng-out` の一覧）だけ、インスタンスごとに AMI を作る（`create-image --no-reboot`。再起動しない）。本体とは別のコマンド（`python3 -m ssm_setup_backup`）で行う。**すでにバックアップがあっても、新しく作る**。作成は完了を待たない（取り始めた時点の中身が残る）。
 
 ```bash
-python3 -m ssm_setup backup --backup-label 2026-10 --check-only < ng.txt   # 確かめるだけ
-python3 -m ssm_setup backup --backup-label 2026-10 < ng.txt
-python3 -m ssm_setup backup-check --backup-label 2026-10 < ng.txt   # 作成が終わったか
+python3 -m ssm_setup_backup backup --backup-label 2026-10 --check-only < ng.txt   # 確かめるだけ
+python3 -m ssm_setup_backup backup --backup-label 2026-10 < ng.txt
+python3 -m ssm_setup_backup check --backup-label 2026-10 < ng.txt   # 作成が終わったか
 ```
 
 | 項目 | 内容 |
@@ -258,7 +285,7 @@ python3 -m ssm_setup backup-check --backup-label 2026-10 < ng.txt   # 作成が�
 | AMI とスナップショットのタグ | `Name`、`Purpose=ssm-setup-backup`、`SourceInstanceId`、`SourceInstanceName`、`BackupRunId`、`BackupLabel`（`--backup-label` の値） |
 | `--backup-label` に使える文字 | 英数字と空白・`_ . : / = + @ -`、128 文字まで |
 
-`ssm-agent` は、AMI の作成が終わって（`available`）から、12 時間以内に行う。**作成が終わったかは `backup-check` で確かめる**（全台が「操作できる」になれば次へ進める）。
+`ssm-agent` は、AMI の作成が終わって（`available`）から、12 時間以内に行う。**作成が終わったかは `check` で確かめる**（全台が「操作できる」になれば次へ進める）。
 
 ## 4. SSM Agent の導入（`ssm-agent`）
 
@@ -282,16 +309,17 @@ python3 -m ssm_setup ssm-agent --backup-label 2026-10 --ssh-key ~/.ssh/<鍵> < n
 
 `ssm-agent` が「操作できない（理由つき）」とした台（SSH で入れない、`sudo` を使えない、AWS の窓口に届かない、など）は、手で直す。
 
-## 5. もう一度確かめる（`ssm-check`）
+## 5. もう一度確かめる（`ssm-check` → `ssm-connect-check`）
 
-`ssm-agent` の後に、同じ一覧で `ssm-check` をもう一度行う。「入れる」になった台（`ok2.txt`）は、フェーズ 2 の対象に加える。
+`ssm-agent` の後に、同じ一覧で 2-1・2-2 をもう一度行う。「入れる」になった台（`ok2.txt`）は、フェーズ 2 の対象に加える。
 
 ```bash
-python3 -m ssm_setup ssm-check --ok-out ok2.txt --ng-out ng2.txt < ng.txt
-cat ok.txt ok2.txt > ../port-guard-rollout/instance-ids.txt   # フェーズ 2 の対象（同じ ID は 1 回だけ使われる）
+python3 -m ssm_setup ssm-check --ok-out enabled2.txt --ng-out ng2.txt < ng.txt
+python3 -m ssm_setup ssm-connect-check --ok-out ok2.txt --ng-out connect-ng2.txt < enabled2.txt
+cat ok.txt ok2.txt > ../../port-guard-rollout/py/instance-ids.txt   # フェーズ 2 の対象（同じ ID は 1 回だけ使われる）
 ```
 
-ここでも入れない台（`ng2.txt` の台。「SSM Agent で直す」になった台も含む）は、もう 3・4 には戻さず、理由と「見るところ」を見て手で直す（すでにあるロールに `AmazonSSMManagedInstanceCore` を足す、送信の 443 番の通り道を開ける、など。この道具では行わない）。直したら `ssm-check --ok-out` で確かめ、「入れる」になった台をフェーズ 2 の対象に加える。
+ここでも入れない台（`ng2.txt`・`connect-ng2.txt` の台。「SSM Agent で直す」になった台も含む）は、もう 3・4 には戻さず、理由と「見るところ」を見て手で直す（すでにあるロールに `AmazonSSMManagedInstanceCore` を足す、送信の 443 番の通り道を開ける、など。この道具では行わない）。直したら 2-1・2-2 で確かめ、「入れる」になった台をフェーズ 2 の対象に加える。
 
 ## 6. 片付け
 
@@ -313,8 +341,8 @@ cat ok.txt ok2.txt > ../port-guard-rollout/instance-ids.txt   # フェーズ 2 �
 `ssm-agent` の SSH の部分だけは、[port-guard-rollout の `al2-instance/`](../port-guard-rollout/al2-instance/README.md) のコンテナを相手に試せる（AWS にないので `--skip-backup-check` と `--no-aws`）。`ssm-role` と `ssm-check` は AWS の API が相手なので、手元では試せない。
 
 ```bash
-cd ssm-setup
-O=(--skip-backup-check --ssh-key ../port-guard-rollout/al2-instance/ssh/id_ed25519 \
+cd ssm-setup/py
+O=(--skip-backup-check --ssh-key ../../port-guard-rollout/al2-instance/ssh/id_ed25519 \
    --ssh-option UserKnownHostsFile=/dev/null --ssh-option StrictHostKeyChecking=no)
 echo 'i-00000001 localhost:2222' | python3 -m ssm_setup ssm-agent --no-aws "${O[@]}" --yes
 ```

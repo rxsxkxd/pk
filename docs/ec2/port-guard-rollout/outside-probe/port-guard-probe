@@ -5,7 +5,7 @@
     例: port-guard-probe 203.0.113.10 80:http 443:tls
         port-guard-probe 203.0.113.10 22:ssh --timeout 3
 
-確かめ方（port_guard_rollout/enable.py の can_connect と同じ判定）:
+確かめ方（py/port_guard_rollout/enable.py の can_connect と同じ判定）:
     tcp   TCP の接続ができれば届いたとみなす（弱い確認）
     ssh   SSH のサーバーの最初の応答（SSH-...）を受け取る
     http  HTTP の応答（HTTP/...）が返る

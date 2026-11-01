@@ -90,7 +90,7 @@ def flow():
           ["IAM ロールが未設定の台にインスタンスプロファイルを関連付ける"])
     s.box(X, rows["ssmcheck"], W, H, ["2. ssm-check"], "check", ["入れる・SSM Agent で直す・手で直す に分ける"])
     s.box(X, rows["backup"], W, H, ["3. backup（ng.txt の台だけ）"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
-    s.box(X, rows["check"], W, H, ["backup-check（補助）"], "check", ["作成済み（available）で 12 時間以内か"])
+    s.box(X, rows["check"], W, H, ["check（補助）"], "check", ["作成済み（available）で 12 時間以内か"])
     s.box(X, rows["agent"], W, H, ["4. ssm-agent（SSH）"], "command", ["SSM Agent を入れる・有効にする・起動し直す"])
     s.box(X, rows["recheck"], W, H, ["5. ssm-check（もう一度。ng.txt の台）"], "check", ["入れる・入れない に分ける"])
     s.box(X, rows["manual"], W, H, ["手で直す"], "manual", ["理由と「見るところ」を見て直し、ssm-check で確かめる"])

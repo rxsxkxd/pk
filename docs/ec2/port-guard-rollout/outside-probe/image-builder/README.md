@@ -30,7 +30,7 @@
 | 点 | 内容 |
 |---|---|
 | 埋め込みにした理由 | S3 に置くと、バケットと、ビルド用のインスタンスの読み取りの権限が増える。`port-guard-probe` は小さい（`Data` の全体で約 6,600 文字）ので、コンポーネントの `Data` の上限（16,000 文字と記憶しているが**未確認**）に十分収まる |
-| 中身をそろえる | `../port-guard-probe` を直したら、テンプレートの埋め込みも同じ中身に直し、`ComponentVersion` と `RecipeVersion` を上げる。単体のテスト（`tests/test_outside_probe.py`）が、埋め込みと本体の食い違いと、`Data` の大きさを確かめる |
+| 中身をそろえる | `../port-guard-probe` を直したら、テンプレートの埋め込みも同じ中身に直し、`ComponentVersion` と `RecipeVersion` を上げる。単体のテスト（`py/tests/test_outside_probe.py`）が、埋め込みと本体の食い違いと、`Data` の大きさを確かめる |
 
 ## 作り方
 

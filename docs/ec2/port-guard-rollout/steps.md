@@ -21,17 +21,17 @@
 | 1. SSM の有効化 | [`ssm-setup/`](../ssm-setup/README.md) | IAM ロール（インスタンスプロファイル）の関連付け、SSM Agent の導入、SSM で入れるかの確認 | AWS の API と SSH（SSM Agent の導入だけ） |
 | **2. 国内だけに絞る設定の導入（この手順）** | `port-guard-rollout/` | iptables ＋ ipset の導入と、遮断の有効化 | SSM（`--via ssm`）。SSH も使える |
 
-このフェーズは、フェーズ 1 の `ssm-check` で「入れる」になった台（`--ok-out` で書き出した `ok.txt` と `ok2.txt`）を対象にする。**バックアップはフェーズごとに取る**（AMI のタグ `Purpose` で分けている。このフェーズは `port-guard-rollout-backup`）。フェーズ 1 のバックアップは、このフェーズの確認には使わない。
+このフェーズは、フェーズ 1 の `ssm-connect-check` で「入れる」になった台（`--ok-out` で書き出した `ok.txt` と `ok2.txt`）を対象にする。**バックアップはフェーズごとに取る**（AMI のタグ `Purpose` で分けている。このフェーズは `port-guard-rollout-backup`）。フェーズ 1 のバックアップは、このフェーズの確認には使わない。
 
 ## 流れ
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "16px"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 40}}}%%
 flowchart TD
-    Pre["前提: SSM の有効化が済んでいる<br>ssm-setup の ssm-check で「入れる」になった台が対象"]
+    Pre["前提: SSM の有効化が済んでいる<br>ssm-setup の ssm-connect-check で「入れる」になった台が対象"]
     Prep["0. 準備<br>対象の一覧・許可する IP・--backup-label を決める"]
     Backup["1. backup<br>AMI を作る（再起動しない・完了は待たない）"]
-    Check{"backup-check（補助）<br>作成済み（available）で 12 時間以内か"}
+    Check{"check（補助）<br>作成済み（available）で 12 時間以内か"}
     Wait["作成を待つ<br>（pending）"]
     Install["2. install（SSM か SSH）<br>ipset と設定を入れ、集合を作る（遮断はまだ効かない）"]
     Probe1["拠点から port-guard-probe（手で）<br>届く（reachable）ことを確かめる"]
@@ -93,7 +93,7 @@ i-0fedcba9876543210  10.0.1.23     # 接続先を直接書く（host、host:port
 同じ条件で、確かめるだけのコマンドもある（読み取りだけ。何も変えない）。操作できるもの（AMI の ID、作成の時刻、作成から何時間たったか、期限まであと何時間か）と、操作できないもの（理由つき）を分けて表示する。終了コードは、0: すべての台にバックアップがある、1: ないものがある、2: 入力・道具の問題。
 
 ```bash
-python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids.txt
+python3 -m port_guard_rollout_backup check --backup-label 2026-10 < instance-ids.txt
 ```
 
 手元の再現の環境（AWS にない偽物のインスタンス）で試すときだけ、`--skip-backup-check` で確かめずに進められる。
@@ -105,7 +105,7 @@ python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids
 | `--via` | 内容 |
 |---|---|
 | `ssh`（既定） | 作業者の PC の `ssh` を呼び、インスタンスの中で `sudo -n bash -s` で実行する。`--ssh-user`（既定 `centos`）、`--ssh-key`、`--ssh-option`（`ssh -o` に渡す値）。踏み台などは作業者の SSH の設定に書いておけばそのまま使える。初めての接続先のホストの鍵は自動で登録する |
-| `ssm` | AWS CLI の `aws ssm send-command`（`AWS-RunShellScript`）で送り、`get-command-invocation` で結果を待つ（root で実行される）。SSM に登録されて `Online` のインスタンスだけが対象（フェーズ 1 の `ssm-check --via run-command` と同じ経路）。処理は base64 にして 1 行のコマンドとして送る |
+| `ssm` | AWS CLI の `aws ssm send-command`（`AWS-RunShellScript`）で送り、`get-command-invocation` で結果を待つ（root で実行される）。SSM に登録されて `Online` のインスタンスだけが対象（フェーズ 1 の `ssm-connect-check --via run-command` と同じ経路）。処理は base64 にして 1 行のコマンドとして送る |
 
 ### 終了コード
 
@@ -125,7 +125,7 @@ python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids
 
 | # | 作業 | 内容 |
 |---|---|---|
-| 0-1 | 対象の一覧 | インスタンスの ID の一覧（`--via ssh` なら SSH の接続先も）を作る。フェーズ 1 の `ssm-check --ok-out` で書き出した「入れる」台の一覧（`ok.txt` と `ok2.txt`）をそのまま使える |
+| 0-1 | 対象の一覧 | インスタンスの ID の一覧（`--via ssh` なら SSH の接続先も）を作る。フェーズ 1 の `ssm-connect-check --ok-out` で書き出した「入れる」台の一覧（`ok.txt` と `ok2.txt`）をそのまま使える |
 | 0-2 | 許可する IP の一覧 | 日本以外から 80・443 番に通す必要がある相手（海外の拠点、保守の委託先、外形監視、決済などの外部サービスの通知の送り元）。1 行 1 件、CIDR 可、`#` から後はコメント |
 | 0-3 | バックアップ作業のタイミング | `--backup-label` に使う値を決める（例 `2026-10`、`2026-10-29`） |
 | 0-4 | 作業者の道具と権限 | Python 3、AWS CLI、上の権限（`--via ssh` なら `ssh` と SSH の鍵） |
@@ -135,12 +135,12 @@ python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids
 
 ## 1. バックアップ（`backup`）
 
-インスタンスごとに AMI を作る（`create-image --no-reboot`。再起動しない）。**すでにバックアップがあっても、新しく作る**。作成は完了を待たない（取り始めた時点の中身が残る）。
+インスタンスごとに AMI を作る（`create-image --no-reboot`。再起動しない）。本体とは別のコマンド（`python3 -m port_guard_rollout_backup`）で行う。**すでにバックアップがあっても、新しく作る**。作成は完了を待たない（取り始めた時点の中身が残る）。
 
 ```bash
-cd port-guard-rollout
-python3 -m port_guard_rollout backup --backup-label 2026-10 --check-only < instance-ids.txt   # 確かめるだけ
-python3 -m port_guard_rollout backup --backup-label 2026-10 < instance-ids.txt
+cd port-guard-rollout/py
+python3 -m port_guard_rollout_backup backup --backup-label 2026-10 --check-only < instance-ids.txt   # 確かめるだけ
+python3 -m port_guard_rollout_backup backup --backup-label 2026-10 < instance-ids.txt
 ```
 
 | 項目 | 内容 |
@@ -150,7 +150,7 @@ python3 -m port_guard_rollout backup --backup-label 2026-10 < instance-ids.txt
 | AMI とスナップショットのタグ | `Name`、`Purpose=port-guard-rollout-backup`、`SourceInstanceId`、`SourceInstanceName`、`BackupRunId`、`BackupLabel`（`--backup-label` の値） |
 | `--backup-label` に使える文字 | 英数字と空白・`_ . : / = + @ -`、128 文字まで |
 
-**フェーズ 1 のバックアップとは別に取る**（タグ `Purpose` が違うので、フェーズ 1 の AMI はこのフェーズの確認では使えない）。次の手順は、AMI の作成が終わって（`available`）から、12 時間以内に行う。**作成が終わったかは `backup-check` で確かめる**（`python3 -m port_guard_rollout backup-check --backup-label 2026-10 < instance-ids.txt`。全台が「操作できる」になれば次へ進める）。終わりに表示される `aws ec2 describe-images ...` でも見られる。
+**フェーズ 1 のバックアップとは別に取る**（タグ `Purpose` が違うので、フェーズ 1 の AMI はこのフェーズの確認では使えない）。次の手順は、AMI の作成が終わって（`available`）から、12 時間以内に行う。**作成が終わったかは `check` で確かめる**（`python3 -m port_guard_rollout_backup check --backup-label 2026-10 < instance-ids.txt`。全台が「操作できる」になれば次へ進める）。終わりに表示される `aws ec2 describe-images ...` でも見られる。
 
 ## 2. ipset の導入と設定（`install`）
 
@@ -278,8 +278,8 @@ python3 -m port_guard_rollout enable --backup-label 2026-10 --ssh-key ~/.ssh/<�
 [`al2-instance/`](./al2-instance/README.md) のコンテナを相手にする（AWS にないので `--skip-backup-check`。80・443 番は手元の 8080・8443 番に転送しているので `--port-map`）。
 
 ```bash
-cd port-guard-rollout
-O=(--skip-backup-check --ssh-key al2-instance/ssh/id_ed25519 \
+cd port-guard-rollout/py
+O=(--skip-backup-check --ssh-key ../al2-instance/ssh/id_ed25519 \
    --ssh-option UserKnownHostsFile=/dev/null --ssh-option StrictHostKeyChecking=no)
 echo 'i-00000001 localhost:2222' | python3 -m port_guard_rollout install --allow-file allow.txt "${O[@]}" --yes
 echo 'i-00000001 localhost:2222' | python3 -m port_guard_rollout enable --port-map 80:8080 --port-map 443:8443 "${O[@]}" --yes

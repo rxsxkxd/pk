@@ -43,7 +43,7 @@ OS の中の判定の流れ:
 | 設定のファイル | `/etc/port-guard/port-guard.conf`（`PORT_GUARD_PORTS=80,443` と `JP_MIN_ENTRIES`） |
 | 適用のスクリプト | `/usr/local/sbin/port-guard-apply`。集合を作って中身を入れ、ルールを入れる（`--sets-only` なら集合だけ）。起動時に systemd（`port-guard.service`）から呼ぶ |
 | 更新のスクリプト | `/usr/local/sbin/port-guard-update-jp`。日本の IP の範囲を取り直し、集合の中身だけを入れ替える（`install` のときに実行する） |
-| 中身の正本 | [`port_guard_rollout/remote/`](./port_guard_rollout/remote/) の `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
+| 中身の正本 | [`remote/`](./remote/) の `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
 
 集合の中身の入れ替えは、一時的な集合に新しい中身を入れてから `ipset swap` で入れ替える。入れ替えは一瞬で済み、途中で空になる時間がない。
 

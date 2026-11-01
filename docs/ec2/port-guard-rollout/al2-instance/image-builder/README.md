@@ -144,14 +144,14 @@ ssh centos@<パブリック IP> 'curl -s http://localhost/health'
 
 ## port-guard-rollout を試す流れ
 
-開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。1〜3 はフェーズ 1 として `ssm-setup/` で `python3 -m ssm_setup` を、4〜7 はフェーズ 2 として `port-guard-rollout/` で `python3 -m port_guard_rollout` を使う。バックアップはフェーズごとに取る。手順の詳細は [ssm-setup の手順](../../../ssm-setup/steps.md) と [port-guard-rollout の手順](../../steps.md)。
+開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。1〜3 はフェーズ 1 として `ssm-setup/py/` で `python3 -m ssm_setup`（バックアップは `python3 -m ssm_setup_backup`）を、4〜7 はフェーズ 2 として `port-guard-rollout/py/` で `python3 -m port_guard_rollout`（バックアップは `python3 -m port_guard_rollout_backup`）を使う。バックアップはフェーズごとに取る。手順の詳細は [ssm-setup の手順](../../../ssm-setup/steps.md) と [port-guard-rollout の手順](../../steps.md)。
 
 | # | コマンド | 確かめること |
 |---|---|---|
 | 1 | フェーズ 1: `ssm-role --instance-profile <用意したもの>` → `ssm-check --ok-out ok.txt --ng-out ng.txt` | 関連付けができる。案 A（SSM Agent を消した）なら「SSM Agent で直す」になり、`ng.txt` に載る。案 C なら「入れる」になり、`ok.txt` に載る |
-| 2 | フェーズ 1: `backup`・`backup-check --backup-label <値> < ng.txt` → `ssm-agent --backup-label <値> --ssh-key <鍵> < ng.txt` | AMI が作られ、作成が終わったら「操作できる」になる。案 A なら「インストール」になり、入って `Online` になる |
+| 2 | フェーズ 1: `backup`・`check --backup-label <値> < ng.txt` → `ssm-agent --backup-label <値> --ssh-key <鍵> < ng.txt` | AMI が作られ、作成が終わったら「操作できる」になる。案 A なら「インストール」になり、入って `Online` になる |
 | 3 | フェーズ 1: もう一度 `ssm-check --ok-out ok2.txt < ng.txt`（`--via session` と `--via run-command` の両方） | 「入れる」になり、`ok2.txt` に載る（4 以降の対象の一覧になる） |
-| 4 | フェーズ 2: `backup`・`backup-check` → `install --backup-label <値> --allow-file <一覧> --check-in-jp <作業者の IP> --check-outside <拠点の IP>`（`--via ssh` と `--via ssm` の両方） | 集合ができ、遮断はまだ効いていない |
+| 4 | フェーズ 2: `backup`・`check` → `install --backup-label <値> --allow-file <一覧> --check-in-jp <作業者の IP> --check-outside <拠点の IP>`（`--via ssh` と `--via ssm` の両方） | 集合ができ、遮断はまだ効いていない |
 | 5 | フェーズ 2: `enable --backup-label <値>`（`--via ssh` と `--via ssm` の両方） | インスタンスごとの確認、自動で元に戻る予約、作業者の PC からの確認、確定。**systemd があるので、`systemctl enable --now port-guard` と、再起動の後にルールと集合が戻ることも試せる** |
 | 6 | 海外からの確認 | [海外の確認の拠点](../../outside-probe.md) から、遮断の前は届き、後は届かないこと |
 | 7 | 破棄の記録 | [破棄の記録](../../iptables-ipset.md#破棄の記録) の場所に `port-guard drop:` の行が出ること（EC2 なのでカーネルのログに出る） |

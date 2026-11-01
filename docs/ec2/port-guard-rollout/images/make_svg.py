@@ -88,7 +88,7 @@ def overall():
     s.box(X, rows["pre"], W, H, ["前提: SSM の有効化が済んでいる"], "done", ["ssm-setup の ssm-check で「入れる」になった台が対象"])
     s.box(X, rows["prep"], W, H, ["0. 準備"], "done", ["対象の一覧・許可する IP・--backup-label を決める"])
     s.box(X, rows["backup"], W, H, ["1. backup"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
-    s.box(X, rows["check"], W, H, ["backup-check（補助）"], "check", ["作成済み（available）で 12 時間以内か"])
+    s.box(X, rows["check"], W, H, ["check（補助）"], "check", ["作成済み（available）で 12 時間以内か"])
     s.box(X, rows["install"], W, H, ["2. install（SSM か SSH）"], "command", ["ipset と設定を入れ、集合を作る（遮断はまだ効かない）"])
     s.box(X, rows["probe1"], W, H, ["拠点から port-guard-probe（手で）"], "manual", ["届く（reachable）ことを確かめる"])
     s.box(X, rows["enable"], W, H, ["3. enable（インスタンスごと）"], "command", ["自動で戻る予約 → 遮断 → 確かめて確定（別の図）"])

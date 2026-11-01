@@ -22,12 +22,14 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 
 流れの図は [手順の「流れ」](./steps.md#流れ)（Mermaid）にある。SVG 版: [全体の流れ](images/flow-overall.svg)、[enable のインスタンスごとの流れ](images/flow-enable.svg)。
 
-フェーズ 1（[ssm-setup](../ssm-setup/README.md)）の `ssm-check` で「入れる」になった台を対象に、`backup` → `backup-check`（補助）→ `install` → `enable` の順に使う。
+フェーズ 1（[ssm-setup](../ssm-setup/README.md)）の `ssm-connect-check` で「入れる」になった台を対象に、`backup` → `check`（補助）→ `install` → `enable` の順に使う。バックアップ（`backup`・`check`）は本体と分けて、別のコマンド `python3 -m port_guard_rollout_backup` にしている。
 
 ```bash
-cd port-guard-rollout
+cd port-guard-rollout/py
 python3 -m port_guard_rollout --help
 python3 -m port_guard_rollout <コマンド> --help
+python3 -m port_guard_rollout_backup --help      # バックアップ（backup・check）
+python3 -m port_guard_rollout_backup <コマンド> --help
 ```
 
 ## 実装の方針
@@ -37,15 +39,15 @@ python3 -m port_guard_rollout <コマンド> --help
 | 言語 | **Python**（標準のライブラリだけを使う）。AMI 公開パイプラインの決定事項 D10（作業者の PC で動く道具は Go）は、この暫定対応の道具には当てはめない |
 | AWS の操作 | **作業者の PC に入っている AWS CLI のコマンドを呼ぶ**（AWS SDK は使わない）。認証情報・プロファイル・リージョンは AWS CLI の設定をそのまま使う |
 | インスタンスでの実行 | SSM の Run Command（AWS CLI の `aws ssm send-command`。`--via ssm`）か、SSH（作業者の PC の `ssh` を呼ぶ）。SSM の有効化はフェーズ 1（ssm-setup）で行う |
-| ssm-setup との共通の部品 | `awscli.py`・`targets.py`・`console.py`・`ssh.py`・`runcommand.py`・`backups.py`・`backup.py`・`backup_check.py` は、ssm-setup に写しがある（フォルダをまたいで読み込まないため）。片方を直したら、もう片方も要るかを見る |
-| サーバーに入れる中身 | 設定・スクリプト・systemd のユニットはシェルのファイル（`port_guard_rollout/remote/`）として道具と一緒に置き、SSH や Run Command で送る処理の中に埋め込む |
+| ssm-setup との共通の部品 | `py/port_guard_rollout/` の `awscli.py`・`targets.py`・`console.py`・`ssh.py`・`runcommand.py`・`flow.py` と、`py/port_guard_rollout_backup/` の `backups.py`・`backup.py`・`check.py` は、ssm-setup に写しがある（フォルダをまたいで読み込まないため）。片方を直したら、もう片方も要るかを見る |
+| サーバーに入れる中身 | 設定・スクリプト・systemd のユニットはシェルのファイル（`remote/`。Python 版と sh 版で共用）として道具と一緒に置き、SSH や Run Command で送る処理の中に埋め込む |
 
 ## テスト
 
 AWS・SSH・SSM には接続せず、偽物で確かめる。
 
 ```bash
-cd port-guard-rollout
+cd port-guard-rollout/py
 python3 -m unittest discover -s tests
 ```
 
@@ -53,10 +55,12 @@ python3 -m unittest discover -s tests
 
 | フォルダ | 内容 |
 |---|---|
-| `port_guard_rollout/` | 道具の本体（Python）。`awscli.py`（AWS CLI を呼ぶ）、`ssh.py`（SSH で root として処理を実行する）、`runcommand.py`（SSM の Run Command で root として処理を実行する）、`targets.py`（標準入力の読み込み）、`console.py`（確認）、`backups.py`（操作の前のバックアップの確認）、`backup.py`（バックアップ）、`backup_check.py`（バックアップがあるかを確かめるだけ）、`install.py`（ipset の導入と設定）、`enable.py`（遮断の有効化）、`__main__.py`（コマンドの入り口） |
-| `port_guard_rollout/remote/` | インスタンスに送るもの。`check.sh`（確認）、`install.sh`（導入と設定）、`enable-check.sh`・`enable-apply.sh`・`enable-confirm.sh`・`enable-revert.sh`（遮断の有効化の確認・有効化・確定・元に戻す）、サーバーに置く `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
+| `py/port_guard_rollout/` | Python 版の道具の本体。`awscli.py`（AWS CLI を呼ぶ）、`ssh.py`（SSH で root として処理を実行する）、`runcommand.py`（SSM の Run Command で root として処理を実行する）、`targets.py`（標準入力の読み込み）、`console.py`（確認）、`flow.py`（コマンドの共通の流れ。各コマンドは「確かめる（plan）」と「行う（apply）」だけを書き、入力・前提の確認・表示・確認・1 台ごとの失敗の扱い・終了コードはここで行う。`install`・`backup` が使う。`enable` は 1 台ごとに確かめながら進めるので、部品だけを使う）、`install.py`（ipset の導入と設定）、`enable.py`（遮断の有効化）、`__main__.py`（コマンドの入り口） |
+| `py/port_guard_rollout_backup/` | バックアップ（Python 版。`python3 -m port_guard_rollout_backup`）。`backup.py`（AMI を作る）、`check.py`（バックアップがあるかを確かめるだけ）、`backups.py`（タグの決まりと、`install`・`enable` が操作の前に行う確認）、`__main__.py`（コマンドの入り口）。AWS CLI の呼び出しなどは `port_guard_rollout/` の部品を使い、`port_guard_rollout/` からは操作の前の確認（`backups.py`）だけを使う |
+| `remote/` | インスタンスに送るもの（Python 版と sh 版で共用）。`install-preflight.sh`・`enable-preflight.sh`（sh 版が送る前の確認）、`check.sh`（確認）、`install.sh`（導入と設定）、`enable-check.sh`・`enable-apply.sh`・`enable-confirm.sh`・`enable-revert.sh`（遮断の有効化の確認・有効化・確定・元に戻す）、サーバーに置く `port-guard-apply`・`port-guard-update-jp`・`port-guard.service` |
 | `images/` | フローの図（SVG）と、それを作り直すスクリプト `make_svg.py`（`python3 images/make_svg.py images`）。アクセス制限の構成の図 `access-architecture.svg`（作るスクリプトは `make_access_svg.py`） |
-| `tests/` | テスト（標準の `unittest`） |
+| `py/tests/` | Python 版のテスト（標準の `unittest`） |
+| `sh/` | sh 版（`install.sh`・`enable.sh`・`lib.sh`。SSM の Run Command だけで、機能を絞って 50 行以内。事前の確認は `remote/` の `*-preflight.sh` でインスタンスの側で行う）。未検証 |
 | [`al2-instance/`](./al2-instance/README.md) | 今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンスを手元で再現する Docker の定義。道具を試す相手にする（フェーズ 1 の ssm-setup の `ssm-agent` からも使う）。開発用のアカウントの、本番とは別の VPC に EC2 として作るための [EC2 Image Builder の定義](./al2-instance/image-builder/README.md)（下書き・未検証）も置いている |
 | [`outside-probe/`](./outside-probe/docker/README.md) | 海外からの確認の拠点（チェック用のクライアント。AL2023）の定義。`port-guard-probe`（確認の処理）、[Docker の定義](./outside-probe/docker/README.md)（手元で試す用）、[EC2 Image Builder の定義](./outside-probe/image-builder/README.md)（別のリージョンで使う AMI） |
 

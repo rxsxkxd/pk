@@ -25,7 +25,7 @@ ARG RUBYGEMS_VERSION=3.4.22
 ARG APP_USER=centos
 
 # 今のインスタンスに近づける。iptables のコマンドと SSH のサーバーは入れ、
-# SSM Agent・ipset・iptables-services・firewalld は入れない（今のインスタンスは SSH で直接入っていて、SSM Agent はない見込み）
+# SSM Agent・ipset・iptables-services は入れない（今のインスタンスは SSH で直接入っていて、SSM Agent はない見込み）
 RUN yum install -y \
       sudo cronie iptables iproute procps-ng shadow-utils hostname which findutils \
       tar gzip bzip2 curl openssl \

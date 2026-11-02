@@ -1,6 +1,6 @@
 # 運用の手順: port-guard を入れた後
 
-> 位置付け: port-guard（80・443 番を国内と許可した IP に絞る iptables ＋ ipset）を**入れて遮断を有効にした後**の運用の手順。最初に入れる手順は [手順](./steps.md)（正本）、仕組みは [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md)、iptables・ipset そのものの説明は [iptables と ipset の基本](./iptables-ipset-basics.md)。
+> 位置付け: port-guard（80・443 番を国内と許可した IP に絞る iptables ＋ ipset）を**入れて遮断を有効にした後**の運用の手順。最初に入れる手順は [手順](./steps.md)（正本。踏み台サーバーから SSH で入れるなら [踏み台サーバーから入れるコマンド](./bastion-install-commands.md)）、仕組みは [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md)、iptables・ipset そのものの説明は [iptables と ipset の基本](./iptables-ipset-basics.md)。
 >
 > 状態: 手順の整理。運用中のインスタンスではまだ行っていない。
 >

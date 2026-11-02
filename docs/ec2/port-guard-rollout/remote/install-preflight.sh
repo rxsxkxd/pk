@@ -4,8 +4,6 @@ set -u
 blocked=0
 ng() { printf 'PG blocked=%s\n' "$1"; blocked=1; }
 grep -q 'Amazon Linux release 2 ' /etc/system-release 2>/dev/null || ng "Amazon Linux 2 ではない"
-systemctl is-active -q firewalld 2>/dev/null && ng "firewalld が動いている"
-systemctl is-enabled -q firewalld 2>/dev/null && ng "firewalld が起動時に有効になっている"
 systemctl is-enabled -q iptables 2>/dev/null && ng "iptables のサービスが起動時に有効になっている"
 iptables -S INPUT 2>/dev/null | grep -q -- '-j PORT_GUARD' && ng "port-guard の遮断がすでに有効になっている"
 rules=0

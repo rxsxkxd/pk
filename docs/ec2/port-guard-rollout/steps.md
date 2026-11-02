@@ -170,7 +170,7 @@ python3 -m port_guard_rollout install --backup-label 2026-10 --allow-file allow.
 
 | 段階 | 内容 |
 |---|---|
-| 確認（読み取りだけ） | 入れるか（または SSM で `Online` か）、`sudo` を使えるか、Amazon Linux 2 か。次のどれかなら**操作しない**: バックアップがない、firewalld が動いている・起動時に有効、iptables のサービスが起動時に有効、既存の iptables のルールがある、既存の ipset の集合がある、port-guard の遮断がすでに有効 |
+| 確認（読み取りだけ） | 入れるか（または SSM で `Online` か）、`sudo` を使えるか、Amazon Linux 2 か。次のどれかなら**操作しない**: バックアップがない、iptables のサービスが起動時に有効、既存の iptables のルールがある、既存の ipset の集合がある、port-guard の遮断がすでに有効 |
 | 導入と設定 | `yum install ipset python3` → 設定（`/etc/port-guard/port-guard.conf`、`allow.txt`）・2 つのスクリプト・systemd のユニットを置く（`daemon-reload` まで。enable しない）→ 日本の IP の範囲を取って集合を作る（`port-guard-update-jp`） |
 | 導入の後の確認 | 集合の件数、遮断のルール（INPUT からの参照）がないこと、`port-guard` と `ipset` のユニットが起動時に有効になっていないこと、`--check-in-jp` の IP が日本の集合に入っていること、`--check-outside` の IP がどちらの集合にも入っていないこと |
 

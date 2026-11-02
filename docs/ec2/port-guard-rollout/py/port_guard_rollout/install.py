@@ -104,10 +104,6 @@ def classify(host, result):
     s = host.state = result.values
     if "Amazon Linux release 2 " not in s["os"] + " ":
         host.reasons.append(f"Amazon Linux 2 ではない（{s['os']}）")
-    if s.get("firewalld_active") == "active":
-        host.reasons.append("firewalld が動いている")
-    elif s.get("firewalld_enabled") == "enabled":
-        host.reasons.append("firewalld が起動時に有効になっている（次の再起動で動き出す）")
     if s.get("iptables_enabled") == "enabled":
         host.reasons.append("iptables のサービスが起動時に有効になっている")
     if s.get("port_guard_jump", "0") != "0":

@@ -8,9 +8,6 @@ unit_active() { local v; v=$(systemctl is-active "$1" 2>/dev/null); echo "${v:-u
 
 kv os "$(head -1 /etc/system-release 2>/dev/null || echo unknown)"
 kv systemd "$([ -d /run/systemd/system ] && echo running || echo not-running)"
-kv firewalld_installed "$(installed firewalld)"
-kv firewalld_enabled "$(unit_enabled firewalld)"
-kv firewalld_active "$(unit_active firewalld)"
 kv iptables_services_installed "$(installed iptables-services)"
 kv iptables_enabled "$(unit_enabled iptables)"
 kv ipset_installed "$(command -v ipset >/dev/null 2>&1 && echo yes || echo no)"

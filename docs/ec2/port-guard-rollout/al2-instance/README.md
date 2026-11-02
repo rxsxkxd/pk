@@ -64,7 +64,7 @@ remote_addr: 192.168.65.1
 | ユーザー | `centos`（`sudo` をパスワードなしで使える。ホームディレクトリは 711） | `useradd` |
 | ログインのしかた | **SSH で直接**（`centos`、鍵での認証。パスワードでのログインと root でのログインは不可） | `openssh-server` |
 | 最初から入っているもの | `iptables`（コマンドだけ）、`cronie`、`sudo`、`openssh-server` | 今のインスタンスに近づけた |
-| 入れていないもの | **`amazon-ssm-agent`**、`ipset`、`iptables-services`、`firewalld`、`openssl11` | 今のインスタンスは SSH で直接入っていて、SSM Agent は入っていない見込み。port-guard-rollout が入れる前の状態にした |
+| 入れていないもの | **`amazon-ssm-agent`**、`ipset`、`iptables-services`、`openssl11` | 今のインスタンスは SSH で直接入っていて、SSM Agent は入っていない見込み。port-guard-rollout が入れる前の状態にした |
 
 ### 今のインスタンスと違うもの
 
@@ -101,7 +101,7 @@ AL2 では、`mod_http2` が Apache とは別の版の番号で出ている。�
 | 動いている Apache が読み込んでいるもの | `/usr/lib64/libssl.so.1.0.2k`、`/usr/lib64/libcrypto.so.1.0.2k`（`/proc/<プロセス番号>/maps` では、`libssl.so.10` ではなく実体のファイル名で見える） |
 | TLS 1.3 | **使えない**（`httpd -t -c 'SSLProtocol TLSv1.2 TLSv1.3'` が `Illegal protocol 'TLSv1.3'`） |
 | iptables | `iptables v1.8.4 (legacy)`。ルールはなく、すべて受け付ける（`-P INPUT ACCEPT` など 3 行） |
-| ipset・iptables-services・firewalld | 入っていない |
+| ipset・iptables-services | 入っていない |
 | SSM Agent | 入れていない（最初の確認のときは入れていたが、今のインスタンスに合わせて外した） |
 | SSH | `centos` で鍵を使ってログインでき、`sudo` をパスワードなしで使える。パスワードでのログインと root でのログインは拒否される（`Permission denied (publickey,...)`）。`openssh-server` 7.4p1 |
 | Ruby（ログインのシェル） | `ruby 2.7.7p221 (2022-11-24 revision 168ec2b1e5) [aarch64-linux]`（rbenv の shims。今のインスタンスと、アーキテクチャ以外は同じ表示） |

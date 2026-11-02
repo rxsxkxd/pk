@@ -15,6 +15,7 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 | ドキュメント | 内容 |
 |---|---|
 | [手順](./steps.md) | **作業の手順の正本**。確定した内容、フェーズの分け方、流れ、各コマンドの使い方、バックアップの確認、元に戻す方法、手元での試し方 |
+| [踏み台サーバーから入れるコマンド](./bastion-install-commands.md) | 踏み台サーバーから SSH（`ssh ... 'bash' < ./command/<ステップ>.sh`）で入れるときの、iptables・ipset のインストールと設定のコマンドをステップごとにまとめたもの。どのステップも、実行するコマンドを並べただけ（ipset を入れる → 空の集合を作る → 一覧を入れる → ルールを入れる → 再起動の後も残す）。日本の IPv4・IPv6 の範囲の一覧は踏み台で作る。IPv6 の分は別のファイル（`*-ipv6.sh`） |
 | [運用の手順](./operations.md) | **入れて遮断を有効にした後**の運用。状態を見る、許可する IP を足す・消す、日本の IP の範囲を新しくする、「つながらない」と言われたとき、一時的に外す・戻す、再起動と AMI から作った台、決めること。道具（`install`・`enable`）は有効にした後の台には使えないので、インスタンスの中のスクリプトを SSM の Run Command で流す |
 | [iptables と ipset の基本](./iptables-ipset-basics.md) | iptables と ipset **そのもの**の説明。表とチェーン、ルールの評価のされ方、行き先と条件、接続の追跡と port-guard への影響、集合の型とコマンド、中身の入れ替え（swap）、再起動の後に残す方法、ほかの仕組み（セキュリティグループ・firewalld・Docker・IPv6）との関係 |
 | [install・enable の処理の流れ（sh 版・Ruby 版）](./install-enable-flow.md) | 機能を絞った sh 版（`sh/`）と Ruby 版（`rb/`）の、コマンドの中の処理の流れ（Mermaid）と、Python 版との違い。未検証 |
@@ -67,6 +68,7 @@ python3 -m unittest discover -s tests
 | `rb/` | Ruby 版（`install.rb`・`enable.rb`・`port_guard.rb`・`lib.rb`。sh 版と同じく SSM の Run Command だけ。標準のライブラリだけで、書き方の確認の rubocop だけ `Gemfile` で入れる）。[処理の流れ](./install-enable-flow.md)。未検証 |
 | [`al2-instance/`](./al2-instance/README.md) | 今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンスを手元で再現する Docker の定義。道具を試す相手にする（フェーズ 1 の ssm-setup の `ssm-agent` からも使う）。開発用のアカウントの、本番とは別の VPC に EC2 として作るための [EC2 Image Builder の定義](./al2-instance/image-builder/README.md)（下書き・未検証）も置いている |
 | [`outside-probe/`](./outside-probe/docker/README.md) | 海外からの確認の拠点（チェック用のクライアント。AL2023）の定義。`port-guard-probe`（確認の処理）、[Docker の定義](./outside-probe/docker/README.md)（手元で試す用）、[EC2 Image Builder の定義](./outside-probe/image-builder/README.md)（別のリージョンで使う AMI） |
+| [`samples/`](./samples/apnic-jp-20261102/README.md) | 手順の検証に使ったサンプル。`apnic-jp-20261102/` は、2026-11-02 の APNIC の統計から Python で作った日本の IPv4・IPv6 の範囲の一覧（`jp-ipv4.txt` 4,738 件・`jp-ipv6.txt` 766 件）と、作った処理 `make_jp_lists.py`。対象のサーバーに入れる一覧は、作業のときに取り直す |
 
 ## 関連ドキュメント
 

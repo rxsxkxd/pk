@@ -8,7 +8,6 @@ from port_guard_rollout.ssh import SshClient, SshResult, parse_output
 
 CLEAN_STATE = {
     "os": "Amazon Linux release 2 (Karoo)", "systemd": "running",
-    "firewalld_installed": "no", "firewalld_enabled": "none", "firewalld_active": "unknown",
     "iptables_services_installed": "no", "iptables_enabled": "none",
     "ipset_installed": "no", "ipset_sets": "", "iptables_other_rules": "0",
     "port_guard_jump": "0", "port_guard_installed": "no", "python3": "yes", "docker_active": "inactive",
@@ -72,8 +71,6 @@ class ClassifyTest(unittest.TestCase):
 
     def test_blockers(self):
         cases = {
-            "firewalld が動いている": {"firewalld_active": "active"},
-            "firewalld が起動時に有効": {"firewalld_enabled": "enabled"},
             "iptables のサービス": {"iptables_enabled": "enabled"},
             "すでに有効": {"port_guard_jump": "1"},
             "既存の iptables のルール": {"iptables_other_rules": "3"},
@@ -124,7 +121,7 @@ class RunTest(unittest.TestCase):
         self.ssh = FakeSsh(
             checks={
                 "host1": result(CLEAN_STATE),
-                "host2": result({**CLEAN_STATE, "firewalld_active": "active"}),
+                "host2": result({**CLEAN_STATE, "iptables_enabled": "enabled"}),
                 "host3": result(CLEAN_STATE),
             },
             installs={"host3": result(returncode=1, stderr="curl: (6) Could not resolve host",
@@ -145,7 +142,7 @@ class RunTest(unittest.TestCase):
         output = self.out.getvalue()
         self.assertIn("完了: 日本の範囲 3500 件", output)
         self.assertIn("「日本の IP の範囲の取得と、集合の作成」で失敗", output)
-        self.assertIn("firewalld が動いている", output)
+        self.assertIn("iptables のサービスが起動時に有効になっている", output)
 
     def test_check_only_and_decline_do_not_install(self):
         self.assertEqual(self.run_install(check_only=True), 0)

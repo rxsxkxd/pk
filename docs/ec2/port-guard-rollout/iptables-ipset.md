@@ -56,7 +56,7 @@ APNIC の統計の 1 行は `apnic|JP|ipv4|1.0.16.0|4096|20110412|allocated` の
 
 ## 事前の確認: すでに入っているか・有効になっているか
 
-iptables ＋ ipset、firewalld、Session Manager は、入っていない前提で道具を作っている（道具の確認の処理も同じことを見る）。ただし、運用中のインスタンスによっては、誰かが入れて有効にしている可能性がある。**手を入れる前に、インスタンスごとに次の確認をする**。どのコマンドも読み取りだけで、設定は変えない。
+iptables ＋ ipset、Session Manager は、入っていない前提で道具を作っている（道具の確認の処理も同じことを見る）。ただし、運用中のインスタンスによっては、誰かが入れて有効にしている可能性がある。**手を入れる前に、インスタンスごとに次の確認をする**。どのコマンドも読み取りだけで、設定は変えない。
 
 ### 「有効」の見分け方
 
@@ -67,11 +67,11 @@ iptables ＋ ipset、firewalld、Session Manager は、入っていない前提�
 | 入っている | パッケージがある | `rpm -q <パッケージ>` |
 | 起動時に有効 | 再起動のときに自動で動き出す | `systemctl is-enabled <ユニット>` が `enabled`（`disabled` なら自動では動かない、`masked` なら起動できないようにされている） |
 | 今動いている | 今この時点で動いている | `systemctl is-active <ユニット>` が `active`（`inactive` なら止まっている） |
-| ルールが効いている | カーネルにルールや集合が入っている | `iptables -S`、`ipset list`、`firewall-cmd --list-all` の中身。**サービスが入っていなくても、手でルールを入れていれば効いている** |
+| ルールが効いている | カーネルにルールや集合が入っている | `iptables -S`、`ipset list` の中身。**サービスが入っていなくても、手でルールを入れていれば効いている** |
 
 | ずれ | 起きること |
 |---|---|
-| 起動時に有効だが、今は止まっている | **次の再起動で動き出し、ポートが閉じる**ことがある（特に firewalld と、`iptables-services` の既定の設定） |
+| 起動時に有効だが、今は止まっている | **次の再起動で動き出し、ポートが閉じる**ことがある（特に `iptables-services` の既定の設定） |
 | 今は動いているが、起動時に有効ではない | 再起動するとルールが消える |
 | サービスはないが、ルールが入っている | 誰かが手で入れたか、ほかのソフトウェア（Docker など）が入れたもの。再起動で消えるか、別の仕組みで入れ直されている |
 
@@ -87,10 +87,10 @@ unit_state() {
 }
 
 section 'パッケージ'
-rpm -q iptables iptables-services ipset ipset-service firewalld amazon-ssm-agent
+rpm -q iptables iptables-services ipset ipset-service amazon-ssm-agent
 
 section 'サービス（起動時に有効か / 今動いているか）'
-for unit in iptables ip6tables ipset firewalld amazon-ssm-agent docker fail2ban; do unit_state "$unit"; done
+for unit in iptables ip6tables ipset amazon-ssm-agent docker fail2ban; do unit_state "$unit"; done
 
 section 'iptables（今カーネルに入っているルール）'
 iptables -V
@@ -102,19 +102,6 @@ section 'ipset（今カーネルに入っている集合）'
 if command -v ipset >/dev/null; then ipset list -t; else echo 'ipset のコマンドなし'; fi
 ls -l /etc/sysconfig/ipset 2>&1
 echo "--- iptables から参照している集合"; iptables -S | grep -- '--match-set' || echo 'なし'
-
-section 'firewalld'
-if command -v firewall-cmd >/dev/null; then
-  firewall-cmd --state
-  if firewall-cmd --state >/dev/null 2>&1; then
-    firewall-cmd --get-active-zones
-    firewall-cmd --list-all
-    firewall-cmd --get-ipsets
-    firewall-cmd --direct --get-all-rules
-  fi
-else
-  echo 'firewall-cmd のコマンドなし'
-fi
 
 section 'カーネルのモジュール'
 lsmod | grep -E '^(ip_tables|ip6_tables|iptable_|ip_set|xt_set|nf_tables|nf_conntrack) ' || echo 'なし'
@@ -136,7 +123,6 @@ EOS
 |---|---|---|
 | iptables | `iptables-services` が「インストールされていない」。`iptables -S` が `-P INPUT ACCEPT`・`-P FORWARD ACCEPT`・`-P OUTPUT ACCEPT` の 3 行だけ（ほかの表も同様） | `-A` で始まる行がある（ルールが効いている）。`iptables` のユニットが `enabled` で、`/etc/sysconfig/iptables` がある（再起動のときにそのファイルのルールが入る。既定の内容は SSH 以外を拒否する） |
 | ipset | `ipset` のコマンドがないか、`ipset list -t` が何も表示しない | 集合がある。iptables から `--match-set` で参照されている。`ipset` のユニットが `enabled`（再起動のときに `/etc/sysconfig/ipset` から集合が入る） |
-| firewalld | `firewalld` が「インストールされていない」、または `firewall-cmd --state` が `not running` で、ユニットが `disabled` | `running`（ゾーンで許可していないポートは閉じている。`--list-all` で許可しているサービスとポートを見る）。**ユニットが `enabled` で今は `not running`**（次の再起動で動き出す） |
 | ほかに iptables を触るもの | `docker`・`fail2ban` のユニットがない | Docker は `nat` の表などに自分のルールを入れる。fail2ban は遮断のルールを足す。どちらも、自前のルールと並べて動かすときに確かめる |
 | カーネルのモジュール | — | `nf_tables` が読み込まれていれば、nftables のルールが入っている可能性がある（`sudo nft list ruleset` で見る。コマンドがなければ使われていない） |
 
@@ -264,12 +250,12 @@ EC2 Instance Connect は 22 番の受信が要るので、全閉じでは使え�
 
 #### インストールしただけで動き出すか
 
-`yum install` では、普通はサービスは**起動しない**。ただし、パッケージによっては**入れただけで「起動時に有効」になる**ことがある（systemd の preset という仕組み）。たとえば firewalld が「起動時に有効、今は止まっている」状態になると、**次の再起動で動き出し、ポートが閉じる**。AL2 の firewalld・`iptables-services`・`ipset-service` がそうなるかは確かめていないので、**入れた直後に必ず状態を見る**。
+`yum install` では、普通はサービスは**起動しない**。ただし、パッケージによっては**入れただけで「起動時に有効」になる**ことがある（systemd の preset という仕組み）。たとえば `iptables-services` が「起動時に有効、今は止まっている」状態になると、**次の再起動で動き出し、既定の設定で SSH 以外の受信が拒否される**。AL2 の `iptables-services`・`ipset-service` がそうなるかは確かめていないので、**入れた直後に必ず状態を見る**。
 
 ```bash
 # 入れた直後に見る（起動時に有効か / 今動いているか）
-systemctl is-enabled firewalld iptables ip6tables ipset amazon-ssm-agent
-systemctl is-active  firewalld iptables ip6tables ipset amazon-ssm-agent
+systemctl is-enabled iptables ip6tables ipset amazon-ssm-agent
+systemctl is-active  iptables ip6tables ipset amazon-ssm-agent
 ```
 
 意図せず `enabled` になっていたら、使わないものは `systemctl disable <ユニット>` で戻す。
@@ -291,7 +277,7 @@ systemctl is-active  firewalld iptables ip6tables ipset amazon-ssm-agent
 ```bash
 sudo iptables -S PORT_GUARD                   # ルールが戻っているか
 sudo ipset list -t                            # 集合が戻っているか（件数）
-systemctl is-active port-guard firewalld amazon-ssm-agent
+systemctl is-active port-guard amazon-ssm-agent
 sudo journalctl -b -u port-guard              # 起動時の適用の記録
 ```
 

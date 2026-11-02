@@ -40,7 +40,7 @@
 | 段 | どのインスタンスか | 確かめること |
 |---|---|---|
 | `validate`（ビルド） | ビルド用のインスタンス | Apache の版、MPM、`mod_ssl` が何かの libssl を使うこと、`/health` の Ruby・OpenSSL・Rails の版。Ruby の OpenSSL と Passenger の版は、ログに出すだけ（確かめない） |
-| `test` | できた AMI から新しく起動したインスタンス | **版は見ない**: `httpd` が動いていること、80・443 番の `/health` が 200 を返すこと、ipset・iptables-services・firewalld が入っていないこと |
+| `test` | できた AMI から新しく起動したインスタンス | **版は見ない**: `httpd` が動いていること、80・443 番の `/health` が 200 を返すこと、ipset・iptables-services が入っていないこと |
 
 細かい版の確認は、実際にビルドとテストを流したときに落ちたので緩めた（2026-10-29）。`validate` の 3 つ（`mod_ssl` の `libssl.so.10`、Ruby の OpenSSL、Passenger の版）は、ビルドを通すために利用者の環境で緩めたものを取り込んだ。`test` は `mod_ssl` の `libssl.so.10` の確認で落ちた。`mod_ssl` が `libssl.so.10`（OpenSSL 1.0.2k）を使っていない理由は確かめていない（上の「起動のときの更新」のほか、x86_64 の `mod_ssl` が手元の arm64 と違う作りの可能性もある）。port-guard を試すのに要るのは、80・443 番で応答することと、ipset などが入っていないことなので、版の違いは問題にしない。本番の版にそろえて試したくなったら、ビルドで `yum-plugin-versionlock` を使って `httpd`・`httpd-tools`・`httpd-devel`・`mod_ssl`・`mod_http2` を固定する（まだ入れていない）。
 

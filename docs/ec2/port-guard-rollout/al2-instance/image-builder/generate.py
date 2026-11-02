@@ -60,7 +60,7 @@ phases:
   - name: build
     steps:
       # Apache は版を指定して入れる。mod_http2 は Apache と別の版の番号なので、2.4.56 と組み合わせられる版を指定する。
-      # iptables のコマンドは入れ、ipset・iptables-services・firewalld は入れない（今のインスタンスに合わせる）
+      # iptables のコマンドは入れ、ipset・iptables-services は入れない（今のインスタンスに合わせる）
       - name: InstallPackages
         action: ExecuteBash
         inputs:
@@ -159,7 +159,7 @@ phases:
             - ldd /usr/lib64/httpd/modules/mod_ssl.so | grep -F libssl
             - "sudo -u centos -H /home/centos/.rbenv/versions/{{{{ RubyVersion }}}}/bin/ruby -ropenssl -e 'puts OpenSSL::OPENSSL_LIBRARY_VERSION' || true"
             - "sudo -u centos -H /home/centos/.rbenv/versions/{{{{ RubyVersion }}}}/bin/passenger-config --version || true"
-            - "! rpm -q ipset iptables-services firewalld"
+            - "! rpm -q ipset iptables-services"
 """
 
 app_steps = []
@@ -236,7 +236,7 @@ phases:
             - systemctl is-active httpd
             - curl -fsS -o /dev/null -w '%{{http_code}}' http://localhost/health | grep -Fx 200
             - curl -fsSk -o /dev/null -w '%{{http_code}}' https://localhost/health | grep -Fx 200
-            - "! rpm -q ipset iptables-services firewalld"
+            - "! rpm -q ipset iptables-services"
 """
 
 template = f"""AWSTemplateFormatVersion: "2010-09-09"

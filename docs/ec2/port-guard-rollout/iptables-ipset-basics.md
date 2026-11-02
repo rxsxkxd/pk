@@ -134,7 +134,7 @@ port-guard のルールは接続の追跡を使っていない（`--ctstate` の
 | 方法 | 内容 | port-guard での扱い |
 |---|---|---|
 | `iptables-services` | `iptables.service` が、起動時に `/etc/sysconfig/iptables` を読み込む（`service iptables save` で今のルールを保存）。**既定の中身は SSH 以外の受信を拒否する** | 使わない（入っていて有効なら、`install` が止める） |
-| firewalld | ゾーンとサービスで設定する別の仕組み。動き出すと、手で入れたルールを置き換える | 使わない（動いている・起動時に有効なら、`install` が止める） |
+| firewalld | ゾーンとサービスで設定する別の仕組み。動き出すと、手で入れたルールを置き換える | 使わない |
 | 自前の systemd のユニット | 起動時にスクリプトでルールを入れ直す | **これを使う**（`port-guard.service` が `port-guard-apply` を呼ぶ）。ルールの中身はファイル（`/etc/port-guard/`）から毎回作るので、保存の操作が要らない |
 
 ## ipset

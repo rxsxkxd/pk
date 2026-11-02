@@ -8,7 +8,6 @@ from port_guard_rollout.ssh import SshResult, parse_output
 
 READY = {
     "os": "Amazon Linux release 2 (Karoo)", "systemd": "running",
-    "firewalld_installed": "no", "firewalld_enabled": "none", "firewalld_active": "unknown",
     "iptables_services_installed": "no", "iptables_enabled": "none", "ipset_installed": "yes",
     "ipset_sets": "port_guard_jp,port_guard_allow", "iptables_other_rules": "0", "port_guard_jump": "0",
     "port_guard_installed": "yes", "python3": "yes", "docker_active": "inactive",

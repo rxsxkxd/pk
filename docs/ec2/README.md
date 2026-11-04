@@ -119,7 +119,8 @@ docs/ec2/
 │       ├── access-restriction-rollout-script-design.md # 設計: 複数台に入れるスクリプト（検討の経緯。確定した手順は port-guard-rollout/steps.md）
 │       ├── firewalld-overview.md          # 補足: firewalld とは何か（利点と、向いている場面）
 │       ├── access-restriction-apache.md       # 暫定対応: Apache で国内だけに絞る（mod_maxminddb）
-│       └── access-restriction-rails-app.md    # 暫定対応: アプリ（Rails 4.2）で国内だけに絞る（Rack::Attack）
+│       ├── access-restriction-rails-app.md    # 暫定対応: アプリ（Rails 4.2）で国内だけに絞る（Rack::Attack）
+│       └── access-restriction-alb-cloudfront.md # 検討: ロードバランサー・CloudFront を前に置くときの国での絞り込み（今は置いていない）
 │
 └── samples/
     └── nginx-passenger-rails/         # 学習用サンプル（nginx + Passenger + Rails の CloudFormation。リリースの仕組みとは無関係）

@@ -2,7 +2,7 @@
 
 > 位置付け: 今の環境（Amazon Linux 2・Apache 2.4.56・Passenger・Rails 4.2・Ruby 2.7.7）に入れる**暫定対応**の検討。AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../../initial-image-build/existing-system-rebuild-on-al2023.md)）とは別に考える。**動かして確かめてはいない**。
 >
-> 同じ要件のほかの層: [OS（iptables ＋ ipset、または firewalld）で絞る](./access-restriction-os-firewall.md)、[アプリ（Rails）で絞る](./access-restriction-rails-app.md)
+> 同じ要件のほかの層: [OS（iptables ＋ ipset、または firewalld）で絞る](./access-restriction-os-firewall.md)、[アプリ（Rails）で絞る](./access-restriction-rails-app.md)、[ロードバランサー・CloudFront を前に置くとき](./access-restriction-alb-cloudfront.md)
 >
 > 作成日: 2026-10-28
 

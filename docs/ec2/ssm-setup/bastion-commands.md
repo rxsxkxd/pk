@@ -10,50 +10,50 @@
 
 | 項目 | 内容 |
 |---|---|
-| 2 種類のファイル | **`aws/`**: AWS の API を呼ぶ（インスタンスプロファイルの関連付け、登録と接続の確認、バックアップ）。AWS CLI と権限がある場所（作業者の PC か、踏み台サーバー）で、`bash aws/<ステップ>.sh <インスタンスの ID>` の形で流す。**`command/`**: 対象のサーバーの中で行う（SSM Agent の確認と導入）。踏み台サーバーから `ssh ... centos@server 'bash' < ./command/<ステップ>.sh >> ./output/result.txt` で流す |
-| 複数台 | `aws/` は 1 台ずつ（インスタンスの ID を引数で渡す）。`command/` は、今の当て込みのスクリプトで |
+| 2 種類のファイル | **カレントのフォルダに置くもの**（`01`〜`10`）: AWS の API を呼ぶ（インスタンスプロファイルの関連付け、登録と接続の確認、バックアップ）。踏み台サーバー（AWS CLI と権限があること）で、`bash <ステップ>.sh <インスタンスの ID>` の形で流す。**`command/ssm_setup/` に置くもの**（`11`・`12`）: 対象のサーバーの中で行う（SSM Agent の確認と導入）。踏み台サーバーから `ssh ... centos@server 'bash' < ./command/ssm_setup/<ステップ>.sh >> ./output/result.txt` で流す。`command/` の下には、対象のサーバーに送るファイルだけを置く（踏み台サーバーで実行するものはカレントのフォルダ） |
+| 複数台 | カレントのフォルダのものは 1 台ずつ（インスタンスの ID を引数で渡す）。`command/ssm_setup/` のものは、今の当て込みのスクリプトで |
 | 認証情報・リージョン | AWS CLI の設定（`AWS_PROFILE`・`AWS_REGION` など）をそのまま使う |
 | インスタンスプロファイル | `AmazonSSMManagedInstanceCore` を付けたロールと、それを入れたインスタンスプロファイルを、先に用意しておく（ここでは作らない。既定の名前は `port-guard-ssm`） |
 | すでにロールがある台 | 何もしない（ロールの付け替えも、そのロールに権限を足すこともしない） |
-| 実行する人（`command/`） | `centos`。root が要る操作は `sudo -n`（パスワードを聞かれる設定なら、待たずに失敗する） |
+| 実行する人（`command/ssm_setup/`） | `centos`。root が要る操作は `sudo -n`（パスワードを聞かれる設定なら、待たずに失敗する） |
 
 ### 流れ
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "16px"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 40}}}%%
 flowchart TD
-    A1["aws/01-check.sh<br>インスタンスの存在・ロールの状態・SSM の登録を見る"]
-    A1 -->|ロールがない| A2["aws/02-attach-role.sh<br>ロールの付与"]
+    A1["01-check.sh<br>インスタンスの存在・ロールの状態・SSM の登録を見る"]
+    A1 -->|ロールがない| A2["02-attach-role.sh<br>ロールの付与"]
     A1 -->|ロールがある| A3
-    A2 --> A3["aws/03-check-permission.sh<br>権限状態の確認（AmazonSSMManagedInstanceCore）"]
-    A3 --> A4["（数分待つ）aws/04-check-online.sh<br>SSM の登録が Online か"]
-    A4 -->|Online| A5["aws/05-check-connect.sh<br>Run Command で echo が返るか"]
-    A4 -->|Online でない| B0["aws/10-backup.sh<br>バックアップ（AMI）"]
-    B0 --> B1["command/11-agent-check.sh（SSH）<br>SSM Agent の状態を見る"]
-    B1 --> B2["command/12-agent-install.sh（SSH）<br>SSM Agent を入れる・有効にする・起動し直す"]
+    A2 --> A3["03-check-permission.sh<br>権限状態の確認（AmazonSSMManagedInstanceCore）"]
+    A3 --> A4["（数分待つ）04-check-online.sh<br>SSM の登録が Online か"]
+    A4 -->|Online| A5["05-check-connect.sh<br>Run Command で echo が返るか"]
+    A4 -->|Online でない| B0["10-backup.sh<br>バックアップ（AMI）"]
+    B0 --> B1["command/ssm_setup/11-agent-check.sh（SSH）<br>SSM Agent の状態を見る"]
+    B1 --> B2["command/ssm_setup/12-agent-install.sh（SSH）<br>SSM Agent を入れる・有効にする・起動し直す"]
     B2 --> A4
     A5 -->|返る| OK["SSM で入れる<br>→ port-guard-rollout へ"]
     A5 -->|返らない| M["手で直す<br>（通り道・権限・SSM Agent の版を見る）"]
 ```
 
-| ステップ | 種類 | ファイル | すること | 変えるもの |
+| ステップ | どこで実行するか | ファイル | すること | 変えるもの |
 |---|---|---|---|---|
-| 1 | AWS | `aws/01-check.sh` | インスタンスの存在、ロールの状態、SSM の登録を見る | なし |
-| 2 | AWS | `aws/02-attach-role.sh` | ロールがない台に、インスタンスプロファイルを関連付ける | 関連付け |
-| 3 | AWS | `aws/03-check-permission.sh` | 関連付けたロールに `AmazonSSMManagedInstanceCore` が付いているか | なし |
-| 4 | AWS | `aws/04-check-online.sh` | SSM の登録が `Online` か（関連付けから数分置いてから） | なし |
-| 5 | AWS | `aws/05-check-connect.sh` | Run Command で `echo` が返るか（実際に入れるか） | なし（コマンドの履歴は AWS の側に残る） |
-| 10 | AWS | `aws/10-backup.sh` | 4 で `Online` にならない台だけ、AMI を作る（再起動しない） | AMI |
-| 11 | SSH | `command/11-agent-check.sh` | SSM Agent の有無・動作、インスタンスプロファイルが見えるか、AWS の窓口に届くか | なし |
-| 12 | SSH | `command/12-agent-install.sh` | SSM Agent を入れて（なければ）、起動時に有効にして、起動し直す | パッケージ、サービス |
+| 1 | 踏み台サーバー（AWS CLI） | `01-check.sh` | インスタンスの存在、ロールの状態、SSM の登録を見る | なし |
+| 2 | 踏み台サーバー（AWS CLI） | `02-attach-role.sh` | ロールがない台に、インスタンスプロファイルを関連付ける | 関連付け |
+| 3 | 踏み台サーバー（AWS CLI） | `03-check-permission.sh` | 関連付けたロールに `AmazonSSMManagedInstanceCore` が付いているか | なし |
+| 4 | 踏み台サーバー（AWS CLI） | `04-check-online.sh` | SSM の登録が `Online` か（関連付けから数分置いてから） | なし |
+| 5 | 踏み台サーバー（AWS CLI） | `05-check-connect.sh` | Run Command で `echo` が返るか（実際に入れるか） | なし（コマンドの履歴は AWS の側に残る） |
+| 10 | 踏み台サーバー（AWS CLI） | `10-backup.sh` | 4 で `Online` にならない台だけ、AMI を作る（再起動しない） | AMI |
+| 11 | 対象のサーバー（踏み台サーバーから SSH） | `command/ssm_setup/11-agent-check.sh` | SSM Agent の有無・動作、インスタンスプロファイルが見えるか、AWS の窓口に届くか | なし |
+| 12 | 対象のサーバー（踏み台サーバーから SSH） | `command/ssm_setup/12-agent-install.sh` | SSM Agent を入れて（なければ）、起動時に有効にして、起動し直す | パッケージ、サービス |
 
 ほとんどの台は、SSM Agent が最初から入って動いていて、ロールがないだけと見込んでいる。そういう台は 1 → 2 → 3 → 4 → 5 で終わる。10〜12 は、4 で `Online` にならない台だけ。
 
-## 1. 状態を見る（`aws/01-check.sh`）
+## 1. 状態を見る（`01-check.sh`）
 
 ```bash
 #!/bin/bash
-# 使い方: bash aws/01-check.sh <インスタンスの ID>
+# 使い方: bash 01-check.sh <インスタンスの ID>
 # インスタンスの存在、ロール（インスタンスプロファイル）の状態、SSM の登録を見る（読み取りだけ）
 ID=$1
 echo "== $ID $(date '+%F %T') 01-check"
@@ -78,11 +78,11 @@ aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$ID" \
 | ロールがあり、登録が `Online` | 5 へ（そのロールで SSM が使えている） |
 | ロールがあり、登録が `Online` でない | 3 で、そのロールに `AmazonSSMManagedInstanceCore` が付いているかを見る。付いていなければ手で直す（すでにあるロールには、ここでは権限を足さない） |
 
-## 2. ロールを付与する（`aws/02-attach-role.sh`）
+## 2. ロールを付与する（`02-attach-role.sh`）
 
 ```bash
 #!/bin/bash
-# 使い方: bash aws/02-attach-role.sh <インスタンスの ID> [インスタンスプロファイルの名前（既定 port-guard-ssm）]
+# 使い方: bash 02-attach-role.sh <インスタンスの ID> [インスタンスプロファイルの名前（既定 port-guard-ssm）]
 # ロールがない台に、SSM 用のインスタンスプロファイルを関連付ける（再起動は要らない）
 set -euo pipefail
 ID=$1
@@ -103,11 +103,11 @@ aws ec2 associate-iam-instance-profile --instance-id "$ID" --iam-instance-profil
 | 再起動 | 要らない。関連付けは OS のディスクを変えない |
 | 戻し方 | `aws ec2 describe-iam-instance-profile-associations --filters Name=instance-id,Values=<ID>` で関連付けの ID を調べ、`aws ec2 disassociate-iam-instance-profile --association-id <関連付けの ID>` |
 
-## 3. 権限状態を確かめる（`aws/03-check-permission.sh`）
+## 3. 権限状態を確かめる（`03-check-permission.sh`）
 
 ```bash
 #!/bin/bash
-# 使い方: bash aws/03-check-permission.sh <インスタンスの ID>
+# 使い方: bash 03-check-permission.sh <インスタンスの ID>
 # 関連付けられたロールに AmazonSSMManagedInstanceCore が付いているか（読み取りだけ）
 set -euo pipefail
 ID=$1
@@ -124,13 +124,13 @@ aws iam list-attached-role-policies --role-name "$ROLE" --query 'AttachedPolicie
 
 最後の行に `AmazonSSMManagedInstanceCore` があればよい。なければ、そのロールでは SSM の登録ができない（独自のポリシーで足りていることもあるので、そのときは 4 で `Online` になるかを見る）。
 
-## 4. SSM の登録を見る（`aws/04-check-online.sh`）
+## 4. SSM の登録を見る（`04-check-online.sh`）
 
 関連付けの後、SSM Agent が新しい権限を拾って登録されるまで、数分かかることがある。少し時間を置いてから流す。
 
 ```bash
 #!/bin/bash
-# 使い方: bash aws/04-check-online.sh <インスタンスの ID>
+# 使い方: bash 04-check-online.sh <インスタンスの ID>
 # SSM の登録が Online か（読み取りだけ）
 ID=$1
 echo "== $ID $(date '+%F %T') 04-check-online"
@@ -143,11 +143,11 @@ aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$ID" \
 | `Online` | 5 へ |
 | 何も出ない（未登録）、`ConnectionLost` | 数分置いてもう一度。それでも変わらなければ、10 → 11 → 12（SSM Agent が入っていない・止まっている・権限を拾い直していない見込み） |
 
-## 5. 実際に入れるかを見る（`aws/05-check-connect.sh`）
+## 5. 実際に入れるかを見る（`05-check-connect.sh`）
 
 ```bash
 #!/bin/bash
-# 使い方: bash aws/05-check-connect.sh <インスタンスの ID>
+# 使い方: bash 05-check-connect.sh <インスタンスの ID>
 # Run Command で echo を 1 回だけ流し、返るかを見る（設定は変えない。コマンドの履歴は AWS の側に残る）
 set -euo pipefail
 ID=$1
@@ -170,13 +170,13 @@ aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$ID" \
 
 人がログインする経路（Session Manager）も確かめるなら、手元に session-manager-plugin を入れて `aws ssm start-session --target <インスタンスの ID>`。
 
-## 10. バックアップを取る（`aws/10-backup.sh`）
+## 10. バックアップを取る（`10-backup.sh`）
 
 11・12 はインスタンスの中を変えるので、その前に AMI を作る（再起動しない）。4 で `Online` にならない台だけ。
 
 ```bash
 #!/bin/bash
-# 使い方: bash aws/10-backup.sh <インスタンスの ID>
+# 使い方: bash 10-backup.sh <インスタンスの ID>
 # AMI を作る（再起動しない。完了は待たない）
 set -euo pipefail
 ID=$1
@@ -200,7 +200,7 @@ aws ec2 describe-images --image-ids <AMI の ID> --query 'Images[0].State' --out
 | タグ | `Purpose=ssm-setup-backup`（port-guard-rollout のバックアップ `port-guard-rollout-backup` とは分ける）、`SourceInstanceId` |
 | 片付け | 落ち着いたら、`Purpose=ssm-setup-backup` のタグで AMI とスナップショットを探して消す |
 
-## 11. SSM Agent の状態を見る（`command/11-agent-check.sh`）
+## 11. SSM Agent の状態を見る（`command/ssm_setup/11-agent-check.sh`）
 
 踏み台サーバーから SSH で流す（SSM がまだ使えないので）。読み取りだけ。
 
@@ -237,7 +237,7 @@ sudo -n tail -n 20 /var/log/amazon/ssm/amazon-ssm-agent.log
 | `iam/info` が `"Code" : "Success"` を返さない | インスタンスプロファイルが見えていない。2 を見直す（12 では直らない） |
 | 窓口がどれも `000` | インスタンスから AWS の窓口への送信の 443 番が通っていない（セキュリティグループ、ネットワーク ACL、経路、VPC エンドポイント）。手で直す（12 では直らない） |
 
-## 12. SSM Agent を入れる・有効にする・起動し直す（`command/12-agent-install.sh`）
+## 12. SSM Agent を入れる・有効にする・起動し直す（`command/ssm_setup/12-agent-install.sh`）
 
 ```bash
 #!/bin/bash
@@ -272,8 +272,8 @@ sudo -n tail -n 20 /var/log/amazon/ssm/amazon-ssm-agent.log
 | 確かめたこと | 結果 |
 |---|---|
 | 構文 | どのファイルも `bash -n` で通る（手元の bash 3.2。AL2 は bash 4.2） |
-| `command/` の 2 つを `bash < ファイル` の形で流す | 最後まで流れる（`sudo`・`yum`・`systemctl`・`curl`・`rpm`・`tail` は、呼ばれ方を記録するだけの偽物に置き換えた） |
-| `aws/` を流す | `aws` を、呼ばれ方を記録して決まった値を返す偽物に置き換えて流し、引数（`--filters`・`--query`・`--iam-instance-profile`・`--tag-specifications`）が狙いどおりに渡ることを確かめた |
+| `command/ssm_setup/` の 2 つを `bash < ファイル` の形で流す | 最後まで流れる（`sudo`・`yum`・`systemctl`・`curl`・`rpm`・`tail` は、呼ばれ方を記録するだけの偽物に置き換えた） |
+| カレントのフォルダの 6 つを流す | `aws` を、呼ばれ方を記録して決まった値を返す偽物に置き換えて流し、引数（`--filters`・`--query`・`--iam-instance-profile`・`--tag-specifications`）が狙いどおりに渡ることを確かめた |
 
 AWS の上で確かめたいこと: 各コマンドの `--query` が実際の応答から狙いの値を取り出せるか、`create-image` の `--tag-specifications` の書き方が通るか、`send-command` の後の 10 秒で結果が出るか。
 

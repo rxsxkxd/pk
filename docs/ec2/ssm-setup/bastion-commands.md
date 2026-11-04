@@ -215,9 +215,10 @@ systemctl is-enabled amazon-ssm-agent
 systemctl is-active amazon-ssm-agent
 
 # インスタンスのメタデータ（IMDSv2）: インスタンスプロファイルが見えるか、リージョン
-TOKEN=$(curl -s -m 5 -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
-curl -s -m 5 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/iam/info; echo
-REGION=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+IMDS=http://169.254.169.254   # インスタンスメタデータサービス（IMDS）の入り口。AWS が決めたアドレスで、公式の名前（DNS 名）はない
+TOKEN=$(curl -s -m 5 -X PUT $IMDS/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
+curl -s -m 5 -H "X-aws-ec2-metadata-token: $TOKEN" $IMDS/latest/meta-data/iam/info; echo
+REGION=$(curl -s -m 5 -H "X-aws-ec2-metadata-token: $TOKEN" $IMDS/latest/meta-data/placement/region)
 echo "リージョン: $REGION"
 
 # AWS の窓口に届くか（000 なら届いていない。それ以外の数字なら届いている）
@@ -261,7 +262,7 @@ sudo -n tail -n 20 /var/log/amazon/ssm/amazon-ssm-agent.log
 
 | 点 | 内容 |
 |---|---|
-| `< /dev/null` | 標準入力で送ったスクリプトの残りを `yum` が読んでしまわないように（[踏み台サーバーからコマンドを流す形](../port-guard-rollout/bastion-install-commands.md#踏み台サーバーからコマンドを流す形) の「標準入力で流すときの注意」） |
+| `< /dev/null` | 標準入力で送ったスクリプトの残りを `yum` が読んでしまわないように（[流し方](../port-guard-rollout/bastion-install-commands.md#流し方)） |
 | 再起動 | OS の再起動は要らない。SSM Agent のサービスを起動し直すだけ |
 | 戻し方 | 入れた SSM Agent を止めるなら `sudo systemctl disable --now amazon-ssm-agent`。最後の手段は 10 の AMI |
 

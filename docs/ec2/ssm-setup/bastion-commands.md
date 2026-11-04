@@ -261,7 +261,7 @@ sudo -n tail -n 20 /var/log/amazon/ssm/amazon-ssm-agent.log
 
 | 点 | 内容 |
 |---|---|
-| `< /dev/null` | 標準入力で送ったスクリプトの残りを `yum` が読んでしまわないように（[標準入力で送るときの注意](../port-guard-rollout/bastion-install-commands.md#標準入力で送るときの注意)） |
+| `< /dev/null` | 標準入力で送ったスクリプトの残りを `yum` が読んでしまわないように（[踏み台サーバーからコマンドを流す形](../port-guard-rollout/bastion-install-commands.md#踏み台サーバーからコマンドを流す形) の「標準入力で流すときの注意」） |
 | 再起動 | OS の再起動は要らない。SSM Agent のサービスを起動し直すだけ |
 | 戻し方 | 入れた SSM Agent を止めるなら `sudo systemctl disable --now amazon-ssm-agent`。最後の手段は 10 の AMI |
 

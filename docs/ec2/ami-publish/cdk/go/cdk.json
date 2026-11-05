@@ -1,0 +1,6 @@
+{
+  "app": "go run .",
+  "context": {
+    "config": "../../config/ami_publish.yml"
+  }
+}

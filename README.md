@@ -14,8 +14,11 @@
 | [`docs/st/`](docs/st/README.md) | 画像を外部の解析サーバーで検証し、チケットコードの QR を発行する API（Go / Lambda）と Vue の SPA、インフラ・CI/CD・E2E 一式 |
 | [`docs/rds_mysql_upgrade/`](docs/rds_mysql_upgrade/README.md) | RDS for MySQL 8.0 → 8.4 を Blue/Green Deployments で移行する手順書・Go のスクリプト・CI 定義一式 |
 | [`docs/ec2/`](docs/ec2/README.md) | Rails アプリのリリース用 EC2 から AMI と起動テンプレートを作り、本番インスタンスを構築する仕組みと設計 |
-| [`docs/ec2/ssm-setup/`](docs/ec2/ssm-setup/README.md) | 運用中の Amazon Linux 2 のインスタンスを SSM で入れる状態にする道具（IAM ロールの関連付け・SSM Agent の導入・接続の確認）。`port-guard-rollout` の前のフェーズ |
-| [`docs/ec2/port-guard-rollout/`](docs/ec2/port-guard-rollout/README.md) | 運用中のインスタンスの 80・443 番を国内と許可した IP だけに絞る設定（iptables + ipset）を、SSM で複数台にまとめて入れる道具（暫定対応） |
+| [`docs/ec2/ssm-setup/`](docs/ec2/ssm-setup/README.md) | 運用中の Amazon Linux 2 のインスタンスを SSM で入れる状態にする道具（IAM ロールの関連付け・SSM Agent の導入・接続の確認。Python 版と、機能を絞った Ruby 版・sh 版。バックアップは別のコマンド）。`port-guard-rollout` の前のフェーズ |
+| [`docs/ec2/port-guard-rollout/`](docs/ec2/port-guard-rollout/README.md) | 運用中のインスタンスの 80・443 番を国内と許可した IP だけに絞る設定（iptables + ipset）を、SSM で複数台にまとめて入れる道具（暫定対応。Python 版と、機能を絞った Ruby 版・sh 版。バックアップは別のコマンド） |
+| [`docs/ec2/sg-ssh-restrict/`](docs/ec2/sg-ssh-restrict/README.md) | セキュリティグループの 22 番（SSH）だけを許可する範囲に絞り、記録から元に戻せる Ruby の道具（未実行） |
+| [`docs/ec2/al2-update/`](docs/ec2/al2-update/README.md) | 運用中の AL2 のインスタンスの OS のパッケージを、SSM の Run Command で 1 台ずつまとめて更新する Ruby の道具（未実行） |
+| [`docs/ec2/api-access-sources/`](docs/ec2/api-access-sources/design.md) | port-guard を有効にする前に、Apache のアクセスログから API の送り元の IP を洗い出す道具の設計（未実装） |
 | [`docs/seq/`](docs/seq/README.md) | Lambda・EC2・ECS・CodeBuild を棚卸しして JSONL で出すツール群（シェル / Ruby / Python の 3 実装） |
 | [`docs/rr/`](docs/rr/DESIGN.md) | Rails 5 / Ruby 2.7 を Debian 13 で動かすための設計と Dockerfile の雛形（Ruby のベースイメージとアプリのイメージ） |
 | [`docs/app/integrated-management-system/`](docs/app/integrated-management-system/README.md) | テナント横断で DB を JOIN する統合管理システム（Rails 5）の整理と置き換えの検討メモ |

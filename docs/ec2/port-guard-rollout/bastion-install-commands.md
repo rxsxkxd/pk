@@ -167,6 +167,7 @@ echo "IPv4: $(wc -l < port_guard_whitelists/jp-ipv4.txt) 件、IPv6: $(wc -l < p
 | VPC とつながったほかのネットワーク（あれば） | VPC のピアリング（VPC 同士の接続）、VPN、Direct Connect（専用線）でつながった先から 80・443 番へ来る通信があれば、その範囲 |
 | 日本の外から受ける必要がある相手（あれば） | 海外の拠点、外部のサービス（決済などの通知）、海外からの外形監視など |
 | 同じリージョンのほかの EC2 から、公開のアドレスで来る通信（あれば） | AWS の公開のアドレスは、多くが米国の組織（ARIN）の登録で、東京リージョンのものでも日本の範囲の一覧にほとんど入らない。公開のアドレスで呼んでくる EC2 があれば、その Elastic IP を書く |
+| 同じリージョンの Lambda・Fargate から呼ばれる通信（あれば） | 送り元は、Lambda・Fargate が VPC の中にいるかと、サーバーのどのアドレスあてに接続するかで変わる。VPC の中からプライベートのアドレスあてなら VPC の範囲で通る。公開のアドレスあてなら NAT ゲートウェイの Elastic IP を書く。VPC に入れていない Lambda は送り元を固定できない。詳しくは [同じリージョンの Lambda・Fargate からサーバーを呼ぶとき、送り元はどこになるか](./access-sources-lambda-fargate.md) |
 
 `port_guard_whitelists/allow-ipv4.txt` の例:
 

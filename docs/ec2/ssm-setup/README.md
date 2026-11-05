@@ -13,7 +13,7 @@
 | ドキュメント | 内容 |
 |---|---|
 | [手順](./steps.md) | **作業の手順の正本**。フェーズの分け方、流れ、各コマンドの使い方、バックアップの確認、元に戻す方法、手元での試し方 |
-| [踏み台サーバーと AWS CLI で SSM を使えるようにするコマンド](./bastion-commands.md) | port-guard-rollout の [踏み台サーバーから入れるコマンド](../port-guard-rollout/bastion-install-commands.md) と同じ形。ステップごとに、実行するコマンドを並べただけのファイル（AWS の API を呼ぶものは踏み台サーバーのカレントのフォルダ、SSM Agent の確認と導入は踏み台サーバーからの SSH で `command/ssm_setup/`）。流れは道具と同じ（ロールの状態 → 付与 → 権限の確認 → 登録 → 実接続。Online にならない台だけバックアップ → SSM Agent） |
+| [作業者の PC の AWS CLI と踏み台サーバーで SSM を使えるようにするコマンド](./bastion-commands.md) | port-guard-rollout の [踏み台サーバーから入れるコマンド](../port-guard-rollout/bastion-install-commands.md) と同じ形。ステップごとに、実行するコマンドを並べただけのファイル（AWS の API を呼ぶもの（01〜10）は作業者のローカルの PC の、アカウントが有効な AWS CLI で。SSM Agent の確認と導入（11・12）は踏み台サーバーからの SSH で `command/ssm_setup/`）。流れは道具と同じ（ロールの状態 → 付与 → 権限の確認 → 登録 → 実接続。Online にならない台だけバックアップ → SSM Agent） |
 | [ssm-role・ssm-check の処理の流れ（sh 版・Ruby 版）](./role-check-flow.md) | 機能を絞った sh 版（`sh/`。50 行以内）と Ruby 版（`rb/`。rubocop の既定に合わせた）の、コマンドの中の処理の流れ（Mermaid）と、Python 版との違い。未検証 |
 
 ## 流れ

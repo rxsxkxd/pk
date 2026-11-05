@@ -15,7 +15,7 @@
 
 設定は、対象のサーバーの中の Linux が持つ通信の選り分けの仕組み（iptables と ipset）で行う。AWS の設定は変えない。
 
-**注意: Let's Encrypt の証明書を certbot で更新している台は、この手順を入れると、そのままでは証明書の更新が失敗する**。対応の方針は、後の「これから入れる運用の仕組み」の「A. Let's Encrypt の更新の間だけ 80 番を開ける」（まだ作っていない）。本番で絞り込みを有効にする前に、これを入れる。
+**注意: Let's Encrypt の証明書を certbot で更新している台は、この手順を入れると、そのままでは証明書の更新が失敗する**。対応は、[手順のドキュメント](./bastion-install-commands.md) のステップ 7（更新の間だけ 80 番を開ける hook）。設計の理由は、後の「これから入れる運用の仕組み」の「A. Let's Encrypt の更新の間だけ 80 番を開ける」。本番で絞り込みを有効にしたら、次の証明書の更新の前に、これを入れる。
 
 **前提: 対象のサーバーは、インターネットから直接 80・443 番を受けている**（ロードバランサー（ALB）や CloudFront を前に置いていない）。前に置くと、対象のサーバーから見た送り元が利用者ではなくなるので、この手順では国で絞れない（そのまま入れると、すべての通信が止まることもある）。前に置くときの考え方は [ロードバランサー・CloudFront を前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)。
 
@@ -164,15 +164,15 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 | `sudo -n sh -c '<コマンド> > <ファイル>'` | `>`（ファイルへの書き出し）も `root` の権限で行うための書き方。`sudo -n <コマンド> > <ファイル>` と書くと、書き出しは `centos` の権限で行われ、`/etc` などには書けない |
 | `sudo -n tee <ファイル> > /dev/null <<'EOF'` 〜 `EOF` | 間の行を、`root` の権限でファイルに書く（`tee` は受け取った中身をファイルに書くコマンド。画面への表示は `/dev/null` に捨てる） |
 
-## これから入れる運用の仕組み（方針を決めた段階。まだ作っていない）
+## これから入れる運用の仕組み（A は手順のステップ 7 に用意。B は方針を決めた段階でまだ作っていない）
 
-> 状態（2026-11-04）: 構成の方針を決めた段階。**スクリプト・設定のファイルはまだ作っていない**。この節のコマンドは、前提を確かめるための読み取りだけのもの。作ったら、ステップの形で[手順のドキュメント](./bastion-install-commands.md)に足す。
+> 状態（2026-11-05）: A（Let's Encrypt）は、スクリプトを [手順のドキュメント](./bastion-install-commands.md) のステップ 7 に用意した（対象のサーバーではまだ流していない）。B（一覧の定期の更新）は、構成の方針を決めた段階で、まだ作っていない。
 
 絞り込みを入れた後の運用で、次の 2 つが要る。
 
 | 要ること | なぜ要るか | 決めた方針 |
 |---|---|---|
-| A. Let's Encrypt の証明書の更新を通す | 絞り込みを入れると、証明書の更新が失敗する（下の A-1） | **certbot の更新の前後に動く処理（hook）で、更新している間だけ 80 番を開ける** |
+| A. Let's Encrypt の証明書の更新を通す | 絞り込みを入れると、証明書の更新が失敗する（下の A-1） | **certbot の更新の前後に動く処理（hook）で、更新している間だけ 80 番を開ける**。スクリプトは [手順のドキュメント](./bastion-install-commands.md) のステップ 7 に用意した（2026-11-05。手元の偽物のコマンドでだけ確かめた） |
 | B. 日本の範囲の一覧を定期に新しくする | APNIC の割り当ては少しずつ変わる（月に数件〜数十件）。古いままだと、新しく日本に割り当てられた範囲からの接続を捨てる | **踏み台サーバーで作って確かめた一覧を S3 に置き、各サーバーが取りに行って入れ替える**。定期の実行の仕方と、S3 を読む権限は、それぞれ 2 つの案を用意して、環境を見て決める |
 
 2 つは**処理をつなげず、時刻だけそろえる**（A は certbot が動く毎月 1 日・16 日の 4:00、B はその 30 分後の 4:30 など）。片方の失敗が、もう片方を巻き込まないようにするため。変更が起きる時刻はそろうので、何か起きたときに調べる時間帯は 1 つで済む。
@@ -232,7 +232,7 @@ hook が操作するのは、**カーネルのメモリーの中にある iptabl
 | カーネルの ipset の集合（`port_guard_jp`・`port_guard_allow` など） | 日本の範囲、許可する IP アドレス | 操作しない（許可の集合に「すべてのアドレス」を入れる形にすると、集合は 80・443 番の両方の判定に使われているので、443 番まで開いてしまう） |
 | ファイル（`/etc/port-guard/*.save`、`/etc/systemd/system/port-guard.service.d/*.conf`） | 起動時に入れ直すための保存と、コマンドの並び | 操作しない。差し込んだルールはどこにも保存しないので、再起動すると消える |
 
-コマンドの形（案。まだ作っていない）:
+コマンドの形（実際のスクリプトは [手順のドキュメント](./bastion-install-commands.md) のステップ 7。ここでは要点だけを抜き出している）:
 
 ```bash
 # 更新の前の処理（/etc/letsencrypt/renewal-hooks/pre/ に置くファイルの中身の案）
@@ -262,23 +262,9 @@ systemctl stop port-guard-acme-close.timer 2>/dev/null || true
 
 ルールは上から順に照合される。80 番は 1 番目のルールで通るので、`PORT_GUARD` まで行かない。443 番は 1 番目のルールに当たらないので、いつもどおり `PORT_GUARD` で絞られる。削除した後は、2 番目のルールだけに戻る。
 
-#### A-4. 前提を確かめる（読み取りだけ）
+#### A-4. 前提を確かめる
 
-hook の置き場所が効くのは、cron が **`certbot renew`** を呼んでいる場合。`certbot certonly ...` を直接呼んでいるなら、cron の行に `--pre-hook`・`--post-hook` を足す形に変わる。対象のサーバーで次を見て確かめる（ほかのステップと同じ形で流してよい）。
-
-```bash
-sudo -n crontab -l 2>&1                                          # root の cron（certbot の行があるか。renew か certonly か）
-sudo -n grep -rn certbot /etc/cron.d/ /etc/crontab 2>/dev/null || true
-sudo -n ls /etc/letsencrypt/renewal/ /etc/letsencrypt/renewal-hooks/*/ 2>&1   # 証明書ごとの設定と、すでにある hook
-sudo -n grep -h 'authenticator\|webroot_path\|_hook' /etc/letsencrypt/renewal/*.conf 2>/dev/null || true   # 確認の方式（webroot か）と、設定ずみの hook
-certbot --version 2>&1 || true
-```
-
-| 見ること | 期待する内容 |
-|---|---|
-| cron の行 | `certbot renew`（`00 04 01 * *` と `00 04 16 * *` の 2 行の見込み） |
-| `authenticator` | `webroot`（HTTP-01 の確認） |
-| すでにある hook | Apache を読み直す処理（`deploy_hook` など）があれば、そのまま残す（今回足すのは pre と post だけ） |
+hook の置き場所（`/etc/letsencrypt/renewal-hooks/`）が効くのは、証明書の更新を **`certbot renew`** で行っている場合。確かめるコマンドと、結果の見方は、[手順のドキュメント](./bastion-install-commands.md) のステップ 7-1（`07-letsencrypt-check.sh`）。
 
 #### A-5. ほかの方法（採らない）
 

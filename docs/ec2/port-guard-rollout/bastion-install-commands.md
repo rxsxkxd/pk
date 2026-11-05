@@ -4,7 +4,7 @@
 >
 > このドキュメントは**手順とコマンド、各ステップの説明、結果の見方**を書いている。長い前置き（Linux・iptables・ipset・systemd などを知らない人向けの仕組みの説明）、運用の仕組みの設計（Let's Encrypt の更新・一覧の定期の更新）、手元で確かめたこと、自動化の道具との違いは [補足](./bastion-install-supplement.md) にまとめている。各ステップの説明と、コマンドの 1 行ずつの意味は、このドキュメントの各ステップにある。
 >
-> 状態: 対象のサーバー（Amazon Linux 2）ではまだ流していない。Let's Encrypt の更新への対応と、一覧の定期の更新は、方針を決めた段階でまだ作っていない（[補足](./bastion-install-supplement.md) の「これから入れる運用の仕組み」）。
+> 状態: 対象のサーバー（Amazon Linux 2）ではまだ流していない。Let's Encrypt の更新への対応はステップ 7 に用意した（手元の偽物のコマンドでだけ確かめた）。一覧の定期の更新は、方針を決めた段階でまだ作っていない（[補足](./bastion-install-supplement.md) の「これから入れる運用の仕組み」）。
 >
 > 更新日: 2026-11-04
 
@@ -17,7 +17,7 @@
 
 | 注意 | 内容 |
 |---|---|
-| **Let's Encrypt の証明書の更新** | certbot で証明書を更新している台は、この手順を入れると、そのままでは更新が失敗する（海外からの確認の接続が捨てられる）。**本番で絞り込みを有効にする前に**、[補足](./bastion-install-supplement.md) の「A. Let's Encrypt の更新の間だけ 80 番を開ける」を入れる（まだ作っていない） |
+| **Let's Encrypt の証明書の更新** | certbot で証明書を更新している台は、この手順を入れると、そのままでは更新が失敗する（海外からの確認の接続が捨てられる）。**ステップ 7（更新の間だけ 80 番を開ける hook）もあわせて流す** |
 | **ロードバランサー・CloudFront** | 対象のサーバーが、インターネットから直接 80・443 番を受けていること。前に置くと、この手順では国で絞れない（すべての通信が止まることもある）。前に置くときは [ロードバランサー・CloudFront を前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md) |
 
 ## 流し方
@@ -37,7 +37,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 | 項目 | 内容 |
 |---|---|
 | 流し方 | 上の「流し方」。複数台へは、踏み台サーバーにある今のスクリプトで |
-| ファイルの置き場所（踏み台サーバー） | **`command/port_guard/` の下には、対象のサーバーに送るファイルだけを置く**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、一覧を新しくしたときの保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するもの（ステップ 0-1 の `make-jp-lists.sh`、ステップ 3-1 の 1 行ずつのコマンド）は、カレントのフォルダに置く・カレントのフォルダで実行する。一覧は `port_guard_whitelists/` |
+| ファイルの置き場所（踏み台サーバー） | **`command/port_guard/` の下には、対象のサーバーに送るファイルだけを置く**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくしたときの保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するもの（ステップ 0-1 の `make-jp-lists.sh`、ステップ 3-1 の 1 行ずつのコマンド）は、カレントのフォルダに置く・カレントのフォルダで実行する。一覧は `port_guard_whitelists/` |
 | 日本の範囲の一覧を作る場所 | **踏み台サーバー**（IPv4 と IPv6）。対象のサーバーは APNIC に取りに行かない（対象のサーバーに `curl`・`python3` は要らない） |
 | 一覧の渡し方 | 一覧を、ステップ 3 のファイルの中に `ipset` に読ませる行（`add <集合> <範囲>`）として並べて送る。そのファイルは、踏み台サーバーで一覧から 1 行のコマンドで作る |
 | 実行する人 | `centos`。`root` の権限が要るコマンドは `sudo -n` |
@@ -63,6 +63,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 |---|---|---|
 | **設定だけ（永続化しない）** | 0 → 1 → 2 → 3 → 4 | 集合もルールも消えて、80・443 番の絞り込みが外れる（元の状態に戻る）。もう一度効かせるには、ステップ 2 から流し直す（下の「注意」） |
 | **永続化する** | 0 → 1 → 2 → 3 → 4 → 5 → 6 | 起動のたびに、サービスが集合とルールを入れ直す（絞り込みが効いたまま） |
+| **Let's Encrypt の証明書を certbot で更新している台**（上のどちらでも） | 上に加えて 7 | 証明書の更新の間だけ 80 番が開く。**ステップ 4 を流したら、次の証明書の更新の前に 7 を流す**（流さないと更新が失敗する） |
 
 - 設定だけは、試しに入れて様子を見るとき向け。問題があっても、再起動すれば元に戻る
 - 永続化するときも、ステップ 4 まで流して結果（日本からつながる・海外から止まる）を確かめてから、ステップ 5・6 を流す
@@ -78,6 +79,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 | 4 | 対象のサーバー | `command/port_guard/04-rules-ipv4.sh`（IPv6 は `-ipv6.sh`） | 対象のサーバーに iptables のルールを入れる | **ここから 80・443 番の絞り込みが効く**（再起動すると消える） |
 | 5 | 対象のサーバー | `command/port_guard/05-persist-ipv4.sh`（IPv6 は `-ipv6.sh`） | 対象のサーバーで、ipset の集合をファイルに保存し、起動時に入れ直すコマンドの並びを置く | 再起動するとまだ消える（ステップ 6 で有効にする） |
 | 6 | 対象のサーバー | `command/port_guard/06-service.sh` | 対象のサーバーに、起動時に動くサービス `port-guard.service` を置いて有効にする | **再起動の後も効く** |
+| 7 | 対象のサーバー（certbot で証明書を更新している台だけ） | `command/port_guard/07-letsencrypt-check.sh`・`07-letsencrypt-hooks.sh` | certbot の hook を置き、証明書の更新の間だけ 80 番を開けるようにする | 証明書の更新の間（数秒〜数分）だけ、80 番がどこからでも通る。443 番は絞ったまま |
 
 各ステップの結果（`result.txt`）を見てから、次のステップを流す。
 
@@ -716,6 +718,186 @@ systemctl is-enabled port-guard                      # enabled
 | 本体に `ExecStart=` がない | ステップ 5 の追加の設定が 1 つもないと、systemd は「`ExecStart=` がない」としてこのサービスを読み込まない。ステップ 5 を先に流す |
 | 再起動の後に確かめる | 保守の時間帯に対象のサーバーを再起動して、ステップ 4 の「確認」の 2 行（IPv6 も入れたなら `ip6tables` でも）、`systemctl is-active port-guard`（`active` であること）、`journalctl -b -u port-guard`（今回の起動での、このサービスの記録。失敗した行があれば出る） |
 
+## ステップ 7: Let's Encrypt の証明書の更新の間だけ 80 番を開ける hook を置く（certbot で証明書を更新している台だけ。`command/port_guard/07-*.sh`）
+
+| 項目 | 内容 |
+|---|---|
+| なぜ要るか | Let's Encrypt は、証明書を更新するときに、**海外を含む複数の場所から** 80 番に確認の接続をしてくる（HTTP-01 の確認）。その送り元は公開されていないので、許可の一覧にも書けない。絞り込みを入れたままだと確認が捨てられ、更新が失敗し、やがて証明書が切れる |
+| すること | certbot の「更新の前と後に、決めたスクリプトを動かす仕組み」（hook）に、2 つのスクリプトを置く。更新の前に、iptables のコマンドで、カーネルの `INPUT` チェーンの一番上に「TCP の 80 番は、どこからでも通す」ルールを 1 つ差し込み、更新の後に削除する |
+| 開く時間・範囲 | certbot が実際に更新を試みる間（数秒〜数分）だけ。**80 番だけ**で、443 番は絞ったまま。更新が要る証明書がない回（期限の 30 日前より前）は、hook は動かず、何も開かない |
+| ファイルの編集はしない | hook が操作するのは、カーネルのメモリーの中の iptables のルールの表だけ。ipset の集合、ステップ 5 の保存のファイル、サービスには触らない。差し込んだルールは保存しないので、再起動すると消える |
+| 開きっぱなしを防ぐ | 更新の前の hook で、systemd の一時の予約（`systemd-run --on-active=30min`。30 分後に 1 回だけコマンドを動かす）も入れる。certbot が途中で落ちて、更新の後の hook が動かなくても、30 分で削除される |
+| 前提 | 証明書の更新を、cron などから **`certbot renew`** で行っていること（hook の置き場所 `/etc/letsencrypt/renewal-hooks/` が効くのは `renew` のときだけ）。7-1 で確かめる |
+| 要らない台 | Let's Encrypt の証明書を certbot で更新していない台 |
+
+設計の理由（cron の時刻で外す案を採らなかった理由など）は、[補足](./bastion-install-supplement.md) の「A. Let's Encrypt の更新の間だけ 80 番を開ける」。
+
+置くファイル（対象のサーバー）:
+
+| ファイル | 中身 | いつ動くか |
+|---|---|---|
+| `/etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh` | 80 番を通すルールを差し込み、30 分後に削除する予約を入れる | `certbot renew` が、更新が要る証明書を見つけて、更新を始める前（1 回の実行で 1 回） |
+| `/etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh` | 80 番を通すルールを削除し、30 分後の予約を取り消す | 更新を試みた後（更新が失敗しても動く） |
+| `/usr/local/sbin/port-guard-acme-close` | 80 番を通すルールを削除する（上の 2 つと、30 分後の予約から呼ばれる） | 更新の後の hook と、30 分後の予約から |
+
+### 7-1. 前提を確かめる（`command/port_guard/07-letsencrypt-check.sh`。読み取りだけ）
+
+```bash
+#!/bin/bash
+# Let's Encrypt の証明書の更新の仕方を確かめる（読み取りだけ。何も変えない）
+set -euo pipefail
+echo "== $(hostname) $(date '+%F %T') 07-letsencrypt-check"
+
+echo "-- cron（certbot の行。renew か certonly か）"
+sudo -n crontab -l 2>&1 | grep -n certbot || echo "root の crontab: certbot の行なし"
+sudo -n sh -c 'grep -rn certbot /etc/cron.d/ /etc/crontab /etc/cron.daily/ 2>/dev/null' || echo "/etc/cron.d など: certbot の行なし"
+echo "-- systemd のタイマー（certbot のもの）"
+systemctl list-timers --all 2>/dev/null | grep -i certbot || echo "certbot のタイマー: なし"
+echo "-- certbot の版"
+sudo -n certbot --version 2>&1 || echo "certbot: 見つからない"
+echo "-- 証明書ごとの設定（確認の方式と、設定ずみの hook）"
+sudo -n sh -c 'grep -H "authenticator\|webroot_path\|_hook" /etc/letsencrypt/renewal/*.conf' 2>&1 || echo "設定: なし"
+echo "-- すでにある hook のファイル"
+sudo -n sh -c 'ls -l /etc/letsencrypt/renewal-hooks/*/' 2>&1 || echo "hook のフォルダ: なし"
+```
+
+| 見ること | 期待する内容 | 違ったら |
+|---|---|---|
+| cron の行 | `certbot renew`（`00 04 01 * *` と `00 04 16 * *` の見込み） | `certbot certonly ...` を直接呼んでいるなら、7-2 の hook のフォルダは効かない。cron の行に `--pre-hook /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh --post-hook /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh` を足す形になる（この手順では扱わない。先に相談する） |
+| certbot のタイマー | なし（cron で更新している） | systemd のタイマーで `certbot renew` を動かしていても、hook のフォルダは効くので、そのまま 7-2 へ進んでよい |
+| certbot の版 | 0.19 以上（hook のフォルダ `renewal-hooks` に対応した版） | それより古ければ、hook のフォルダは効かない（先に相談する） |
+| `authenticator` | `webroot`（HTTP-01 の確認。80 番に確認が来る） | `dns-...` なら、80 番に確認は来ないので、このステップは要らない |
+| すでにある hook | `deploy_hook`（Apache を読み直すなど）があっても、そのまま残す | このステップが足すのは pre と post のファイルだけ |
+
+### 7-2. hook を置く（`command/port_guard/07-letsencrypt-hooks.sh`）
+
+```bash
+#!/bin/bash
+# Let's Encrypt の証明書の更新の間だけ、TCP の 80 番をどこからでも通す hook を置く
+set -euo pipefail
+echo "== $(hostname) $(date '+%F %T') 07-letsencrypt-hooks"
+
+sudo -n install -d -m 755 /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
+
+# 80 番を通すルールを削除する（更新の後の hook と、30 分後の予約から呼ばれる。何度流してもよい）
+sudo -n tee /usr/local/sbin/port-guard-acme-close > /dev/null <<'EOF'
+#!/bin/bash
+# port-guard: Let's Encrypt の確認のために差し込んだ「TCP の 80 番は通す」ルールを、カーネルの INPUT チェーンから削除する
+# 同じ条件のルールを、削除できなくなるまで削除する（何かの理由で 2 つ入っていても残さない）
+while /usr/sbin/iptables -w 10 -D INPUT -p tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT 2>/dev/null; do :; done
+while /usr/sbin/ip6tables -w 10 -D INPUT -p tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT 2>/dev/null; do :; done
+# 残っていないかを確かめて、記録に残す（journalctl -t port-guard-acme で見られる）
+if /usr/sbin/iptables -w 10 -C INPUT -p tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT 2>/dev/null; then
+  /usr/bin/logger -t port-guard-acme "WARNING: tcp/80 rule (IPv4) is still in INPUT"
+else
+  /usr/bin/logger -t port-guard-acme "closed tcp/80"
+fi
+exit 0
+EOF
+sudo -n chmod 755 /usr/local/sbin/port-guard-acme-close
+
+# 更新の前: 80 番を通すルールを差し込み、30 分後に削除する予約を入れる
+sudo -n tee /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh > /dev/null <<'EOF'
+#!/bin/bash
+# port-guard: Let's Encrypt の確認の間だけ、カーネルの INPUT チェーンの一番上に「TCP の 80 番は、どこからでも通す」ルールを差し込む
+# すでに差し込まれていれば、差し込まない（二重に入れない）
+/usr/sbin/iptables -w 10 -C INPUT -p tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT 2>/dev/null \
+  || /usr/sbin/iptables -w 10 -I INPUT 1 -p tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT
+/usr/sbin/ip6tables -w 10 -C INPUT -p tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT 2>/dev/null \
+  || /usr/sbin/ip6tables -w 10 -I INPUT 1 -p tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT
+# 30 分後に削除する予約（前の予約が残っていれば、取り消してから入れ直す）
+/usr/bin/systemctl stop port-guard-acme-close.timer 2>/dev/null
+/usr/bin/systemctl reset-failed port-guard-acme-close.service 2>/dev/null
+/usr/bin/systemd-run --unit=port-guard-acme-close --on-active=30min /usr/local/sbin/port-guard-acme-close
+/usr/bin/logger -t port-guard-acme "opened tcp/80 for Let's Encrypt (closes after renewal, or in 30 minutes at the latest)"
+# 失敗しても certbot の更新は続けさせる（開けられなかったときは、確認が通らず更新が失敗するだけで、今と同じ）
+exit 0
+EOF
+sudo -n chmod 755 /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh
+
+# 更新の後: 80 番を通すルールを削除し、30 分後の予約を取り消す
+sudo -n tee /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh > /dev/null <<'EOF'
+#!/bin/bash
+# port-guard: Let's Encrypt の確認が終わったので、差し込んだ 80 番のルールを削除し、30 分後の予約を取り消す
+/usr/local/sbin/port-guard-acme-close
+/usr/bin/systemctl stop port-guard-acme-close.timer 2>/dev/null
+exit 0
+EOF
+sudo -n chmod 755 /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh
+
+# 確認
+sudo -n ls -l /usr/local/sbin/port-guard-acme-close /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh
+sudo -n bash -n /usr/local/sbin/port-guard-acme-close
+sudo -n bash -n /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh
+sudo -n bash -n /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh
+```
+
+| 行 | 意味 |
+|---|---|
+| `install -d -m 755 .../pre .../post` | hook のフォルダを作る（すでにあれば何もしない） |
+| `tee <ファイル> <<'EOF'` 〜 `EOF` と `chmod 755` | 間の中身で、対象のサーバーにスクリプトを置き、実行できるようにする（certbot は、実行できるファイルだけを hook として動かす） |
+| `iptables -C INPUT <条件>` | その条件のルールが、カーネルの `INPUT` チェーンにあるかを調べる（あれば成功、なければ失敗）。`||` の後は、なかったときだけ動く |
+| `iptables -I INPUT 1 -p tcp --dport 80 ... -j ACCEPT` | カーネルの `INPUT` チェーンの 1 番目に「TCP の 80 番あては通す」ルールを差し込む。`PORT_GUARD` へ飛ばすルールより上にあるので、80 番は絞り込みの前に通る。443 番は当たらないので、いつもどおり絞られる |
+| `-m comment --comment port-guard-acme` | ルールに目印の文字列を付ける（動きには影響しない）。削除のときに、この目印まで一致するルールだけを削除する（ほかの 80 番のルールを誤って削除しない） |
+| `iptables -D INPUT <差し込んだときと同じ条件>` | カーネルの表から、その内容のルールを探して削除する。ルールの番号や、別の管理の記録は要らない。`while ...; do :; done` は、削除できなくなるまで繰り返す |
+| `ip6tables` の行 | IPv6 でも同じことをする。IPv6 を絞っていない台でも、通すルールが一時的に入るだけで害はない（Let's Encrypt は、ドメインに IPv6 のアドレスがあれば IPv6 でも確認に来る） |
+| `systemd-run --unit=port-guard-acme-close --on-active=30min <コマンド>` | systemd に「30 分後に、このコマンドを 1 回だけ動かす」一時の予約を作らせる。ファイルには残らず、再起動で消える。同じ名前の予約が残っていると作れないので、その前の `systemctl stop ...timer` と `reset-failed` で片付ける |
+| `logger -t port-guard-acme "..."` | システムの記録に残す。`journalctl -t port-guard-acme` で、いつ開けて、いつ閉じたかが見られる |
+| `exit 0` | hook はいつも成功で終える（certbot の更新を止めない） |
+| 確認の `bash -n` | 置いたスクリプトの書き方に誤りがないか（実行はしない） |
+
+### 7-3. hook を手で動かして確かめる
+
+置いた hook を、certbot を使わずに手で動かして、ルールが差し込まれ、削除されることを確かめる。**手で動かしている間（数秒）、80 番がどこからでも通る**。
+
+`command/port_guard/07-letsencrypt-hooks-test.sh`:
+
+```bash
+#!/bin/bash
+# 置いた hook を手で動かして、80 番を通すルールが差し込まれ、削除されることを確かめる（数秒だけ 80 番が開く）
+set -euo pipefail
+echo "== $(hostname) $(date '+%F %T') 07-letsencrypt-hooks-test"
+
+echo "-- 更新の前の hook を動かす"
+sudo -n /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh
+sudo -n iptables -w 10 -S INPUT | head -3                       # 1 行目に --comment port-guard-acme のルールがあること
+sudo -n systemctl list-timers --all 2>/dev/null | grep port-guard-acme-close || echo "30 分後の予約: なし"
+
+echo "-- 更新の後の hook を動かす"
+sudo -n /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh
+sudo -n iptables -w 10 -S INPUT | grep -c port-guard-acme || true    # 0
+sudo -n ip6tables -w 10 -S INPUT | grep -c port-guard-acme || true   # 0
+sudo -n systemctl list-timers --all 2>/dev/null | grep port-guard-acme-close || echo "30 分後の予約: なし（取り消された）"
+sudo -n journalctl -t port-guard-acme --no-pager 2>/dev/null | tail -2   # opened ... と closed tcp/80
+```
+
+| 確かめること | 期待する内容 |
+|---|---|
+| 更新の前の hook の後の `INPUT` | 1 行目が `-A INPUT -p tcp -m tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT`、2 行目が `-A INPUT -p tcp -m multiport --dports 80,443 -j PORT_GUARD` |
+| 30 分後の予約 | 更新の前の hook の後は `port-guard-acme-close.timer` がある。更新の後の hook の後はない |
+| 更新の後の hook の後 | `port-guard-acme` の付いたルールが 0（IPv4・IPv6 とも） |
+| 記録 | `opened tcp/80 ...` と `closed tcp/80` |
+
+certbot から動くことまで確かめるなら、対象のサーバーで `sudo certbot renew --dry-run`（Let's Encrypt の試験用の窓口で、更新の手順だけを本物どおりに流す。証明書は変わらない）を流し、`/var/log/letsencrypt/letsencrypt.log` に `port-guard-open-80.sh` と `port-guard-close-80.sh` が動いた記録があること、確認が通ったことを見る。`--dry-run` で hook が動くかは certbot の版によるので、動いた記録がなければ、次の本物の更新の後に同じ記録を見る。
+
+### hook を取り除く（`command/port_guard/07-letsencrypt-hooks-remove.sh`）
+
+```bash
+#!/bin/bash
+# Let's Encrypt の hook を取り除く（差し込まれたままの 80 番のルールがあれば、先に削除する）
+set -euo pipefail
+echo "== $(hostname) $(date '+%F %T') 07-letsencrypt-hooks-remove"
+
+sudo -n /usr/local/sbin/port-guard-acme-close || true
+sudo -n systemctl stop port-guard-acme-close.timer 2>/dev/null || true
+sudo -n rm -f /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh /usr/local/sbin/port-guard-acme-close
+
+# 確認
+sudo -n sh -c 'ls /etc/letsencrypt/renewal-hooks/*/' 2>&1 | grep -c port-guard || true   # 0
+```
+
+port-guard 自体をアンインストールした（`uninstall.sh`）台でも、hook は残る。残しても、80 番を通すルールを一時的に差し込んで削除するだけで害はないが、不要なら取り除く。
+
 ## 日本の範囲の一覧を新しくするとき
 
 > **この節は、踏み台サーバーから人が流す手動の手順で、S3 による一覧の管理は想定していない**。S3 に置いた一覧を各サーバーが定期に取りに行って入れ替える形は、[補足](./bastion-install-supplement.md) の「B. 日本の範囲の一覧を定期に新しくする」で方針を決めた段階で、まだ作っていない。それができたら、この節は「S3 や定期の入れ替えが使えないときの予備」になる。
@@ -948,7 +1130,7 @@ sudo -n iptables -w 10 -S INPUT | grep -c -- '-j PORT_GUARD' || true      # 0
 
 | 消すもの | 残るもの |
 |---|---|
-| サービスの本体（`/etc/systemd/system/port-guard.service`）と、起動時のコマンドの並び（`/etc/systemd/system/port-guard.service.d/`）。カーネルの `INPUT` チェーンから `PORT_GUARD` へ飛ばすルール | `PORT_GUARD` チェーンと集合（カーネルの中。どこからも使われないので何もしない。再起動すると消える）、保存のファイル（`/etc/port-guard/`）、入れる前のルールの控え（`/var/lib/port-guard/`）、ipset のパッケージ |
+| サービスの本体（`/etc/systemd/system/port-guard.service`）と、起動時のコマンドの並び（`/etc/systemd/system/port-guard.service.d/`）。カーネルの `INPUT` チェーンから `PORT_GUARD` へ飛ばすルール | `PORT_GUARD` チェーンと集合（カーネルの中。どこからも使われないので何もしない。再起動すると消える）、保存のファイル（`/etc/port-guard/`）、入れる前のルールの控え（`/var/lib/port-guard/`）、ipset のパッケージ、ステップ 7 の Let's Encrypt の hook（残しても害はない。消すならステップ 7 の `07-letsencrypt-hooks-remove.sh`） |
 
 もう一度入れるときは、ステップ 5・6 を流し直す（再起動していなければ、集合は残っているので、ステップ 2〜4 は要らない。ただし `PORT_GUARD` へ飛ばすルールは消えているので、`sudo systemctl start port-guard` で入れ直す）。
 

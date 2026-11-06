@@ -15,7 +15,7 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 | ドキュメント | 内容 |
 |---|---|
 | [手順](./steps.md) | **作業の手順の正本**。確定した内容、フェーズの分け方、流れ、各コマンドの使い方、バックアップの確認、元に戻す方法、手元での試し方 |
-| [踏み台サーバーから入れるコマンド](./bastion-install-commands.md) | 踏み台サーバーから SSH（`ssh ... 'bash' < ./command/port_guard/<ステップ>.sh`）で入れるときの、iptables・ipset のインストールと設定の**手順とコマンド、各ステップの説明（コマンドの 1 行ずつの意味を含む）、結果の見方**。どのステップも、実行するコマンドを並べただけ（一覧を作る → ipset を入れる → 空の集合を作る → 一覧を入れる → ルールを入れる → 起動時に入れ直す行を置く → サービスを有効にする → certbot で証明書を更新している台は Let's Encrypt の hook を置く）。日本の範囲の一覧は踏み台サーバーで作り（`port_guard_whitelists/`）、許可の一覧には VPC の範囲を入れる。IPv6 の分は別のファイル（`*-ipv6.sh`）。起動時のサービスは IPv4・IPv6 で 1 つ |
+| [踏み台サーバーから入れるコマンド](./bastion-install-commands.md) | 踏み台サーバーから SSH（`ssh ... 'bash' < ./command/port_guard/<ステップ>.sh`）で入れるときの、iptables・ipset のインストールと設定の**手順とコマンド、各ステップの説明（コマンドの 1 行ずつの意味を含む）、結果の見方**。どのステップも、実行するコマンドを並べただけ（一覧を作る → ipset を入れる → 空の集合を作る → 一覧を入れる → ルールを入れる → 起動時に入れ直す行を置く → サービスを有効にする → certbot で証明書を更新している台は Let's Encrypt の hook を置く）。日本の範囲の一覧は踏み台サーバーで作り（`port_guard_whitelists/`。TSV で、1 列目が範囲、2 列目以降が情報）、許可の一覧には VPC の範囲を入れる。AWS の東京と大阪のリージョンの範囲も、別の一覧・別の ipset の集合・別のルールで許可する（`make-aws-lists.sh`）。IPv6 の分は別のファイル（`*-ipv6.sh`）。起動時のサービスは IPv4・IPv6 で 1 つ |
 | [踏み台サーバーから入れる手順の補足](./bastion-install-supplement.md) | 上の手順から分けた長い前置きと補足を 1 つにまとめたもの。Linux・iptables・ipset・systemd を知らない人向けの仕組みの説明、**運用の仕組みの設計**（Let's Encrypt の更新の間だけ 80 番を開ける certbot の hook（スクリプトは手順のステップ 7）、一覧を S3 から定期に入れ替える（方針を決めた段階でまだ作っていない））、手元で確かめたこと |
 | [同じリージョンの Lambda・Fargate からサーバーを呼ぶとき、送り元はどこになるか](./access-sources-lambda-fargate.md) | 絞り込みを入れたサーバーを Lambda・Fargate から呼ぶときの送り元のアドレス（VPC の中か、プライベートのアドレスあてか公開のアドレスあてか）と、許可の一覧に書くもの（VPC の範囲、NAT ゲートウェイの Elastic IP）。確かめ方（port-guard の記録、VPC フローログなど） |
 | [運用の手順](./operations.md) | **入れて遮断を有効にした後**の運用。状態を見る、許可する IP を足す・消す、日本の IP の範囲を新しくする、「つながらない」と言われたとき、一時的に外す・戻す、再起動と AMI から作った台、決めること。道具（`install`・`enable`）は有効にした後の台には使えないので、インスタンスの中のスクリプトを SSM の Run Command で流す |
@@ -70,7 +70,7 @@ python3 -m unittest discover -s tests
 | `rb/` | Ruby 版（`install.rb`・`enable.rb`・`port_guard.rb`・`lib.rb`。sh 版と同じく SSM の Run Command だけ。標準のライブラリだけで、書き方の確認の rubocop だけ `Gemfile` で入れる）。[処理の流れ](./install-enable-flow.md)。未検証 |
 | [`al2-instance/`](./al2-instance/README.md) | 今の構成（AL2・Apache 2.4.56・Passenger 6.0.18・Ruby 2.7.7・Rails 4.2）に近いインスタンスを手元で再現する Docker の定義。道具を試す相手にする（フェーズ 1 の ssm-setup の `ssm-agent` からも使う）。開発用のアカウントの、本番とは別の VPC に EC2 として作るための [EC2 Image Builder の定義](./al2-instance/image-builder/README.md)（下書き・未検証）も置いている |
 | [`outside-probe/`](./outside-probe/docker/README.md) | 海外からの確認の拠点（チェック用のクライアント。AL2023）の定義。`port-guard-probe`（確認の処理）、[Docker の定義](./outside-probe/docker/README.md)（手元で試す用）、[EC2 Image Builder の定義](./outside-probe/image-builder/README.md)（別のリージョンで使う AMI） |
-| [`samples/`](./samples/apnic-jp-20261102/README.md) | 手順の検証に使ったサンプル。`apnic-jp-20261102/` は、2026-11-02 の APNIC の統計から Python で作った日本の IPv4・IPv6 の範囲の一覧（`jp-ipv4.txt` 4,738 件・`jp-ipv6.txt` 766 件）と、作った処理 `make_jp_lists.py`。対象のサーバーに入れる一覧は、作業のときに取り直す |
+| [`samples/`](./samples/apnic-jp-20261102/README.md) | 手順の検証に使ったサンプル（どれも TSV）。[`apnic-jp-20261102/`](./samples/apnic-jp-20261102/README.md) は、2026-11-02 の APNIC の統計から Python で作った日本の IPv4・IPv6 の範囲の一覧（`jp-ipv4.txt` 4,738 件・`jp-ipv6.txt` 766 件）と、作った処理 `make_jp_lists.py`。[`aws-tokyo-osaka-20261106/`](./samples/aws-tokyo-osaka-20261106/README.md) は、2026-11-06 の AWS の `ip-ranges.json` から Python で作った東京・大阪のリージョンの範囲の一覧（`aws-ipv4.txt` 305 件・`aws-ipv6.txt` 149 件。台北のローカルゾーンを除く）と、作った処理 `make_aws_lists.py`。対象のサーバーに入れる一覧は、作業のときに取り直す |
 
 ## 関連ドキュメント
 

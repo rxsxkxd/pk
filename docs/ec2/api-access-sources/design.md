@@ -172,7 +172,8 @@ parse @message /^(?<ip>\S+) \S+ \S+ \[(?<time>[^\]]+)\] "(?<method>\S+) (?<path>
 | `private` | プライベートのアドレス（`10.0.0.0/8`・`172.16.0.0/12`・`192.168.0.0/16`、IPv6 の `fc00::/7`）。許可の一覧の VPC の範囲に入るかも合わせて見る | 許可の一覧に入っていれば通る。入っていなければ止まる |
 | `allow` | 許可の一覧（`port_guard_whitelists/allow-ipv4.txt`・`allow-ipv6.txt`） | 通る |
 | `jp` | 日本の範囲（`port_guard_whitelists/jp-ipv4.txt`・`jp-ipv6.txt`。APNIC から作った一覧） | 通る |
-| `aws` | AWS の範囲（`ip-ranges.json`。AWS が公開しているもの。サービスとリージョンも取る） | **止まる**。Lambda や他社の EC2 など。固定でないことが多いので、相手に呼び方を変えてもらう候補 |
+| `aws_allowed` | AWS の東京と大阪の範囲（踏み台サーバーの `port_guard_whitelists/aws-ipv4.txt`・`aws-ipv6.txt`。port-guard で許可している一覧そのもの） | 通る |
+| `aws` | ほかのリージョンの AWS の範囲（`ip-ranges.json`。AWS が公開しているもの。サービスとリージョンも取る） | **止まる**。Lambda や他社の EC2 など。固定でないことが多いので、相手に呼び方を変えてもらう候補 |
 | `other` | どれにも入らない | **止まる**。許可の一覧に足すか、相手に確かめる候補 |
 
 | 出力 | 中身 |
@@ -204,7 +205,7 @@ end
 
 | もの | 取り方 |
 |---|---|
-| 日本の範囲・許可の一覧 | 踏み台サーバーの `port_guard_whitelists/` から取ってくる（port-guard の一覧と同じものを使い、判定をそろえる） |
+| 日本の範囲・許可の一覧・AWS の東京と大阪の一覧 | 踏み台サーバーの `port_guard_whitelists/` から取ってくる（port-guard の一覧と同じものを使い、判定をそろえる）。どれも TSV で、1 列目が範囲、2 列目以降が情報（あってもなくてもよい）、`#` から後はコメント。チェッカーは 1 列目を範囲として読み、2 列目以降は出力の補足（AWS ならリージョン・サービス）に使う |
 | AWS の範囲（`ip-ranges.json`） | `https://ip-ranges.amazonaws.com/ip-ranges.json` から取る（数 MB の見込み。取る前に確認する）。いつの版かを、ファイルの中の `createDate` で出力に書く |
 
 ## 気を付けること

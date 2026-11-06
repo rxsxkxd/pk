@@ -1,766 +1,768 @@
-2001:200::/35
-2001:200:2000::/35
-2001:200:4000::/34
-2001:200:8000::/33
-2001:218::/35
-2001:218:2000::/35
-2001:218:4000::/34
-2001:218:8000::/33
-2001:240::/35
-2001:240:2000::/35
-2001:240:4000::/34
-2001:240:8000::/33
-2001:258::/35
-2001:258:2000::/35
-2001:258:4000::/34
-2001:258:8000::/33
-2001:260::/35
-2001:260:2000::/35
-2001:260:4000::/34
-2001:260:8000::/33
-2001:268::/35
-2001:268:2000::/35
-2001:268:4000::/34
-2001:268:8000::/33
-2001:278::/35
-2001:278:2000::/35
-2001:278:4000::/34
-2001:278:8000::/33
-2001:298::/35
-2001:298:2000::/35
-2001:298:4000::/34
-2001:298:8000::/33
-2001:2a0::/35
-2001:2a0:2000::/35
-2001:2a0:4000::/34
-2001:2a0:8000::/33
-2001:2a8::/35
-2001:2a8:2000::/35
-2001:2a8:4000::/34
-2001:2a8:8000::/33
-2001:2c0::/35
-2001:2c0:2000::/35
-2001:2c0:4000::/34
-2001:2c0:8000::/33
-2001:2c8::/35
-2001:2c8:2000::/35
-2001:2c8:4000::/34
-2001:2c8:8000::/33
-2001:2e8::/35
-2001:2e8:2000::/35
-2001:2e8:4000::/34
-2001:2e8:8000::/33
-2001:2f0::/35
-2001:2f0:2000::/35
-2001:2f0:4000::/34
-2001:2f0:8000::/33
-2001:2f8::/35
-2001:2f8:2000::/35
-2001:2f8:4000::/34
-2001:2f8:8000::/33
-2001:300::/35
-2001:300:2000::/35
-2001:300:4000::/34
-2001:300:8000::/33
-2001:308::/35
-2001:308:2000::/35
-2001:308:4000::/34
-2001:308:8000::/33
-2001:310::/35
-2001:310:2000::/35
-2001:310:4000::/34
-2001:310:8000::/33
-2001:318::/35
-2001:318:2000::/35
-2001:318:4000::/34
-2001:318:8000::/33
-2001:338::/35
-2001:338:2000::/35
-2001:338:4000::/34
-2001:338:8000::/33
-2001:340::/35
-2001:340:2000::/35
-2001:340:4000::/34
-2001:340:8000::/33
-2001:348::/35
-2001:348:2000::/35
-2001:348:4000::/34
-2001:348:8000::/33
-2001:350::/35
-2001:350:2000::/35
-2001:350:4000::/34
-2001:350:8000::/33
-2001:358::/35
-2001:358:2000::/35
-2001:358:4000::/34
-2001:358:8000::/33
-2001:368::/35
-2001:368:2000::/35
-2001:368:4000::/34
-2001:368:8000::/33
-2001:370::/35
-2001:370:2000::/35
-2001:370:4000::/34
-2001:370:8000::/33
-2001:380::/35
-2001:380:2000::/35
-2001:380:4000::/34
-2001:380:8000::/33
-2001:398::/35
-2001:398:2000::/35
-2001:398:4000::/34
-2001:398:8000::/33
-2001:3a0::/35
-2001:3a0:2000::/35
-2001:3a0:4000::/34
-2001:3a0:8000::/33
-2001:3b0::/35
-2001:3b0:2000::/35
-2001:3b0:4000::/34
-2001:3b0:8000::/33
-2001:3b8::/35
-2001:3b8:2000::/35
-2001:3b8:4000::/34
-2001:3b8:8000::/33
-2001:3c0::/35
-2001:3d0::/35
-2001:3d0:2000::/35
-2001:3d0:4000::/34
-2001:3d0:8000::/33
-2001:3d8::/35
-2001:3d8:2000::/35
-2001:3d8:4000::/34
-2001:3d8:8000::/33
-2001:3e0::/35
-2001:3e0:2000::/35
-2001:3e0:4000::/34
-2001:3e0:8000::/33
-2001:3e8::/32
-2001:7fa:0:3::/64
-2001:7fa:7::/48
-2001:c28::/32
-2001:c30::/32
-2001:c40::/32
-2001:c70::/32
-2001:c80::/32
-2001:c90::/32
-2001:cb0::/32
-2001:cb8::/32
-2001:cc8::/32
-2001:cc9::/32
-2001:cd0::/32
-2001:ce8::/32
-2001:cf8::/32
-2001:d00::/32
-2001:d28::/32
-2001:d30::/32
-2001:d50::/32
-2001:d70::/30
-2001:d80::/32
-2001:d88::/32
-2001:d90::/32
-2001:da0::/32
-2001:dc2::/32
-2001:dc3::/32
-2001:dc4::/32
-2001:dc9::/32
-2001:dd8:22::/48
-2001:dda::/48
-2001:ddb::/48
-2001:de1::/42
-2001:de8:4::/46
-2001:de8:8::/48
-2001:de8:c::/48
-2001:de8:1e::/48
-2001:de8:2000::/48
-2001:df0:8::/48
-2001:df0:15::/48
-2001:df0:43::/48
-2001:df0:45::/48
-2001:df0:46::/48
-2001:df0:68::/48
-2001:df0:95::/48
-2001:df0:cf::/48
-2001:df0:eb::/48
-2001:df0:21e::/48
-2001:df0:232::/48
-2001:df0:254::/48
-2001:df0:258::/48
-2001:df0:25e::/48
-2001:df0:266::/48
-2001:df0:293::/48
-2001:df0:2a6::/48
-2001:df0:2b4::/48
-2001:df0:2c2::/48
-2001:df0:2ca::/48
-2001:df0:2cc::/48
-2001:df0:2e4::/48
-2001:df0:2ed::/48
-2001:df0:2ee::/48
-2001:df0:2f5::/48
-2001:df0:401::/48
-2001:df0:440::/48
-2001:df0:449::/48
-2001:df0:456::/48
-2001:df0:462::/48
-2001:df0:467::/48
-2001:df0:1800::/48
-2001:df0:2440::/48
-2001:df0:2f80::/48
-2001:df0:3d80::/48
-2001:df0:6800::/48
-2001:df0:7480::/48
-2001:df0:8500::/48
-2001:df0:8bc0::/48
-2001:df0:a880::/48
-2001:df0:aa80::/48
-2001:df0:b400::/48
-2001:df0:bb80::/48
-2001:df0:bb81::/48
-2001:df0:c280::/48
-2001:df0:d740::/48
-2001:df0:ebc0::/48
-2001:df0:fd80::/48
-2001:df1:bc0::/48
-2001:df1:f40::/48
-2001:df1:4380::/48
-2001:df1:48c0::/48
-2001:df1:b3c0::/48
-2001:df1:c580::/48
-2001:df1:da80::/48
-2001:df1:e500::/48
-2001:df2:9b40::/48
-2001:df2:af00::/48
-2001:df2:b340::/48
-2001:df2:c300::/48
-2001:df2:c900::/48
-2001:df2:d800::/48
-2001:df2:da00::/48
-2001:df2:fc00::/48
-2001:df3:4c0::/48
-2001:df3:540::/48
-2001:df3:14c0::/48
-2001:df3:25c0::/48
-2001:df3:2680::/48
-2001:df3:4b80::/48
-2001:df3:6500::/48
-2001:df3:9380::/48
-2001:df3:a2c0::/48
-2001:df3:a700::/48
-2001:df3:aac0::/48
-2001:df3:b780::/48
-2001:df3:bc00::/48
-2001:df3:f6c0::/48
-2001:df4:1780::/48
-2001:df4:1781::/48
-2001:df4:1f80::/48
-2001:df4:53c0::/48
-2001:df4:6680::/48
-2001:df4:7200::/48
-2001:df4:b400::/48
-2001:df4:b480::/48
-2001:df5:12c0::/48
-2001:df5:2040::/48
-2001:df5:2c00::/48
-2001:df5:6400::/48
-2001:df5:76c0::/48
-2001:df5:bac0::/48
-2001:df6:580::/48
-2001:df6:2c80::/48
-2001:df6:34c0::/48
-2001:df6:5180::/48
-2001:df6:5fc0::/48
-2001:df6:6000::/48
-2001:df6:6240::/48
-2001:df6:7280::/48
-2001:df6:7281::/48
-2001:df6:8000::/48
-2001:df6:a000::/48
-2001:df6:a680::/48
-2001:df6:b800::/48
-2001:df6:d7c0::/48
-2001:df6:edc0::/48
-2001:df6:fd40::/48
-2001:df7:1ac0::/48
-2001:df7:4800::/43
-2001:df7:5600::/48
-2001:df7:7800::/48
-2001:df7:8380::/48
-2001:df7:a800::/48
-2001:df7:ea80::/48
-2001:df7:f000::/48
-2001:e28::/32
-2001:e38::/32
-2001:e40::/32
-2001:e41::/32
-2001:e42::/31
-2001:e44::/30
-2001:e58::/32
-2001:e90::/32
-2001:f08::/32
-2001:f58::/32
-2001:f60::/28
-2001:f70::/28
-2001:f80::/32
-2001:f98::/32
-2001:fa0::/32
-2001:fa8::/32
-2001:fc8::/32
-2001:ff0::/32
-2001:4460::/32
-2001:44a0::/32
-2001:44a8::/32
-2001:44b0::/32
-2001:a000::/21
-2400:1000::/32
-2400:12e0::/32
-2400:1520::/32
-2400:1920::/32
-2400:1b80::/32
-2400:1de0::/32
-2400:2000::/20
-2400:3000::/32
-2400:3260::/32
-2400:32a0::/32
-2400:3800::/32
-2400:3980::/32
-2400:3aa0::/32
-2400:3e80::/32
-2400:3f80::/32
-2400:4000::/22
-2400:4840::/32
-2400:48c0::/32
-2400:4d60::/32
-2400:5100::/32
-2400:5320::/32
-2400:53a0::/32
-2400:53e0::/32
-2400:5b60::/32
-2400:6700::/32
-2400:6b00::/32
-2400:6f00::/32
-2400:7800::/32
-2400:7940::/32
-2400:7b00::/32
-2400:7ce0::/32
-2400:7d20::/32
-2400:7e00::/32
-2400:8040::/32
-2400:8120::/32
-2400:81e0::/32
-2400:8300::/32
-2400:8320::/32
-2400:8400::/32
-2400:8500::/32
-2400:8700::/32
-2400:8820::/32
-2400:8d40::/32
-2400:9180::/32
-2400:9920::/32
-2400:99a0::/32
-2400:a080::/32
-2400:a140::/32
-2400:a300::/32
-2400:a800::/32
-2400:ac00::/32
-2400:af80::/32
-2400:b1a0::/32
-2400:b3c0::/32
-2400:b3e0::/32
-2400:b420::/32
-2400:b680::/32
-2400:bf60::/32
-2400:c0a0::/32
-2400:c320::/32
-2400:c7e0::/32
-2400:c8a0::/32
-2400:ce20::/32
-2400:d640::/32
-2400:d820::/32
-2400:dcc0::/32
-2400:ddc0::/32
-2400:df00::/32
-2400:e000::/32
-2400:e100::/32
-2400:e400::/32
-2400:e860::/32
-2400:f400::/32
-2400:f460::/32
-2400:f7a0::/32
-2400:f9a0::/32
-2400:fba0::/32
-2401:2a0::/32
-2401:3e0::/32
-2401:440::/32
-2401:600::/32
-2401:900::/32
-2401:980::/32
-2401:c20::/32
-2401:d20::/32
-2401:1b20::/32
-2401:1f20::/32
-2401:1f60::/32
-2401:2100::/32
-2401:24c0::/32
-2401:2500::/32
-2401:2540::/32
-2401:25c0::/32
-2401:2680::/32
-2401:2940::/32
-2401:2a80::/32
-2401:2d60::/32
-2401:2f20::/32
-2401:3200::/32
-2401:3600::/32
-2401:3aa0::/32
-2401:3b00::/32
-2401:3fa0::/32
-2401:4360::/32
-2401:43a0::/32
-2401:4640::/32
-2401:4d40::/29
-2401:5300::/32
-2401:55c0::/32
-2401:5ac0::/32
-2401:5e40::/32
-2401:7040::/32
-2401:7640::/32
-2401:7641::/32
-2401:7b60::/32
-2401:7ec0::/32
-2401:7f00::/32
-2401:8280::/32
-2401:8520::/32
-2401:8700::/32
-2401:89e0::/32
-2401:8b00::/32
-2401:9220::/32
-2401:98a0::/32
-2401:9c20::/32
-2401:9fe0::/32
-2401:a1c0::/32
-2401:a240::/32
-2401:a380::/32
-2401:a500::/32
-2401:a920::/32
-2401:ad00::/32
-2401:af80::/32
-2401:b140::/32
-2401:b420::/32
-2401:b720::/32
-2401:b9c0::/32
-2401:bd00::/32
-2401:bf00::/32
-2401:bfe0::/32
-2401:c080::/32
-2401:c1a0::/32
-2401:c800::/32
-2401:cba0::/32
-2401:cbc0::/32
-2401:ce80::/32
-2401:cee0::/32
-2401:d0a0::/32
-2401:d220::/32
-2401:d440::/32
-2401:d500::/32
-2401:d560::/32
-2401:d700::/32
-2401:d900::/32
-2401:dbc0::/32
-2401:dc40::/32
-2401:dd40::/32
-2401:df60::/32
-2401:e260::/32
-2401:e300::/32
-2401:e700::/32
-2401:efc0::/32
-2401:f100::/32
-2401:f280::/32
-2401:f800::/32
-2401:f820::/32
-2402:700::/32
-2402:de0::/32
-2402:ea0::/32
-2402:1400::/32
-2402:1580::/32
-2402:1d00::/32
-2402:1e80::/32
-2402:2840::/32
-2402:2f60::/32
-2402:3000::/32
-2402:3160::/32
-2402:3260::/32
-2402:3800::/32
-2402:3880::/32
-2402:3b00::/32
-2402:3c60::/32
-2402:3d00::/32
-2402:3ee0::/32
-2402:40a0::/32
-2402:4200::/32
-2402:4700::/32
-2402:4ee0::/32
-2402:5120::/32
-2402:52e0::/32
-2402:54a0::/32
-2402:56c0::/32
-2402:59e0::/32
-2402:5a00::/32
-2402:5a20::/32
-2402:6020::/32
-2402:6700::/32
-2402:6800::/32
-2402:6b00::/32
-2402:6ba0::/32
-2402:6c80::/32
-2402:73c0::/32
-2402:7440::/32
-2402:75e0::/32
-2402:7700::/32
-2402:7a00::/32
-2402:7f80::/32
-2402:8240::/32
-2402:9300::/32
-2402:a800::/32
-2402:af40::/32
-2402:b300::/32
-2402:b700::/32
-2402:b7c0::/32
-2402:b9c0::/32
-2402:bb00::/32
-2402:bc00::/29
-2402:c080::/31
-2402:c200::/32
-2402:c400::/32
-2402:c600::/32
-2402:c800::/32
-2402:c840::/32
-2402:d200::/32
-2402:d600::/32
-2402:d700::/32
-2402:dc00::/32
-2402:e200::/32
-2402:e800::/32
-2402:f2c0::/32
-2403:400::/32
-2403:401::/32
-2403:1240::/32
-2403:1800::/32
-2403:1f00::/32
-2403:2000::/32
-2403:2880::/32
-2403:2d00::/32
-2403:2dc0::/32
-2403:3200::/32
-2403:3a00::/32
-2403:4040::/32
-2403:4400::/32
-2403:4440::/32
-2403:5440::/32
-2403:5700::/32
-2403:5a00::/32
-2403:5f00::/32
-2403:6c00::/32
-2403:7300::/32
-2403:7800::/32
-2403:7940::/32
-2403:7a00::/32
-2403:7c00::/32
-2403:8a00::/32
-2403:8e00::/32
-2403:8f00::/32
-2403:9200::/32
-2403:9400::/32
-2403:9600::/32
-2403:9900::/24
-2403:9a00::/32
-2403:9c00::/32
-2403:a640::/32
-2403:a700::/32
-2403:ac80::/32
-2403:bd80::/32
-2403:c780::/32
-2403:d000::/32
-2403:d001::/32
-2403:dd40::/32
-2403:e4c0::/32
-2403:f200::/32
-2404:168::/32
-2404:1a8::/32
-2404:200::/32
-2404:a00::/32
-2404:1000::/32
-2404:1300::/32
-2404:1900::/32
-2404:1980::/32
-2404:1b00::/32
-2404:2680::/32
-2404:2d00::/32
-2404:3200::/32
-2404:5100::/32
-2404:5200::/32
-2404:5480::/32
-2404:5d80::/32
-2404:60c0::/32
-2404:7200::/32
-2404:7900::/32
-2404:7a00::/32
-2404:7a80::/29
-2404:8200::/32
-2404:85c0::/32
-2404:8640::/32
-2404:8680::/32
-2404:8740::/32
-2404:87c0::/32
-2404:8e00::/31
-2404:9000::/32
-2404:9200::/32
-2404:9840::/32
-2404:9ac0::/32
-2404:a600::/32
-2404:b600::/32
-2404:b8c0::/32
-2404:c700::/32
-2404:ca00::/32
-2404:cb00::/32
-2404:ce00::/32
-2404:d540::/32
-2404:df40::/32
-2404:e000::/32
-2404:e040::/32
-2404:e480::/32
-2404:e840::/32
-2404:ec00::/32
-2404:f1c0::/32
-2404:fe40::/32
-2405::/32
-2405:640::/32
-2405:7c0::/32
-2405:e00::/32
-2405:1140::/32
-2405:1200::/32
-2405:1201::/32
-2405:1202::/31
-2405:1204::/30
-2405:1440::/32
-2405:1800::/32
-2405:1a80::/32
-2405:2040::/32
-2405:25c0::/32
-2405:2700::/32
-2405:2a00::/32
-2405:30c0::/32
-2405:3600::/32
-2405:3700::/32
-2405:3840::/32
-2405:4e00::/32
-2405:5300::/32
-2405:5340::/32
-2405:6580::/29
-2405:6cc0::/32
-2405:7000::/32
-2405:7740::/32
-2405:7800::/32
-2405:7d00::/32
-2405:8000::/32
-2405:8500::/32
-2405:9ac0::/32
-2405:9e40::/32
-2405:9fc0::/32
-2405:a200::/32
-2405:be00::/32
-2405:c100::/32
-2405:c700::/32
-2405:d200::/32
-2405:d580::/32
-2405:d780::/32
-2405:e800::/32
-2405:ed00::/32
-2405:f000::/32
-2405:f800::/32
-2405:fc80::/32
-2405:fe40::/32
-2406:1c0::/32
-2406:500::/32
-2406:600::/32
-2406:800::/32
-2406:a00::/32
-2406:1000::/32
-2406:1940::/32
-2406:2600::/32
-2406:2800::/32
-2406:2900::/32
-2406:2b40::/32
-2406:4580::/32
-2406:5200::/32
-2406:63c0::/32
-2406:6e40::/32
-2406:7440::/32
-2406:7ec0::/32
-2406:8000::/32
-2406:8c00::/32
-2406:8e00::/32
-2406:9900::/32
-2406:9b40::/32
-2406:a1c0::/32
-2406:a3c0::/32
-2406:ab40::/28
-2406:b800::/32
-2406:bb00::/29
-2406:c700::/32
-2406:ce00::/29
-2406:d200::/32
-2406:d6c0::/32
-2406:e240::/32
-2406:e700::/32
-2406:e800::/32
-2406:f200::/32
-2406:f240::/32
-2406:fd40::/32
-2406:fe00::/32
-2407:c40::/32
-2407:1200::/32
-2407:1dc0::/32
-2407:3000::/32
-2407:3300::/32
-2407:5300::/32
-2407:5680::/32
-2407:58c0::/32
-2407:6140::/32
-2407:61c0::/32
-2407:8a00::/32
-2407:8f00::/32
-2407:9580::/32
-2407:9900::/32
-2407:a2c0::/32
-2407:a6c0::/32
-2407:a800::/32
-2407:a840::/32
-2407:b000::/32
-2407:b001::/32
-2407:b0c0::/32
-2407:bc40::/32
-2407:c800::/32
-2407:cc00::/32
-2407:d440::/32
-2407:d600::/32
-2407:d800::/32
-2407:e0c0::/32
-2407:e540::/32
-2407:e600::/32
-2407:eac0::/32
-2407:eb40::/32
-2407:ee40::/32
-2407:f240::/32
-2407:f600::/32
-2407:fc40::/32
-2408::/22
-2409:10::/28
-2409:250::/28
-240a::/25
-240b::/26
-240b:240::/26
-240b:c000::/24
-240d::/27
-240f::/24
-240f:100::/24
+# source: APNIC delegated-apnic-latest 20261102
+# cidr	country	registry	status	date
+2001:200::/35	JP	apnic	allocated	19990813
+2001:200:2000::/35	JP	apnic	allocated	20030423
+2001:200:4000::/34	JP	apnic	allocated	20030423
+2001:200:8000::/33	JP	apnic	allocated	20030423
+2001:218::/35	JP	apnic	allocated	19990922
+2001:218:2000::/35	JP	apnic	allocated	20020724
+2001:218:4000::/34	JP	apnic	allocated	20020724
+2001:218:8000::/33	JP	apnic	allocated	20020724
+2001:240::/35	JP	apnic	allocated	20000308
+2001:240:2000::/35	JP	apnic	allocated	20020726
+2001:240:4000::/34	JP	apnic	allocated	20020726
+2001:240:8000::/33	JP	apnic	allocated	20020726
+2001:258::/35	JP	apnic	allocated	20000502
+2001:258:2000::/35	JP	apnic	allocated	20021021
+2001:258:4000::/34	JP	apnic	allocated	20021021
+2001:258:8000::/33	JP	apnic	allocated	20021021
+2001:260::/35	JP	apnic	allocated	20000719
+2001:260:2000::/35	JP	apnic	allocated	20020725
+2001:260:4000::/34	JP	apnic	allocated	20020725
+2001:260:8000::/33	JP	apnic	allocated	20020725
+2001:268::/35	JP	apnic	allocated	20000829
+2001:268:2000::/35	JP	apnic	allocated	20020715
+2001:268:4000::/34	JP	apnic	allocated	20020715
+2001:268:8000::/33	JP	apnic	allocated	20020715
+2001:278::/35	JP	apnic	allocated	20000915
+2001:278:2000::/35	JP	apnic	allocated	20020822
+2001:278:4000::/34	JP	apnic	allocated	20020822
+2001:278:8000::/33	JP	apnic	allocated	20020822
+2001:298::/35	JP	apnic	allocated	20001207
+2001:298:2000::/35	JP	apnic	allocated	20020905
+2001:298:4000::/34	JP	apnic	allocated	20020905
+2001:298:8000::/33	JP	apnic	allocated	20020905
+2001:2a0::/35	JP	apnic	allocated	20001208
+2001:2a0:2000::/35	JP	apnic	allocated	20021118
+2001:2a0:4000::/34	JP	apnic	allocated	20021118
+2001:2a0:8000::/33	JP	apnic	allocated	20021118
+2001:2a8::/35	JP	apnic	allocated	20001228
+2001:2a8:2000::/35	JP	apnic	allocated	20040728
+2001:2a8:4000::/34	JP	apnic	allocated	20040728
+2001:2a8:8000::/33	JP	apnic	allocated	20040728
+2001:2c0::/35	JP	apnic	allocated	20010207
+2001:2c0:2000::/35	JP	apnic	allocated	20020828
+2001:2c0:4000::/34	JP	apnic	allocated	20020828
+2001:2c0:8000::/33	JP	apnic	allocated	20020828
+2001:2c8::/35	JP	apnic	allocated	20010208
+2001:2c8:2000::/35	JP	apnic	allocated	20040813
+2001:2c8:4000::/34	JP	apnic	allocated	20040813
+2001:2c8:8000::/33	JP	apnic	allocated	20040813
+2001:2e8::/35	JP	apnic	allocated	20010702
+2001:2e8:2000::/35	JP	apnic	allocated	20020711
+2001:2e8:4000::/34	JP	apnic	allocated	20020711
+2001:2e8:8000::/33	JP	apnic	allocated	20020711
+2001:2f0::/35	JP	apnic	allocated	20010801
+2001:2f0:2000::/35	JP	apnic	allocated	20020824
+2001:2f0:4000::/34	JP	apnic	allocated	20020824
+2001:2f0:8000::/33	JP	apnic	allocated	20020824
+2001:2f8::/35	JP	apnic	allocated	20010809
+2001:2f8:2000::/35	JP	apnic	allocated	20020823
+2001:2f8:4000::/34	JP	apnic	allocated	20020823
+2001:2f8:8000::/33	JP	apnic	allocated	20020823
+2001:300::/35	JP	apnic	allocated	20010810
+2001:300:2000::/35	JP	apnic	allocated	20030411
+2001:300:4000::/34	JP	apnic	allocated	20030411
+2001:300:8000::/33	JP	apnic	allocated	20030411
+2001:308::/35	JP	apnic	allocated	20010814
+2001:308:2000::/35	JP	apnic	allocated	20020813
+2001:308:4000::/34	JP	apnic	allocated	20020813
+2001:308:8000::/33	JP	apnic	allocated	20020813
+2001:310::/35	JP	apnic	allocated	20010815
+2001:310:2000::/35	JP	apnic	allocated	20020715
+2001:310:4000::/34	JP	apnic	allocated	20020715
+2001:310:8000::/33	JP	apnic	allocated	20020715
+2001:318::/35	JP	apnic	allocated	20010817
+2001:318:2000::/35	JP	apnic	allocated	20020711
+2001:318:4000::/34	JP	apnic	allocated	20020711
+2001:318:8000::/33	JP	apnic	allocated	20020711
+2001:338::/35	JP	apnic	allocated	20011005
+2001:338:2000::/35	JP	apnic	allocated	20090806
+2001:338:4000::/34	JP	apnic	allocated	20090806
+2001:338:8000::/33	JP	apnic	allocated	20090806
+2001:340::/35	JP	apnic	allocated	20011030
+2001:340:2000::/35	JP	apnic	allocated	20021009
+2001:340:4000::/34	JP	apnic	allocated	20021009
+2001:340:8000::/33	JP	apnic	allocated	20021009
+2001:348::/35	JP	apnic	allocated	20011031
+2001:348:2000::/35	JP	apnic	allocated	20020717
+2001:348:4000::/34	JP	apnic	allocated	20020717
+2001:348:8000::/33	JP	apnic	allocated	20020717
+2001:350::/35	JP	apnic	allocated	20011108
+2001:350:2000::/35	JP	apnic	allocated	20021009
+2001:350:4000::/34	JP	apnic	allocated	20021009
+2001:350:8000::/33	JP	apnic	allocated	20021009
+2001:358::/35	JP	apnic	allocated	20011115
+2001:358:2000::/35	JP	apnic	allocated	20040809
+2001:358:4000::/34	JP	apnic	allocated	20040809
+2001:358:8000::/33	JP	apnic	allocated	20040809
+2001:368::/35	JP	apnic	allocated	20011212
+2001:368:2000::/35	JP	apnic	allocated	20020712
+2001:368:4000::/34	JP	apnic	allocated	20020712
+2001:368:8000::/33	JP	apnic	allocated	20020712
+2001:370::/35	JP	apnic	allocated	20010212
+2001:370:2000::/35	JP	apnic	allocated	20030210
+2001:370:4000::/34	JP	apnic	allocated	20030210
+2001:370:8000::/33	JP	apnic	allocated	20030210
+2001:380::/35	JP	apnic	allocated	20020115
+2001:380:2000::/35	JP	apnic	allocated	20020712
+2001:380:4000::/34	JP	apnic	allocated	20020712
+2001:380:8000::/33	JP	apnic	allocated	20020712
+2001:398::/35	JP	apnic	allocated	20020215
+2001:398:2000::/35	JP	apnic	allocated	20020716
+2001:398:4000::/34	JP	apnic	allocated	20020716
+2001:398:8000::/33	JP	apnic	allocated	20020716
+2001:3a0::/35	JP	apnic	allocated	20020319
+2001:3a0:2000::/35	JP	apnic	allocated	20030317
+2001:3a0:4000::/34	JP	apnic	allocated	20030317
+2001:3a0:8000::/33	JP	apnic	allocated	20030317
+2001:3b0::/35	JP	apnic	allocated	20020403
+2001:3b0:2000::/35	JP	apnic	allocated	20020712
+2001:3b0:4000::/34	JP	apnic	allocated	20020712
+2001:3b0:8000::/33	JP	apnic	allocated	20020712
+2001:3b8::/35	JP	apnic	allocated	20020409
+2001:3b8:2000::/35	JP	apnic	allocated	20020923
+2001:3b8:4000::/34	JP	apnic	allocated	20020923
+2001:3b8:8000::/33	JP	apnic	allocated	20020923
+2001:3c0::/35	JP	apnic	allocated	20020513
+2001:3d0::/35	JP	apnic	allocated	20020521
+2001:3d0:2000::/35	JP	apnic	allocated	20030214
+2001:3d0:4000::/34	JP	apnic	allocated	20030214
+2001:3d0:8000::/33	JP	apnic	allocated	20030214
+2001:3d8::/35	JP	apnic	allocated	20020523
+2001:3d8:2000::/35	JP	apnic	allocated	20020830
+2001:3d8:4000::/34	JP	apnic	allocated	20020830
+2001:3d8:8000::/33	JP	apnic	allocated	20020830
+2001:3e0::/35	JP	apnic	allocated	20020524
+2001:3e0:2000::/35	JP	apnic	allocated	20020711
+2001:3e0:4000::/34	JP	apnic	allocated	20020711
+2001:3e0:8000::/33	JP	apnic	allocated	20020711
+2001:3e8::/32	JP	apnic	allocated	20100806
+2001:7fa:0:3::/64	JP	apnic	assigned	20020226
+2001:7fa:7::/48	JP	apnic	assigned	20050526
+2001:c28::/32	JP	apnic	allocated	20020730
+2001:c30::/32	JP	apnic	allocated	20020801
+2001:c40::/32	JP	apnic	allocated	20020808
+2001:c70::/32	JP	apnic	allocated	20020910
+2001:c80::/32	JP	apnic	allocated	20020916
+2001:c90::/32	JP	apnic	allocated	20020930
+2001:cb0::/32	JP	apnic	allocated	20021011
+2001:cb8::/32	JP	apnic	allocated	20021011
+2001:cc8::/32	JP	apnic	allocated	20021113
+2001:cc9::/32	JP	apnic	allocated	20110816
+2001:cd0::/32	JP	apnic	allocated	20021205
+2001:ce8::/32	JP	apnic	allocated	20030113
+2001:cf8::/32	JP	apnic	allocated	20030206
+2001:d00::/32	JP	apnic	allocated	20030206
+2001:d28::/32	JP	apnic	allocated	20030325
+2001:d30::/32	JP	apnic	allocated	20030407
+2001:d50::/32	JP	apnic	allocated	20030605
+2001:d70::/30	JP	apnic	allocated	20030912
+2001:d80::/32	JP	apnic	allocated	20031002
+2001:d88::/32	JP	apnic	allocated	20031006
+2001:d90::/32	JP	apnic	allocated	20031017
+2001:da0::/32	JP	apnic	allocated	20031106
+2001:dc2::/32	JP	apnic	assigned	20030529
+2001:dc3::/32	JP	apnic	assigned	20030619
+2001:dc4::/32	JP	apnic	assigned	20031117
+2001:dc9::/32	JP	apnic	assigned	20041108
+2001:dd8:22::/48	JP	apnic	assigned	20111107
+2001:dda::/48	JP	apnic	assigned	20141223
+2001:ddb::/48	JP	apnic	assigned	20220713
+2001:de1::/42	JP	apnic	assigned	20100419
+2001:de8:4::/46	JP	apnic	assigned	20080402
+2001:de8:8::/48	JP	apnic	assigned	20080811
+2001:de8:c::/48	JP	apnic	assigned	20090303
+2001:de8:1e::/48	JP	apnic	assigned	20121101
+2001:de8:2000::/48	JP	apnic	assigned	20260505
+2001:df0:8::/48	JP	apnic	assigned	20080320
+2001:df0:15::/48	JP	apnic	assigned	20080625
+2001:df0:43::/48	JP	apnic	assigned	20081017
+2001:df0:45::/48	JP	apnic	assigned	20090108
+2001:df0:46::/48	JP	apnic	assigned	20090206
+2001:df0:68::/48	JP	apnic	assigned	20100201
+2001:df0:95::/48	JP	apnic	assigned	20100419
+2001:df0:cf::/48	JP	apnic	assigned	20101101
+2001:df0:eb::/48	JP	apnic	assigned	20110121
+2001:df0:21e::/48	JP	apnic	assigned	20110428
+2001:df0:232::/48	JP	apnic	assigned	20110616
+2001:df0:254::/48	JP	apnic	assigned	20111013
+2001:df0:258::/48	JP	apnic	assigned	20111101
+2001:df0:25e::/48	JP	apnic	assigned	20111114
+2001:df0:266::/48	JP	apnic	assigned	20111213
+2001:df0:293::/48	JP	apnic	assigned	20120201
+2001:df0:2a6::/48	JP	apnic	assigned	20120320
+2001:df0:2b4::/48	JP	apnic	assigned	20120509
+2001:df0:2c2::/48	JP	apnic	assigned	20120614
+2001:df0:2ca::/48	JP	apnic	assigned	20120703
+2001:df0:2cc::/48	JP	apnic	assigned	20120712
+2001:df0:2e4::/48	JP	apnic	assigned	20120727
+2001:df0:2ed::/48	JP	apnic	assigned	20120806
+2001:df0:2ee::/48	JP	apnic	assigned	20120806
+2001:df0:2f5::/48	JP	apnic	assigned	20120821
+2001:df0:401::/48	JP	apnic	assigned	20120320
+2001:df0:440::/48	JP	apnic	assigned	20121130
+2001:df0:449::/48	JP	apnic	assigned	20121220
+2001:df0:456::/48	JP	apnic	assigned	20130110
+2001:df0:462::/48	JP	apnic	assigned	20130124
+2001:df0:467::/48	JP	apnic	assigned	20130206
+2001:df0:1800::/48	JP	apnic	assigned	20131114
+2001:df0:2440::/48	JP	apnic	assigned	20211203
+2001:df0:2f80::/48	JP	apnic	assigned	20190416
+2001:df0:3d80::/48	JP	apnic	assigned	20190424
+2001:df0:6800::/48	JP	apnic	assigned	20131119
+2001:df0:7480::/48	JP	apnic	assigned	20190521
+2001:df0:8500::/48	JP	apnic	assigned	20170308
+2001:df0:8bc0::/48	JP	apnic	assigned	20220317
+2001:df0:a880::/48	JP	apnic	assigned	20190619
+2001:df0:aa80::/48	JP	apnic	assigned	20190619
+2001:df0:b400::/48	JP	apnic	assigned	20140924
+2001:df0:bb80::/48	JP	apnic	assigned	20190626
+2001:df0:bb81::/48	JP	apnic	assigned	20220915
+2001:df0:c280::/48	JP	apnic	assigned	20190627
+2001:df0:d740::/48	JP	apnic	assigned	20220616
+2001:df0:ebc0::/48	JP	apnic	assigned	20220704
+2001:df0:fd80::/48	JP	apnic	assigned	20190725
+2001:df1:bc0::/48	JP	apnic	assigned	20220726
+2001:df1:f40::/48	JP	apnic	assigned	20220727
+2001:df1:4380::/48	JP	apnic	assigned	20190828
+2001:df1:48c0::/48	JP	apnic	assigned	20220916
+2001:df1:b3c0::/48	JP	apnic	assigned	20221219
+2001:df1:c580::/48	JP	apnic	assigned	20191025
+2001:df1:da80::/48	JP	apnic	assigned	20191101
+2001:df1:e500::/48	JP	apnic	assigned	20170711
+2001:df2:9b40::/48	JP	apnic	assigned	20230622
+2001:df2:af00::/48	JP	apnic	assigned	20171003
+2001:df2:b340::/48	JP	apnic	assigned	20230718
+2001:df2:c300::/48	JP	apnic	assigned	20171010
+2001:df2:c900::/48	JP	apnic	assigned	20171011
+2001:df2:d800::/48	JP	apnic	assigned	20140224
+2001:df2:da00::/48	JP	apnic	assigned	20160621
+2001:df2:fc00::/48	JP	apnic	assigned	20150309
+2001:df3:4c0::/48	JP	apnic	assigned	20231011
+2001:df3:540::/48	JP	apnic	assigned	20231011
+2001:df3:14c0::/48	JP	apnic	assigned	20231031
+2001:df3:25c0::/48	JP	apnic	assigned	20231115
+2001:df3:2680::/48	JP	apnic	assigned	20200313
+2001:df3:4b80::/48	JP	apnic	assigned	20200331
+2001:df3:6500::/48	JP	apnic	assigned	20171204
+2001:df3:9380::/48	JP	apnic	assigned	20200427
+2001:df3:a2c0::/48	JP	apnic	assigned	20240404
+2001:df3:a700::/48	JP	apnic	assigned	20171225
+2001:df3:aac0::/48	JP	apnic	assigned	20240410
+2001:df3:b780::/48	JP	apnic	assigned	20200514
+2001:df3:bc00::/48	JP	apnic	assigned	20150423
+2001:df3:f6c0::/48	JP	apnic	assigned	20240624
+2001:df4:1780::/48	JP	apnic	assigned	20200626
+2001:df4:1781::/48	JP	apnic	assigned	20220505
+2001:df4:1f80::/48	JP	apnic	assigned	20200703
+2001:df4:53c0::/48	JP	apnic	assigned	20240929
+2001:df4:6680::/48	JP	apnic	assigned	20200805
+2001:df4:7200::/48	JP	apnic	assigned	20160901
+2001:df4:b400::/48	JP	apnic	assigned	20150630
+2001:df4:b480::/48	JP	apnic	assigned	20200831
+2001:df5:12c0::/48	JP	apnic	assigned	20250211
+2001:df5:2040::/48	JP	apnic	assigned	20250220
+2001:df5:2c00::/48	JP	apnic	assigned	20150729
+2001:df5:6400::/48	JP	apnic	assigned	20150806
+2001:df5:76c0::/48	JP	apnic	assigned	20250429
+2001:df5:bac0::/48	JP	apnic	assigned	20250616
+2001:df6:580::/48	JP	apnic	assigned	20210217
+2001:df6:2c80::/48	JP	apnic	assigned	20210304
+2001:df6:34c0::/48	JP	apnic	assigned	20251013
+2001:df6:5180::/48	JP	apnic	assigned	20210325
+2001:df6:5fc0::/48	JP	apnic	assigned	20251130
+2001:df6:6000::/48	JP	apnic	assigned	20130709
+2001:df6:6240::/48	JP	apnic	assigned	20251203
+2001:df6:7280::/48	JP	apnic	assigned	20210408
+2001:df6:7281::/48	JP	apnic	assigned	20220829
+2001:df6:8000::/48	JP	apnic	assigned	20130326
+2001:df6:a000::/48	JP	apnic	assigned	20130709
+2001:df6:a680::/48	JP	apnic	assigned	20210513
+2001:df6:b800::/48	JP	apnic	allocated	20140624
+2001:df6:d7c0::/48	JP	apnic	assigned	20260324
+2001:df6:edc0::/48	JP	apnic	assigned	20260414
+2001:df6:fd40::/48	JP	apnic	assigned	20260429
+2001:df7:1ac0::/48	JP	apnic	assigned	20260612
+2001:df7:4800::/43	JP	apnic	assigned	20140704
+2001:df7:5600::/48	JP	apnic	assigned	20161213
+2001:df7:7800::/48	JP	apnic	assigned	20140711
+2001:df7:8380::/48	JP	apnic	assigned	20210908
+2001:df7:a800::/48	JP	apnic	assigned	20140725
+2001:df7:ea80::/48	JP	apnic	assigned	20211026
+2001:df7:f000::/48	JP	apnic	assigned	20131114
+2001:e28::/32	JP	apnic	allocated	20040102
+2001:e38::/32	JP	apnic	allocated	20040121
+2001:e40::/32	JP	apnic	allocated	20040130
+2001:e41::/32	JP	apnic	allocated	20110204
+2001:e42::/31	JP	apnic	allocated	20110204
+2001:e44::/30	JP	apnic	allocated	20110204
+2001:e58::/32	JP	apnic	allocated	20040213
+2001:e90::/32	JP	apnic	allocated	20040326
+2001:f08::/32	JP	apnic	allocated	20040607
+2001:f58::/32	JP	apnic	allocated	20040826
+2001:f60::/28	JP	apnic	allocated	20040823
+2001:f70::/28	JP	apnic	allocated	20180205
+2001:f80::/32	JP	apnic	allocated	20041001
+2001:f98::/32	JP	apnic	allocated	20041025
+2001:fa0::/32	JP	apnic	allocated	20041207
+2001:fa8::/32	JP	apnic	allocated	20041217
+2001:fc8::/32	JP	apnic	allocated	20050124
+2001:ff0::/32	JP	apnic	allocated	20050329
+2001:4460::/32	JP	apnic	allocated	20050725
+2001:44a0::/32	JP	apnic	allocated	20051014
+2001:44a8::/32	JP	apnic	allocated	20051018
+2001:44b0::/32	JP	apnic	allocated	20051107
+2001:a000::/21	JP	apnic	allocated	20041201
+2400:1000::/32	JP	apnic	allocated	20081223
+2400:12e0::/32	JP	apnic	allocated	20211013
+2400:1520::/32	JP	apnic	allocated	20211018
+2400:1920::/32	JP	apnic	allocated	20211029
+2400:1b80::/32	JP	apnic	allocated	20131003
+2400:1de0::/32	JP	apnic	allocated	20211108
+2400:2000::/20	JP	apnic	allocated	20050712
+2400:3000::/32	JP	apnic	allocated	20081229
+2400:3260::/32	JP	apnic	allocated	20211116
+2400:32a0::/32	JP	apnic	allocated	20211116
+2400:3800::/32	JP	apnic	allocated	20090128
+2400:3980::/32	JP	apnic	allocated	20131022
+2400:3aa0::/32	JP	apnic	allocated	20211204
+2400:3e80::/32	JP	apnic	allocated	20131024
+2400:3f80::/32	JP	apnic	allocated	20131025
+2400:4000::/22	JP	apnic	allocated	20050815
+2400:4840::/32	JP	apnic	allocated	20161122
+2400:48c0::/32	JP	apnic	allocated	20161122
+2400:4d60::/32	JP	apnic	allocated	20220117
+2400:5100::/32	JP	apnic	allocated	20110413
+2400:5320::/32	JP	apnic	allocated	20220125
+2400:53a0::/32	JP	apnic	allocated	20220126
+2400:53e0::/32	JP	apnic	allocated	20220126
+2400:5b60::/32	JP	apnic	allocated	20220217
+2400:6700::/32	JP	apnic	allocated	20110419
+2400:6b00::/32	JP	apnic	allocated	20110419
+2400:6f00::/32	JP	apnic	allocated	20110419
+2400:7800::/32	JP	apnic	allocated	20090211
+2400:7940::/32	JP	apnic	allocated	20161213
+2400:7b00::/32	JP	apnic	allocated	20110421
+2400:7ce0::/32	JP	apnic	allocated	20220517
+2400:7d20::/32	JP	apnic	allocated	20220517
+2400:7e00::/32	JP	apnic	allocated	20100316
+2400:8040::/32	JP	apnic	allocated	20161221
+2400:8120::/32	JP	apnic	allocated	20220525
+2400:81e0::/32	JP	apnic	allocated	20220526
+2400:8300::/32	JP	apnic	allocated	20110427
+2400:8320::/32	JP	apnic	allocated	20220531
+2400:8400::/32	JP	apnic	allocated	20090717
+2400:8500::/32	JP	apnic	allocated	20110427
+2400:8700::/32	JP	apnic	allocated	20110428
+2400:8820::/32	JP	apnic	allocated	20220616
+2400:8d40::/32	JP	apnic	allocated	20170110
+2400:9180::/32	JP	apnic	allocated	20140116
+2400:9920::/32	JP	apnic	allocated	20220726
+2400:99a0::/32	JP	apnic	allocated	20220726
+2400:a080::/32	JP	apnic	allocated	20140214
+2400:a140::/32	JP	apnic	allocated	20170130
+2400:a300::/32	JP	apnic	allocated	20110503
+2400:a800::/32	JP	apnic	allocated	20090213
+2400:ac00::/32	JP	apnic	allocated	20090729
+2400:af80::/32	JP	apnic	allocated	20140303
+2400:b1a0::/32	JP	apnic	allocated	20220930
+2400:b3c0::/32	JP	apnic	allocated	20170216
+2400:b3e0::/32	JP	apnic	allocated	20221005
+2400:b420::/32	JP	apnic	allocated	20221005
+2400:b680::/32	JP	apnic	allocated	20140305
+2400:bf60::/32	JP	apnic	allocated	20221109
+2400:c0a0::/32	JP	apnic	allocated	20221114
+2400:c320::/32	JP	apnic	allocated	20221117
+2400:c7e0::/32	JP	apnic	allocated	20221202
+2400:c8a0::/32	JP	apnic	allocated	20221207
+2400:ce20::/32	JP	apnic	allocated	20221223
+2400:d640::/32	JP	apnic	allocated	20170310
+2400:d820::/32	JP	apnic	allocated	20230119
+2400:dcc0::/32	JP	apnic	allocated	20170316
+2400:ddc0::/32	JP	apnic	allocated	20170317
+2400:df00::/32	JP	apnic	allocated	20110524
+2400:e000::/32	JP	apnic	allocated	20081210
+2400:e100::/32	JP	apnic	allocated	20110524
+2400:e400::/32	JP	apnic	allocated	20090807
+2400:e860::/32	JP	apnic	allocated	20230309
+2400:f400::/32	JP	apnic	allocated	20090810
+2400:f460::/32	JP	apnic	allocated	20230411
+2400:f7a0::/32	JP	apnic	allocated	20230419
+2400:f9a0::/32	JP	apnic	allocated	20230501
+2400:fba0::/32	JP	apnic	allocated	20230508
+2401:2a0::/32	JP	apnic	allocated	20230523
+2401:3e0::/32	JP	apnic	allocated	20230526
+2401:440::/32	JP	apnic	allocated	20170424
+2401:600::/32	JP	apnic	allocated	20100325
+2401:900::/32	JP	apnic	allocated	20110606
+2401:980::/32	JP	apnic	allocated	20140602
+2401:c20::/32	JP	apnic	allocated	20230619
+2401:d20::/32	JP	apnic	allocated	20230619
+2401:1b20::/32	JP	apnic	allocated	20230719
+2401:1f20::/32	JP	apnic	allocated	20230802
+2401:1f60::/32	JP	apnic	allocated	20230802
+2401:2100::/32	JP	apnic	allocated	20110614
+2401:24c0::/32	JP	apnic	allocated	20170516
+2401:2500::/32	JP	apnic	allocated	20110614
+2401:2540::/32	JP	apnic	allocated	20170516
+2401:25c0::/32	JP	apnic	allocated	20170516
+2401:2680::/32	JP	apnic	allocated	20140620
+2401:2940::/32	JP	apnic	allocated	20170522
+2401:2a80::/32	JP	apnic	allocated	20140630
+2401:2d60::/32	JP	apnic	allocated	20230828
+2401:2f20::/32	JP	apnic	allocated	20230904
+2401:3200::/32	JP	apnic	allocated	20100401
+2401:3600::/32	JP	apnic	allocated	20100406
+2401:3aa0::/32	JP	apnic	allocated	20230919
+2401:3b00::/32	JP	apnic	allocated	20110617
+2401:3fa0::/32	JP	apnic	allocated	20230929
+2401:4360::/32	JP	apnic	allocated	20231011
+2401:43a0::/32	JP	apnic	allocated	20231011
+2401:4640::/32	JP	apnic	allocated	20170607
+2401:4d40::/29	JP	apnic	allocated	20170609
+2401:5300::/32	JP	apnic	allocated	20110630
+2401:55c0::/32	JP	apnic	allocated	20170615
+2401:5ac0::/32	JP	apnic	allocated	20170620
+2401:5e40::/32	JP	apnic	allocated	20170623
+2401:7040::/32	JP	apnic	allocated	20170627
+2401:7640::/32	JP	apnic	allocated	20170703
+2401:7641::/32	JP	apnic	allocated	20190401
+2401:7b60::/32	JP	apnic	allocated	20240129
+2401:7ec0::/32	JP	apnic	allocated	20170711
+2401:7f00::/32	JP	apnic	allocated	20110714
+2401:8280::/32	JP	apnic	allocated	20140901
+2401:8520::/32	JP	apnic	allocated	20240304
+2401:8700::/32	JP	apnic	allocated	20110721
+2401:89e0::/32	JP	apnic	allocated	20240314
+2401:8b00::/32	JP	apnic	allocated	20110725
+2401:9220::/32	JP	apnic	allocated	20240408
+2401:98a0::/32	JP	apnic	allocated	20240430
+2401:9c20::/32	JP	apnic	allocated	20240508
+2401:9fe0::/32	JP	apnic	allocated	20240517
+2401:a1c0::/32	JP	apnic	allocated	20170815
+2401:a240::/32	JP	apnic	allocated	20170815
+2401:a380::/32	JP	apnic	allocated	20141006
+2401:a500::/32	JP	apnic	allocated	20110804
+2401:a920::/32	JP	apnic	allocated	20240620
+2401:ad00::/32	JP	apnic	allocated	20110809
+2401:af80::/32	JP	apnic	allocated	20141020
+2401:b140::/32	JP	apnic	allocated	20170828
+2401:b420::/32	JP	apnic	allocated	20240716
+2401:b720::/32	JP	apnic	allocated	20240801
+2401:b9c0::/32	JP	apnic	allocated	20170905
+2401:bd00::/32	JP	apnic	allocated	20110818
+2401:bf00::/32	JP	apnic	allocated	20110818
+2401:bfe0::/32	JP	apnic	allocated	20240830
+2401:c080::/32	JP	apnic	allocated	20141119
+2401:c1a0::/32	JP	apnic	allocated	20240909
+2401:c800::/32	JP	apnic	allocated	20080606
+2401:cba0::/32	JP	apnic	allocated	20241009
+2401:cbc0::/32	JP	apnic	allocated	20170920
+2401:ce80::/32	JP	apnic	allocated	20141202
+2401:cee0::/32	JP	apnic	allocated	20241021
+2401:d0a0::/32	JP	apnic	allocated	20241027
+2401:d220::/32	JP	apnic	allocated	20241030
+2401:d440::/32	JP	apnic	allocated	20170929
+2401:d500::/32	JP	apnic	allocated	20110829
+2401:d560::/32	JP	apnic	allocated	20241107
+2401:d700::/32	JP	apnic	allocated	20110830
+2401:d900::/32	JP	apnic	allocated	20110831
+2401:dbc0::/32	JP	apnic	allocated	20171010
+2401:dc40::/32	JP	apnic	allocated	20171010
+2401:dd40::/32	JP	apnic	allocated	20171010
+2401:df60::/32	JP	apnic	allocated	20241210
+2401:e260::/32	JP	apnic	allocated	20241220
+2401:e300::/32	JP	apnic	allocated	20110831
+2401:e700::/32	JP	apnic	allocated	20110902
+2401:efc0::/32	JP	apnic	allocated	20171031
+2401:f100::/32	JP	apnic	allocated	20110909
+2401:f280::/32	JP	apnic	allocated	20150121
+2401:f800::/32	JP	apnic	allocated	20080612
+2401:f820::/32	JP	apnic	allocated	20250321
+2402:700::/32	JP	apnic	allocated	20110922
+2402:de0::/32	JP	apnic	allocated	20250528
+2402:ea0::/32	JP	apnic	allocated	20250530
+2402:1400::/32	JP	apnic	allocated	20091005
+2402:1580::/32	JP	apnic	allocated	20150223
+2402:1d00::/32	JP	apnic	allocated	20111003
+2402:1e80::/32	JP	apnic	allocated	20150309
+2402:2840::/32	JP	apnic	allocated	20171204
+2402:2f60::/32	JP	apnic	allocated	20251001
+2402:3000::/32	JP	apnic	allocated	20080213
+2402:3160::/32	JP	apnic	allocated	20251010
+2402:3260::/32	JP	apnic	allocated	20251015
+2402:3800::/32	JP	apnic	allocated	20080620
+2402:3880::/32	JP	apnic	allocated	20150402
+2402:3b00::/32	JP	apnic	allocated	20111017
+2402:3c60::/32	JP	apnic	allocated	20251203
+2402:3d00::/32	JP	apnic	allocated	20111018
+2402:3ee0::/32	JP	apnic	allocated	20251215
+2402:40a0::/32	JP	apnic	allocated	20251217
+2402:4200::/32	JP	apnic	allocated	20100512
+2402:4700::/32	JP	apnic	allocated	20111020
+2402:4ee0::/32	JP	apnic	allocated	20260224
+2402:5120::/32	JP	apnic	allocated	20260309
+2402:52e0::/32	JP	apnic	allocated	20260326
+2402:54a0::/32	JP	apnic	allocated	20260405
+2402:56c0::/32	JP	apnic	allocated	20180115
+2402:59e0::/32	JP	apnic	allocated	20260422
+2402:5a00::/32	JP	apnic	allocated	20100514
+2402:5a20::/32	JP	apnic	allocated	20260422
+2402:6020::/32	JP	apnic	allocated	20260527
+2402:6700::/32	JP	apnic	allocated	20111028
+2402:6800::/32	JP	apnic	allocated	20080702
+2402:6b00::/32	JP	apnic	allocated	20111031
+2402:6ba0::/32	JP	apnic	allocated	20260803
+2402:6c80::/32	JP	apnic	allocated	20150601
+2402:73c0::/32	JP	apnic	allocated	20180207
+2402:7440::/32	JP	apnic	allocated	20180207
+2402:75e0::/32	JP	apnic	allocated	20260913
+2402:7700::/32	JP	apnic	allocated	20111109
+2402:7a00::/32	JP	apnic	allocated	20100518
+2402:7f80::/32	JP	apnic	allocated	20150626
+2402:8240::/32	JP	apnic	allocated	20180226
+2402:9300::/32	JP	apnic	allocated	20111121
+2402:a800::/32	JP	apnic	allocated	20080723
+2402:af40::/32	JP	apnic	allocated	20180404
+2402:b300::/32	JP	apnic	allocated	20111214
+2402:b700::/32	JP	apnic	allocated	20111216
+2402:b7c0::/32	JP	apnic	allocated	20180410
+2402:b9c0::/32	JP	apnic	allocated	20180411
+2402:bb00::/32	JP	apnic	allocated	20111221
+2402:bc00::/29	JP	apnic	allocated	20091104
+2402:c080::/31	JP	apnic	allocated	20150813
+2402:c200::/32	JP	apnic	allocated	20100608
+2402:c400::/32	JP	apnic	allocated	20091110
+2402:c600::/32	JP	apnic	allocated	20100608
+2402:c800::/32	JP	apnic	allocated	20080728
+2402:c840::/32	JP	apnic	allocated	20180419
+2402:d200::/32	JP	apnic	allocated	20100615
+2402:d600::/32	JP	apnic	allocated	20100616
+2402:d700::/32	JP	apnic	allocated	20120106
+2402:dc00::/32	JP	apnic	allocated	20091116
+2402:e200::/32	JP	apnic	allocated	20100617
+2402:e800::/32	JP	apnic	allocated	20080807
+2402:f2c0::/32	JP	apnic	allocated	20180525
+2403:400::/32	JP	apnic	allocated	20091123
+2403:401::/32	JP	apnic	allocated	20191218
+2403:1240::/32	JP	apnic	allocated	20180618
+2403:1800::/32	JP	apnic	allocated	20080814
+2403:1f00::/32	JP	apnic	allocated	20120216
+2403:2000::/32	JP	apnic	allocated	20070622
+2403:2880::/32	JP	apnic	allocated	20151021
+2403:2d00::/32	JP	apnic	allocated	20120224
+2403:2dc0::/32	JP	apnic	allocated	20180710
+2403:3200::/32	JP	apnic	allocated	20100705
+2403:3a00::/32	JP	apnic	allocated	20100706
+2403:4040::/32	JP	apnic	allocated	20180718
+2403:4400::/32	JP	apnic	allocated	20091210
+2403:4440::/32	JP	apnic	allocated	20180723
+2403:5440::/32	JP	apnic	allocated	20180801
+2403:5700::/32	JP	apnic	allocated	20120315
+2403:5a00::/32	JP	apnic	allocated	20100709
+2403:5f00::/32	JP	apnic	allocated	20120320
+2403:6c00::/32	JP	apnic	allocated	20091222
+2403:7300::/32	JP	apnic	allocated	20120328
+2403:7800::/32	JP	apnic	allocated	20080829
+2403:7940::/32	JP	apnic	allocated	20180905
+2403:7a00::/32	JP	apnic	allocated	20100723
+2403:7c00::/32	JP	apnic	allocated	20100104
+2403:8a00::/32	JP	apnic	allocated	20100727
+2403:8e00::/32	JP	apnic	allocated	20100728
+2403:8f00::/32	JP	apnic	allocated	20120412
+2403:9200::/32	JP	apnic	allocated	20100728
+2403:9400::/32	JP	apnic	allocated	20100108
+2403:9600::/32	JP	apnic	allocated	20100729
+2403:9900::/24	JP	apnic	allocated	20120413
+2403:9a00::/32	JP	apnic	allocated	20100730
+2403:9c00::/32	JP	apnic	allocated	20100108
+2403:a640::/32	JP	apnic	allocated	20180928
+2403:a700::/32	JP	apnic	allocated	20120419
+2403:ac80::/32	JP	apnic	allocated	20151123
+2403:bd80::/32	JP	apnic	allocated	20151127
+2403:c780::/32	JP	apnic	allocated	20151201
+2403:d000::/32	JP	apnic	allocated	20080208
+2403:d001::/32	JP	apnic	allocated	20200907
+2403:dd40::/32	JP	apnic	allocated	20181031
+2403:e4c0::/32	JP	apnic	allocated	20181105
+2403:f200::/32	JP	apnic	allocated	20100816
+2404:168::/32	JP	apnic	allocated	20060630
+2404:1a8::/32	JP	apnic	allocated	20061004
+2404:200::/32	JP	apnic	allocated	20100819
+2404:a00::/32	JP	apnic	allocated	20100820
+2404:1000::/32	JP	apnic	allocated	20090115
+2404:1300::/32	JP	apnic	allocated	20120530
+2404:1900::/32	JP	apnic	allocated	20120601
+2404:1980::/32	JP	apnic	allocated	20160106
+2404:1b00::/32	JP	apnic	allocated	20120601
+2404:2680::/32	JP	apnic	allocated	20160119
+2404:2d00::/32	JP	apnic	allocated	20120614
+2404:3200::/32	JP	apnic	allocated	20100830
+2404:5100::/32	JP	apnic	allocated	20120702
+2404:5200::/32	JP	apnic	allocated	20100906
+2404:5480::/32	JP	apnic	allocated	20160218
+2404:5d80::/32	JP	apnic	allocated	20160224
+2404:60c0::/32	JP	apnic	allocated	20190208
+2404:7200::/32	JP	apnic	allocated	20100917
+2404:7900::/32	JP	apnic	allocated	20120718
+2404:7a00::/32	JP	apnic	allocated	20100921
+2404:7a80::/29	JP	apnic	allocated	20160307
+2404:8200::/32	JP	apnic	allocated	20100923
+2404:85c0::/32	JP	apnic	allocated	20190304
+2404:8640::/32	JP	apnic	allocated	20190304
+2404:8680::/32	JP	apnic	allocated	20160315
+2404:8740::/32	JP	apnic	allocated	20190304
+2404:87c0::/32	JP	apnic	allocated	20190304
+2404:8e00::/31	JP	apnic	allocated	20100924
+2404:9000::/32	JP	apnic	allocated	20090121
+2404:9200::/32	JP	apnic	allocated	20100924
+2404:9840::/32	JP	apnic	allocated	20190311
+2404:9ac0::/32	JP	apnic	allocated	20190313
+2404:a600::/32	JP	apnic	allocated	20101001
+2404:b600::/32	JP	apnic	allocated	20101005
+2404:b8c0::/32	JP	apnic	allocated	20190404
+2404:c700::/32	JP	apnic	allocated	20120816
+2404:ca00::/32	JP	apnic	allocated	20101006
+2404:cb00::/32	JP	apnic	allocated	20120817
+2404:ce00::/32	JP	apnic	allocated	20101006
+2404:d540::/32	JP	apnic	allocated	20190507
+2404:df40::/32	JP	apnic	allocated	20190518
+2404:e000::/32	JP	apnic	allocated	20081223
+2404:e040::/32	JP	apnic	allocated	20190520
+2404:e480::/32	JP	apnic	allocated	20160427
+2404:e840::/32	JP	apnic	allocated	20190529
+2404:ec00::/32	JP	apnic	allocated	20100211
+2404:f1c0::/32	JP	apnic	allocated	20190611
+2404:fe40::/32	JP	apnic	allocated	20190626
+2405::/32	JP	apnic	allocated	20061107
+2405:640::/32	JP	apnic	allocated	20190708
+2405:7c0::/32	JP	apnic	allocated	20190709
+2405:e00::/32	JP	apnic	allocated	20101102
+2405:1140::/32	JP	apnic	allocated	20190717
+2405:1200::/32	JP	apnic	allocated	20101103
+2405:1201::/32	JP	apnic	allocated	20200723
+2405:1202::/31	JP	apnic	allocated	20200723
+2405:1204::/30	JP	apnic	allocated	20200723
+2405:1440::/32	JP	apnic	allocated	20190722
+2405:1800::/32	JP	apnic	allocated	20081010
+2405:1a80::/32	JP	apnic	allocated	20160510
+2405:2040::/32	JP	apnic	allocated	20190731
+2405:25c0::/32	JP	apnic	allocated	20190809
+2405:2700::/32	JP	apnic	allocated	20120914
+2405:2a00::/32	JP	apnic	allocated	20101108
+2405:30c0::/32	JP	apnic	allocated	20190821
+2405:3600::/32	JP	apnic	allocated	20101116
+2405:3700::/32	JP	apnic	allocated	20120920
+2405:3840::/32	JP	apnic	allocated	20190827
+2405:4e00::/32	JP	apnic	allocated	20101119
+2405:5300::/32	JP	apnic	allocated	20121001
+2405:5340::/32	JP	apnic	allocated	20190925
+2405:6580::/29	JP	apnic	allocated	20160518
+2405:6cc0::/32	JP	apnic	allocated	20191023
+2405:7000::/32	JP	apnic	allocated	20080414
+2405:7740::/32	JP	apnic	allocated	20191108
+2405:7800::/32	JP	apnic	allocated	20081021
+2405:7d00::/32	JP	apnic	allocated	20121019
+2405:8000::/32	JP	apnic	allocated	20070222
+2405:8500::/32	JP	apnic	allocated	20121023
+2405:9ac0::/32	JP	apnic	allocated	20191217
+2405:9e40::/32	JP	apnic	allocated	20191218
+2405:9fc0::/32	JP	apnic	allocated	20191219
+2405:a200::/32	JP	apnic	allocated	20101207
+2405:be00::/32	JP	apnic	allocated	20101216
+2405:c100::/32	JP	apnic	allocated	20121120
+2405:c700::/32	JP	apnic	allocated	20121121
+2405:d200::/32	JP	apnic	allocated	20101223
+2405:d580::/32	JP	apnic	allocated	20160628
+2405:d780::/32	JP	apnic	allocated	20160628
+2405:e800::/32	JP	apnic	allocated	20090317
+2405:ed00::/32	JP	apnic	allocated	20121211
+2405:f000::/32	JP	apnic	allocated	20080502
+2405:f800::/32	JP	apnic	allocated	20090318
+2405:fc80::/32	JP	apnic	allocated	20160720
+2405:fe40::/32	JP	apnic	allocated	20200410
+2406:1c0::/32	JP	apnic	allocated	20200415
+2406:500::/32	JP	apnic	allocated	20130104
+2406:600::/32	JP	apnic	allocated	20110106
+2406:800::/32	JP	apnic	allocated	20090319
+2406:a00::/32	JP	apnic	allocated	20110106
+2406:1000::/32	JP	apnic	allocated	20071109
+2406:1940::/32	JP	apnic	allocated	20200515
+2406:2600::/32	JP	apnic	allocated	20110111
+2406:2800::/32	JP	apnic	allocated	20090320
+2406:2900::/32	JP	apnic	allocated	20130129
+2406:2b40::/32	JP	apnic	allocated	20200618
+2406:4580::/32	JP	apnic	allocated	20160803
+2406:5200::/32	JP	apnic	allocated	20110117
+2406:63c0::/32	JP	apnic	allocated	20200826
+2406:6e40::/32	JP	apnic	allocated	20200908
+2406:7440::/32	JP	apnic	allocated	20200914
+2406:7ec0::/32	JP	apnic	allocated	20200921
+2406:8000::/32	JP	apnic	allocated	20070117
+2406:8c00::/32	JP	apnic	allocated	20100222
+2406:8e00::/32	JP	apnic	allocated	20110128
+2406:9900::/32	JP	apnic	allocated	20130402
+2406:9b40::/32	JP	apnic	allocated	20201015
+2406:a1c0::/32	JP	apnic	allocated	20201021
+2406:a3c0::/32	JP	apnic	allocated	20201022
+2406:ab40::/28	JP	apnic	allocated	20201102
+2406:b800::/32	JP	apnic	allocated	20090414
+2406:bb00::/29	JP	apnic	allocated	20130415
+2406:c700::/32	JP	apnic	allocated	20130419
+2406:ce00::/29	JP	apnic	allocated	20110204
+2406:d200::/32	JP	apnic	allocated	20110207
+2406:d6c0::/32	JP	apnic	allocated	20201204
+2406:e240::/32	JP	apnic	allocated	20201210
+2406:e700::/32	JP	apnic	allocated	20130508
+2406:e800::/32	JP	apnic	allocated	20090428
+2406:f200::/32	JP	apnic	allocated	20110210
+2406:f240::/32	JP	apnic	allocated	20201225
+2406:fd40::/32	JP	apnic	allocated	20210106
+2406:fe00::/32	JP	apnic	allocated	20110211
+2407:c40::/32	JP	apnic	allocated	20210122
+2407:1200::/32	JP	apnic	allocated	20110216
+2407:1dc0::/32	JP	apnic	allocated	20210215
+2407:3000::/32	JP	apnic	allocated	20080311
+2407:3300::/32	JP	apnic	allocated	20130617
+2407:5300::/32	JP	apnic	allocated	20130627
+2407:5680::/32	JP	apnic	allocated	20160922
+2407:58c0::/32	JP	apnic	allocated	20210427
+2407:6140::/32	JP	apnic	allocated	20210513
+2407:61c0::/32	JP	apnic	allocated	20210513
+2407:8a00::/32	JP	apnic	allocated	20110304
+2407:8f00::/32	JP	apnic	allocated	20130717
+2407:9580::/32	JP	apnic	allocated	20161019
+2407:9900::/32	JP	apnic	allocated	20130722
+2407:a2c0::/32	JP	apnic	allocated	20210705
+2407:a6c0::/32	JP	apnic	allocated	20210713
+2407:a800::/32	JP	apnic	allocated	20090518
+2407:a840::/32	JP	apnic	allocated	20210716
+2407:b000::/32	JP	apnic	allocated	20080401
+2407:b001::/32	JP	apnic	allocated	20131108
+2407:b0c0::/32	JP	apnic	allocated	20210727
+2407:bc40::/32	JP	apnic	allocated	20210804
+2407:c800::/32	JP	apnic	allocated	20090525
+2407:cc00::/32	JP	apnic	allocated	20100309
+2407:d440::/32	JP	apnic	allocated	20210831
+2407:d600::/32	JP	apnic	allocated	20110324
+2407:d800::/32	JP	apnic	allocated	20090526
+2407:e0c0::/32	JP	apnic	allocated	20210913
+2407:e540::/32	JP	apnic	allocated	20210917
+2407:e600::/32	JP	apnic	allocated	20110328
+2407:eac0::/32	JP	apnic	allocated	20210925
+2407:eb40::/32	JP	apnic	allocated	20210925
+2407:ee40::/32	JP	apnic	allocated	20210927
+2407:f240::/32	JP	apnic	allocated	20210929
+2407:f600::/32	JP	apnic	allocated	20110329
+2407:fc40::/32	JP	apnic	allocated	20211006
+2408::/22	JP	apnic	allocated	20071102
+2409:10::/28	JP	apnic	allocated	20100924
+2409:250::/28	JP	apnic	allocated	20100924
+240a::/25	JP	apnic	allocated	20100302
+240b::/26	JP	apnic	allocated	20100924
+240b:240::/26	JP	apnic	allocated	20100924
+240b:c000::/24	JP	apnic	allocated	20181026
+240d::/27	JP	apnic	allocated	20101224
+240f::/24	JP	apnic	allocated	20101224
+240f:100::/24	JP	apnic	allocated	20171027

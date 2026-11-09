@@ -88,6 +88,9 @@ docs/ec2/
 ├── sg-ssh-restrict/                 # セキュリティグループの 22 番（SSH）を許可する範囲に絞る Ruby の道具（規則を直す・付け替えるの 2 通り。説明は README.md）
 ├── al2-update/                      # 運用中の AL2 のインスタンスで OS のパッケージを yum で複数台まとめて更新する Ruby の道具（更新の確認、バックアップ、1 台ずつの更新。インスタンスに送るものは remote/。説明は README.md）
 │
+│  ── SSL/TLS の終端の移行の検討 ──
+├── tls-termination-migration/       # httpd が終端している SSL/TLS を前段へ移す 3 つの構成（ALB → EC2、CloudFront → EC2、CloudFront → ALB → EC2）の比較と手順、WAF を置ける場所（検討と手順の下書き）
+│
 │  ── リリースの仕組みの設計ドキュメント ──
 ├── ami-build-pipeline.md              # 全体の設計（リリース検証 → AMI 化 → 起動テンプレート）
 ├── ami-publish-development-plan.md    # 中段の開発計画（決定事項 D1〜D10 の正本）

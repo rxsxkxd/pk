@@ -4,7 +4,7 @@
 >
 > このドキュメントは**手順とコマンド、各ステップの説明、結果の見方**を書いている。長い前置き（Linux・iptables・ipset・systemd などを知らない人向けの仕組みの説明）、運用の仕組みの設計（Let's Encrypt の更新・一覧の定期の更新）、手元で確かめたこと、自動化の道具との違いは [補足](./bastion-install-supplement.md) にまとめている。各ステップの説明と、コマンドの 1 行ずつの意味は、このドキュメントの各ステップにある。
 >
-> 状態: 対象のサーバー（Amazon Linux 2）ではまだ流していない。Let's Encrypt の更新への対応はステップ 7 に用意した（手元の偽物のコマンドでだけ確かめた）。一覧の定期の更新は、方針を決めた段階でまだ作っていない（[補足](./bastion-install-supplement.md) の「これから入れる運用の仕組み」）。
+> 状態: 対象のサーバー（Amazon Linux 2）ではまだ流していない。Let's Encrypt の更新への対応はステップ 7 に用意した（手元の偽物のコマンドでだけ確かめた）。一覧の更新は `make-refresh.sh`（「一覧を新しくするとき」）に用意した。**本番に流す前に確認が要ることは [確認すること](./confirmation-items.md) にまとめている**。
 >
 > 更新日: 2026-11-04
 
@@ -38,7 +38,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 | 項目 | 内容 |
 |---|---|
 | 流し方 | 上の「流し方」。複数台へは、踏み台サーバーにある今のスクリプトで |
-| ファイルの置き場所（踏み台サーバー） | **`command/port_guard/` の下には、対象のサーバーに送るファイルだけを置く**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくしたときの保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するもの（ステップ 0-1 の `make-jp-lists.sh`、ステップ 0-3 の `make-aws-lists.sh`、ステップ 3-1 の 1 行ずつのコマンド）は、カレントのフォルダに置く・カレントのフォルダで実行する。一覧は `port_guard_whitelists/` |
+| ファイルの置き場所（踏み台サーバー） | **`command/port_guard/` の下には、対象のサーバーに送るファイルだけを置く**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくするときの `refresh-ipv4.sh`・`refresh-ipv6.sh`、保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するもの（ステップ 0-1 の `make-jp-lists.sh`、ステップ 0-3 の `make-aws-lists.sh`、一覧を新しくするときの `make-refresh.sh`、ステップ 3-1 の 1 行ずつのコマンド）は、カレントのフォルダに置く・カレントのフォルダで実行する。一覧は `port_guard_whitelists/` |
 | 日本の範囲の一覧を作る場所 | **踏み台サーバー**（IPv4 と IPv6）。対象のサーバーは APNIC に取りに行かない（対象のサーバーに `curl`・`python3` は要らない） |
 | 一覧の渡し方 | 一覧を、ステップ 3 のファイルの中に `ipset` に読ませる行（`add <集合> <範囲>`）として並べて送る。そのファイルは、踏み台サーバーで一覧から 1 行のコマンドで作る |
 | 実行する人 | `centos`。`root` の権限が要るコマンドは `sudo -n` |
@@ -338,7 +338,7 @@ echo "ip-ranges.json の版: ${CREATED}、IPv4: $(grep -vc '^#' port_guard_white
 | 件数の目安 | 2026-11-06 の版で IPv4 305 件、IPv6 149 件（台北を除いた後） |
 | 確かめたこと | 2026-11-06 の版で、この `awk` の結果が、Python の JSON の読み込みで同じ条件で取り出したものと、全件同じだった |
 | 形が変わったら | AWS が `ip-ranges.json` の書き方（1 行に 1 項目）を変えると、取り出せなくなる。件数が 0 や大きく減ったときは、ファイルの中を見て確かめる |
-| 更新の頻度 | AWS は、この一覧を随時更新する。日本の範囲の一覧と同じく、一覧を新しくするときに流し直す（後の「日本の範囲の一覧・AWS の範囲の一覧を新しくするとき」） |
+| 更新の頻度 | AWS は、この一覧を随時更新する。日本の範囲の一覧と同じく、一覧を新しくするときに流し直す（後の「一覧を新しくするとき」） |
 | 大阪のほかのゾーン | `network_border_group` には、Wavelength（通信事業者の網の中の区画）の東京・大阪（`ap-northeast-1-wl1-nrt-wlz-1`・`ap-northeast-1-wl1-kix-wlz-1`）も入る。どちらも日本の中にあるので、除いていない |
 
 ### 一覧のファイルの形（TSV）
@@ -548,7 +548,7 @@ sudo -n ipset list -t port_guard_allow
 | まだ効かない | ipset の集合は、ステップ 4 の iptables のルールから参照されるまで何もしない。このステップの後も、80・443 番は今までどおり |
 | 入っているかを 1 件ずつ確かめる | 対象のサーバーで `sudo ipset test port_guard_jp 1.0.16.1`。入っていれば `is in set` と表示される（終了コード 0） |
 | 一覧を作り直したら | ステップ 0 の後に、3-1 の 1 行ずつでファイルを作り直す |
-| 絞り込みが効いた後に流し直すとき | `flush` してから入れ直すまでの短い間（1 秒もかからない）、集合が空になり、日本からの接続も捨てられる。永続化している台では、入れ直した後に `command/port_guard/save-ipv4.sh`（と `save-ipv6.sh`）も流して、起動時に読み込むファイルを保存し直す（後の「日本の範囲の一覧・AWS の範囲の一覧を新しくするとき」の 4） |
+| 絞り込みが効いた後に流し直すとき | `flush` してから入れ直すまでの短い間（1 秒もかからない）、集合が空になり、日本からの接続も捨てられる。永続化している台では、入れ直した後に `command/port_guard/save-ipv4.sh`（と `save-ipv6.sh`）も流して、起動時に読み込むファイルを保存し直す（後の「中身を入れ替えずに、起動時に読み込むファイルだけを保存し直すとき」）。集合が空になる時間を避けたいなら、後の「一覧を新しくするとき」の `refresh-ipv4.sh` を使う |
 
 ## ステップ 4: 対象のサーバーに iptables のルールを入れる。ここから絞り込みが効く（`command/port_guard/04-rules-ipv4.sh`・`04-rules-ipv6.sh`）
 
@@ -851,7 +851,7 @@ systemctl is-enabled port-guard                      # enabled
 |---|---|
 | なぜ要るか | Let's Encrypt は、証明書を更新するときに、**海外を含む複数の場所から** 80 番に確認の接続をしてくる（HTTP-01 の確認）。その送り元は公開されていないので、許可の一覧にも書けない。絞り込みを入れたままだと確認が捨てられ、更新が失敗し、やがて証明書が切れる |
 | すること | certbot の「更新の前と後に、決めたスクリプトを動かす仕組み」（hook）に、2 つのスクリプトを置く。更新の前に、iptables のコマンドで、カーネルの `INPUT` チェーンの一番上に「TCP の 80 番は、どこからでも通す」ルールを 1 つ差し込み、更新の後に削除する |
-| 開く時間・範囲 | certbot が実際に更新を試みる間（数秒〜数分）だけ。**80 番だけ**で、443 番は絞ったまま。更新が要る証明書がない回（期限の 30 日前より前）は、hook は動かず、何も開かない |
+| 開く時間・範囲 | certbot が実際に更新を試みる間（数秒〜数分）だけ。**80 番だけ**で、443 番は絞ったまま（そのため、確認のパスが HTTPS へ転送されていないことが前提。7-1 で確かめる）。更新が要る証明書がない回（期限の 30 日前より前）は、hook は動かず、何も開かない |
 | ファイルの編集はしない | hook が操作するのは、カーネルのメモリーの中の iptables のルールの表だけ。ipset の集合、ステップ 5 の保存のファイル、サービスには触らない。差し込んだルールは保存しないので、再起動すると消える |
 | 開きっぱなしを防ぐ | 更新の前の hook で、systemd の一時の予約（`systemd-run --on-active=30min`。30 分後に 1 回だけコマンドを動かす）も入れる。certbot が途中で落ちて、更新の後の hook が動かなくても、30 分で削除される |
 | 前提 | 証明書の更新を、cron などから **`certbot renew`** で行っていること（hook の置き場所 `/etc/letsencrypt/renewal-hooks/` が効くのは `renew` のときだけ）。7-1 で確かめる |
@@ -864,7 +864,7 @@ systemctl is-enabled port-guard                      # enabled
 | ファイル | 中身 | いつ動くか |
 |---|---|---|
 | `/etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh` | 80 番を通すルールを差し込み、30 分後に削除する予約を入れる | `certbot renew` が、更新が要る証明書を見つけて、更新を始める前（1 回の実行で 1 回） |
-| `/etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh` | 80 番を通すルールを削除し、30 分後の予約を取り消す | 更新を試みた後（更新が失敗しても動く） |
+| `/etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh` | 80 番を通すルールを削除し、30 分後の予約を取り消す | 更新を試みた後（更新が失敗した場合に動くかは certbot の説明に明記がない。動かなくても、30 分後の予約で削除される） |
 | `/usr/local/sbin/port-guard-acme-close` | 80 番を通すルールを削除する（上の 2 つと、30 分後の予約から呼ばれる） | 更新の後の hook と、30 分後の予約から |
 
 ### 7-1. 前提を確かめる（`command/port_guard/07-letsencrypt-check.sh`。読み取りだけ）
@@ -886,15 +886,42 @@ echo "-- 証明書ごとの設定（確認の方式と、設定ずみの hook）
 sudo -n sh -c 'grep -H "authenticator\|webroot_path\|_hook" /etc/letsencrypt/renewal/*.conf' 2>&1 || echo "設定: なし"
 echo "-- すでにある hook のファイル"
 sudo -n sh -c 'ls -l /etc/letsencrypt/renewal-hooks/*/' 2>&1 || echo "hook のフォルダ: なし"
+echo "-- 80 番の確認のパスが HTTPS へ転送されていないか（証明書ごと）"
+for conf in $(sudo -n sh -c 'ls /etc/letsencrypt/renewal/*.conf' 2>/dev/null); do
+  domain=$(basename "$conf" .conf)
+  echo "--- ${domain}"
+  curl -sS -o /dev/null -D - -m 5 -H "Host: ${domain}" "http://127.0.0.1/.well-known/acme-challenge/port-guard-check" 2>&1 | grep -iE '^(HTTP/|Location:|curl:)' || true
+done
 ```
 
 | 見ること | 期待する内容 | 違ったら |
 |---|---|---|
 | cron の行 | `certbot renew`（`00 04 01 * *` と `00 04 16 * *` の見込み） | `certbot certonly ...` を直接呼んでいるなら、7-2 の hook のフォルダは効かない。cron の行に `--pre-hook /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh --post-hook /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh` を足す形になる（この手順では扱わない。先に相談する） |
 | certbot のタイマー | なし（cron で更新している） | systemd のタイマーで `certbot renew` を動かしていても、hook のフォルダは効くので、そのまま 7-2 へ進んでよい |
-| certbot の版 | 0.19 以上（hook のフォルダ `renewal-hooks` に対応した版） | それより古ければ、hook のフォルダは効かない（先に相談する） |
+| certbot の版 | 0.19 以上（hook のフォルダ `renewal-hooks` に対応した版） | それより古ければ、hook のフォルダは効かない（先に相談する）。3.2.0 より前は、hook のフォルダが効くのは `renew` のときだけ |
 | `authenticator` | `webroot`（HTTP-01 の確認。80 番に確認が来る） | `dns-...` なら、80 番に確認は来ないので、このステップは要らない |
 | すでにある hook | `deploy_hook`（Apache を読み直すなど）があっても、そのまま残す | このステップが足すのは pre と post のファイルだけ |
+| **確認のパスの転送** | `HTTP/1.1 404` など、`Location: https://...` が付かない（`port-guard-check` というファイルはないので、404 でよい） | `301`・`302` で `Location: https://...` が出たら、下の「80 番が HTTPS へ転送しているとき」のとおりに直す。直さないと更新が失敗する |
+
+#### 80 番が HTTPS へ転送しているとき
+
+Let's Encrypt の確認はリダイレクトをたどる。80 番が HTTPS へ転送していると、確認は 443 番へ進み、そこは絞ったままなので、更新が失敗する。**確認のパス（`/.well-known/acme-challenge/`）だけを、転送から外す**。Apache の 80 番の設定（`<VirtualHost *:80>`）を、今の書き方に合わせて直す。
+
+`RewriteRule` で転送している場合（`RewriteRule` の直前に条件を 1 行足す）:
+
+```apache
+RewriteEngine On
+RewriteCond %{REQUEST_URI} !^/\.well-known/acme-challenge/
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+```
+
+`Redirect` で転送している場合（`Redirect` は条件を付けられないので、`RedirectMatch` に置き換える。`www.example.com` は今の転送先に合わせる）:
+
+```apache
+RedirectMatch 301 ^/(?!\.well-known/acme-challenge/)(.*)$ https://www.example.com/$1
+```
+
+直した後に、`sudo apachectl configtest` で書き方を確かめ、`sudo apachectl graceful` で読み直す。もう一度 `07-letsencrypt-check.sh` を流して、`Location:` が出なくなったことを確かめる。Apache を変えたくない場合は、更新の間だけ 443 番も開ける形にもできるが、その間はサイト全体が開く（hook の変更が要る）。上の 2 つの例は、対象のサーバーの設定に合わせて確かめていない。
 
 ### 7-2. hook を置く（`command/port_guard/07-letsencrypt-hooks.sh`）
 
@@ -1005,7 +1032,7 @@ sudo -n journalctl -t port-guard-acme --no-pager 2>/dev/null | tail -2   # opene
 | 更新の後の hook の後 | `port-guard-acme` の付いたルールが 0（IPv4・IPv6 とも） |
 | 記録 | `opened tcp/80 ...` と `closed tcp/80` |
 
-certbot から動くことまで確かめるなら、対象のサーバーで `sudo certbot renew --dry-run`（Let's Encrypt の試験用の窓口で、更新の手順だけを本物どおりに流す。証明書は変わらない）を流し、`/var/log/letsencrypt/letsencrypt.log` に `port-guard-open-80.sh` と `port-guard-close-80.sh` が動いた記録があること、確認が通ったことを見る。`--dry-run` で hook が動くかは certbot の版によるので、動いた記録がなければ、次の本物の更新の後に同じ記録を見る。
+certbot から動くことまで確かめるには、**絞り込みが効いている 1 台で** `sudo certbot renew --dry-run` を流す（Let's Encrypt の試験用の窓口で、更新の手順だけを本物どおりに流す。証明書は変わらない。`--dry-run` でも pre と post の hook は動く）。確認が通り、`/var/log/letsencrypt/letsencrypt.log` に `port-guard-open-80.sh` と `port-guard-close-80.sh` が動いた記録があることを見る。海外からの確認まで含めて試せるので、ほかの台に広げる前に流す。
 
 ### hook を取り除く（`command/port_guard/07-letsencrypt-hooks-remove.sh`）
 
@@ -1025,63 +1052,201 @@ sudo -n sh -c 'ls /etc/letsencrypt/renewal-hooks/*/' 2>&1 | grep -c port-guard |
 
 port-guard 自体をアンインストールした（`uninstall.sh`）台でも、hook は残る。残しても、80 番を通すルールを一時的に差し込んで削除するだけで害はないが、不要なら取り除く。
 
-## 日本の範囲の一覧・AWS の範囲の一覧を新しくするとき
+## 一覧を新しくするとき（日本の範囲・AWS の範囲・許可する IP アドレス）
 
-> **この節は、踏み台サーバーから人が流す手動の手順で、S3 による一覧の管理は想定していない**。S3 に置いた一覧を各サーバーが定期に取りに行って入れ替える形は、[補足](./bastion-install-supplement.md) の「B. 日本の範囲の一覧を定期に新しくする」で方針を決めた段階で、まだ作っていない。それができたら、この節は「S3 や定期の入れ替えが使えないときの予備」になる。
+> **この節は、踏み台サーバーから人が流す手順**（2026-11-09 の想定。[確認すること](./confirmation-items.md) の R1・R2）。S3 に置いた一覧を各サーバーが取りに行く形は見送った（[補足](./bastion-install-supplement.md) の「B」に案だけを残している）。
 
-APNIC の割り当ては少しずつ変わる（月に数件〜数十件）。AWS の範囲の一覧も随時更新される。一覧を新しくするときは、次の順に流す。IPv6 も絞っている台は、括弧の中の IPv6 の分も流す。**AWS の範囲の一覧を新しくするときは、各手順の「AWS」の行を流す**（日本の範囲と同時でも、片方だけでもよい）。
+APNIC の割り当ては少しずつ変わり（月に数件〜数十件）、AWS の範囲の一覧も随時更新される。月に 1 回を目安に、次の順に流す。許可する IP アドレスを変えたときも同じ手順で流す。ステップ 3 の「空にしてから入れる」と違い、**集合が空になる時間はできない**。
 
-**1. 踏み台サーバーで、日本の範囲の一覧（と AWS の範囲の一覧）を作り直す**（ステップ 0-1・0-3。カレントのフォルダで）
+| 順 | どこで | すること |
+|---|---|---|
+| 1 | 踏み台サーバー | `bash make-jp-lists.sh` と `bash make-aws-lists.sh` で一覧を作り直す。許可する IP アドレスを変えるなら、`port_guard_whitelists/allow-ipv4.txt`（と `allow-ipv6.txt`）を書き直す（ステップ 0） |
+| 2 | 踏み台サーバー | `bash make-refresh.sh` で、一覧を確かめて、各サーバーに送るファイルを作る |
+| 3 | 1 台 | `command/port_guard/refresh-ipv4.sh`（IPv6 も絞っている台は `refresh-ipv6.sh` も）を流して、結果を確かめる |
+| 4 | 残りの台 | 踏み台サーバーにある今のスクリプトで、同じファイルを流す |
+
+実際に流すコマンド:
 
 ```bash
+# 1. 踏み台サーバーのカレントのフォルダで、一覧を作り直す
 bash make-jp-lists.sh
-bash make-aws-lists.sh   # AWS の範囲の一覧も新しくするとき（ステップ 0-3）
+bash make-aws-lists.sh
+
+# 2. 踏み台サーバーのカレントのフォルダで、一覧を確かめて、各サーバーに送るファイルを作る
+bash make-refresh.sh
+
+# 3. まず 1 台に流す（4. 残りの台には、踏み台サーバーにある今のスクリプトで、同じファイルを流す）
+ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/refresh-ipv4.sh >> ./output/result.txt
+ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/refresh-ipv6.sh >> ./output/result.txt   # IPv6 も絞っている台だけ
 ```
 
-`port_guard_whitelists/jp-ipv4.txt`（と `jp-ipv6.txt`）、`aws-ipv4.txt`（と `aws-ipv6.txt`）が新しくなる。最後に出る件数が、前回と大きく変わっていないことを確かめる。
-
-**2. 踏み台サーバーで、ipset の集合に入れるファイルを作り直す**（ステップ 3-1 のうち、日本の範囲の行（と AWS の行）。踏み台サーバーのカレントのフォルダで実行する）
+`make-refresh.sh`（踏み台サーバーのカレントのフォルダで実行する）:
 
 ```bash
-{ echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_jp'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/jp-ipv4.txt | awk 'NF { print "add port_guard_jp " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_jp'; } > command/port_guard/03-jp-ipv4.sh
+#!/bin/bash
+# 踏み台サーバーで実行する。一覧を確かめてから、各サーバーで ipset の集合を入れ替えるファイルを作る
+# 使い方: bash make-refresh.sh（増減の基準で止まり、内容を確かめたうえで進めるときは FORCE=1 bash make-refresh.sh）
+set -euo pipefail
+LISTS=port_guard_whitelists
+LAST=$LISTS/last-refresh
+MAX_CHANGE_PERCENT=5
+mkdir -p command/port_guard "$LAST"
 
-# IPv6 も絞っている台があるときだけ
-{ echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_jp6'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/jp-ipv6.txt | awk 'NF { print "add port_guard_jp6 " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_jp6'; } > command/port_guard/03-jp-ipv6.sh
+# 1. 一覧を確かめる（一覧の名前:下限の件数。許可の一覧は 0 件でもよく、増減の基準も当てない）
+too_few=0
+too_changed=0
+for item in jp-ipv4:1000 jp-ipv6:200 aws-ipv4:100 aws-ipv6:50 allow-ipv4:0 allow-ipv6:0; do
+  name=${item%:*}
+  min=${item#*:}
+  sed 's/#.*//' "$LISTS/$name.txt" | awk 'NF { print $1 }' | LC_ALL=C sort -u > "$LAST/$name.new"
+  count=$(wc -l < "$LAST/$name.new" | tr -d ' ')
+  if [ "$count" -lt "$min" ]; then
+    echo "${name}: ${count} 件で、下限の ${min} 件より少ない"
+    too_few=1
+  fi
+  if [ -f "$LAST/$name.txt" ]; then
+    last=$(wc -l < "$LAST/$name.txt" | tr -d ' ')
+    added=$(LC_ALL=C comm -13 "$LAST/$name.txt" "$LAST/$name.new" | wc -l | tr -d ' ')
+    removed=$(LC_ALL=C comm -23 "$LAST/$name.txt" "$LAST/$name.new" | wc -l | tr -d ' ')
+    echo "${name}: ${count} 件（前回 ${last} 件、増 ${added} 件、減 ${removed} 件）"
+    if [ "$min" -gt 0 ] && [ "$last" -gt 0 ] && [ $(( (added + removed) * 100 )) -gt $(( MAX_CHANGE_PERCENT * last )) ]; then
+      echo "${name}: 前回からの増減が ${MAX_CHANGE_PERCENT}% を超えている"
+      too_changed=1
+    fi
+  else
+    echo "${name}: ${count} 件（前回の記録なし）"
+  fi
+done
+if [ "$too_few" = 1 ]; then
+  echo "件数が足りない一覧があるので止める（一覧を作り直して確かめる）"
+  exit 1
+fi
+if [ "$too_changed" = 1 ] && [ "${FORCE:-0}" != 1 ]; then
+  echo "増減が大きい一覧があるので止める（内容を確かめて、問題なければ FORCE=1 を付けて流す）"
+  exit 1
+fi
 
-# AWS の範囲の一覧も新しくするとき
-{ echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_aws'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/aws-ipv4.txt | awk 'NF { print "add port_guard_aws " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_aws'; } > command/port_guard/03-aws-ipv4.sh
-{ echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_aws6'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/aws-ipv6.txt | awk 'NF { print "add port_guard_aws6 " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_aws6'; } > command/port_guard/03-aws-ipv6.sh   # IPv6 も絞っている台があるときだけ
+# 2. 各サーバーに送るファイルを作る（IPv4 と IPv6 で 1 つずつ）
+for family in ipv4 ipv6; do
+  if [ "$family" = ipv4 ]; then
+    s=''; inet=inet; jp_min=1000; aws_min=100
+  else
+    s=6; inet=inet6; jp_min=200; aws_min=50
+  fi
+  {
+    echo '#!/bin/bash'
+    echo "# ipset の集合 port_guard_jp${s}・port_guard_allow${s}・port_guard_aws${s} の中身を入れ替え、起動時に読み込むファイルに保存し直す"
+    echo 'set -euo pipefail'
+    echo "echo \"== \$(hostname) \$(date '+%F %T') refresh-${family}\""
+    echo
+    echo '# 今の集合があることを確かめる（1 つでもなければ、どれも入れ替えずに止まる）'
+    for set in jp allow aws; do echo "sudo -n ipset list -t port_guard_${set}${s} > /dev/null"; done
+    echo
+    echo '# 一時の集合を作る（前回の途中で残っていれば、先に消す）'
+    for set in jp allow aws; do
+      echo "sudo -n ipset destroy port_guard_${set}${s}_new 2>/dev/null || true"
+      echo "sudo -n ipset create port_guard_${set}${s}_new hash:net family ${inet} maxelem 65536"
+    done
+    echo
+    echo '# 一時の集合に、新しい一覧を入れる'
+    echo "sudo -n ipset restore -exist <<'EOF'"
+    for set in jp allow aws; do
+      awk -v set="port_guard_${set}${s}_new" '{ print "add " set " " $1 }' "$LAST/$set-$family.new"
+    done
+    echo 'EOF'
+    echo
+    echo '# 件数を確かめる（足りなければ、今の集合に触らずに止まる）'
+    echo "[ \"\$(sudo -n ipset list -t port_guard_jp${s}_new | awk -F': ' '/Number of entries/ { print \$2 }')\" -ge ${jp_min} ] || { echo \"日本の範囲が ${jp_min} 件未満なので止める\"; exit 1; }"
+    echo "[ \"\$(sudo -n ipset list -t port_guard_aws${s}_new | awk -F': ' '/Number of entries/ { print \$2 }')\" -ge ${aws_min} ] || { echo \"AWS の範囲が ${aws_min} 件未満なので止める\"; exit 1; }"
+    echo
+    echo '# 今の集合と一時の集合を、一瞬で入れ替える（iptables のルールには触らない）'
+    for set in jp allow aws; do echo "sudo -n ipset swap port_guard_${set}${s}_new port_guard_${set}${s}"; done
+    echo
+    echo '# 一時の集合（入れ替えた後は古い中身）を消す'
+    for set in jp allow aws; do echo "sudo -n ipset destroy port_guard_${set}${s}_new"; done
+    echo
+    echo '# 起動時に読み込むファイルを、別名で作ってから置き換える（途中で失敗しても、今のファイルは壊れない）'
+    echo 'sudo -n install -d -m 755 /etc/port-guard'
+    echo "sudo -n sh -c 'ipset save port_guard_jp${s} > /etc/port-guard/ipset-${family}.save.new && ipset save port_guard_allow${s} >> /etc/port-guard/ipset-${family}.save.new && ipset save port_guard_aws${s} >> /etc/port-guard/ipset-${family}.save.new && mv /etc/port-guard/ipset-${family}.save.new /etc/port-guard/ipset-${family}.save'"
+    echo
+    echo '# 確認'
+    for set in jp allow aws; do echo "sudo -n ipset list -t port_guard_${set}${s} | grep -E '^(Name|Number of entries|References):'"; done
+  } > "command/port_guard/refresh-${family}.sh"
+done
+
+# 3. 今回の一覧を、次の比較のために残す
+for name in jp-ipv4 jp-ipv6 aws-ipv4 aws-ipv6 allow-ipv4 allow-ipv6; do
+  mv "$LAST/$name.new" "$LAST/$name.txt"
+done
+echo "作った: command/port_guard/refresh-ipv4.sh（$(wc -l < command/port_guard/refresh-ipv4.sh | tr -d ' ') 行）、command/port_guard/refresh-ipv6.sh（$(wc -l < command/port_guard/refresh-ipv6.sh | tr -d ' ') 行）"
 ```
 
-`command/port_guard/03-jp-ipv4.sh`（と `03-jp-ipv6.sh`）、AWS の分は `03-aws-ipv4.sh`（と `03-aws-ipv6.sh`）が、新しい一覧の中身で作り直される。
+| 確かめること | 内容 |
+|---|---|
+| 件数の下限 | 日本 1,000 件（IPv6 は 200 件）、AWS 100 件（IPv6 は 50 件）。足りなければ、`FORCE=1` を付けても止まる |
+| 前回からの増減 | 日本と AWS の一覧で、前回 `make-refresh.sh` を流したときの一覧（`port_guard_whitelists/last-refresh/`）から 5% を超えて変わっていたら止まる。内容を確かめて問題なければ、`FORCE=1 bash make-refresh.sh` で進める |
+| 許可の一覧 | 0 件でもよく、増減の基準も当てない（件数が少ないので、1 件の変更で基準を超えてしまうため）。増減の件数は表示されるので、目で確かめる |
+| 必要なファイル | `allow-ipv4.txt`・`allow-ipv6.txt` がないと止まる。IPv6 を絞らないなら、空の `allow-ipv6.txt` を置く |
 
-**3. 作り直したファイルを、踏み台サーバーにある今のスクリプトで各サーバーに流して、ipset の集合の中身を入れ替える**（ステップ 3-3）
+作られる `command/port_guard/refresh-ipv4.sh` の中身（`add` の行は省略。2026-11-02・2026-11-06 の一覧で約 5,100 行、約 190 KB）:
 
-```bash
-ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/03-jp-ipv4.sh >> ./output/result.txt
-ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/03-jp-ipv6.sh >> ./output/result.txt   # IPv6 も絞っている台だけ
-ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/03-aws-ipv4.sh >> ./output/result.txt   # AWS の範囲の一覧も新しくするとき
-ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/03-aws-ipv6.sh >> ./output/result.txt   # 同上で、IPv6 も絞っている台だけ
+```text
+#!/bin/bash
+# ipset の集合 port_guard_jp・port_guard_allow・port_guard_aws の中身を入れ替え、起動時に読み込むファイルに保存し直す
+set -euo pipefail
+echo "== $(hostname) $(date '+%F %T') refresh-ipv4"
+
+# 今の集合があることを確かめる（1 つでもなければ、どれも入れ替えずに止まる）
+sudo -n ipset list -t port_guard_jp > /dev/null
+sudo -n ipset list -t port_guard_allow > /dev/null
+sudo -n ipset list -t port_guard_aws > /dev/null
+
+# 一時の集合を作る（前回の途中で残っていれば、先に消す）
+sudo -n ipset destroy port_guard_jp_new 2>/dev/null || true
+sudo -n ipset create port_guard_jp_new hash:net family inet maxelem 65536
+（allow・aws も同じ）
+
+# 一時の集合に、新しい一覧を入れる
+sudo -n ipset restore -exist <<'EOF'
+add port_guard_jp_new 1.0.16.0/20
+...
+EOF
+
+# 件数を確かめる（足りなければ、今の集合に触らずに止まる）
+（日本 1,000 件・AWS 100 件以上か）
+
+# 今の集合と一時の集合を、一瞬で入れ替える（iptables のルールには触らない）
+sudo -n ipset swap port_guard_jp_new port_guard_jp
+（allow・aws も同じ）
+
+# 一時の集合（入れ替えた後は古い中身）を消す
+（3 つ）
+
+# 起動時に読み込むファイルを、別名で作ってから置き換える（途中で失敗しても、今のファイルは壊れない）
+（ipset save を 3 つ書いてから mv）
+
+# 確認
+（3 つの集合の Name・Number of entries・References）
 ```
 
-- カーネルの中の集合 `port_guard_jp`（と `port_guard_jp6`、AWS の分は `port_guard_aws`・`port_guard_aws6`）の中身が、新しい一覧に入れ替わる。iptables のルールには触らない
-- 結果のファイルの `Number of entries` が、1 の件数と同じであること
-- 空にしてから入れ直すまでの 1 秒もかからない間、日本からの接続も捨てられる（利用の少ない時間帯に流す）
-- **この時点では、再起動すると古い一覧に戻る**（起動時に読み込むファイルは、まだ古い中身のまま）。次の 4 も流す
+| 点 | 内容 |
+|---|---|
+| `ipset swap <一時の集合> <今の集合>` | 2 つの集合の中身を一瞬で入れ替える。iptables のルールは集合を名前で参照しているので、ルールはそのままで、新しい中身が効く |
+| 途中で失敗したとき | 入れ替えの前に失敗すれば、今の集合と保存のファイルは変わらず、絞り込みは今の一覧で効き続ける。一時の集合が残っていても、どこからも参照されず、次に流すときに消える |
+| 結果の見方 | `Number of entries` が `make-refresh.sh` の表示の件数と同じで、`References` が `1`（ルールから参照されている）であること |
+| 永続化していない台 | 流してかまわない。保存のファイルができるだけで、起動時には使われない |
+| 前の版で入れた台 | AWS の集合がないと、最初の確認で止まる。先に「前の版の手順で入れた台に、AWS の東京と大阪の許可を足す」を流す |
 
-**4. 対象のサーバーで、ipset の集合の今の中身を、起動時に読み込むファイルに保存し直す**
+### 中身を入れ替えずに、起動時に読み込むファイルだけを保存し直すとき（`save-ipv4.sh`・`save-ipv6.sh`）
 
-ステップ 5 の `05-persist-ipv4.sh` の中の、次の 3 行と同じことをする。
+`refresh-ipv4.sh` は保存も行うが、集合の中身の入れ替えとセットになっている。次のように、**今の集合の中身をそのまま保存したい**ときは、保存だけのファイルを流す。
 
-```bash
-sudo -n sh -c 'ipset save port_guard_jp > /etc/port-guard/ipset-ipv4.save'
-sudo -n sh -c 'ipset save port_guard_allow >> /etc/port-guard/ipset-ipv4.save'
-sudo -n sh -c 'ipset save port_guard_aws >> /etc/port-guard/ipset-ipv4.save'
-```
+| 使う場面 | 流すもの |
+|---|---|
+| ステップ 3 のファイル（`03-*.sh`）を流し直して、集合の中身を入れ替えたとき | `03-*.sh` を流した後に `save-ipv4.sh` |
+| 手で `ipset add`・`ipset del` をして、その中身を再起動の後も残したいとき | `save-ipv4.sh` |
 
-1 行目で日本の範囲を書き出してファイルを**作り直し**（`>`）、2 行目で許可する IP アドレスを、3 行目で AWS の東京と大阪の範囲を**書き足す**（`>>`）。1 つのファイルに 3 つの集合が入っているので、どれか 1 つだけを変えたときも、**3 行とも流す**（1 行目だけだと、許可する IP アドレスと AWS の範囲がファイルから消え、再起動の後に VPC の中などからの通信が捨てられる。また、起動時のルールが参照する AWS の集合が作られず、サービスがそこで止まる）。
-
-この 3 行だけのファイルを、踏み台サーバーの `command/port_guard/save-ipv4.sh`（と `save-ipv6.sh`）として置き、ほかのステップと同じ形で流す。
+1 つのファイルに 3 つの集合が入っているので、どれか 1 つだけを変えたときも、3 行とも流す（1 行目だけだと、許可する IP アドレスと AWS の範囲がファイルから消える）。
 
 `command/port_guard/save-ipv4.sh`:
 
@@ -1096,7 +1261,7 @@ sudo -n sh -c 'ipset save port_guard_allow >> /etc/port-guard/ipset-ipv4.save'
 sudo -n sh -c 'ipset save port_guard_aws >> /etc/port-guard/ipset-ipv4.save'
 
 # 確認
-grep -c '^add port_guard_jp ' /etc/port-guard/ipset-ipv4.save || true      # 日本の範囲の件数（3 の Number of entries と同じ）
+grep -c '^add port_guard_jp ' /etc/port-guard/ipset-ipv4.save || true      # 日本の範囲の件数
 grep -c '^add port_guard_allow ' /etc/port-guard/ipset-ipv4.save || true   # 許可する IP アドレスの件数
 grep -c '^add port_guard_aws ' /etc/port-guard/ipset-ipv4.save || true     # AWS の東京と大阪の件数
 ```
@@ -1126,30 +1291,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/save-ipv6.sh >> ./output/result.txt   # IPv6 も絞っている台だけ
 ```
 
-`save-ipv4.sh` の代わりに、`05-persist-ipv4.sh` を丸ごと流し直してもよい（保存の 3 行に加えて、起動時のコマンドの並びのファイルを同じ中身で置き直すだけ）。ステップ 6 まで流していない（永続化していない）台では、4 は要らない。
-
-### 許可する IP アドレスの一覧を変えるとき
-
-VPC の範囲を足した、許可する相手が増えた・減ったなどのとき。日本の範囲の一覧（上の 1）は作り直さなくてよい。
-
-1. 踏み台サーバーで、`port_guard_whitelists/allow-ipv4.txt`（と `allow-ipv6.txt`）を書き直す（ステップ 0-2）
-2. 踏み台サーバーで、ステップ 3-1 のうち許可する IP アドレスの行で、ファイルを作り直す（カレントのフォルダで）
-
-```bash
-{ echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_allow'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/allow-ipv4.txt | awk 'NF { print "add port_guard_allow " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_allow'; } > command/port_guard/03-allow-ipv4.sh
-
-# IPv6 も絞っている台があるときだけ
-{ echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_allow6'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/allow-ipv6.txt | awk 'NF { print "add port_guard_allow6 " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_allow6'; } > command/port_guard/03-allow-ipv6.sh
-```
-
-3. 踏み台サーバーにある今のスクリプトで各サーバーに流して、ipset の集合の中身を入れ替える
-
-```bash
-ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/03-allow-ipv4.sh >> ./output/result.txt
-ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/03-allow-ipv6.sh >> ./output/result.txt   # IPv6 も絞っている台だけ
-```
-
-4. 対象のサーバーで、起動時に読み込むファイルに保存し直す（上の 4 と同じ `save-ipv4.sh`（と `save-ipv6.sh`））
+`save-ipv4.sh` の代わりに、`05-persist-ipv4.sh` を丸ごと流し直してもよい（保存の 3 行に加えて、起動時のコマンドの並びのファイルを同じ中身で置き直すだけ）。ステップ 6 まで流していない（永続化していない）台では、要らない。
 
 ## 前の版の手順で入れた台に、AWS の東京と大阪の許可を足す
 

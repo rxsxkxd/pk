@@ -1,0 +1,366 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CloudFront -> ALB -> EC2. CloudFront terminates viewer TLS, connects to the ALB over HTTPS,
+  and the ALB forwards HTTP to httpd on the existing instance.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets in at least two Availability Zones.
+  InstanceId:
+    Type: AWS::EC2::Instance::Id
+  InstanceSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Existing security group of the instance. Ingress rules from the ALB are added to it.
+  CloudFrontPrefixListId:
+    Type: String
+    Description: Prefix list ID of com.amazonaws.global.cloudfront.origin-facing in this Region.
+    AllowedPattern: "^pl-[0-9a-f]+$"
+  DomainName:
+    Type: String
+    Description: Domain name used by viewers.
+  OriginDomainName:
+    Type: String
+    Description: Public DNS name that resolves to the ALB. Must differ from DomainName.
+  AlbCertificateArn:
+    Type: String
+    Description: ACM certificate in the same Region as the ALB. Covers DomainName and OriginDomainName.
+    AllowedPattern: "^arn:aws:acm:.*"
+  CloudFrontCertificateArn:
+    Type: String
+    Description: ACM certificate in us-east-1 that covers DomainName.
+    AllowedPattern: "^arn:aws:acm:us-east-1:.*"
+  OriginVerifyHeaderName:
+    Type: String
+    Default: X-Origin-Verify
+  OriginVerifyHeaderValue:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Secret value that the ALB listener rules check.
+  RestrictToCloudFront:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Keep "false" until DNS points to CloudFront. Then set "true" to reject direct access.
+  AlbSslPolicy:
+    Type: String
+    Default: ELBSecurityPolicy-TLS13-1-2-2021-06
+  NewAppPort:
+    Type: Number
+    Default: 8080
+  OldAppPort:
+    Type: Number
+    Default: 80
+  OldAppPathPattern:
+    Type: String
+    Default: /old_app_a*
+  HealthCheckPath:
+    Type: String
+    Default: /alb-health.txt
+  IdleTimeoutSeconds:
+    Type: Number
+    Default: 60
+    MinValue: 1
+    MaxValue: 4000
+  OriginReadTimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 120
+  OriginKeepaliveTimeoutSeconds:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 300
+  CloudFrontWebAclArn:
+    Type: String
+    Default: ""
+    Description: Optional. AWS WAF web ACL created in us-east-1 (CLOUDFRONT scope).
+
+Conditions:
+  Restricted:
+    Fn::Equals:
+      - Ref: RestrictToCloudFront
+      - "true"
+  NotRestricted:
+    Fn::Not:
+      - Condition: Restricted
+  HasCloudFrontWebAcl:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: CloudFrontWebAclArn
+          - ""
+
+Resources:
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB behind CloudFront
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        Fn::If:
+          - Restricted
+          - - IpProtocol: tcp
+              FromPort: 443
+              ToPort: 443
+              SourcePrefixListId:
+                Ref: CloudFrontPrefixListId
+          - - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            - IpProtocol: tcp
+              FromPort: 443
+              ToPort: 443
+              CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort:
+            Ref: NewAppPort
+          ToPort:
+            Ref: NewAppPort
+          DestinationSecurityGroupId:
+            Ref: InstanceSecurityGroupId
+        - IpProtocol: tcp
+          FromPort:
+            Ref: OldAppPort
+          ToPort:
+            Ref: OldAppPort
+          DestinationSecurityGroupId:
+            Ref: InstanceSecurityGroupId
+
+  InstanceIngressNewApp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: InstanceSecurityGroupId
+      IpProtocol: tcp
+      FromPort:
+        Ref: NewAppPort
+      ToPort:
+        Ref: NewAppPort
+      SourceSecurityGroupId:
+        Fn::GetAtt: [AlbSecurityGroup, GroupId]
+      Description: From the ALB to new_app_b
+
+  InstanceIngressOldApp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: InstanceSecurityGroupId
+      IpProtocol: tcp
+      FromPort:
+        Ref: OldAppPort
+      ToPort:
+        Ref: OldAppPort
+      SourceSecurityGroupId:
+        Fn::GetAtt: [AlbSecurityGroup, GroupId]
+      Description: From the ALB to old_app_a
+
+  NewAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Protocol: HTTP
+      Port:
+        Ref: NewAppPort
+      TargetType: instance
+      Targets:
+        - Id:
+            Ref: InstanceId
+      HealthCheckPath:
+        Ref: HealthCheckPath
+      Matcher:
+        HttpCode: "200"
+
+  OldAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Protocol: HTTP
+      Port:
+        Ref: OldAppPort
+      TargetType: instance
+      Targets:
+        - Id:
+            Ref: InstanceId
+      HealthCheckPath:
+        Ref: HealthCheckPath
+      Matcher:
+        HttpCode: "200"
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      Subnets:
+        Ref: SubnetIds
+      SecurityGroups:
+        - Ref: AlbSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value:
+            Ref: IdleTimeoutSeconds
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: LoadBalancer
+      Protocol: HTTPS
+      Port: 443
+      SslPolicy:
+        Ref: AlbSslPolicy
+      Certificates:
+        - CertificateArn:
+            Ref: AlbCertificateArn
+      DefaultActions:
+        Fn::If:
+          - Restricted
+          - - Type: fixed-response
+              FixedResponseConfig:
+                StatusCode: "403"
+                ContentType: text/plain
+                MessageBody: Access denied
+          - - Type: forward
+              TargetGroupArn:
+                Ref: NewAppTargetGroup
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: LoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+
+  CloudFrontOldAppRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Ref: HttpsListener
+      Priority: 10
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName:
+              Ref: OriginVerifyHeaderName
+            Values:
+              - Ref: OriginVerifyHeaderValue
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - Ref: OldAppPathPattern
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: OldAppTargetGroup
+
+  CloudFrontNewAppRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Ref: HttpsListener
+      Priority: 20
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName:
+              Ref: OriginVerifyHeaderName
+            Values:
+              - Ref: OriginVerifyHeaderValue
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: NewAppTargetGroup
+
+  # Keeps /old_app_a reachable for viewers that still connect directly to the ALB during the migration.
+  DirectOldAppRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: NotRestricted
+    Properties:
+      ListenerArn:
+        Ref: HttpsListener
+      Priority: 30
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - Ref: OldAppPathPattern
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: OldAppTargetGroup
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: false
+        Aliases:
+          - Ref: DomainName
+        ViewerCertificate:
+          AcmCertificateArn:
+            Ref: CloudFrontCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        WebACLId:
+          Fn::If:
+            - HasCloudFrontWebAcl
+            - Ref: CloudFrontWebAclArn
+            - Ref: AWS::NoValue
+        Origins:
+          - Id: alb-origin
+            DomainName:
+              Ref: OriginDomainName
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              HTTPSPort: 443
+              OriginSSLProtocols:
+                - TLSv1.2
+              OriginReadTimeout:
+                Ref: OriginReadTimeoutSeconds
+              OriginKeepaliveTimeout:
+                Ref: OriginKeepaliveTimeoutSeconds
+            OriginCustomHeaders:
+              - HeaderName:
+                  Ref: OriginVerifyHeaderName
+                HeaderValue:
+                  Ref: OriginVerifyHeaderValue
+        DefaultCacheBehavior:
+          TargetOriginId: alb-origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: false
+          # Managed-CachingDisabled
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # Managed-AllViewer
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+
+Outputs:
+  DistributionDomainName:
+    Value:
+      Fn::GetAtt: [Distribution, DomainName]
+  LoadBalancerDnsName:
+    Description: Point OriginDomainName to this name.
+    Value:
+      Fn::GetAtt: [LoadBalancer, DNSName]
+  LoadBalancerCanonicalHostedZoneId:
+    Value:
+      Fn::GetAtt: [LoadBalancer, CanonicalHostedZoneID]

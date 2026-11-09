@@ -1,0 +1,40 @@
+# 設定値の例。値はすべて架空のもの。環境ごとに写して、-c config=<ファイル> で指定する。
+stack_name_prefix: myapp-production
+aws_region: ap-northeast-1
+
+vpc_id: vpc-0123456789abcdef0
+availability_zones: [ap-northeast-1a, ap-northeast-1c]
+# availability_zones と同じ順番で、AZ ごとに 1 つ
+subnet_ids: [subnet-0123456789abcdef0, subnet-0123456789abcdef1]
+instance_id: i-0123456789abcdef0
+# インスタンスの既存のセキュリティグループ。ALB からの許可を足す
+instance_security_group_id: sg-0123456789abcdef0
+# com.amazonaws.global.cloudfront.origin-facing の ID（リージョンごとに違う）
+cloudfront_prefix_list_id: pl-0123456789abcdef0
+
+# 利用者が使う名前
+domain_name: app.example.com
+# CloudFront の接続先の名前。domain_name とは別の名前にする
+origin_domain_name: origin.app.example.com
+
+# ALB と同じリージョンの ACM の証明書
+alb_certificate_arn: arn:aws:acm:ap-northeast-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
+# us-east-1 の ACM の証明書
+cloudfront_certificate_arn: arn:aws:acm:us-east-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
+
+# 付けないときは空のままにする
+alb_web_acl_arn: ""
+cloudfront_web_acl_arn: ""
+
+# CloudFront -> ALB -> EC2 だけで使う。DNS を CloudFront へ向けた後に true にする
+restrict_to_cloudfront: false
+
+# ここから下は省略すると、次の既定値になる
+new_app_port: 8080
+old_app_port: 80
+old_app_path_pattern: /old_app_a*
+health_check_path: /alb-health.txt
+idle_timeout_seconds: 60
+origin_read_timeout_seconds: 30
+origin_keepalive_timeout_seconds: 5
+origin_verify_header_name: X-Origin-Verify

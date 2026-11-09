@@ -1,0 +1,222 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  ALB -> EC2. ALB terminates TLS and forwards HTTP to httpd on the existing instance.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnets in at least two Availability Zones.
+  InstanceId:
+    Type: AWS::EC2::Instance::Id
+  InstanceSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Existing security group of the instance. Ingress rules from the ALB are added to it.
+  AlbCertificateArn:
+    Type: String
+    Description: ACM certificate in the same Region as the ALB.
+    AllowedPattern: "^arn:aws:acm:.*"
+  AlbSslPolicy:
+    Type: String
+    Default: ELBSecurityPolicy-TLS13-1-2-2021-06
+  NewAppPort:
+    Type: Number
+    Default: 8080
+  OldAppPort:
+    Type: Number
+    Default: 80
+  OldAppPathPattern:
+    Type: String
+    Default: /old_app_a*
+  HealthCheckPath:
+    Type: String
+    Default: /alb-health.txt
+  IdleTimeoutSeconds:
+    Type: Number
+    Default: 60
+    MinValue: 1
+    MaxValue: 4000
+  AlbWebAclArn:
+    Type: String
+    Default: ""
+    Description: Optional. Regional AWS WAF web ACL to associate with the ALB.
+
+Conditions:
+  HasAlbWebAcl:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AlbWebAclArn
+          - ""
+
+Resources:
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB in front of the instance
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort:
+            Ref: NewAppPort
+          ToPort:
+            Ref: NewAppPort
+          DestinationSecurityGroupId:
+            Ref: InstanceSecurityGroupId
+        - IpProtocol: tcp
+          FromPort:
+            Ref: OldAppPort
+          ToPort:
+            Ref: OldAppPort
+          DestinationSecurityGroupId:
+            Ref: InstanceSecurityGroupId
+
+  InstanceIngressNewApp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: InstanceSecurityGroupId
+      IpProtocol: tcp
+      FromPort:
+        Ref: NewAppPort
+      ToPort:
+        Ref: NewAppPort
+      SourceSecurityGroupId:
+        Fn::GetAtt: [AlbSecurityGroup, GroupId]
+      Description: From the ALB to new_app_b
+
+  InstanceIngressOldApp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: InstanceSecurityGroupId
+      IpProtocol: tcp
+      FromPort:
+        Ref: OldAppPort
+      ToPort:
+        Ref: OldAppPort
+      SourceSecurityGroupId:
+        Fn::GetAtt: [AlbSecurityGroup, GroupId]
+      Description: From the ALB to old_app_a
+
+  NewAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Protocol: HTTP
+      Port:
+        Ref: NewAppPort
+      TargetType: instance
+      Targets:
+        - Id:
+            Ref: InstanceId
+      HealthCheckPath:
+        Ref: HealthCheckPath
+      Matcher:
+        HttpCode: "200"
+
+  OldAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId:
+        Ref: VpcId
+      Protocol: HTTP
+      Port:
+        Ref: OldAppPort
+      TargetType: instance
+      Targets:
+        - Id:
+            Ref: InstanceId
+      HealthCheckPath:
+        Ref: HealthCheckPath
+      Matcher:
+        HttpCode: "200"
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      Subnets:
+        Ref: SubnetIds
+      SecurityGroups:
+        - Ref: AlbSecurityGroup
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value:
+            Ref: IdleTimeoutSeconds
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: LoadBalancer
+      Protocol: HTTPS
+      Port: 443
+      SslPolicy:
+        Ref: AlbSslPolicy
+      Certificates:
+        - CertificateArn:
+            Ref: AlbCertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: NewAppTargetGroup
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Ref: LoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "443"
+            StatusCode: HTTP_301
+
+  OldAppRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Ref: HttpsListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - Ref: OldAppPathPattern
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Ref: OldAppTargetGroup
+
+  AlbWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: HasAlbWebAcl
+    Properties:
+      ResourceArn:
+        Ref: LoadBalancer
+      WebACLArn:
+        Ref: AlbWebAclArn
+
+Outputs:
+  LoadBalancerDnsName:
+    Value:
+      Fn::GetAtt: [LoadBalancer, DNSName]
+  LoadBalancerCanonicalHostedZoneId:
+    Value:
+      Fn::GetAtt: [LoadBalancer, CanonicalHostedZoneID]

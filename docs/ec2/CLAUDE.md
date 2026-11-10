@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EC2 の運用・自動化に関する**日本語の設計ドキュメント群**と、その実装である **AMI 公開パイプライン（`ami-publish/`）** が同居している。ドキュメントの追記・修正は日本語で行い、用語はできるだけ省略しない（例: 「生成 YAML」ではなく何の生成物かまで書く）。
 
+取り違えやすい表現は、正確な名前を決めて明示する。「対象のサーバー」「対象」のように文脈で指すものが変わる語をそのまま使わず、役割が分かる名前（例: 「稼働サーバー」「中継サーバー」）を決める。1 つのドキュメントの中では、同じものは同じ名前で、違うものは違う名前で書く。役割の近いものが複数出てくるドキュメントでは、冒頭の「用語」の節で定義する。
+
 - 中心となる設計: `ami-build-pipeline.md`（リリース検証 → AMI 化 → 起動テンプレート）→ 実装範囲を絞った `ami-publish-development-plan.md`（決定事項 D1〜D10 の正本）→ 稼働環境での確認は `ami-publish-environment-verification.md`、失敗時の対処は `ami-publish-troubleshooting.md`。主要なドキュメント以外の調査・補足のドキュメントとメモは `notes/` に置く（段階ごとに `notes/ami-publish/`・`notes/release-verification/`・`notes/instance-provisioning/`、EC2 の運用に関する個別の調査は `notes/ec2-operations/`）
 - `*-memo.md` は**採用しなかった・保留中の選択肢の備忘録**。採用済みの設計として扱わない
 - 図は Mermaid。見やすさのため縦向き（`flowchart TD`）と `%%{init: ...}%%` の文字サイズ指定を使っている箇所がある

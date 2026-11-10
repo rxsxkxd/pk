@@ -1,0 +1,140 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  IAM role and instance profile of the relay server that runs SSM Run Command and Session Manager.
+  Associate the instance profile with the existing instance by using the AWS CLI.
+
+Parameters:
+  RoleName:
+    Type: String
+    Default: ssm-relay
+    Description: Also used as the instance profile name. The deny policy refers to this role by name.
+  VpcEndpointId:
+    Type: String
+    Description: Interface VPC endpoint for com.amazonaws.<region>.ssm.
+    AllowedPattern: "^vpce-[0-9a-f]+$"
+  RelayPrivateIp:
+    Type: String
+    Description: Private IPv4 address of the relay server.
+    AllowedPattern: "^([0-9]{1,3}\\.){3}[0-9]{1,3}$"
+  TargetTagValue:
+    Type: String
+    Default: relay
+    Description: Value of the SsmAccess tag on the instances that the relay server can operate.
+
+Resources:
+  RelayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Ref: RoleName
+      Description: Relay server that runs SSM Run Command and Session Manager
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - Fn::Sub: arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: relay-ssm-operations
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SendCommandToTaggedInstances
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    aws:SourceVpce:
+                      Ref: VpcEndpointId
+                    ssm:resourceTag/SsmAccess:
+                      Ref: TargetTagValue
+                  IpAddress:
+                    aws:VpcSourceIp:
+                      Fn::Sub: ${RelayPrivateIp}/32
+              - Sid: SendCommandDocument
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+                Condition:
+                  StringEquals:
+                    aws:SourceVpce:
+                      Ref: VpcEndpointId
+                  IpAddress:
+                    aws:VpcSourceIp:
+                      Fn::Sub: ${RelayPrivateIp}/32
+              - Sid: SendCommandViaAwsService
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+                Condition:
+                  Bool:
+                    aws:ViaAWSService: "true"
+              - Sid: ReadCommandResults
+                Effect: Allow
+                Action:
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:ListCommands
+                  - ssm:DescribeInstanceInformation
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:SourceVpce:
+                      Ref: VpcEndpointId
+              - Sid: StartSessionToTaggedInstances
+                Effect: Allow
+                Action: ssm:StartSession
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    aws:SourceVpce:
+                      Ref: VpcEndpointId
+                    ssm:resourceTag/SsmAccess:
+                      Ref: TargetTagValue
+                  IpAddress:
+                    aws:VpcSourceIp:
+                      Fn::Sub: ${RelayPrivateIp}/32
+              - Sid: StartSessionDocuments
+                Effect: Allow
+                Action: ssm:StartSession
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/SSM-SessionManagerRunShell
+                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-StartNonInteractiveCommand
+              - Sid: ManageOwnSessions
+                Effect: Allow
+                Action:
+                  - ssm:TerminateSession
+                  - ssm:ResumeSession
+                  - ssmmessages:OpenDataChannel
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:*:*:session/*
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/aws:ssmmessages:session-id: ${aws:userid}
+
+  RelayInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Ref: RoleName
+      Roles:
+        - Ref: RelayRole
+
+Outputs:
+  RoleArn:
+    Description: Use this ARN in the deny policy.
+    Value:
+      Fn::GetAtt: [RelayRole, Arn]
+  InstanceProfileName:
+    Description: Associate this instance profile with the relay server by using associate-iam-instance-profile.
+    Value:
+      Ref: RelayInstanceProfile

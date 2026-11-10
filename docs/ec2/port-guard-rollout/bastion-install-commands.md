@@ -6,7 +6,7 @@
 >
 > 状態: 対象のサーバー（Amazon Linux 2）ではまだ流していない。Let's Encrypt の更新への対応はステップ 7 に用意した（手元の偽物のコマンドでだけ確かめた）。一覧の更新は `make-refresh.sh`（「一覧を新しくするとき」）に用意した。**本番に流す前に確認が要ることは [確認すること](./confirmation-items.md) にまとめている**。
 >
-> 更新日: 2026-11-04
+> 更新日: 2026-11-10
 
 ## このドキュメントで行うこと
 
@@ -66,7 +66,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 |---|---|---|
 | **設定だけ（永続化しない）** | 0 → 1 → 2 → 3 → 4 | 集合もルールも消えて、80・443 番の絞り込みが外れる（元の状態に戻る）。もう一度効かせるには、ステップ 2 から流し直す（下の「注意」） |
 | **永続化する** | 0 → 1 → 2 → 3 → 4 → 5 → 6 | 起動のたびに、サービスが集合とルールを入れ直す（絞り込みが効いたまま） |
-| **Let's Encrypt の証明書を certbot で更新している台**（上のどちらでも） | 上に加えて 7 | 証明書の更新の間だけ 80 番が開く。**ステップ 4 を流したら、次の証明書の更新の前に 7 を流す**（流さないと更新が失敗する） |
+| **Let's Encrypt の証明書を certbot で更新している台**（上のどちらでも） | 上に加えて 7 | 証明書の更新の間だけ 80 番が開く。**ステップ 4 を流したら、間を空けずに同じ作業の中で 7 を流す**（流さないと更新が失敗する） |
 
 - 設定だけは、試しに入れて様子を見るとき向け。問題があっても、再起動すれば元に戻る
 - 永続化するときも、ステップ 4 まで流して結果（日本からつながる・海外から止まる）を確かめてから、ステップ 5・6 を流す
@@ -854,6 +854,8 @@ systemctl is-enabled port-guard                      # enabled
 | 開く時間・範囲 | certbot が実際に更新を試みる間（数秒〜数分）だけ。**80 番だけ**で、443 番は絞ったまま（そのため、確認のパスが HTTPS へ転送されていないことが前提。7-1 で確かめる）。更新が要る証明書がない回（期限の 30 日前より前）は、hook は動かず、何も開かない |
 | ファイルの編集はしない | hook が操作するのは、カーネルのメモリーの中の iptables のルールの表だけ。ipset の集合、ステップ 5 の保存のファイル、サービスには触らない。差し込んだルールは保存しないので、再起動すると消える |
 | 開きっぱなしを防ぐ | 更新の前の hook で、systemd の一時の予約（`systemd-run --on-active=30min`。30 分後に 1 回だけコマンドを動かす）も入れる。certbot が途中で落ちて、更新の後の hook が動かなくても、30 分で削除される |
+| 開いている間の影響 | 80 番は世界中から受け付ける。80 番でアプリを出している台（`old_app_a` など）は、その間（最大 30 分）アプリの国の絞り込みが外れる。許容するかは [確認すること](./confirmation-items.md) の L14 |
+| セキュリティグループ | hook が開けるのは iptables だけ。セキュリティグループで 80 番が全世界に開いていることが前提（[確認すること](./confirmation-items.md) の L8） |
 | 前提 | 証明書の更新を、cron などから **`certbot renew`** で行っていること（hook の置き場所 `/etc/letsencrypt/renewal-hooks/` が効くのは `renew` のときだけ）。7-1 で確かめる |
 | 要らない台 | Let's Encrypt の証明書を certbot で更新していない台 |
 
@@ -867,6 +869,29 @@ systemctl is-enabled port-guard                      # enabled
 | `/etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh` | 80 番を通すルールを削除し、30 分後の予約を取り消す | 更新を試みた後（更新が失敗した場合に動くかは certbot の説明に明記がない。動かなくても、30 分後の予約で削除される） |
 | `/usr/local/sbin/port-guard-acme-close` | 80 番を通すルールを削除する（上の 2 つと、30 分後の予約から呼ばれる） | 更新の後の hook と、30 分後の予約から |
 
+### 今の仕様での、証明書の期限切れのリスク
+
+90 日の証明書を、毎月 1 日と 16 日の cron の `certbot renew` で更新している場合の整理である（cron の時刻と `certbot renew` の使用は見込みで、実環境では未確認。7-1 で確かめる）。**この仕様だけなら、重大な問題が起きる可能性は低い**。
+
+90 日の証明書は残り 30 日から更新の対象になるので、更新は次のように進む。
+
+- 1 回目の試行は、たいてい残り約 29 日のとき
+- 失敗しても、2 回目が残り約 14 日のときにある（日付の並びによっては、1 回目が残り約 16 日で、2 回目が期限の当日ごろになることがある）
+- 2 回とも失敗して初めて期限切れになる
+
+一時的な障害で 1 回失敗する程度なら問題にならない。問題になるのは、**失敗し続ける原因があり、それに誰も気づかない場合**だけである。
+
+| 発生する問題 | 原因 |
+|---|---|
+| 更新が毎回失敗する | 80 番の絞り込みで確認の接続が止まる（port-guard を入れて、この hook が効かない場合） |
+| 更新が毎回失敗する | セキュリティグループ、80 番の HTTPS への転送、DNS の向き先の誤り |
+| 失敗に気づかない | Let's Encrypt の通知メールは 2025-06-04 に終了している。cron の失敗にも通知がない |
+| 更新はできたのに古い証明書のまま | 更新の後に httpd を読み直していない |
+
+期限切れの原因になりそうなのは、実質的に port-guard の導入で 80 番を絞ることである。今の運用で更新が通っているなら、その状態自体に危険はない。絞り込みを入れた後も、この hook が効いていることを 1 度確かめれば、cron の頻度を今すぐ変える必要はない。
+
+Let's Encrypt の有効期間は短くなる予定なので（[有効期間の短縮の予定](../notes/instance-provisioning/letsencrypt-certificate-timing.md#有効期間の短縮の予定)）、そのときに cron の頻度を見直す。残り日数の確かめ方は [証明書の期限の確認](./certificate-expiry-check.md)。
+
 ### 7-1. 前提を確かめる（`command/port_guard/07-letsencrypt-check.sh`。読み取りだけ）
 
 ```bash
@@ -878,10 +903,14 @@ echo "== $(hostname) $(date '+%F %T') 07-letsencrypt-check"
 echo "-- cron（certbot の行。renew か certonly か）"
 sudo -n crontab -l 2>&1 | grep -n certbot || echo "root の crontab: certbot の行なし"
 sudo -n sh -c 'grep -rn certbot /etc/cron.d/ /etc/crontab /etc/cron.daily/ 2>/dev/null' || echo "/etc/cron.d など: certbot の行なし"
+echo "-- cron（ユーザーごとの crontab）"
+sudo -n sh -c 'grep -Hn certbot /var/spool/cron/* 2>/dev/null' || echo "ユーザーの crontab: certbot の行なし"
 echo "-- systemd のタイマー（certbot のもの）"
 systemctl list-timers --all 2>/dev/null | grep -i certbot || echo "certbot のタイマー: なし"
 echo "-- certbot の版"
 sudo -n certbot --version 2>&1 || echo "certbot: 見つからない"
+echo "-- 証明書と有効期限"
+sudo -n certbot certificates 2>&1 || echo "証明書の一覧: 取れない"
 echo "-- 証明書ごとの設定（確認の方式と、設定ずみの hook）"
 sudo -n sh -c 'grep -H "authenticator\|webroot_path\|_hook" /etc/letsencrypt/renewal/*.conf' 2>&1 || echo "設定: なし"
 echo "-- すでにある hook のファイル"
@@ -897,6 +926,8 @@ done
 | 見ること | 期待する内容 | 違ったら |
 |---|---|---|
 | cron の行 | `certbot renew`（`00 04 01 * *` と `00 04 16 * *` の見込み） | `certbot certonly ...` を直接呼んでいるなら、7-2 の hook のフォルダは効かない。cron の行に `--pre-hook /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh --post-hook /etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh` を足す形になる（この手順では扱わない。先に相談する） |
+| ユーザーごとの crontab | root の行だけ | `centos` など別のユーザーの行があれば、`sudo` の設定と、hook が root で動くことを確かめる。cron の行に `--post-hook` があっても残す |
+| 証明書と有効期限 | 残り日数に余裕がある | 更新が近い台は、ステップ 4 と 7 の間を空けない |
 | certbot のタイマー | なし（cron で更新している） | systemd のタイマーで `certbot renew` を動かしていても、hook のフォルダは効くので、そのまま 7-2 へ進んでよい |
 | certbot の版 | 0.19 以上（hook のフォルダ `renewal-hooks` に対応した版） | それより古ければ、hook のフォルダは効かない（先に相談する）。3.2.0 より前は、hook のフォルダが効くのは `renew` のときだけ |
 | `authenticator` | `webroot`（HTTP-01 の確認。80 番に確認が来る） | `dns-...` なら、80 番に確認は来ないので、このステップは要らない |
@@ -963,7 +994,12 @@ sudo -n tee /etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh > /dev/null
 /usr/bin/systemctl stop port-guard-acme-close.timer 2>/dev/null
 /usr/bin/systemctl reset-failed port-guard-acme-close.service 2>/dev/null
 /usr/bin/systemd-run --unit=port-guard-acme-close --on-active=30min /usr/local/sbin/port-guard-acme-close
-/usr/bin/logger -t port-guard-acme "opened tcp/80 for Let's Encrypt (closes after renewal, or in 30 minutes at the latest)"
+# 差し込めたかを確かめて、記録に残す（journalctl -t port-guard-acme で見られる）
+if /usr/sbin/iptables -w 10 -C INPUT -p tcp --dport 80 -m comment --comment port-guard-acme -j ACCEPT 2>/dev/null; then
+  /usr/bin/logger -t port-guard-acme "opened tcp/80 for Let's Encrypt (closes after renewal, or in 30 minutes at the latest)"
+else
+  /usr/bin/logger -t port-guard-acme "WARNING: failed to open tcp/80 (IPv4). The renewal may fail"
+fi
 # 失敗しても certbot の更新は続けさせる（開けられなかったときは、確認が通らず更新が失敗するだけで、今と同じ）
 exit 0
 EOF
@@ -1033,6 +1069,8 @@ sudo -n journalctl -t port-guard-acme --no-pager 2>/dev/null | tail -2   # opene
 | 記録 | `opened tcp/80 ...` と `closed tcp/80` |
 
 certbot から動くことまで確かめるには、**絞り込みが効いている 1 台で** `sudo certbot renew --dry-run` を流す（Let's Encrypt の試験用の窓口で、更新の手順だけを本物どおりに流す。証明書は変わらない。`--dry-run` でも pre と post の hook は動く）。確認が通り、`/var/log/letsencrypt/letsencrypt.log` に `port-guard-open-80.sh` と `port-guard-close-80.sh` が動いた記録があることを見る。海外からの確認まで含めて試せるので、ほかの台に広げる前に流す。
+
+`--dry-run` の成功だけではステップ 7 の完了としない。**実際の更新が 1 回通り、`journalctl -t port-guard-acme` に `opened` と `closed` が記録され、証明書の期限が延びたことを確かめて完了とする**。残り日数は [`cert-expiry-check.sh`](./certificate-expiry-check.md) で確かめる（[確認すること](./confirmation-items.md) の L16・L17）。
 
 ### hook を取り除く（`command/port_guard/07-letsencrypt-hooks-remove.sh`）
 

@@ -1,6 +1,6 @@
 # SSM の操作を特定の中継サーバーからだけに絞る IAM の設定
 
-> 位置付け: 検討と設定の下書き。採用済みの設計ではない。対象のインスタンスで SSM Agent が動いている前提で、Run Command と Session Manager の操作を、同じ VPC にある特定の中継サーバーからだけに絞る設定と、特定のユーザーだけが中継サーバー経由で稼働サーバーに入れるようにする設定をまとめる。
+> 位置付け: 検討と設定の下書き。採用済みの設計ではない。稼働サーバーで SSM Agent が動いている前提で、Run Command と Session Manager の操作を、同じ VPC にある特定の中継サーバーからだけに絞る設定と、特定のユーザーだけが中継サーバー経由で稼働サーバーに入れるようにする設定をまとめる。
 >
 > 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-10）。**どのポリシーも AWS の環境では試していない**。特に `ssm:StartSession` に `aws:SourceVpce` の条件が効くことは、AWS のドキュメントの例が `ssm:SendCommand` だけなので、確かめていない。SSM のアクションごとのリソースの種類の一覧（Service Authorization Reference）は取得できず、リソースの指定は Run Command と Session Manager のドキュメントの例に合わせた。
 >
@@ -8,19 +8,27 @@
 >
 > 作成日: 2026-11-10
 
+## 用語
+
+| 用語 | 指すもの |
+|---|---|
+| 稼働サーバー | 中継サーバーから Run Command・Session Manager で操作する、本番のサーバー。タグ `SsmAccess=relay` を付ける |
+| 中継サーバー | 稼働サーバーへの SSM の操作を実行する、同じ VPC の特定のサーバー。IAM ロール `ssm-relay` を付ける |
+| 作業者の PC | 作業者の手元の PC。今の `ssm-setup` などの道具を動かしている場所 |
+
 ## 結論
 
 - **中継サーバーからだけに絞ることは可能**。ただし、`aws:SourceVpce` だけでは「その VPC エンドポイントを通った」ことしか分からず、**同じ VPC のほかのサーバーと区別できない**。IAM のロールと、中継サーバーのプライベート IP の条件を組み合わせる。
 - **特定のユーザーだけが中継サーバー経由で入る形も可能**。ただし、提示の 3 層だけでは足りない。中継サーバーから AWS を呼ぶときに AWS が見るのは**中継サーバーのロール**で、誰が操作したかは見えない。特定のユーザーに絞る場所は、「誰が中継サーバーに入れるか」になる。
-- **Deny は `ssm:*` にしない**。対象のサーバーの SSM Agent も `ssm:` の操作を呼ぶので、`ssm:SendCommand` と `ssm:StartSession` に絞る。
+- **Deny は `ssm:*` にしない**。稼働サーバーの SSM Agent も `ssm:` の操作を呼ぶので、`ssm:SendCommand` と `ssm:StartSession` に絞る。
 - **今の道具と作業の流れに影響する**（[影響を受けるもの](#影響を受けるもの)）。作業者の PC からの `ssm-connect-check` や port-guard の `--via ssm`、コンソールからの操作は止まる。
 
 ## 提示の 3 層の確認
 
 | # | 提示の内容 | 判定 | 補足 |
 |---|---|---|---|
-| 1 | 中継サーバーのロールに、VPC エンドポイント条件付きで `ssm:SendCommand`・`ssm:StartSession` を Allow | 正しい。足すものがある | Run Command のドキュメントは、`ssm:SendCommand` にグローバル条件キーを使うときは `aws:ViaAWSService` を `true` にした文も含めるよう求めている。対象のインスタンスとドキュメントも絞る |
-| 2 | 対象のサーバーのロールは `AmazonSSMManagedInstanceCore` のみ | 正しい | このポリシーに `ssm:SendCommand` と `ssm:StartSession` は含まれない。ただし、すでに別のロールが付いている台は、そのロールの内容を確かめる（`ssm-role` は既存のロールを変えない） |
+| 1 | 中継サーバーのロールに、VPC エンドポイント条件付きで `ssm:SendCommand`・`ssm:StartSession` を Allow | 正しい。足すものがある | Run Command のドキュメントは、`ssm:SendCommand` にグローバル条件キーを使うときは `aws:ViaAWSService` を `true` にした文も含めるよう求めている。操作できる稼働サーバーと SSM ドキュメントも絞る |
+| 2 | 稼働サーバーのロールは `AmazonSSMManagedInstanceCore` のみ | 正しい | このポリシーに `ssm:SendCommand` と `ssm:StartSession` は含まれない。ただし、すでに別のロールが付いている台は、そのロールの内容を確かめる（`ssm-role` は既存のロールを変えない） |
 | 3 | 指定の VPC エンドポイント以外からの SSM 操作を Deny | **このままでは不足があり、危険** | 下の表 |
 
 3 の注意点は次のとおり。
@@ -28,9 +36,9 @@
 | 問題 | 内容 | 対応 |
 |---|---|---|
 | エンドポイントの条件は中継サーバーを特定しない | 同じ VPC のサーバーが同じエンドポイントを使えば条件を満たす | `aws:PrincipalArn` で中継サーバーのロールに絞る |
-| `ssm:*` を Deny すると SSM Agent が止まる | 対象のサーバーが別の経路で SSM を呼ぶと、`ssm:UpdateInstanceInformation` などが拒否される | `ssm:SendCommand`・`ssm:StartSession` だけを Deny する |
+| `ssm:*` を Deny すると SSM Agent が止まる | 稼働サーバーが別の経路で SSM を呼ぶと、`ssm:UpdateInstanceInformation` などが拒否される | `ssm:SendCommand`・`ssm:StartSession` だけを Deny する |
 | AWS のサービスからの呼び出しが止まる | サービスが利用者の認証情報で呼ぶときは、元の VPC エンドポイントの情報が引き継がれない | Deny に `aws:ViaAWSService` が `false` の条件を足す |
-| SCP の効かない範囲がある | 管理アカウントと、サービスリンクロールには効かない。SCP は AWS Organizations で「すべての機能」が有効なときだけ使える | 対象のアカウントがメンバーアカウントかを確かめる |
+| SCP の効かない範囲がある | 管理アカウントと、サービスリンクロールには効かない。SCP は AWS Organizations で「すべての機能」が有効なときだけ使える | 稼働サーバーと中継サーバーのある AWS アカウントが、メンバーアカウントかを確かめる |
 
 `StringNotEquals` は、キーがリクエストにないときは条件が真になる。VPC エンドポイントを通らない要求には `aws:SourceVpce` がないので、次の Deny は正しく効く。`StringNotEqualsIfExists` にしても同じく Deny になる。
 
@@ -59,14 +67,14 @@ flowchart TD
 
 | 設定 | 内容 | 注意 |
 |---|---|---|
-| プライベート DNS を有効にする（既定の案） | VPC の中で `ssm.ap-northeast-1.amazonaws.com` がエンドポイントのアドレスになる | **VPC の全部のサーバーの SSM Agent もこのエンドポイントを使う**。エンドポイントのセキュリティグループは、対象のサーバーからの 443 番も許可する。中継サーバーだけに絞ると SSM Agent がつながらなくなる |
-| プライベート DNS を無効にする（別案） | 中継サーバーだけが `--endpoint-url` でエンドポイントを指定する。セキュリティグループは中継サーバーからだけにできる | 道具の AWS CLI の呼び出しに指定を足す必要がある。対象のサーバーの SSM Agent は今までの経路のまま |
+| プライベート DNS を有効にする（既定の案） | VPC の中で `ssm.ap-northeast-1.amazonaws.com` がエンドポイントのアドレスになる | **VPC の全部のサーバーの SSM Agent もこのエンドポイントを使う**。エンドポイントのセキュリティグループは、稼働サーバーからの 443 番も許可する。中継サーバーだけに絞ると SSM Agent がつながらなくなる |
+| プライベート DNS を無効にする（別案） | 中継サーバーだけが `--endpoint-url` でエンドポイントを指定する。セキュリティグループは中継サーバーからだけにできる | 道具の AWS CLI の呼び出しに指定を足す必要がある。稼働サーバーの SSM Agent は今までの経路のまま |
 
 ### 2. 中継サーバーのロール
 
 `ssm-relay` に、次のポリシーと `AmazonSSMManagedInstanceCore` を付ける（`AmazonSSMManagedInstanceCore` は、ユーザーが Session Manager で中継サーバーに入るために要る）。
 
-対象のサーバーにタグ `SsmAccess=relay` を付けておく前提である。
+稼働サーバーにタグ `SsmAccess=relay` を付けておく前提である。
 
 ```json
 {
@@ -168,7 +176,31 @@ flowchart TD
 
 `iam:PassRole` で `ssm-relay` をほかのインスタンスに付けられる人がいないことも確かめる。
 
-### 3. 対象のサーバーのロール
+#### CloudFormation で作る
+
+今の中継サーバーには IAM ロールが付いていないので、新しく作って関連付ける。ロール、上のポリシー、`AmazonSSMManagedInstanceCore`、インスタンスプロファイルは [cloudformation/relay-role.yml](./cloudformation/relay-role.yml) で定義している。**AWS ではまだデプロイしていない**（`cfn-lint` と、上のポリシーとの突き合わせだけを確かめた）。
+
+CloudFormation のスタックの外にある既存のインスタンスには、インスタンスプロファイルを定義で関連付けられないので、関連付けは AWS CLI で行う。SCP の Deny と VPC エンドポイントは、このスタックに含めない（VPC エンドポイントは先に作っておく）。
+
+```bash
+# スタックの作成（変更セットを確認してから反映する）
+aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
+  --template-file ssm-setup/cloudformation/relay-role.yml \
+  --stack-name ssm-relay-role \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides VpcEndpointId=vpce-0123456789abcdef0 RelayPrivateIp=10.0.1.10
+
+# 中継サーバーへの関連付け（再起動は要らない）
+aws ec2 associate-iam-instance-profile --region ap-northeast-1 \
+  --instance-id i-0relay0000000000a \
+  --iam-instance-profile Name=ssm-relay
+```
+
+稼働サーバーに付けるタグの値は `TargetTagValue`（既定 `relay`）で変えられる。タグのキー `SsmAccess` はポリシーの条件キーの名前なので、テンプレートに固定で書いている。
+
+関連付けると、**中継サーバーにログインできる人全員がこのロールを使える**。先に、誰が中継サーバーに入れるかと、IMDS へのアクセスの制限を確かめる（[特定のユーザーに絞る方法](#特定のユーザーに絞る方法)）。
+
+### 3. 稼働サーバーのロール
 
 `AmazonSSMManagedInstanceCore` だけを付ける。`ssm-setup` の `ssm-role` が関連付けるものと同じで、追加の設定はない。
 
@@ -246,6 +278,24 @@ flowchart TD
 
 **Organizations を使っていない場合**は、同じ内容の Deny を、IAM のユーザーやグループ、ロールに付ける。アカウント全体の強制にはならず、付け忘れや、管理者による取り外しは防げない。
 
+#### Deny を付けない場合
+
+Deny を付けなくても、中継サーバーからの経路は使えるようになる。**今 SSM の権限を持っている人やロールは、今までどおり外部からも操作できる**。外部から誰でも操作できるようになるわけではない。
+
+| 操作する主体 | Deny なし | Deny あり |
+|---|---|---|
+| 中継サーバーのロール（中継サーバーから） | 使える | 使える |
+| 中継サーバーのロールの認証情報を外へ持ち出して使う | 使えない（2 の Allow の条件が VPC エンドポイントと中継サーバーの IP に限っているため） | 使えない |
+| 5 のポリシーだけを持つユーザーが稼働サーバーへ直接入る | 入れない（許可がないため） | 入れない |
+| すでに `ssm:SendCommand` などの権限を持つ人（管理者、作業者の PC の AWS CLI、コンソール） | **今までどおり操作できる** | 止まる |
+| 今後、誤って広い権限を付けられた人 | **操作できる** | 止まる |
+
+Deny の役割は、「中継サーバー以外から操作できない」ことを、ほかのポリシーの内容に関係なく保証することである。付けなければこの保証がなくなるだけで、[影響を受けるもの](#影響を受けるもの)に挙げた作業者の PC の道具、コンソール、CodeBuild のヘルスチェックは今までどおり動く。
+
+Deny なしで外部からの操作を減らしたいときは、該当する人やロールから `ssm:SendCommand` と `ssm:StartSession` の許可を外す。
+
+中継サーバーにログインできる人が、中継サーバーのロールを使えることは、Deny の有無に関係しない（[特定のユーザーに絞る方法](#特定のユーザーに絞る方法)）。
+
 ### 5. 特定のユーザーの設定
 
 ユーザーには、**中継サーバーへの `ssm:StartSession` だけ**を許可する。稼働サーバーへの権限は与えない。
@@ -304,7 +354,7 @@ flowchart TD
 
 Deny を入れる前に、次を確かめる。
 
-| 対象 | 影響 | 対応 |
+| 影響を受けるもの | 影響 | 対応 |
 |---|---|---|
 | `ssm-setup` の `ssm-connect-check`（作業者の PC） | 止まる | 中継サーバーから動かす |
 | `port-guard-rollout`・`al2-update` の Run Command（作業者の PC） | 止まる | 中継サーバーから動かす |
@@ -318,9 +368,9 @@ Deny を入れる前に、次を確かめる。
 
 | # | 作業 | 確かめること |
 |---|---|---|
-| 1 | VPC エンドポイントを作る | 対象のサーバーが `Online` のままであること（プライベート DNS を有効にするとき） |
+| 1 | VPC エンドポイントを作る | 稼働サーバーが `Online` のままであること（プライベート DNS を有効にするとき） |
 | 2 | 中継サーバーに `ssm-relay` を付ける | 中継サーバーから `send-command` が成功すること |
-| 3 | 対象のサーバーにタグを付ける | タグのない台に `send-command` すると拒否されること |
+| 3 | 稼働サーバーにタグを付ける | タグのない台に `send-command` すると拒否されること |
 | 4 | ユーザーのポリシーを付ける | ユーザーが中継サーバーに入れること |
 | 5 | Deny を**試験用の OU のアカウント**で確かめる | 下の表 |
 | 6 | Deny を本番のアカウントに付ける | 元に戻すときは SCP を外す |
@@ -332,7 +382,7 @@ Deny を入れる前に、次を確かめる。
 | 同じ VPC の別のサーバーから `send-command` | `AccessDenied` |
 | ユーザーが稼働サーバーへ直接 `start-session` | `AccessDenied` |
 | ユーザーが中継サーバーへ `start-session` | 成功 |
-| 対象のサーバーの SSM の状態 | `Online` のまま |
+| 稼働サーバーの SSM の状態 | `Online` のまま |
 | AMI 公開パイプラインのヘルスチェック | 成功 |
 | 例外のロールで `send-command` | 成功 |
 
@@ -342,7 +392,7 @@ Deny を入れる前に、次を確かめる。
 |---|---|
 | R1 | 中継サーバーを今の踏み台サーバーと兼ねるか |
 | R2 | 案 A か案 B か（誰が操作したかを CloudTrail で分ける必要があるか） |
-| R3 | AWS Organizations の SCP を使えるか（対象のアカウントがメンバーアカウントか） |
+| R3 | AWS Organizations の SCP を使えるか（稼働サーバーと中継サーバーのある AWS アカウントがメンバーアカウントか） |
 | R4 | VPC エンドポイントのプライベート DNS を有効にするか |
 | R5 | 作業者の PC からの道具の実行をやめて、中継サーバーへ移せるか |
 | R6 | 例外のロール（`break-glass-admin`）の使い方 |

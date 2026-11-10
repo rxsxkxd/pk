@@ -16,7 +16,7 @@ flowchart TD
   SG --> H["httpd *:443<br/>証明書あり"]
 ```
 
-CloudFront から EC2 まではインターネットを通るので、オリジンへは **HTTPS Only** にする。EC2 の証明書は残る。
+CloudFront から EC2 まではインターネットを通るので、オリジンへは **HTTPS Only** にする。EC2 の証明書は残る。ALB を通さないことのデメリットは [README](./README.md#alb-を通さないことのデメリット) にまとめた。
 
 ## 手順
 
@@ -38,7 +38,7 @@ aws acm request-certificate --region us-east-1 \
 
 ### 3. httpd を設定する
 
-[cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md) のとおりに設定する。秘密のヘッダーの確認は、CloudFront の用意ができてから入れる（手順 6）。
+[cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md) のとおりに設定する。秘密のヘッダーの確認は、DNS の切り替えが行き渡ってから入れる（手順 9）。先に入れると、まだ EC2 へ直接来ている利用者が 403 になる。
 
 ### 4. CloudFront のディストリビューションを作る
 
@@ -81,14 +81,13 @@ aws ec2 authorize-security-group-ingress --group-id <専用のグループ> \
 | 許可の一覧に足す（勧める） | `ip-ranges.json` の `CLOUDFRONT_ORIGIN_FACING` の範囲を port-guard の許可の一覧へ足す。**直接のアクセスは日本に絞ったまま**、CloudFront を通せる。反映のしかたは [port-guard-rollout の手順](../port-guard-rollout/steps.md)で確かめる |
 | port-guard を外す | [国での絞り込みの順番](../notes/ec2-operations/access-restriction-alb-cloudfront.md#切り替えるときの順番)のとおり。手順 8 までの間、直接のアクセスの絞り込みがなくなる |
 
-### 6. 秘密のヘッダーの確認を入れて、切り替えの前に確かめる
+### 6. 切り替えの前に確かめる
 
-httpd の[秘密のヘッダーの確認](./cloudfront-to-ec2-httpd.md#3-秘密のヘッダーを確認する)を有効にする。次に、CloudFront の `*.cloudfront.net` の名前の IP へ、本番のドメインで接続する。
+CloudFront の `*.cloudfront.net` の名前の IP へ、本番のドメインで接続する。
 
 ```bash
 dig +short <ディストリビューションのドメイン名>
 curl -v --resolve <ドメイン>:443:<CloudFront の IP> https://<ドメイン>/
-curl -v https://origin.app.example.com/    # 403 になること
 ```
 
 | 確認 | 期待 |
@@ -114,10 +113,11 @@ DNS を CloudFront へ向ける。Route 53 ならエイリアスレコードに�
 
 | 順番 | 作業 |
 |---|---|
-| 1 | EC2 のグループから、`0.0.0.0/0` などの 80・443 番の許可を消す |
-| 2 | 国の絞り込みを CloudFront へ移し、直接のアクセスがセキュリティグループで止まることを確かめてから、port-guard を外す |
-| 3 | 証明書の更新が新しい経路で成功することを確かめる（`sudo certbot renew --dry-run`） |
-| 4 | 証明書の有効期限の監視を入れる。**オリジンの証明書が切れると、すべての利用者に 502 が返る** |
+| 1 | httpd の[秘密のヘッダーの確認](./cloudfront-to-ec2-httpd.md#3-秘密のヘッダーを確認する)を有効にする。`curl -v https://origin.app.example.com/` が 403 になり、CloudFront 経由は通ることを確かめる |
+| 2 | EC2 のグループから、`0.0.0.0/0` などの 80・443 番の許可を消す |
+| 3 | 国の絞り込みを CloudFront へ移し、直接のアクセスがセキュリティグループで止まることを確かめてから、port-guard を外す |
+| 4 | 証明書の更新が新しい経路で成功することを確かめる（`sudo certbot renew --dry-run`） |
+| 5 | 証明書の有効期限の監視を入れる。**オリジンの証明書が切れると、すべての利用者に 502 が返る** |
 
 ## 元に戻す
 

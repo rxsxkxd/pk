@@ -1,0 +1,173 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  CloudFront -> EC2 with the viewer domain name unchanged. CloudFront terminates viewer TLS and connects
+  to httpd over HTTPS through a separate origin DNS name, keeping the viewer Host header.
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  CloudFrontPrefixListId:
+    Type: String
+    Description: Prefix list ID of com.amazonaws.global.cloudfront.origin-facing in this Region.
+    AllowedPattern: "^pl-[0-9a-f]+$"
+  DomainName:
+    Type: String
+    Description: Domain name used by viewers, such as app.example.com. Unchanged by this migration.
+  OriginDomainName:
+    Type: String
+    Description: Separate public DNS name that resolves to the instance, such as origin.app.example.com.
+  CloudFrontCertificateArn:
+    Type: String
+    Description: Output CertificateArn of the certificate stack in us-east-1.
+    AllowedPattern: "^arn:aws:acm:us-east-1:.*"
+  OriginVerifyHeaderName:
+    Type: String
+    Default: X-Origin-Verify
+  OriginVerifyHeaderValue:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Secret value that httpd checks to reject requests that bypass this distribution.
+  OriginReadTimeoutSeconds:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    MaxValue: 120
+  OriginKeepaliveTimeoutSeconds:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 300
+  CloudFrontWebAclArn:
+    Type: String
+    Default: ""
+    Description: Optional. AWS WAF web ACL created in us-east-1 (CLOUDFRONT scope).
+  OriginHostedZoneId:
+    Type: String
+    Default: ""
+    Description: Optional. Route 53 hosted zone in which to create the OriginDomainName record.
+  OriginElasticIp:
+    Type: String
+    Default: ""
+    Description: Elastic IP address of the instance. Required when OriginHostedZoneId is set.
+    AllowedPattern: "^$|^([0-9]{1,3}\\.){3}[0-9]{1,3}$"
+
+Rules:
+  OriginNameDiffersFromViewerName:
+    Assertions:
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: OriginDomainName
+                - Ref: DomainName
+        AssertDescription: OriginDomainName must differ from DomainName, which resolves to CloudFront itself.
+  OriginRecordNeedsElasticIp:
+    RuleCondition:
+      Fn::Not:
+        - Fn::Equals:
+            - Ref: OriginHostedZoneId
+            - ""
+    Assertions:
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: OriginElasticIp
+                - ""
+        AssertDescription: OriginElasticIp is required when OriginHostedZoneId is set.
+
+Conditions:
+  HasCloudFrontWebAcl:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: CloudFrontWebAclArn
+          - ""
+  HasOriginRecord:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: OriginHostedZoneId
+          - ""
+
+Resources:
+  OriginRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasOriginRecord
+    Properties:
+      HostedZoneId:
+        Ref: OriginHostedZoneId
+      Name:
+        Ref: OriginDomainName
+      Type: A
+      TTL: "300"
+      ResourceRecords:
+        - Ref: OriginElasticIp
+
+  OriginSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTPS from CloudFront origin-facing servers. Attach it to the instance.
+      VpcId:
+        Ref: VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourcePrefixListId:
+            Ref: CloudFrontPrefixListId
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: false
+        Aliases:
+          - Ref: DomainName
+        ViewerCertificate:
+          AcmCertificateArn:
+            Ref: CloudFrontCertificateArn
+          SslSupportMethod: sni-only
+          MinimumProtocolVersion: TLSv1.2_2021
+        WebACLId:
+          Fn::If:
+            - HasCloudFrontWebAcl
+            - Ref: CloudFrontWebAclArn
+            - Ref: AWS::NoValue
+        Origins:
+          - Id: ec2-origin
+            DomainName:
+              Ref: OriginDomainName
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              HTTPSPort: 443
+              OriginSSLProtocols:
+                - TLSv1.2
+              OriginReadTimeout:
+                Ref: OriginReadTimeoutSeconds
+              OriginKeepaliveTimeout:
+                Ref: OriginKeepaliveTimeoutSeconds
+            OriginCustomHeaders:
+              - HeaderName:
+                  Ref: OriginVerifyHeaderName
+                HeaderValue:
+                  Ref: OriginVerifyHeaderValue
+        DefaultCacheBehavior:
+          TargetOriginId: ec2-origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: false
+          # Managed-CachingDisabled
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          # Managed-AllViewer. Keeps the viewer Host header, so the certificate on the instance is checked against DomainName.
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+
+Outputs:
+  DistributionDomainName:
+    Description: Point DomainName to this name after checking the distribution.
+    Value:
+      Fn::GetAtt: [Distribution, DomainName]
+  OriginSecurityGroupId:
+    Description: Attach this security group to the instance before switching DNS.
+    Value:
+      Fn::GetAtt: [OriginSecurityGroup, GroupId]

@@ -1,0 +1,52 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  ACM certificate for the viewer domain name of CloudFront. Deploy this stack in us-east-1.
+
+Parameters:
+  DomainName:
+    Type: String
+    Description: Domain name used by viewers, such as app.example.com.
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional. Route 53 hosted zone of DomainName. When set, CloudFormation creates the DNS validation record.
+      When empty, add the validation CNAME that ACM shows to your DNS provider while the stack is being created.
+
+Rules:
+  MustBeInUsEast1:
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: AWS::Region
+            - us-east-1
+        AssertDescription: CloudFront requires the ACM certificate to be in us-east-1.
+
+Conditions:
+  HasHostedZone:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: HostedZoneId
+          - ""
+
+Resources:
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName:
+        Ref: DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        Fn::If:
+          - HasHostedZone
+          - - DomainName:
+                Ref: DomainName
+              HostedZoneId:
+                Ref: HostedZoneId
+          - Ref: AWS::NoValue
+
+Outputs:
+  CertificateArn:
+    Description: Pass this value as CloudFrontCertificateArn of the CloudFront stack.
+    Value:
+      Ref: Certificate

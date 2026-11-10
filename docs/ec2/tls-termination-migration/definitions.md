@@ -13,6 +13,8 @@
 | ALB → EC2 | `cloudformation/alb-to-ec2.yml` | `<prefix>-alb-to-ec2` |
 | CloudFront → EC2 | `cloudformation/cloudfront-to-ec2.yml` | `<prefix>-cloudfront-to-ec2` |
 | CloudFront → ALB → EC2 | `cloudformation/cloudfront-alb-to-ec2.yml` | `<prefix>-cloudfront-alb-to-ec2` |
+| CloudFront → EC2（[外部のドメイン名を変えない場合](./cloudfront-to-ec2-same-domain.md)） | `cloudformation/cloudfront-to-ec2-same-domain.yml` | `<prefix>-cloudfront-to-ec2-same-domain` |
+| 上の構成の外向きの ACM の証明書（`us-east-1`） | `cloudformation/cloudfront-to-ec2-same-domain-certificate.yml` | `<prefix>-cloudfront-certificate` |
 
 ```
 cdk/python/
@@ -25,6 +27,8 @@ cdk/python/
       alb.py                   ALB・ターゲットグループ・リスナー・セキュリティグループ（2 つの構成で共用）
       alb_to_ec2.py
       cloudfront_to_ec2.py
+      cloudfront_to_ec2_same_domain.py
+      cloudfront_certificate.py
       cloudfront_alb_to_ec2.py
 ```
 
@@ -43,7 +47,7 @@ CDK は L2 で書いているので、論理 ID は CloudFormation の YAML と�
 
 | もの | 理由・行うこと |
 |---|---|
-| ACM の証明書 | CloudFront 用は `us-east-1` に要り、スタックのリージョンと分かれる。先に作って ARN を渡す |
+| ACM の証明書 | CloudFront 用は `us-east-1` に要り、スタックのリージョンと分かれる。先に作って ARN を渡す（外部のドメイン名を変えない構成は、`us-east-1` の証明書のスタックを別に用意している） |
 | WAF の web ACL | 中身のルールは要件次第。先に作って ARN を渡す。CloudFront 用は `us-east-1` |
 | DNS のレコード | 切り替えの時点を担当者が決めるため。`origin.<ドメイン>` と本番の名前は別に用意する |
 | インスタンスへのセキュリティグループの付け替え | CloudFront → EC2 の出力 `OriginSecurityGroupId` を、既存のグループに**足して**付ける（`modify-instance-attribute --groups` は全部を置き換えるので、既存のグループも並べる） |
@@ -88,6 +92,47 @@ CDK_CONTEXT_JSON='{"config":"config.yml"}' CDK_OUTDIR=cdk.out .venv/bin/python a
 
 `cdk.out/<スタック名>.template.json` を、上の `aws cloudformation deploy` で反映する（`cdk bootstrap` は不要）。Node.js 26 では jsii が未検証の警告を出す（合成は成功した）。対応版は 22 と 24。
 
+### CloudFront → EC2（外部のドメイン名を変えない場合）
+
+`ap-northeast-1` を前提にする。CloudFront の外向きの証明書は ACM で管理する。CloudFront が使う ACM の証明書は `us-east-1` に置く決まりなので、証明書だけ別のスタックにしている。
+
+| スタック | リージョン | 内容 |
+|---|---|---|
+| `cloudfront-to-ec2-same-domain-certificate.yml` | `us-east-1` | `app.example.com` の ACM の証明書 |
+| `cloudfront-to-ec2-same-domain.yml` | `ap-northeast-1` | CloudFront、オリジン用のセキュリティグループ、`origin.app.example.com` の Route 53 のレコード（任意） |
+
+| パラメータ | 内容 |
+|---|---|
+| 証明書のスタックの `HostedZoneId` | `app.example.com` のホストゾーンが同じアカウントの Route 53 にあるなら指定する。検証用のレコードが自動で作られる。空にすると、ACM が示す CNAME を DNS に足すまで、スタックは `CREATE_IN_PROGRESS` のまま待つ |
+| `OriginHostedZoneId`、`OriginElasticIp` | `origin.app.example.com` のレコードもこのスタックで作るときに指定する。別の DNS で管理するなら空にして、手で作る |
+
+`app.example.com` のレコードは定義に含めない。既にあるレコードで、切り替えの時点も担当者が決めるため。`OriginDomainName` と `DomainName` が同じだと EC2 へ届かないので、デプロイのときに止まるようにしている（CDK は合成のとき）。
+
+```bash
+# 1. 証明書（us-east-1）
+aws cloudformation deploy --region us-east-1 \
+  --template-file cloudformation/cloudfront-to-ec2-same-domain-certificate.yml \
+  --stack-name <スタック名>-certificate \
+  --parameter-overrides DomainName=app.example.com HostedZoneId=<ホストゾーン ID>
+
+# 2. 証明書の ARN を確かめる
+aws cloudformation describe-stacks --region us-east-1 --stack-name <スタック名>-certificate \
+  --query "Stacks[0].Outputs[?OutputKey=='CertificateArn'].OutputValue" --output text
+
+# 3. CloudFront など（ap-northeast-1）。変更セットを確認してから反映する
+aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
+  --template-file cloudformation/cloudfront-to-ec2-same-domain.yml \
+  --stack-name <スタック名> \
+  --parameter-overrides VpcId=<VPC> CloudFrontPrefixListId=<pl-...> \
+    DomainName=app.example.com OriginDomainName=origin.app.example.com \
+    CloudFrontCertificateArn=<2 の ARN> OriginVerifyHeaderValue=<秘密の値> \
+    OriginHostedZoneId=<ホストゾーン ID> OriginElasticIp=<Elastic IP>
+```
+
+CloudFront のプレフィックスリストの ID は、上の `describe-managed-prefix-lists` に `--region ap-northeast-1` を付けて調べる。
+
+CDK では、`<prefix>-cloudfront-certificate` を先に合成・デプロイし、出力の ARN を設定値の `cloudfront_certificate_arn` に書いてから、`<prefix>-cloudfront-to-ec2-same-domain` を合成する。
+
 ### 秘密のヘッダーの値
 
 CloudFront を使う 2 つの構成は、`OriginVerifyHeaderValue` を**デプロイのときのパラメータ**で渡す（32 文字以上）。`NoEcho` にしているのでテンプレートと `describe-stacks` には出ないが、CloudFront の設定と ALB のルールを読める人には見える。
@@ -113,6 +158,7 @@ openssl rand -hex 32
 | ALB の `deletion_protection.enabled` | 省略（既定の `false`） | `false` を明示 |
 | オリジンの `HTTPSPort` | `443` を明示 | 省略（既定の 443） |
 | `RestrictToCloudFront` | パラメータで切り替える | 設定値で切り替える（合成し直す） |
+| ACM の証明書の `Name` タグ | なし | CDK が付ける |
 | 論理 ID | 短い名前 | CDK が生成する名前 |
 
 CDK の ALB のセキュリティグループの外向きは、L2 の `add_egress_rule` を使わず、L1 のプロパティで直接書いている。理由は `tls_termination_cdk/stacks/alb.py` のコメントのとおり。
@@ -130,3 +176,4 @@ AWS のドキュメントと照らし合わせた（2026-11-09、2026-11-10）�
 
 - [AWS::EC2::SecurityGroup（既定の外向きの規則）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-securitygroup.html)
 - [AWS::EC2::SecurityGroupEgress](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-securitygroupegress.html)
+- [AWS::CertificateManager::Certificate（DNS 検証）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-certificatemanager-certificate.html)

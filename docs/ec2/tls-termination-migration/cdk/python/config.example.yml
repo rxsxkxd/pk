@@ -16,6 +16,12 @@ cloudfront_prefix_list_id: pl-0123456789abcdef0
 domain_name: app.example.com
 # CloudFront の接続先の名前。domain_name とは別の名前にする
 origin_domain_name: origin.app.example.com
+# CloudFront -> EC2（外部のドメイン名を変えない場合）で使う
+# domain_name の Route 53 のホストゾーン。指定すると ACM の検証用のレコードを自動で作る
+certificate_hosted_zone_id: ""
+# origin_domain_name の Route 53 のレコードも作るときに指定する
+origin_hosted_zone_id: ""
+origin_elastic_ip: ""
 
 # ALB と同じリージョンの ACM の証明書
 alb_certificate_arn: arn:aws:acm:ap-northeast-1:111122223333:certificate/00000000-0000-0000-0000-000000000000

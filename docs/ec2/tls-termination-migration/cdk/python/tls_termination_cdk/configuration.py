@@ -47,6 +47,9 @@ class Configuration:
     cloudfront_certificate_arn: str
     alb_web_acl_arn: str = ""
     cloudfront_web_acl_arn: str = ""
+    certificate_hosted_zone_id: str = ""
+    origin_hosted_zone_id: str = ""
+    origin_elastic_ip: str = ""
     restrict_to_cloudfront: bool = False
     new_app_port: int = 8080
     old_app_port: int = 80
@@ -71,6 +74,12 @@ def load_configuration(path: str) -> Configuration:
         raise ConfigurationError(f"必要な項目がありません: {', '.join(missing)}")
 
     try:
-        return Configuration(**values)
+        configuration = Configuration(**values)
     except TypeError as error:
         raise ConfigurationError(f"未知の項目があります: {error}") from error
+
+    if configuration.origin_domain_name == configuration.domain_name:
+        raise ConfigurationError("origin_domain_name は domain_name と別の名前にしてください")
+    if configuration.origin_hosted_zone_id and not configuration.origin_elastic_ip:
+        raise ConfigurationError("origin_hosted_zone_id を指定するときは origin_elastic_ip も必要です")
+    return configuration

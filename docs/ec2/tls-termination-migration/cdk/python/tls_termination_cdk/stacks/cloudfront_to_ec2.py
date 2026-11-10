@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from aws_cdk import aws_ec2 as ec2
 from constructs import Construct
 
 from ..configuration import Configuration
-from .common import TerminationStack, define_distribution, origin_verify_header_value
+from .common import (
+    TerminationStack,
+    define_distribution,
+    define_origin_security_group,
+    origin_verify_header_value,
+)
 
 
 class CloudFrontToEc2Stack(TerminationStack):
@@ -18,25 +22,7 @@ class CloudFrontToEc2Stack(TerminationStack):
             configuration,
         )
 
-        vpc = ec2.Vpc.from_vpc_attributes(
-            self,
-            "Vpc",
-            vpc_id=configuration.vpc_id,
-            availability_zones=configuration.availability_zones,
-            public_subnet_ids=configuration.subnet_ids,
-        )
-        origin_security_group = ec2.SecurityGroup(
-            self,
-            "OriginSecurityGroup",
-            vpc=vpc,
-            description="HTTPS from CloudFront origin-facing servers. Attach it to the instance.",
-        )
-        origin_security_group.add_ingress_rule(
-            ec2.Peer.prefix_list(configuration.cloudfront_prefix_list_id),
-            ec2.Port.tcp(443),
-            "HTTPS from CloudFront",
-        )
-
+        origin_security_group = define_origin_security_group(self, configuration)
         distribution = define_distribution(self, configuration, origin_verify_header_value(self))
 
         self.output("DistributionDomainName", distribution.distribution_domain_name)

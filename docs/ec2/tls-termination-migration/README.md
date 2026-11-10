@@ -16,6 +16,7 @@
 | [alb-to-ec2.md](./alb-to-ec2.md) | ALB → EC2 への移行の手順 |
 | [cloudfront-to-ec2.md](./cloudfront-to-ec2.md) | CloudFront → EC2 への移行の手順 |
 | [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md) | CloudFront → EC2 のときに httpd で行う設定 |
+| [cloudfront-to-ec2-same-domain.md](./cloudfront-to-ec2-same-domain.md) | CloudFront → EC2 で外部のドメイン名を変えない場合の、DNS・証明書・Host の対応 |
 | [cloudfront-alb-to-ec2.md](./cloudfront-alb-to-ec2.md) | CloudFront → ALB → EC2 への移行の手順 |
 | [definitions.md](./definitions.md) | 3 つの構成の ALB・CloudFront の定義（`cloudformation/` の YAML と `cdk/python/` の CDK）の説明と使い方 |
 
@@ -29,9 +30,14 @@
 
 ## 3 つの構成
 
+今の構成は、手前に何も置かない Client → EC2 で、httpd が Let's Encrypt の証明書で SSL/TLS を終端している。ここから、次の A・B・C のどれかへ移す。同じ内容の図を [architecture.svg](./architecture.svg) にも置いている。
+
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "16px"}}}%%
 flowchart TD
+  subgraph Now["今の構成: Client → EC2"]
+    N1["利用者"] -- "HTTPS（Let's Encrypt の証明書）" --> N2["EC2 の httpd<br/>証明書あり"]
+  end
   subgraph A["A. ALB → EC2"]
     A1["利用者"] -- "HTTPS（ACM の証明書）" --> A2["ALB<br/>WAF を置ける"]
     A2 -- "HTTP（VPC の中）" --> A3["EC2 の httpd<br/>証明書なし"]
@@ -60,6 +66,21 @@ flowchart TD
 | アプリの応答の上限 | ALB のアイドルタイムアウト（既定 60 秒、最大 4000 秒） | オリジンの応答タイムアウト（既定 30 秒、1〜120 秒。それより長くは申請） | 両方の短い方 |
 
 ALB の料金は、AWS の料金のページの計算例では `us-east-1` で 1 時間 $0.0225、1 LCU あたり 1 時間 $0.008 である（2026-11-09 確認）。東京リージョンの金額はページに載っていなかったので、[料金計算ツール](https://calculator.aws/)で確かめる。
+
+## ALB を通さないことのデメリット
+
+CloudFront → EC2 は、ALB を通す 2 つの構成と比べて次の点で不利になる。
+
+| # | デメリット | 内容 |
+|---|---|---|
+| 1 | EC2 の証明書が残る | httpd の SSL/TLS の処理も、証明書の更新もなくならない。オリジンの証明書が切れると、すべての利用者に 502 が返る。今の HTTP-01 の更新は CloudFront 経由に変わり、地理的制限を使うと海外からの確認が止まる（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
+| 2 | ヘルスチェックと負荷分散がない | CloudFront のオリジングループで予備の台への切り替えはできるが、負荷分散ではない |
+| 3 | 無停止の入れ替えがしにくい | ALB なら新しい台を登録してから古い台を外せる。直結では、オリジンの付け替えになる |
+| 4 | EC2 を外に出したままになる | 公開の DNS 名と IP アドレスが要る。プレフィックスリストは CloudFront 全体の範囲で、他人のディストリビューションからも届くので、httpd で秘密のヘッダーの確認も要る。[VPC オリジン](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html)を使えば避けられるが、EC2 をプライベートサブネットへ移す話になる |
+| 5 | セキュリティグループの枠を消費する | EC2 のセキュリティグループで、プレフィックスリストが 55 件に数えられる。既定の上限は 60 件 |
+| 6 | パスでの振り分けを ALB に任せられない | `old_app_a` は httpd の 443 番へ移すか、CloudFront のビヘイビアで分ける |
+
+一方で、ALB の時間課金がなく、構成要素も 1 つ減る。台数が 1 台のままなら、ALB を置いても冗長にはならないので、2 と 3 の差は小さくなる。1 台の運用で、入れ替えのときの停止と証明書の運用を許容できるなら、直結でも問題ない。
 
 ## WAF を置ける場所
 
@@ -125,3 +146,6 @@ AWS のドキュメントと照らし合わせた（2026-11-09）。
 - [Target groups for your Application Load Balancers](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-target-groups.html)
 - [Edit attributes for your Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)
 - [CloudFront quotas](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-limits.html)
+- [Require HTTPS between CloudFront and your custom origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-https-cloudfront-to-custom-origin.html)
+- [Restrict access with VPC origins](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html)
+- [AWS-managed prefix lists（weight）](https://docs.aws.amazon.com/vpc/latest/userguide/working-with-aws-managed-prefix-lists.html)

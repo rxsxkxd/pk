@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 794" width="1000" height="794" role="img" aria-labelledby="title desc">
+  <title id="title">今の構成と、SSL/TLS の終端を移す 3 つの構成</title>
+  <desc id="desc">今の利用者から EC2 へ直接接続する構成と、CloudFront、ALB を経て EC2 へ至る 3 つの構成について、各区間のプロトコルと SSL/TLS を終端する場所を示す。</desc>
+  <defs>
+    <marker id="arrow-https" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#1f7a4d"/>
+    </marker>
+    <marker id="arrow-http" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#b4531a"/>
+    </marker>
+    <style>
+      text { font-family: "Hiragino Sans", "Noto Sans CJK JP", "Yu Gothic", sans-serif; fill: #1f2933; }
+      .heading { font-size: 20px; font-weight: 700; }
+      .group { font-size: 15px; font-weight: 700; }
+      .row { font-size: 13px; fill: #52606d; }
+      .name { font-size: 16px; font-weight: 700; text-anchor: middle; }
+      .sub { font-size: 12px; text-anchor: middle; fill: #3e4c59; }
+      .label { font-size: 12px; text-anchor: middle; }
+      .https { fill: #1f7a4d; font-weight: 700; }
+      .http { fill: #b4531a; font-weight: 700; }
+      .legend { font-size: 12px; fill: #3e4c59; }
+      .panel { fill: #f7f9fb; stroke: #d9e2ec; }
+      .node { fill: #ffffff; stroke: #9aa5b1; stroke-width: 1.5; }
+      .term { fill: #fff3d6; stroke: #c98a0c; stroke-width: 2; }
+      .line-https { stroke: #1f7a4d; stroke-width: 2; fill: none; marker-end: url(#arrow-https); }
+      .line-http { stroke: #b4531a; stroke-width: 2; stroke-dasharray: 7 5; fill: none; marker-end: url(#arrow-http); }
+    </style>
+  </defs>
+
+  <rect width="1000" height="794" fill="#ffffff"/>
+  <text class="heading" x="30" y="36">今の構成と、SSL/TLS の終端を移す 3 つの構成</text>
+
+  <!-- 今の構成 -->
+  <rect class="panel" x="16" y="52" width="968" height="132" rx="8"/>
+  <text class="group" x="30" y="78">今の構成（Client → EC2）</text>
+  <rect class="node" x="30" y="92" width="160" height="80" rx="6"/>
+  <text class="name" x="110" y="138">Client</text>
+  <rect class="term" x="810" y="92" width="160" height="80" rx="6"/>
+  <text class="name" x="890" y="120">EC2（httpd）</text>
+  <text class="sub" x="890" y="140">SSL/TLS を終端</text>
+  <text class="sub" x="890" y="158">Let's Encrypt の証明書</text>
+  <line class="line-https" x1="190" y1="132" x2="808" y2="132"/>
+  <text class="label https" x="500" y="124">HTTPS</text>
+  <text class="label" x="500" y="152">インターネット</text>
+
+  <g transform="translate(0 144)">
+  <!-- ALB を通す -->
+  <rect class="panel" x="16" y="52" width="968" height="330" rx="8"/>
+  <text class="group" x="30" y="78">ALB を通す</text>
+
+  <!-- 構成 1 -->
+  <text class="row" x="30" y="102">CloudFront → ALB → EC2</text>
+  <rect class="node" x="30" y="112" width="160" height="80" rx="6"/>
+  <text class="name" x="110" y="158">Client</text>
+  <rect class="term" x="290" y="112" width="160" height="80" rx="6"/>
+  <text class="name" x="370" y="140">CloudFront</text>
+  <text class="sub" x="370" y="160">SSL/TLS を終端</text>
+  <text class="sub" x="370" y="178">ACM（us-east-1）</text>
+  <rect class="term" x="550" y="112" width="160" height="80" rx="6"/>
+  <text class="name" x="630" y="140">ALB</text>
+  <text class="sub" x="630" y="160">SSL/TLS を終端</text>
+  <text class="sub" x="630" y="178">ACM（ALB のリージョン）</text>
+  <rect class="node" x="810" y="112" width="160" height="80" rx="6"/>
+  <text class="name" x="890" y="140">EC2（httpd）</text>
+  <text class="sub" x="890" y="160">HTTP で受ける</text>
+  <text class="sub" x="890" y="178">証明書は不要</text>
+  <line class="line-https" x1="190" y1="152" x2="288" y2="152"/>
+  <text class="label https" x="240" y="144">HTTPS</text>
+  <text class="label" x="240" y="172">インターネット</text>
+  <line class="line-https" x1="450" y1="152" x2="548" y2="152"/>
+  <text class="label https" x="500" y="144">HTTPS</text>
+  <text class="label" x="500" y="172">インターネット</text>
+  <line class="line-http" x1="710" y1="152" x2="808" y2="152"/>
+  <text class="label http" x="760" y="144">HTTP</text>
+  <text class="label" x="760" y="172">VPC の中</text>
+
+  <!-- 構成 2 -->
+  <text class="row" x="30" y="238">ALB → EC2</text>
+  <rect class="node" x="30" y="248" width="160" height="80" rx="6"/>
+  <text class="name" x="110" y="294">Client</text>
+  <rect class="term" x="550" y="248" width="160" height="80" rx="6"/>
+  <text class="name" x="630" y="276">ALB</text>
+  <text class="sub" x="630" y="296">SSL/TLS を終端</text>
+  <text class="sub" x="630" y="314">ACM（ALB のリージョン）</text>
+  <rect class="node" x="810" y="248" width="160" height="80" rx="6"/>
+  <text class="name" x="890" y="276">EC2（httpd）</text>
+  <text class="sub" x="890" y="296">HTTP で受ける</text>
+  <text class="sub" x="890" y="314">証明書は不要</text>
+  <line class="line-https" x1="190" y1="288" x2="548" y2="288"/>
+  <text class="label https" x="370" y="280">HTTPS</text>
+  <text class="label" x="370" y="308">インターネット</text>
+  <line class="line-http" x1="710" y1="288" x2="808" y2="288"/>
+  <text class="label http" x="760" y="280">HTTP</text>
+  <text class="label" x="760" y="308">VPC の中</text>
+
+  <text class="legend" x="30" y="362">どちらも EC2 の証明書をなくせる。ALB で負荷分散とヘルスチェックができる。</text>
+
+  <!-- CloudFront から直 -->
+  <rect class="panel" x="16" y="396" width="968" height="194" rx="8"/>
+  <text class="group" x="30" y="422">CloudFront から直</text>
+
+  <!-- 構成 3 -->
+  <text class="row" x="30" y="446">CloudFront → EC2</text>
+  <rect class="node" x="30" y="456" width="160" height="80" rx="6"/>
+  <text class="name" x="110" y="502">Client</text>
+  <rect class="term" x="290" y="456" width="160" height="80" rx="6"/>
+  <text class="name" x="370" y="484">CloudFront</text>
+  <text class="sub" x="370" y="504">SSL/TLS を終端</text>
+  <text class="sub" x="370" y="522">ACM（us-east-1）</text>
+  <rect class="term" x="810" y="456" width="160" height="80" rx="6"/>
+  <text class="name" x="890" y="484">EC2（httpd）</text>
+  <text class="sub" x="890" y="504">SSL/TLS を終端</text>
+  <text class="sub" x="890" y="522">Let's Encrypt などが必要</text>
+  <line class="line-https" x1="190" y1="496" x2="288" y2="496"/>
+  <text class="label https" x="240" y="488">HTTPS</text>
+  <text class="label" x="240" y="516">インターネット</text>
+  <line class="line-https" x1="450" y1="496" x2="808" y2="496"/>
+  <text class="label https" x="630" y="488">HTTPS</text>
+  <text class="label" x="630" y="516">インターネット</text>
+
+  <text class="legend" x="30" y="568">EC2 の証明書が残る。CloudFront からの接続先になるので、EC2 は公開の DNS 名を持つ。</text>
+
+  <!-- 凡例 -->
+  <line class="line-https" x1="30" y1="622" x2="84" y2="622"/>
+  <text class="legend" x="92" y="626">HTTPS</text>
+  <line class="line-http" x1="160" y1="622" x2="214" y2="622"/>
+  <text class="legend" x="222" y="626">HTTP</text>
+  <rect class="term" x="286" y="612" width="22" height="20" rx="3"/>
+  <text class="legend" x="316" y="626">SSL/TLS を終端する場所</text>
+  </g>
+</svg>

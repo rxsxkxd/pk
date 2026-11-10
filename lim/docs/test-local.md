@@ -6,7 +6,7 @@ AWS も Docker も使わずに、**画像処理そのもの**を確認する手�
 |---|---|
 | **確認できないこと** | S3 との連携、IAM、イベントの配線（→ [test-sam-local.md](test-sam-local.md) / [deploy.md](deploy.md)） |
 
-必要なのは **Go 1.24 以降だけ**。
+必要なのは **Go 1.26 以降だけ**。
 
 ---
 

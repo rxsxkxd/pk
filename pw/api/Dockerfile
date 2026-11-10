@@ -1,5 +1,5 @@
-# Go 1.24 を使って API バイナリをビルドするステージ。
-FROM golang:1.24-alpine AS build
+# Go 1.26 を使って API バイナリをビルドするステージ。
+FROM golang:1.26-alpine AS build
 
 # ソースコードを扱うコンテナ内の作業ディレクトリ。
 WORKDIR /src

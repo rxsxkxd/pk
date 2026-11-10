@@ -25,7 +25,7 @@ make test → make validate → make deploy → 確認メールのリンクを�
 |---|---|
 | AWS CLI（認証情報の設定済み） | `aws sts get-caller-identity` |
 | AWS SAM CLI | `sam --version` |
-| Go 1.24 以降 | `go version` |
+| Go 1.26 以降 | `go version` |
 
 デプロイする IAM 主体には、Lambda / API Gateway / SNS / CloudWatch / IAM ロール作成の権限が要る。
 

@@ -211,7 +211,7 @@ curl -fsS -m 5 -H "X-aws-ec2-metadata-token: $TOKEN" "$IMDS/latest/meta-data/net
 
 | 行 | 意味 |
 |---|---|
-| `IMDS=http://169.254.169.254` | インスタンスメタデータサービスの入り口を、名前（`IMDS`）を付けた変数にしておく。以降の問い合わせは `$IMDS/...` と書く。AWS はこの仕組みに DNS の名前を用意しておらず、AWS のドキュメントもアドレスで案内している（下の「なぜ…から調べるか」） |
+| `IMDS=http://169.254.169.254` | インスタンスメタデータサービスの入り口を、名前（`IMDS`）を付けた変数にしておく。以降の問い合わせは `$IMDS/...` と書く。AWS はこの仕組みに DNS の名前を用意しておらず、AWS のドキュメントもアドレスで案内している（[補足](./bastion-install-supplement.md) の「ステップ 0-2」） |
 | `TOKEN=$(curl ... -X PUT ... /latest/api/token)` | インスタンスメタデータに問い合わせるための、60 秒だけ使える合言葉（トークン）をもらう（インスタンスメタデータの新しい形（IMDSv2）の決まり。古い形しか許していない台でも、この形で問い合わせられる） |
 | `MAC=$(curl ... /meta-data/mac)` | このサーバーのネットワークの口の識別子（MAC アドレス）を聞く。VPC の情報は、口ごとに聞く形になっているため |
 | `curl ... /vpc-ipv4-cidr-blocks` | その口が入っている VPC の IPv4 の範囲を聞く。VPC に範囲を足してある場合は、複数行で出る。`; echo` は、結果の末尾に改行がないので足すだけ |
@@ -229,42 +229,7 @@ IPv6 の VPC の範囲:
 
 出た IPv4 の範囲を `port_guard_whitelists/allow-ipv4.txt` に、IPv6 の範囲が出たら（IPv6 も絞る台では）`port_guard_whitelists/allow-ipv6.txt` に書く。AWS CLI が使える場所からなら、`aws ec2 describe-vpcs --query 'Vpcs[].[VpcId,CidrBlock]' --output text` でも分かる。
 
-**なぜインスタンスメタデータ（`169.254.169.254`）から調べるか（経緯）**
-
-2026-11-04 に、「VPC の中から来る通信の送り元はプライベートのアドレスで、日本の範囲の一覧に入らないので、VPC の範囲を許可の一覧に入れる必要がある」と分かった。そのとき、VPC の範囲をどこから調べるかを、次の 2 つから選んだ。
-
-| 調べ方 | 要るもの | 選んだか |
-|---|---|---|
-| 対象のサーバーの中から、インスタンスメタデータ（`169.254.169.254`）に問い合わせる | `curl`（Amazon Linux 2 に最初から入っている）だけ。AWS の操作の権限も、AWS CLI も要らない | **選んだ** |
-| AWS CLI で `aws ec2 describe-vpcs` を呼ぶ | AWS CLI と、EC2 の情報を読む権限（`ec2:DescribeVpcs`）。踏み台サーバーにあるとは限らない | 予備（AWS CLI が使える場所なら、これでもよい） |
-
-選んだ理由:
-
-- **ほかのステップと同じ形で流せる**。踏み台サーバーから SSH で `bash` に流すだけで、踏み台サーバーに AWS の権限を持たせなくてよい
-- **取り違えない**。インスタンスメタデータは「問い合わせてきたインスタンス自身の情報」を返すので、その台が実際に入っている VPC の範囲が出る（VPC が複数あっても、どれがその台の VPC かを人が見分けなくてよい）
-- **読み取りだけ**。何も変えない。問い合わせは料金もかからない
-
-`169.254.169.254` は、AWS が EC2 のインスタンスに用意している決まったアドレス（インスタンスメタデータサービス、IMDS）。リンクローカル（そのインスタンスの中からだけ届くアドレス）で、インターネットや VPC のどこかにあるサーバーではない。インスタンスが載っている AWS の基盤が、そのインスタンスからの問い合わせにだけ答える。外（踏み台サーバーなど）から、別のインスタンスの情報を聞くことはできない。
-
-**名前（DNS 名）ではなくアドレスで書く理由**: AWS のドキュメントは、インスタンスメタデータサービスをアドレス（IPv4 は `169.254.169.254`、IPv6 は `fd00:ec2::254`）でだけ案内していて、公式の名前はない（2026-11-04 に確かめた）。名前を使う形は DNS の設定に左右されるので使わない。その代わり、スクリプトの中では `IMDS` という名前の変数に入れて、何のアドレスかが分かるようにしている。
-
-このやり方は、AWS が公開している仕組みに沿っている（2026-11-04 に、下の AWS のドキュメントと照らし合わせた）。
-
-| 使っているもの | AWS のドキュメントでの説明 |
-|---|---|
-| `http://169.254.169.254/latest/meta-data/` | インスタンスメタデータの入り口。リンクローカルのアドレスで、インスタンスの中からだけ有効 |
-| `PUT /latest/api/token`（`X-aws-ec2-metadata-token-ttl-seconds`）でトークンを取り、`X-aws-ec2-metadata-token` に付けて問い合わせる | IMDSv2（新しい形）の問い合わせ方。古い形（IMDSv1）しか許していない台でも、この形は使える。IMDSv2 が必須の台では、古い形は使えない |
-| `meta-data/mac` | インスタンスの MAC アドレス（ネットワークの口が複数あるときは、最初の口 `eth0`） |
-| `meta-data/network/interfaces/macs/<MAC>/vpc-ipv4-cidr-blocks` | その口が入っている VPC の IPv4 の範囲（複数あれば複数行） |
-| `meta-data/network/interfaces/macs/<MAC>/vpc-ipv6-cidr-blocks` | その VPC の IPv6 の範囲（ない場合は `404 - Not Found` になるので、`curl -f` が失敗を返す） |
-| `curl -f` | AWS のドキュメントにも、`-f` を付けると HTTP のエラーのときに失敗を返し、スクリプトで止められると書かれている |
-
-AWS のドキュメント:
-
-- [Use instance metadata to manage your EC2 instance（インスタンスメタデータとは。項目の一覧（Instance metadata categories）に `mac`・`vpc-ipv4-cidr-blocks`・`vpc-ipv6-cidr-blocks` がある）](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-metadata.html)
-- [Access instance metadata for an EC2 instance（`169.254.169.254` への問い合わせ方、IMDSv2 のトークン、エラーのときの応答）](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html)
-- [Use the Instance Metadata Service to access instance metadata（IMDSv1 と IMDSv2 の違い）](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html)
-- [Link-local addresses（リンクローカルのアドレス）](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-instance-addressing.html#link-local-addresses)
+インスタンスメタデータから調べる理由と、AWS のドキュメントとの照らし合わせは [補足](./bastion-install-supplement.md) の「ステップ 0-2」。
 
 **VPC の範囲を丸ごと許可するのは、VPC の中を信頼する前提**。VPC の中の特定のサーバーからだけ受けたいなら、VPC の範囲の代わりに、そのサーバーのプライベートのアドレスを 1 件ずつ書く（ただし、踏み台サーバーからの確認もそのアドレスを書かないと止まる）。
 
@@ -272,11 +237,7 @@ AWS のドキュメント:
 
 AWS が公開している IP アドレスの範囲の一覧（`ip-ranges.json`。約 2.7 MB）を取り、**東京（`ap-northeast-1`）と大阪（`ap-northeast-3`）のリージョン**の範囲だけを取り出して、一覧（TSV）にする。この一覧は、ipset の別の集合（`port_guard_aws`・`port_guard_aws6`）に入れ、`PORT_GUARD` チェーンの別のルールで通す（日本の範囲や、手で書く許可の一覧とは分けて管理する）。
 
-| 分けて管理する理由 | 内容 |
-|---|---|
-| 作り方と更新の頻度が違う | 許可の一覧（0-2）は人が書き、この一覧は AWS の公開の一覧から機械的に作る。混ぜると、作り直すたびに手で書いた行が消える |
-| 単独で外せる | AWS の許可をやめるときは、この集合とルールだけを外せばよい（VPC の範囲などの許可に影響しない） |
-| 何で通ったかが分かる | ルールが別なので、どの理由で許可したかを追える |
+分けて管理する理由は [補足](./bastion-install-supplement.md) の「ステップ 0-3」。
 
 **注意: リージョンを丸ごと許可する**。この範囲には、AWS の東京・大阪を使う**すべての利用者**（他社の EC2・Lambda・NAT ゲートウェイなど）が入る。東京か大阪に EC2 を借りれば、誰でも通れる。実際に呼んでくる相手が分かったら（[API のアクセス元の洗い出し](../api-access-sources/design.md)）、その相手だけを許可の一覧（0-2）に書く形に狭めることを考える。
 
@@ -687,11 +648,7 @@ IPv4 の分と IPv6 の分は、**別々の追加の設定のファイル**に�
 | `/etc/systemd/system/port-guard.service.d/20-ipv6.conf` | 5（IPv6） | IPv6 の分の `ExecStart=` の並び |
 | `/etc/systemd/system/port-guard.service` | 6 | サービスの本体。`ExecStart=` は書かない（上の 2 つから集まる） |
 
-systemd は、`port-guard.service` を読むときに、`port-guard.service.d/` の中の `*.conf` を**ファイルの名前の順に**読み、`ExecStart=` を本体に足していく。この仕組みで、次のようになる。
-
-- **IPv4・IPv6 のどちらも、入れるかどうかを選べる**: 置いたファイルの分だけが動く。IPv6 を絞らない台では `05-persist-ipv6.sh` を流さない。後から外すときは、そのファイルを消して `systemctl daemon-reload` するだけ（後の「IPv4・IPv6 を後から外す・足す」）
-- **IPv4 → IPv6 の順に、1 つずつ動く**: `10-` が `20-` より先に読まれ、1 つのサービスの `ExecStart=` は上から順に 1 つずつ動く。IPv4 と IPv6 が同じ時刻に iptables を操作することがないので、ロックの取り合いが起きない（IPv4 と IPv6 で 2 つのサービスに分けると、systemd が 2 つを同時に起動して、ロックを取り合い、片方が `Another app is currently holding the xtables lock` で失敗する。前の版の手順では 2 つに分けていて、Amazon Linux 2 の上で実際に起きたので、1 つにまとめた）
-- ステップ 1〜5 は、IPv4・IPv6 で別のファイルのまま。1 つにまとまるのは、サービスだけ
+サービスは IPv4・IPv6 で 1 つで、`port-guard.service.d/` の中の `*.conf` を名前の順に読む（置いた分だけ動く）。仕組みと、1 つにまとめた理由は [補足](./bastion-install-supplement.md) の「ステップ 5」。
 
 ステップ 4 の結果を確かめてから流す。
 
@@ -852,14 +809,12 @@ systemctl is-enabled port-guard                      # enabled
 | なぜ要るか | Let's Encrypt は、証明書を更新するときに、**海外を含む複数の場所から** 80 番に確認の接続をしてくる（HTTP-01 の確認）。その送り元は公開されていないので、許可の一覧にも書けない。絞り込みを入れたままだと確認が捨てられ、更新が失敗し、やがて証明書が切れる |
 | すること | certbot の「更新の前と後に、決めたスクリプトを動かす仕組み」（hook）に、2 つのスクリプトを置く。更新の前に、iptables のコマンドで、カーネルの `INPUT` チェーンの一番上に「TCP の 80 番は、どこからでも通す」ルールを 1 つ差し込み、更新の後に削除する |
 | 開く時間・範囲 | certbot が実際に更新を試みる間（数秒〜数分）だけ。**80 番だけ**で、443 番は絞ったまま（そのため、確認のパスが HTTPS へ転送されていないことが前提。7-1 で確かめる）。更新が要る証明書がない回（期限の 30 日前より前）は、hook は動かず、何も開かない |
-| ファイルの編集はしない | hook が操作するのは、カーネルのメモリーの中の iptables のルールの表だけ。ipset の集合、ステップ 5 の保存のファイル、サービスには触らない。差し込んだルールは保存しないので、再起動すると消える |
-| 開きっぱなしを防ぐ | 更新の前の hook で、systemd の一時の予約（`systemd-run --on-active=30min`。30 分後に 1 回だけコマンドを動かす）も入れる。certbot が途中で落ちて、更新の後の hook が動かなくても、30 分で削除される |
 | 開いている間の影響 | 80 番は世界中から受け付ける。80 番でアプリを出している台（`old_app_a` など）は、その間（最大 30 分）アプリの国の絞り込みが外れる。許容するかは [確認すること](./confirmation-items.md) の L14 |
 | セキュリティグループ | hook が開けるのは iptables だけ。セキュリティグループで 80 番が全世界に開いていることが前提（[確認すること](./confirmation-items.md) の L8） |
 | 前提 | 証明書の更新を、cron などから **`certbot renew`** で行っていること（hook の置き場所 `/etc/letsencrypt/renewal-hooks/` が効くのは `renew` のときだけ）。7-1 で確かめる |
 | 要らない台 | Let's Encrypt の証明書を certbot で更新していない台 |
 
-設計の理由（cron の時刻で外す案を採らなかった理由など）は、[補足](./bastion-install-supplement.md) の「A. Let's Encrypt の更新の間だけ 80 番を開ける」。
+開きっぱなしを防ぐ仕組み、ファイルを編集しないこと、設計の理由（cron の時刻で外す案を採らなかった理由など）、今の仕様での期限切れのリスクは、[補足](./bastion-install-supplement.md) の「A. Let's Encrypt の更新の間だけ 80 番を開ける」。
 
 置くファイル（対象のサーバー）:
 
@@ -868,29 +823,6 @@ systemctl is-enabled port-guard                      # enabled
 | `/etc/letsencrypt/renewal-hooks/pre/port-guard-open-80.sh` | 80 番を通すルールを差し込み、30 分後に削除する予約を入れる | `certbot renew` が、更新が要る証明書を見つけて、更新を始める前（1 回の実行で 1 回） |
 | `/etc/letsencrypt/renewal-hooks/post/port-guard-close-80.sh` | 80 番を通すルールを削除し、30 分後の予約を取り消す | 更新を試みた後（更新が失敗した場合に動くかは certbot の説明に明記がない。動かなくても、30 分後の予約で削除される） |
 | `/usr/local/sbin/port-guard-acme-close` | 80 番を通すルールを削除する（上の 2 つと、30 分後の予約から呼ばれる） | 更新の後の hook と、30 分後の予約から |
-
-### 今の仕様での、証明書の期限切れのリスク
-
-90 日の証明書を、毎月 1 日と 16 日の cron の `certbot renew` で更新している場合の整理である（cron の時刻と `certbot renew` の使用は見込みで、実環境では未確認。7-1 で確かめる）。**この仕様だけなら、重大な問題が起きる可能性は低い**。
-
-90 日の証明書は残り 30 日から更新の対象になるので、更新は次のように進む。
-
-- 1 回目の試行は、たいてい残り約 29 日のとき
-- 失敗しても、2 回目が残り約 14 日のときにある（日付の並びによっては、1 回目が残り約 16 日で、2 回目が期限の当日ごろになることがある）
-- 2 回とも失敗して初めて期限切れになる
-
-一時的な障害で 1 回失敗する程度なら問題にならない。問題になるのは、**失敗し続ける原因があり、それに誰も気づかない場合**だけである。
-
-| 発生する問題 | 原因 |
-|---|---|
-| 更新が毎回失敗する | 80 番の絞り込みで確認の接続が止まる（port-guard を入れて、この hook が効かない場合） |
-| 更新が毎回失敗する | セキュリティグループ、80 番の HTTPS への転送、DNS の向き先の誤り |
-| 失敗に気づかない | Let's Encrypt の通知メールは 2025-06-04 に終了している。cron の失敗にも通知がない |
-| 更新はできたのに古い証明書のまま | 更新の後に httpd を読み直していない |
-
-期限切れの原因になりそうなのは、実質的に port-guard の導入で 80 番を絞ることである。今の運用で更新が通っているなら、その状態自体に危険はない。絞り込みを入れた後も、この hook が効いていることを 1 度確かめれば、cron の頻度を今すぐ変える必要はない。
-
-Let's Encrypt の有効期間は短くなる予定なので（[有効期間の短縮の予定](../notes/instance-provisioning/letsencrypt-certificate-timing.md#有効期間の短縮の予定)）、そのときに cron の頻度を見直す。残り日数の確かめ方は [証明書の期限の確認](./certificate-expiry-check.md)。
 
 ### 7-1. 前提を確かめる（`command/port_guard/07-letsencrypt-check.sh`。読み取りだけ）
 
@@ -1514,4 +1446,4 @@ sudo -n ipset list -n | grep -c port_guard || true        # 0
 
 ## 補足
 
-長い前置き（仕組みの説明）、運用の仕組みの設計、手元で確かめたこと、自動化の道具との違いは [補足](./bastion-install-supplement.md)。
+長い前置き（仕組みの説明）、運用の仕組みの設計、ステップごとの経緯や理由、手元で確かめたこと、自動化の道具との違いは [補足](./bastion-install-supplement.md)。

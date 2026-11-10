@@ -2,7 +2,7 @@
 
 > 位置付け: CloudFront と ALB の両方を前に置く手順の下書き。比較は [README](./README.md)。ALB から EC2 までの部分は [alb-to-ec2.md](./alb-to-ec2.md) と同じ。
 >
-> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。**コマンドと設定は実機で流していない**。`<...>` は環境に合わせて置き換える。
+> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。httpd の設定は、今の構成に近いコンテナで確かめた（2026-11-10）。**実際の CloudFront・ALB では試していない**。`<...>` は環境に合わせて置き換える。
 >
 > 作成日: 2026-11-09
 
@@ -80,12 +80,12 @@ CloudFront の後ろに ALB を置くと、`X-Forwarded-For` は `利用者, Clo
 ```apache
 RemoteIPHeader X-Forwarded-For
 RemoteIPInternalProxy <VPC の CIDR>
-RemoteIPTrustedProxyList /etc/httpd/cloudfront-origin-facing.list
+Include /etc/httpd/cloudfront-origin-facing.conf
 RequestHeader unset X-Forwarded-For
 RequestHeader unset Client-IP
 ```
 
-一覧のファイルの作り方は [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md#4-利用者の-ip-を復元する)。
+読み込むファイルの作り方は [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md#4-利用者の-ip-を復元する)。`RemoteIPInternalProxy` と `RemoteIPTrustedProxyList` を同じ VirtualHost で使う形は、コンテナで確かめたときに CloudFront のアドレスが信頼されず、利用者の IP を取れなかったので使わない。
 
 Rails には、ALB が CloudFront との接続に基づいて付ける `X-Forwarded-Proto: https` が届く。
 
@@ -122,13 +122,23 @@ Rails には、ALB が CloudFront との接続に基づいて付ける `X-Forwar
 
 今のインスタンスの配置を変える話になるので、手順には含めていない。
 
+## 検証の結果
+
+今の構成に近いコンテナで、ALB を模したコンテナから `X-Forwarded-For: 利用者, CloudFront のアドレス` と `X-Forwarded-Proto: https` を送って確かめた（2026-11-10）。
+
+| 項目 | 結果 |
+|---|---|
+| 利用者の IP の復元 | `request.remote_ip` が利用者の IP になる |
+| 残りの `X-Forwarded-For` | Rails に渡らない |
+| HTTPS の認識 | `request.ssl?` が true になる |
+
 ## 確かめること（動かしていない点）
 
 | 項目 | 内容 |
 |---|---|
-| `X-Forwarded-For` の順序 | 実際の見出しで、`利用者, CloudFront` の順になっていること |
+| `X-Forwarded-For` の順序 | 実際の見出しで、`利用者, CloudFront` の順になっていること（AWS のドキュメントの記述をもとにした） |
 | 応答のタイムアウト | CloudFront と ALB の両方の値の組み合わせで、長い処理が通ること |
-| HTTPS の認識 | ALB が付ける `X-Forwarded-Proto` が `https` であること |
+| `X-Forwarded-Proto` の値 | 実際の ALB が `https` を付けること |
 
 ## 参考
 

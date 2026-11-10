@@ -2,7 +2,7 @@
 
 > 位置付け: 検討と手順の下書き。採用済みの設計ではない。今 httpd（Apache）が SSL/TLS を終端している Web サービスについて、終端を前段へ移す 3 つの構成を比べ、それぞれの移行の手順をまとめる。
 >
-> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。**手順のコマンドと Apache の設定は実機で流していない**。動かして確かめていない点は、各ドキュメントの「確かめること」に書いた。
+> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。Apache の設定は、今の構成に近いコンテナで確かめた（2026-11-10）。**AWS のコマンドは実行しておらず、実際の ALB・CloudFront では試していない**。結果と、確かめていない点は、各ドキュメントの「検証の結果」と「確かめること」に書いた。
 >
 > 関連: [前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)、[前段の構成と料金の考え方](../notes/instance-provisioning/cloudfront-alb-front-options.md)、[Let's Encrypt の扱い](../notes/instance-provisioning/letsencrypt-certificate-timing.md)
 >

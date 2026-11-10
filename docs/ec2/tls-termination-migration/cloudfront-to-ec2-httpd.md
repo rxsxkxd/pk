@@ -4,7 +4,7 @@
 >
 > 前提: CloudFront の Origin protocol は **HTTPS only**、オリジンリクエストポリシーは **`AllViewer`**（利用者の Host をそのまま渡す）。
 >
-> 確かめた範囲: AWS の仕様は AWS のドキュメント、`mod_remoteip` は Apache のドキュメントと照らし合わせた（2026-11-09）。**設定は実機で流していない**。
+> 確かめた範囲: AWS の仕様は AWS のドキュメント、`mod_remoteip` は Apache のドキュメントと照らし合わせた（2026-11-09）。httpd の設定は、今の構成に近いコンテナで確かめた（2026-11-10。下の「検証の結果」）。**実際の CloudFront では試していない**。
 >
 > 作成日: 2026-11-09
 
@@ -45,7 +45,7 @@
 
    # 4. 利用者の IP の復元
    RemoteIPHeader X-Forwarded-For
-   RemoteIPTrustedProxyList /etc/httpd/cloudfront-origin-facing.list
+   Include /etc/httpd/cloudfront-origin-facing.conf
    RequestHeader unset X-Forwarded-For
    RequestHeader unset Client-IP
 
@@ -96,19 +96,21 @@ CloudFront の Add custom header に設定した値を、httpd で確認する�
 
 CloudFront は `X-Forwarded-For` の**末尾**に利用者の IP を足す。`mod_remoteip` は右から順に処理して、信頼できないアドレスで止まるので、直前の中継（CloudFront の接続元）を信頼すれば、利用者の IP が残る。
 
-信頼する範囲のファイルを作る。
+信頼する範囲のファイルを作る。`conf.d` の外に置いて、VirtualHost の中から `Include` で読み込む。
 
 ```bash
 curl -s https://ip-ranges.amazonaws.com/ip-ranges.json \
-  | jq -r '.prefixes[] | select(.service=="CLOUDFRONT_ORIGIN_FACING") | .ip_prefix' \
-  | sudo tee /etc/httpd/cloudfront-origin-facing.list
+  | jq -r '.prefixes[] | select(.service=="CLOUDFRONT_ORIGIN_FACING") | "RemoteIPTrustedProxy " + .ip_prefix' \
+  | sudo tee /etc/httpd/cloudfront-origin-facing.conf
 ```
+
+`RemoteIPTrustedProxyList` でファイルを読む形にしないのは、`RemoteIPInternalProxy` と同じ VirtualHost で使うと、ヘッダーの中の CloudFront のアドレスが信頼されなかったためである（Apache 2.4.56 のコンテナで確かめた。CloudFront → ALB → EC2 で問題になる）。原因は確かめていない。CloudFront → EC2 だけなら `RemoteIPTrustedProxyList` でも動いたが、書き方をそろえるために `RemoteIPTrustedProxy` の行にしている。
 
 | 注意 | 内容 |
 |---|---|
 | 範囲の更新 | 範囲は変わる。定期的に更新して `apachectl graceful` する。更新が遅れた場合、新しいアドレスからの要求はログの送り元が CloudFront のままになる |
 | `RequestHeader unset` | 利用者が偽って付けた `X-Forwarded-For` の残りが Rails に渡ると、Rails 4.2 の `request.remote_ip` がそちらを選ぶことがある。`Client-IP` も同じ |
-| ログ | `%a` を使う形式にする（[alb-to-ec2.md](./alb-to-ec2.md#3-httpd-に-http-の-virtualhost-を足す) の `combined_client_ip`） |
+| ログ | `%a` を使う形式（[alb-to-ec2.md](./alb-to-ec2.md#3-httpd-に-http-の-virtualhost-を足す) の `combined_client_ip`）で利用者の IP が出る。Apache 2.4.56 のコンテナでは、`combined`（`%h`）でも利用者の IP が出た |
 | アプリ側で行う場合 | [`trusted_proxies` の案](../notes/ec2-operations/access-restriction-alb-cloudfront.md#そのほかに変わること)もある。httpd で復元する方が、ログとアプリの両方に効く |
 
 ## 5. `KeepAliveTimeout`
@@ -164,15 +166,28 @@ Alias /.well-known/acme-challenge /var/www/html/.well-known/acme-challenge
 
 **Origin protocol を HTTP only にする場合**（勧めない）は、CloudFront が `X-Forwarded-Proto` を取り除くので、Rails が HTTP と誤認する。`force_ssl` が有効なら無限にリダイレクトする。`RequestHeader set X-Forwarded-Proto "https"` が要る。
 
+## 検証の結果
+
+今の構成に近いコンテナ（Amazon Linux 2、Apache 2.4.56、Passenger 6.0.18、Rails 4.2、rack 1.6.13）に上の設定を入れ、別のコンテナから CloudFront を模した要求を送って確かめた（2026-11-10）。コンテナの証明書は自己署名で、接続時に検証していない。
+
+| 項目 | 結果 |
+|---|---|
+| 秘密のヘッダーの確認 | ヘッダーなし・値の違いは 403、一致すれば 200。`<Location "/">` の `Require expr` が `<Directory>` の `Require all granted` を上書きする |
+| `RequestHeader unset` の時点 | 秘密のヘッダーの確認の後で効き、Rails には渡らない |
+| 利用者の IP の復元 | CloudFront の実際の範囲のアドレス（`130.176.88.20`）から接続して、`REMOTE_ADDR` と `request.remote_ip` が利用者の IP になる |
+| 偽の `X-Forwarded-For`・`Client-IP` | 効かない。`RequestHeader unset` を外すと、Rails 4.2 の `remote_ip` は偽の値を選ぶ |
+| Rails の HTTPS の認識 | `X-Forwarded-Proto` なしで HTTPS と扱われる |
+| `PassengerEnabled off` | `/.well-known/acme-challenge` のファイルが Rails を通らずに返る |
+| `old_app_a` | `Alias` と `<Location>` の形で動き、URL に `/old_app_a` が付く |
+| TLS の接続名（SNI）と Host が違う場合 | SNI が別の名前でも、SNI がなくても 200 |
+| `KeepAliveTimeout 10` | 無通信で 10 秒後に閉じる |
+
 ## 確かめること（動かしていない点）
 
 | 項目 | 内容 |
 |---|---|
-| 認可の上書き | `<Location "/">` の `Require expr` が、`<Directory>` の `Require all granted` を上書きすること |
-| `RequestHeader unset` の時点 | 認可と `mod_remoteip` の後で、Passenger が見る前に効くこと |
-| `Require expr` の書き方 | `apachectl configtest` と、ヘッダーあり・なしの応答で確かめる |
-| `PassengerEnabled off` | `Alias` の先の `<Directory>` で、Rails に渡らないこと |
-| `old_app_a` | `Alias` と `<Location>` の形で動くこと。今の配置（`/var/www/html` の下のシンボリックリンクなど）に合わせる |
+| 実際の CloudFront | Host の受け渡しと証明書の確認が、ドキュメントどおりに動くこと |
+| `old_app_a` の配置 | 本物の配置（`/var/www/html` の下のシンボリックリンクなど）に合わせること |
 | Let's Encrypt | 今の `AL2` の certbot の設定（webroot のパス）で `--dry-run` が通ること |
 
 ## 参考

@@ -2,7 +2,7 @@
 
 > 位置付け: 利用者から見た SSL/TLS の終端を CloudFront へ移す手順の下書き。比較は [README](./README.md)、httpd の設定は [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md)。
 >
-> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。**コマンドと設定は実機で流していない**。`<...>` は環境に合わせて置き換える。
+> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。httpd の設定は、今の構成に近いコンテナで確かめた（2026-11-10。[結果](./cloudfront-to-ec2-httpd.md#検証の結果)）。**AWS のコマンドは実行していない。実際の CloudFront でも試していない**。`<...>` は環境に合わせて置き換える。
 >
 > 作成日: 2026-11-09
 
@@ -127,7 +127,7 @@ DNS を CloudFront へ向ける。Route 53 ならエイリアスレコードに�
 
 | 項目 | 内容 |
 |---|---|
-| オリジンへの SNI | `AllViewer` で Host を渡すときに、CloudFront が送る SNI が利用者の Host になるか（AWS のドキュメントでは確かめられなかった）。httpd が別の VirtualHost の証明書を返さないことを確かめる |
+| オリジンへの SNI | `AllViewer` で Host を渡すときに、CloudFront が送る SNI が利用者の Host になるか（AWS のドキュメントでは確かめられなかった）。コンテナの httpd は、SNI が別の名前でも、SNI がなくても 200 を返した。実際の環境で、httpd が別の VirtualHost の証明書を返さないことを確かめる |
 | `CachingDisabled` と `AllViewer` の組み合わせ | Cookie と `Set-Cookie`、`Authorization` が期待どおり通ること |
 | ファイルのアップロード | 応答タイムアウトに収まること |
 

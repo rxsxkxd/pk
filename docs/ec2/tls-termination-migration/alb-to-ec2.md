@@ -2,7 +2,7 @@
 
 > 位置付け: 今 httpd が終端している SSL/TLS を ALB へ移す手順の下書き。比較は [README](./README.md)。
 >
-> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。**コマンドと Apache の設定は実機で流していない**。`<...>` は環境に合わせて置き換える。
+> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。Apache の設定は、今の構成に近いコンテナで確かめた（2026-11-10。下の「検証の結果」）。**AWS のコマンドは実行していない。実際の ALB でも試していない**。`<...>` は環境に合わせて置き換える。
 >
 > 作成日: 2026-11-09
 
@@ -197,15 +197,29 @@ DNS を ALB へ向ける。Route 53 なら ALB へのエイリアスレコード
 
 手順 9 の前なら、DNS を Elastic IP へ戻すだけでよい。手順 9 の後は、セキュリティグループと証明書を戻してから DNS を戻す。
 
+## 検証の結果
+
+今の構成に近いコンテナ（Amazon Linux 2、Apache 2.4.56、MPM は prefork、Passenger 6.0.18、Rails 4.2、rack 1.6.13）に上の設定を入れ、別のコンテナから ALB を模した要求を送って確かめた（2026-11-10）。
+
+| 項目 | 結果 |
+|---|---|
+| Rails の HTTPS の認識 | `X-Forwarded-Proto: https` で `request.ssl?` が true。`force_ssl` が通り、Secure の Cookie が付く。この見出しがないと `force_ssl` は 301 を返す |
+| リダイレクト先 | `https://<ドメイン>/...` になり、8080 番は出ない |
+| Passenger と利用者の IP | `mod_remoteip` の結果が `REMOTE_ADDR` として Rails に渡り、`request.remote_ip` も利用者の IP になる |
+| 偽の `X-Forwarded-For`・`Client-IP` | 効かない。`RequestHeader unset` を外すと、Rails 4.2 の `remote_ip` は偽の値を選ぶ |
+| 信頼しない送り元 | `X-Forwarded-For` は無視され、接続元の IP になる |
+| 静的なファイル | `alb-health.txt` は Rails を通らずに Apache から返る（8080 番、80 番とも） |
+| `/old_app_a` | 80 番の VirtualHost で動き、URL は `https://<ドメイン>/old_app_a/...` になる |
+| `KeepAliveTimeout 65` | 無通信で閉じるまで 65 秒（1 回目 65 秒、測り直しの 7 回はすべて 65.0〜65.1 秒、既定の 5 秒の対照は 5.0 秒）。途中の 1 回だけ 84 秒だったが、再現せず、原因は確かめていない |
+| ログの形式 | `%a` で利用者の IP が出る。`combined`（`%h`）でも利用者の IP が出た |
+
 ## 確かめること（動かしていない点）
 
 | 項目 | 内容 |
 |---|---|
-| Rails の HTTPS の認識 | `X-Forwarded-Proto` で HTTPS と扱われること（使っている `rack` のバージョンで確かめる） |
-| Passenger と利用者の IP | `mod_remoteip` の結果が `REMOTE_ADDR` として Rails に渡ること。`RequestHeader unset` が Passenger が見る前に効くこと |
-| 静的なファイル | `alb-health.txt` が、Rails を通らずに Apache から返ること |
-| `KeepAliveTimeout 65` | MPM が `prefork` だと、接続ごとにプロセスを占有する。`httpd -V` で MPM を確かめ、`MaxRequestWorkers` に余裕があるかを見る |
-| `/old_app_a` の HTTPS 化 | `old_app_a` が HTTPS で正しく動くこと |
+| 実際の ALB | ヘルスチェック、`X-Forwarded-*` の値、リダイレクト |
+| `KeepAliveTimeout 65` の負荷 | MPM が `prefork` だと、接続ごとにプロセスを占有する。本番で `httpd -V` と `MaxRequestWorkers` に余裕があるかを見る |
+| 本物のアプリ | `old_app_a`・`new_app_b` の Cookie、CSRF のトークン、ファイルのアップロード |
 
 ## 参考
 

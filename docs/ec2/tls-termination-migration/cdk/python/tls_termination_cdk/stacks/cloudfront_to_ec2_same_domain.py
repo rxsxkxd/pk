@@ -37,7 +37,9 @@ class CloudFrontToEc2SameDomainStack(TerminationStack):
             )
 
         origin_security_group = define_origin_security_group(self, configuration)
-        distribution = define_distribution(self, configuration, origin_verify_header_value(self))
+        distribution = define_distribution(
+            self, configuration, origin_verify_header_value(self), configuration.geo_restriction_countries
+        )
 
         self.output(
             "DistributionDomainName",

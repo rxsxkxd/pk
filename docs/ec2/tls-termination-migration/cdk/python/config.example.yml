@@ -32,6 +32,9 @@ cloudfront_certificate_arn: arn:aws:acm:us-east-1:111122223333:certificate/00000
 alb_web_acl_arn: ""
 cloudfront_web_acl_arn: ""
 
+# CloudFront -> EC2 の地理的制限で許可する国。空のリスト [] にすると制限しない
+geo_restriction_countries: [JP]
+
 # CloudFront -> ALB -> EC2 だけで使う。DNS を CloudFront へ向けた後に true にする
 restrict_to_cloudfront: false
 

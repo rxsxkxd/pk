@@ -17,6 +17,7 @@
 | [cloudfront-to-ec2.md](./cloudfront-to-ec2.md) | CloudFront → EC2 への移行の手順 |
 | [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md) | CloudFront → EC2 のときに httpd で行う設定 |
 | [cloudfront-to-ec2-same-domain.md](./cloudfront-to-ec2-same-domain.md) | CloudFront → EC2 で外部のドメイン名を変えない場合の、DNS・証明書・Host の対応 |
+| [cloudfront-to-ec2-domains-certificates.md](./cloudfront-to-ec2-domains-certificates.md) | CloudFront → EC2 のドメイン名・DNS のレコード・証明書の構成と、オリジンの証明書の更新の決めごと |
 | [cloudfront-alb-to-ec2.md](./cloudfront-alb-to-ec2.md) | CloudFront → ALB → EC2 への移行の手順 |
 | [definitions.md](./definitions.md) | 3 つの構成の ALB・CloudFront の定義（`cloudformation/` の YAML と `cdk/python/` の CDK）の説明と使い方 |
 

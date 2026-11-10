@@ -81,8 +81,15 @@ def define_distribution(
     scope: Construct,
     configuration: Configuration,
     origin_verify_value: str,
+    geo_restriction_countries: list[str] | None = None,
 ) -> cloudfront.Distribution:
-    """CloudFront のディストリビューション。キャッシュせず、利用者の Host などをすべてオリジンへ渡す。"""
+    """CloudFront のディストリビューション。キャッシュせず、利用者の Host などをすべてオリジンへ渡す。
+
+    geo_restriction_countries を渡すと、その国からの要求だけを受け付ける（地理的制限）。
+    """
+    geo_restriction = (
+        cloudfront.GeoRestriction.allowlist(*geo_restriction_countries) if geo_restriction_countries else None
+    )
     origin = origins.HttpOrigin(
         configuration.origin_domain_name,
         protocol_policy=cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
@@ -101,6 +108,7 @@ def define_distribution(
         minimum_protocol_version=cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021,
         http_version=cloudfront.HttpVersion.HTTP2,
         enable_ipv6=False,
+        geo_restriction=geo_restriction,
         web_acl_id=configuration.cloudfront_web_acl_arn or None,
         default_behavior=cloudfront.BehaviorOptions(
             origin=origin,

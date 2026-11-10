@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -50,6 +50,8 @@ class Configuration:
     certificate_hosted_zone_id: str = ""
     origin_hosted_zone_id: str = ""
     origin_elastic_ip: str = ""
+    # CloudFront -> EC2 の地理的制限で許可する国（ISO 3166-1 alpha-2）。空にすると制限しない
+    geo_restriction_countries: list[str] = field(default_factory=lambda: ["JP"])
     restrict_to_cloudfront: bool = False
     new_app_port: int = 8080
     old_app_port: int = 80

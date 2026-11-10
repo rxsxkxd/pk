@@ -37,12 +37,25 @@ Parameters:
     Default: 5
     MinValue: 1
     MaxValue: 300
+  GeoRestrictionType:
+    Type: String
+    Default: whitelist
+    AllowedValues: [whitelist, none]
+    Description: whitelist allows only the countries in GeoRestrictionCountries. none disables the restriction.
+  GeoRestrictionCountries:
+    Type: CommaDelimitedList
+    Default: JP
+    Description: ISO 3166-1 alpha-2 country codes allowed when GeoRestrictionType is whitelist.
   CloudFrontWebAclArn:
     Type: String
     Default: ""
     Description: Optional. AWS WAF web ACL created in us-east-1 (CLOUDFRONT scope).
 
 Conditions:
+  HasGeoRestriction:
+    Fn::Equals:
+      - Ref: GeoRestrictionType
+      - whitelist
   HasCloudFrontWebAcl:
     Fn::Not:
       - Fn::Equals:
@@ -70,6 +83,15 @@ Resources:
         Enabled: true
         HttpVersion: http2
         IPV6Enabled: false
+        Restrictions:
+          GeoRestriction:
+            RestrictionType:
+              Ref: GeoRestrictionType
+            Locations:
+              Fn::If:
+                - HasGeoRestriction
+                - Ref: GeoRestrictionCountries
+                - Ref: AWS::NoValue
         Aliases:
           - Ref: DomainName
         ViewerCertificate:

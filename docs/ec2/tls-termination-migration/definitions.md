@@ -39,7 +39,7 @@ CDK は L2 で書いているので、論理 ID は CloudFormation の YAML と�
 | 種類 | リソース |
 |---|---|
 | ALB | ロードバランサー、ターゲットグループ（`new_app_b`: 8080 番、`old_app_a`: 80 番）、HTTPS・HTTP のリスナー、パスとヘッダーのルール |
-| CloudFront | ディストリビューション（HTTPS only、`CachingDisabled`、`AllViewer`、秘密のヘッダー） |
+| CloudFront | ディストリビューション（HTTPS only、`CachingDisabled`、`AllViewer`、秘密のヘッダー）。CloudFront → EC2 の 2 つの定義は、地理的制限（既定は日本だけを許可）も含む |
 | セキュリティグループ | ALB 用、CloudFront → EC2 のオリジン用、既存のインスタンスのグループへの許可の追加 |
 | WAF | **関連付けだけ**（web ACL の ARN を渡したとき） |
 
@@ -51,7 +51,10 @@ CDK は L2 で書いているので、論理 ID は CloudFormation の YAML と�
 | WAF の web ACL | 中身のルールは要件次第。先に作って ARN を渡す。CloudFront 用は `us-east-1` |
 | DNS のレコード | 切り替えの時点を担当者が決めるため。`origin.<ドメイン>` と本番の名前は別に用意する |
 | インスタンスへのセキュリティグループの付け替え | CloudFront → EC2 の出力 `OriginSecurityGroupId` を、既存のグループに**足して**付ける（`modify-instance-attribute --groups` は全部を置き換えるので、既存のグループも並べる） |
-| 地理的制限、静的なファイルのキャッシュ | 使うと決まってから足す |
+| 静的なファイルのキャッシュ | 使うと決まってから足す |
+| CloudFront → ALB → EC2 の地理的制限 | 国で絞る方法を決めてから足す（CloudFront → EC2 だけ先に入れた） |
+
+**地理的制限（CloudFront → EC2）**: パラメータ `GeoRestrictionType`（既定 `whitelist`）と `GeoRestrictionCountries`（既定 `JP`）で決める。`GeoRestrictionType=none` で制限しない。CDK は設定値の `geo_restriction_countries`（既定 `[JP]`。空のリストで制限しない）。止めた要求には CloudFront が 403 を返す。**有効にすると、EC2 の Let's Encrypt の証明書を CloudFront 経由の HTTP-01 で更新できなくなる**（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)）。
 
 httpd の設定は別に要る（[ALB](./alb-to-ec2.md#3-httpd-に-http-の-virtualhost-を足す)、[CloudFront](./cloudfront-to-ec2-httpd.md)）。
 

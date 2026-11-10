@@ -76,7 +76,7 @@ EC2 の証明書の更新の経路は、DNS の向き先が変わるので見直
 
 | 方法 | 内容 | 注意 |
 |---|---|---|
-| HTTP-01 を CloudFront 経由で続ける | Let's Encrypt の確認は `app.example.com` → CloudFront → EC2 の 443 番と届く | 地理的制限を使うと海外からの確認が止まる。WAF でこのパスを例外にする。httpd の 443 番に `/.well-known/acme-challenge` の設定が要る |
+| HTTP-01 を CloudFront 経由で続ける | Let's Encrypt の確認は `app.example.com` → CloudFront → EC2 の 443 番と届く | **地理的制限（この構成の既定）を有効にすると、海外からの確認が止まって使えない**。使うなら、地理的制限の代わりに WAF でこのパスを例外にする。httpd の 443 番に `/.well-known/acme-challenge` の設定が要る |
 | DNS-01 に変える | CloudFront の設定に左右されない | DNS の API の権限の持たせ方を決める |
 
 詳しくは [証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)。
@@ -103,6 +103,7 @@ EC2 の証明書の更新の経路は、DNS の向き先が変わるので見直
 | Viewer protocol policy | Redirect HTTP to HTTPS | |
 | Allowed HTTP methods | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | フォームと API のため |
 | Add custom header | `X-Origin-Verify: <長いランダムな値>` | CloudFront を通らない要求の見分け |
+| Geographic restrictions | 許可する国の一覧に `JP` だけ | 日本以外からの要求に 403 を返す（今の port-guard と同じ国の絞り込み）。追加の料金はかからない |
 
 定義は CloudFormation の [cloudfront-to-ec2-same-domain.yml](./cloudformation/cloudfront-to-ec2-same-domain.yml)（`ap-northeast-1`）と [cloudfront-to-ec2-same-domain-certificate.yml](./cloudformation/cloudfront-to-ec2-same-domain-certificate.yml)（ACM の証明書。`us-east-1`）、および同じ内容の CDK。使い方は [definitions.md](./definitions.md#cloudfront--ec2外部のドメイン名を変えない場合)。
 

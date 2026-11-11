@@ -173,7 +173,7 @@ curl -s https://ip-ranges.amazonaws.com/ip-ranges.json \
 | # | 作業 | 利用者への影響 |
 |---|---|---|
 | 1 | `app.example.com` の DNS の TTL を短くする | なし |
-| 2 | ACM の証明書と WAF の web ACL を `us-east-1` に作る（証明書は検証の CNAME を足す） | なし |
+| 2 | ACM の証明書と WAF の web ACL を `us-east-1` に作る（証明書は検証の CNAME を足す。本番は外部の DNS サービスに手で足す: [外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)） | なし |
 | 3 | `origin.app.example.com` を作る | なし |
 | 4 | httpd に、秘密のヘッダーの確認**以外**の設定を入れる | なし |
 | 5 | セキュリティグループで、CloudFront からの接続を通す（今の許可は残す。この移行の対象の台には port-guard を入れていない） | なし |

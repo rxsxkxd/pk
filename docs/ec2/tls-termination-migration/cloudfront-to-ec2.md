@@ -36,6 +36,8 @@ aws acm request-certificate --region us-east-1 \
   --domain-name <ドメイン> --validation-method DNS
 ```
 
+ACM が示す CNAME を DNS に足し、消さずに残す。DNS が Route 53 でない場合の流れ（CNAME の取り出し方、名前の欄の注意、72 時間の期限）は [外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)。
+
 ### 3. httpd を設定する
 
 [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md) のとおりに設定する。秘密のヘッダーの確認は、DNS の切り替えが行き渡ってから入れる（手順 9）。先に入れると、まだ EC2 へ直接来ている利用者が 403 になる。

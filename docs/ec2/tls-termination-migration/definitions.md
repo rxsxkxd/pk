@@ -184,8 +184,8 @@ CDK_CONTEXT_JSON='{"config":"config.yml"}' CDK_OUTDIR=cdk.out .venv/bin/python a
 
 | パラメータ | 内容 |
 |---|---|
-| 証明書のスタックの `HostedZoneId` | `app.example.com` のホストゾーンが同じアカウントの Route 53 にあるなら指定する。検証用のレコードが自動で作られる。空にすると、ACM が示す CNAME を DNS に足すまで、スタックは `CREATE_IN_PROGRESS` のまま待つ |
-| `OriginHostedZoneId`、`OriginElasticIp` | `origin.app.example.com` のレコードもこのスタックで作るときに指定する。別の DNS で管理するなら空にして、手で作る |
+| 証明書のスタックの `HostedZoneId` | `app.example.com` のホストゾーンが同じアカウントの Route 53 にあるなら指定する。検証用のレコードが自動で作られる。空にすると、ACM が示す CNAME を DNS に足すまで、スタックは `CREATE_IN_PROGRESS` のまま待つ。ステージングは Route 53 なので指定する。本番は外部の DNS サービスなので空にする（[外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)） |
+| `OriginHostedZoneId`、`OriginElasticIp` | `origin.app.example.com` のレコードもこのスタックで作るときに指定する。別の DNS で管理するなら空にして、手で作る（本番はこちら） |
 
 `app.example.com` のレコードは定義に含めない。既にあるレコードで、切り替えの時点も担当者が決めるため。`OriginDomainName` と `DomainName` が同じだと EC2 へ届かないので、デプロイのときに止まるようにしている（CDK は合成のとき）。
 

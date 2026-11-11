@@ -48,7 +48,7 @@ aws acm request-certificate --region <リージョン> \
   --domain-name <ドメイン> --validation-method DNS
 ```
 
-ACM が示す CNAME を DNS に登録する。CNAME を残しておけば、使われている間は自動で更新される。
+ACM が示す CNAME を DNS に登録する。CNAME を残しておけば、使われている間は自動で更新される。DNS が Route 53 でない場合の流れは [外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)（ALB の場合は、証明書を ALB と同じリージョンに作る）。
 
 ### 3. httpd に HTTP の VirtualHost を足す
 

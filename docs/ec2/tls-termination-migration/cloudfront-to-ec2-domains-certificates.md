@@ -41,9 +41,9 @@ flowchart TD
 
 | レコード | 今 | 移行後 | 作り方 |
 |---|---|---|---|
-| `app.example.com` | 稼働サーバーの Elastic IP | CloudFront（Route 53 ならエイリアスの A レコード。IPv6 を有効にしたら AAAA も） | 切り替えの時点を担当者が決めて手で変える。定義には含めない |
-| `origin.app.example.com` | なし | 稼働サーバーの Elastic IP（A レコード） | 新しく作る。Route 53 なら CloudFront → EC2 のスタックで作れる（`OriginHostedZoneId`） |
-| ACM の検証用の CNAME（`_<文字列>.app.example.com`） | なし | ACM が示す値 | 証明書のスタックの作成中に足す。Route 53 なら自動で作られる（`HostedZoneId`）。**ACM が自動で更新するために残しておく** |
+| `app.example.com` | 稼働サーバーの Elastic IP | CloudFront（Route 53 ならエイリアスの A レコード。IPv6 を有効にしたら AAAA も） | 切り替えの時点を担当者が決めて手で変える。定義には含めない。外部の DNS サービスなら CNAME（[外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)） |
+| `origin.app.example.com` | なし | 稼働サーバーの Elastic IP（A レコード） | 新しく作る。Route 53 なら CloudFront → EC2 のスタックで作れる（`OriginHostedZoneId`）。外部の DNS サービスなら手で足す |
+| ACM の検証用の CNAME（`_<文字列>.app.example.com`） | なし | ACM が示す値 | 証明書のスタックの作成中に足す。Route 53 なら自動で作られる（`HostedZoneId`）。外部の DNS サービスなら手で足す（[外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)）。**ACM が自動で更新するために残しておく** |
 
 | 注意 | 内容 |
 |---|---|
@@ -118,8 +118,8 @@ CloudFront がオリジンへの TLS で送る名前（SNI）は、AWS のドキ
 | # | 論点 |
 |---|---|
 | C1 | オリジンの証明書の更新の方法 → **WAF で確認のパスを例外にし、HTTP-01 を続ける**（2026-11-11 に決めた） |
-| C2 | `app.example.com` の DNS が Route 53 か → **ステージングは Route 53、本番は別のサービス**（2026-11-11）。ステージングは `HostedZoneId`・`OriginHostedZoneId` を指定して定義で作る。本番は空にして、ACM の検証の CNAME と `origin.app.example.com` を、その DNS のサービスに手で足す |
-| C3 | ドメインに CAA レコードがあるか。あれば ACM の発行を許可する必要がある（AWS のドキュメントでは確かめられなかった） |
+| C2 | `app.example.com` の DNS が Route 53 か → **ステージングは Route 53、本番は別のサービス**（2026-11-11）。ステージングは `HostedZoneId`・`OriginHostedZoneId` を指定して定義で作る。本番は空にして、ACM の検証の CNAME と `origin.app.example.com` を、その DNS のサービスに手で足す（[外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)） |
+| C3 | ドメインに CAA レコードがあるか。あれば ACM の発行を許可する必要がある（AWS のドキュメントでは確かめられなかった）。確かめ方は [外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)の 0 |
 
 ## 参考
 

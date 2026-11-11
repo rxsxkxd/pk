@@ -56,6 +56,12 @@ class Configuration:
     geo_restriction_countries: list[str] = field(default_factory=list)
     # CloudFront 用の web ACL（<prefix>-cloudfront-waf）で許可する国
     waf_allowed_countries: list[str] = field(default_factory=lambda: ["JP"])
+    # 許可する国の外から通す IP（CIDR）。空のままでよい
+    waf_exception_ipv4_addresses: list[str] = field(default_factory=list)
+    waf_exception_ipv6_addresses: list[str] = field(default_factory=list)
+    # count: マネージドルールは記録だけ。誤検知がないことをログで確かめてから block にする
+    waf_managed_rules_mode: str = "count"
+    waf_log_retention_days: int = 30
     restrict_to_cloudfront: bool = False
     new_app_port: int = 8080
     old_app_port: int = 80
@@ -90,4 +96,6 @@ def load_configuration(path: str) -> Configuration:
         raise ConfigurationError("origin_hosted_zone_id を指定するときは origin_elastic_ip も必要です")
     if not configuration.waf_allowed_countries:
         raise ConfigurationError("waf_allowed_countries に許可する国を 1 つ以上書いてください")
+    if configuration.waf_managed_rules_mode not in ("count", "block"):
+        raise ConfigurationError("waf_managed_rules_mode は count か block にしてください")
     return configuration

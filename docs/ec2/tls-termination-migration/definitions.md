@@ -15,7 +15,7 @@
 | CloudFront → ALB → EC2 | `cloudformation/cloudfront-alb-to-ec2.yml` | `<prefix>-cloudfront-alb-to-ec2` |
 | CloudFront → EC2（[外部のドメイン名を変えない場合](./cloudfront-to-ec2-same-domain.md)） | `cloudformation/cloudfront-to-ec2-same-domain.yml` | `<prefix>-cloudfront-to-ec2-same-domain` |
 | 上の構成の外向きの ACM の証明書（`us-east-1`） | `cloudformation/cloudfront-to-ec2-same-domain-certificate.yml` | `<prefix>-cloudfront-certificate` |
-| CloudFront 用の WAF の web ACL（`us-east-1`。CloudFront → EC2 の国の絞り込み） | `cloudformation/cloudfront-waf.yml` | `<prefix>-cloudfront-waf` |
+| CloudFront 用の WAF の web ACL とログ（`us-east-1`。CloudFront → EC2 の防御） | `cloudformation/cloudfront-waf.yml` | `<prefix>-cloudfront-waf` |
 
 ```
 cdk/python/
@@ -43,7 +43,7 @@ CDK は L2 で書いているので、論理 ID は CloudFormation の YAML と�
 | ALB | ロードバランサー、ターゲットグループ（`new_app_b`: 8080 番、`old_app_a`: 80 番）、HTTPS・HTTP のリスナー、パスとヘッダーのルール |
 | CloudFront | ディストリビューション（HTTPS only、`CachingDisabled`、`AllViewer`、秘密のヘッダー）。CloudFront → EC2 の 2 つの定義は、地理的制限の設定も持つが、既定は使わない（国の絞り込みは WAF） |
 | セキュリティグループ | ALB 用、CloudFront → EC2 のオリジン用、既存のインスタンスのグループへの許可の追加 |
-| WAF | 構成の定義は**関連付けだけ**（web ACL の ARN を渡したとき）。CloudFront 用の web ACL は `cloudfront-waf.yml`（下の「国の絞り込み（WAF）」） |
+| WAF | 構成の定義は**関連付けだけ**（web ACL の ARN を渡したとき）。CloudFront 用の web ACL（国の絞り込み、例外の IP、マネージドルール、ログ）は `cloudfront-waf.yml`（下の「国の絞り込み（WAF）」） |
 
 ## 定義に含めないもの
 
@@ -58,27 +58,48 @@ CDK は L2 で書いているので、論理 ID は CloudFormation の YAML と�
 
 ## 国の絞り込み（WAF）
 
-CloudFront → EC2 では、国の絞り込みを WAF で行う（2026-11-11 に決めた）。EC2 の Let's Encrypt の証明書を、CloudFront 経由の HTTP-01 で更新し続けるため、確認のパスだけはどの国からも通す。
+CloudFront → EC2 では、WAF で防御する（2026-11-11 に決めた）。国で絞り、特定の IP を例外にでき、AWS のマネージドルールを入れ、ログを残す。EC2 の Let's Encrypt の証明書を、CloudFront 経由の HTTP-01 で更新し続けるため、確認のパスだけはどの国からも通す。
 
 | ルール | 優先順位 | 条件 | 動作 |
 |---|---|---|---|
 | `AllowAcmeChallenge` | 0 | パスが `/.well-known/acme-challenge/` で始まる。比べる前に `URL_DECODE`、`NORMALIZE_PATH` の順で変換する | 通す（以降のルールは見ない） |
-| `BlockOutsideAllowedCountries` | 1 | 送り元の国が許可する国（既定 `JP`）にない | 止める（CloudFront が 403 を返す） |
-| 既定の動作 | — | どちらにも当たらない | 通す |
+| `BlockOutsideAllowedCountries` | 1 | 送り元の国が許可する国（既定 `JP`）になく、**かつ**例外の IP の一覧（IPv4・IPv6）にもない | 止める（CloudFront が 403 を返す） |
+| `AWSManagedRulesAmazonIpReputationList` | 2 | Amazon の脅威情報で悪いとされた IP | 最初は記録だけ（下の「マネージドルール」） |
+| `AWSManagedRulesCommonRuleSet` | 3 | よくある攻撃（XSS、パスの移動、大きすぎる要求など） | 同上 |
+| `AWSManagedRulesKnownBadInputsRuleSet` | 4 | 既知の悪い入力（Log4j など） | 同上 |
+| 既定の動作 | — | どれにも当たらない | 通す |
+
+国の絞り込みをマネージドルールより先にしているのは、マネージドルールのログを、許可する国と例外の IP からの要求だけにして、誤検知を見やすくするためである。例外の IP もマネージドルールは通る。
 
 - **変換の理由**: `/.well-known/acme-challenge/../../admin` や `%2e%2e` のように、例外のパスで始まって外へ出る要求を、例外に当てないため。`NORMALIZE_PATH` は重複したスラッシュ、`.`、`..` を取り除く
 - **CloudFront の地理的制限は使わない**: 地理的制限で止めた要求は WAF に届かないので、パスの例外を作れない。CloudFront → EC2 の 2 つの定義のパラメータ `GeoRestrictionType` の既定を `none` に変えた（CDK は `geo_restriction_countries` の既定を空に変えた）。`whitelist` にすると、HTTP-01 の更新が止まる
 - **国の判定**: 送り元の IP アドレス（CloudFront に接続した利用者）で行う。`X-Forwarded-For` は使わない（利用者が書き換えられるため）
-- **料金**: web ACL 1 つとルール 2 つで月 $7、100 万リクエストごとに $0.60（[README](./README.md#waf-を置ける場所)。2026-11-09 確認）
+- **料金**: web ACL 1 つで月 $5、ルール 1 つで月 $1、100 万リクエストごとに $0.60（[README](./README.md#waf-を置ける場所)。2026-11-09 確認）。ルール 2 つとマネージドルールグループ 3 つで、ルールを 5 つと数えれば月 $10。マネージドルールグループの数え方と、この 3 つに追加の料金がないことは、料金のページで確かめていない。ほかに CloudWatch Logs の料金がかかる
+- **キャパシティ（WCU）**: マネージドルールグループが 25・700・200、自分で書いたルールが約 25 で、合計は約 950。web ACL の上限 1,500 に収まる
 - **httpd**: 443 番の VirtualHost に確認のパスの設定が要る（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)）
-- `CloudFrontWebAclArn` は空でもデプロイできる（その間は国で絞らない）。本番で空にしない
+- `CloudFrontWebAclArn` は空でもデプロイできる（その間は国で絞らず、マネージドルールも効かない）。一旦、任意のままにする（2026-11-11。必須にするかは後で決め直す）。本番で空にしない
 
-**決めた前提（2026-11-11。定義にはまだ入れていない）**: 移す目的は WAF による防御。国の絞り込みに加えて、(1) 特定の IP を国の判定の例外にできるようにする、(2) WAF のログを残す、(3) AWS のマネージドルールを入れる。
+| CloudFormation のパラメータ | CDK の設定値 | 内容 |
+|---|---|---|
+| `AllowedCountries` | `waf_allowed_countries` | 許可する国（ISO 3166-1 alpha-2。既定 `JP`。CDK は空だとエラー） |
+| `ExceptionIpv4Addresses`、`ExceptionIpv6Addresses` | `waf_exception_ipv4_addresses`、`waf_exception_ipv6_addresses` | 許可する国の外から通す IP（CIDR。例 `192.0.2.44/32`）。既定は空。一覧は空でも作っておくので、例外を足すときは値を変えて更新するだけでよい |
+| `ManagedRulesMode` | `waf_managed_rules_mode` | `count`（既定。記録だけ）か `block` |
+| `LogRetentionInDays` | `waf_log_retention_days` | ログを残す日数（既定 30） |
 
-| パラメータ・設定値 | 内容 |
-|---|---|
-| `cloudfront-waf.yml` の `AllowedCountries` | 許可する国（ISO 3166-1 alpha-2。既定 `JP`） |
-| CDK の `waf_allowed_countries` | 同上（既定 `[JP]`。空はエラー） |
+### マネージドルール
+
+最初は `count` で入れ、ログで誤検知がないことを確かめてから `block` に切り替える（2026-11-11 に決めた）。
+
+- `count` の間は、ルールグループの中のルールを 1 つずつ Count に上書きする（`RuleActionOverrides`）。ルールグループ全体を Count にする方法（`OverrideAction: Count`）は、AWS のドキュメントで試験に向かないとされているので使わない（最初に当たったルールだけが数えられ、ほかのルールが当たるかは分からないため）
+- 上書きするルールの名前は、AWS のドキュメントの一覧から写した（2026-11-11）。ルールグループの版が上がってルールが増えると、増えたルールは上書きされず、`count` の間も止める。版が上がったら一覧を見直す
+- 切り替える前に、ログで Count になった要求のラベル（`awswaf:managed:aws:...`）を見る。特に `SizeRestrictions_BODY` は 8 KB を超える本文を止めるので、フォームの送信やファイルのアップロードで当たる見込みが高い。当たるルールがあれば、そのルールだけ Count のまま残して `block` にする（テンプレートの、そのルールの上書きを残す形に直す）
+
+### ログ
+
+`us-east-1` の CloudWatch Logs のロググループ `aws-waf-logs-<スタック名>` に送り、30 日残す（2026-11-11 に決めた）。名前は `aws-waf-logs-` で始め、web ACL と同じリージョンとアカウントに置く決まりである。ロググループの書き込みの許可（リソースポリシー）は、ログの設定を作るときに WAF が付ける。
+
+- ログには要求の見出し（ヘッダー）が入る見込みで、Cookie（セッション）が残るかもしれない。どの項目が残るかは、実際のログで確かめる。残したくない項目があれば、ログの設定の `RedactedFields` か、web ACL のデータ保護の設定で消す（AWS のドキュメントでは、`RedactedFields` で消せるのは `UriPath`、`QueryString`、`SingleHeader`、`Method` だけ）
+- ログを読める人を、CloudWatch Logs の権限で絞る
 
 ### デプロイ
 
@@ -110,7 +131,7 @@ CDK では、`<prefix>-cloudfront-waf` を合成・デプロイし、出力の A
 | 国内 | `curl -sI https://app.example.com/` | アプリの応答 |
 | 稼働サーバー | `sudo certbot renew --dry-run` | 成功 |
 
-止めた件数と例は、web ACL の CloudWatch のメトリクスと、サンプルのリクエスト（`SampledRequestsEnabled`）で見られる。ログの保存は定義に含めていない。
+止めた件数と例は、web ACL の CloudWatch のメトリクス、サンプルのリクエスト（`SampledRequestsEnabled`）、ログで見られる。例外の IP は、一覧に入れた IP から `curl -sI https://app.example.com/` を流してアプリの応答になることで確かめる。
 
 httpd の設定は別に要る（[ALB](./alb-to-ec2.md#3-httpd-に-http-の-virtualhost-を足す)、[CloudFront](./cloudfront-to-ec2-httpd.md)）。
 
@@ -247,3 +268,10 @@ WAF は 2026-11-11 に照らし合わせた。
 - [Geographic match rule statement（CloudFront の地理的制限で止めた要求は WAF に届かない、送り元の IP で判定）](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-geo-match.html)
 - [String match rule statement（Starts with、変換は並べた順に行う）](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-string-match.html)
 - [Using text transformations（URL_DECODE、NORMALIZE_PATH）](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-transformation.html)
+- [AWS::WAFv2::IPSet（Addresses は空の配列でよい、CIDR で書く）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-wafv2-ipset.html)
+- [Baseline rule groups（CommonRuleSet と KnownBadInputsRuleSet の名前、WCU、ルールの一覧）](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html)
+- [IP reputation rule groups（AmazonIpReputationList）](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-ip-rep.html)
+- [Overriding rule group actions（試験にはルールごとの Count の上書きを使う）](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-group-override-options.html)
+- [AWS::WAFv2::LoggingConfiguration（送り先は aws-waf-logs- で始める、RedactedFields）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-wafv2-loggingconfiguration.html)
+- [Sending web ACL traffic logs to CloudWatch Logs（同じリージョンとアカウント）](https://docs.aws.amazon.com/waf/latest/developerguide/logging-cw-logs.html)
+- [AWS::Logs::LogGroup（GetAtt の Arn は末尾に :* が付く）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-logs-loggroup.html)

@@ -35,6 +35,13 @@ cloudfront_web_acl_arn: ""
 # CloudFront 用の web ACL（<prefix>-cloudfront-waf）で許可する国。
 # /.well-known/acme-challenge/ だけはどの国からも通す（EC2 の Let's Encrypt の HTTP-01 の更新のため）
 waf_allowed_countries: [JP]
+# 許可する国の外から通す IP（CIDR。例: 192.0.2.44/32）。マネージドルールは通る
+waf_exception_ipv4_addresses: []
+waf_exception_ipv6_addresses: []
+# count: マネージドルールは記録だけ。ログで誤検知がないことを確かめてから block にする
+waf_managed_rules_mode: count
+# us-east-1 の CloudWatch Logs（aws-waf-logs-<prefix>-cloudfront-waf）に残す日数
+waf_log_retention_days: 30
 # CloudFront -> EC2 の地理的制限で許可する国。既定は空（制限しない）。国の絞り込みは上の WAF で行う。
 # 地理的制限で止めた要求は WAF に届かないので、ここに書くと HTTP-01 の更新が止まる
 geo_restriction_countries: []

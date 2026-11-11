@@ -1,13 +1,33 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed countries,
-  except the Let's Encrypt HTTP-01 challenge path. Deploy this stack in us-east-1.
+  AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed countries
+  (with IP exceptions), except the Let's Encrypt HTTP-01 challenge path, and applies AWS managed rules.
+  Logs go to CloudWatch Logs. Deploy this stack in us-east-1.
 
 Parameters:
   AllowedCountries:
     Type: CommaDelimitedList
     Default: JP
     Description: ISO 3166-1 alpha-2 country codes allowed to reach the distribution.
+  ExceptionIpv4Addresses:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional. IPv4 CIDRs allowed from outside AllowedCountries, such as 192.0.2.44/32.
+  ExceptionIpv6Addresses:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional. IPv6 CIDRs allowed from outside AllowedCountries, such as 2001:db8::1/128.
+  ManagedRulesMode:
+    Type: String
+    Default: count
+    AllowedValues: [count, block]
+    Description: >-
+      count overrides every rule in the managed rule groups to Count (record only).
+      block uses the actions defined by the rule groups. Switch after checking the logs for false positives.
+  LogRetentionInDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365]
 
 Rules:
   MustBeInUsEast1:
@@ -18,14 +38,57 @@ Rules:
             - us-east-1
         AssertDescription: A web ACL for CloudFront (CLOUDFRONT scope) must be created in us-east-1.
 
+Conditions:
+  HasExceptionIpv4:
+    Fn::Not:
+      - Fn::Equals:
+          - Fn::Join: ["", {Ref: ExceptionIpv4Addresses}]
+          - ""
+  HasExceptionIpv6:
+    Fn::Not:
+      - Fn::Equals:
+          - Fn::Join: ["", {Ref: ExceptionIpv6Addresses}]
+          - ""
+  ManagedRulesCountOnly:
+    Fn::Equals:
+      - Ref: ManagedRulesMode
+      - count
+
 Resources:
+  # The IP sets always exist (possibly empty) so that adding an exception is a parameter change only.
+  ExceptionIpv4Set:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-exception-ipv4
+      Scope: CLOUDFRONT
+      IPAddressVersion: IPV4
+      Addresses:
+        Fn::If:
+          - HasExceptionIpv4
+          - Ref: ExceptionIpv4Addresses
+          - []
+
+  ExceptionIpv6Set:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name:
+        Fn::Sub: ${AWS::StackName}-exception-ipv6
+      Scope: CLOUDFRONT
+      IPAddressVersion: IPV6
+      Addresses:
+        Fn::If:
+          - HasExceptionIpv6
+          - Ref: ExceptionIpv6Addresses
+          - []
+
   WebAcl:
     Type: AWS::WAFv2::WebACL
     Properties:
       Name:
         Ref: AWS::StackName
       Scope: CLOUDFRONT
-      Description: Allowed countries only, except the ACME HTTP-01 challenge path.
+      Description: Allowed countries and IP exceptions, ACME challenge path, AWS managed rules.
       DefaultAction:
         Allow: {}
       VisibilityConfig:
@@ -55,23 +118,148 @@ Resources:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
             MetricName: AllowAcmeChallenge
+
+        # Block when the country is not allowed and the address is not an exception.
+        # The managed rules below still inspect the exception addresses.
         - Name: BlockOutsideAllowedCountries
           Priority: 1
           Action:
             Block: {}
           Statement:
-            NotStatement:
-              Statement:
-                GeoMatchStatement:
-                  CountryCodes:
-                    Ref: AllowedCountries
+            AndStatement:
+              Statements:
+                - NotStatement:
+                    Statement:
+                      GeoMatchStatement:
+                        CountryCodes:
+                          Ref: AllowedCountries
+                - NotStatement:
+                    Statement:
+                      IPSetReferenceStatement:
+                        Arn:
+                          Fn::GetAtt: [ExceptionIpv4Set, Arn]
+                - NotStatement:
+                    Statement:
+                      IPSetReferenceStatement:
+                        Arn:
+                          Fn::GetAtt: [ExceptionIpv6Set, Arn]
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
             MetricName: BlockOutsideAllowedCountries
+
+        # Managed rule groups. In count mode every rule is overridden to Count (AWS recommends
+        # rule action overrides, not the rule group override, for testing).
+        - Name: AWSManagedRulesAmazonIpReputationList
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAmazonIpReputationList
+              RuleActionOverrides:
+                Fn::If:
+                  - ManagedRulesCountOnly
+                  - - {Name: AWSManagedIPReputationList, ActionToUse: {Count: {}}}
+                    - {Name: AWSManagedReconnaissanceList, ActionToUse: {Count: {}}}
+                  - Ref: AWS::NoValue
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesAmazonIpReputationList
+
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 3
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              RuleActionOverrides:
+                Fn::If:
+                  - ManagedRulesCountOnly
+                  - - {Name: NoUserAgent_HEADER, ActionToUse: {Count: {}}}
+                    - {Name: UserAgent_BadBots_HEADER, ActionToUse: {Count: {}}}
+                    - {Name: SizeRestrictions_QUERYSTRING, ActionToUse: {Count: {}}}
+                    - {Name: SizeRestrictions_Cookie_HEADER, ActionToUse: {Count: {}}}
+                    - {Name: SizeRestrictions_BODY, ActionToUse: {Count: {}}}
+                    - {Name: SizeRestrictions_URIPATH, ActionToUse: {Count: {}}}
+                    - {Name: EC2MetaDataSSRF_BODY, ActionToUse: {Count: {}}}
+                    - {Name: EC2MetaDataSSRF_COOKIE, ActionToUse: {Count: {}}}
+                    - {Name: EC2MetaDataSSRF_URIPATH, ActionToUse: {Count: {}}}
+                    - {Name: EC2MetaDataSSRF_QUERYARGUMENTS, ActionToUse: {Count: {}}}
+                    - {Name: GenericLFI_QUERYARGUMENTS, ActionToUse: {Count: {}}}
+                    - {Name: GenericLFI_URIPATH, ActionToUse: {Count: {}}}
+                    - {Name: GenericLFI_BODY, ActionToUse: {Count: {}}}
+                    - {Name: RestrictedExtensions_URIPATH, ActionToUse: {Count: {}}}
+                    - {Name: RestrictedExtensions_QUERYARGUMENTS, ActionToUse: {Count: {}}}
+                    - {Name: GenericRFI_QUERYARGUMENTS, ActionToUse: {Count: {}}}
+                    - {Name: GenericRFI_BODY, ActionToUse: {Count: {}}}
+                    - {Name: GenericRFI_URIPATH, ActionToUse: {Count: {}}}
+                    - {Name: CrossSiteScripting_COOKIE, ActionToUse: {Count: {}}}
+                    - {Name: CrossSiteScripting_QUERYARGUMENTS, ActionToUse: {Count: {}}}
+                    - {Name: CrossSiteScripting_BODY, ActionToUse: {Count: {}}}
+                    - {Name: CrossSiteScripting_URIPATH, ActionToUse: {Count: {}}}
+                  - Ref: AWS::NoValue
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSet
+
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 4
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+              RuleActionOverrides:
+                Fn::If:
+                  - ManagedRulesCountOnly
+                  - - {Name: JavaDeserializationRCE_HEADER, ActionToUse: {Count: {}}}
+                    - {Name: JavaDeserializationRCE_BODY, ActionToUse: {Count: {}}}
+                    - {Name: JavaDeserializationRCE_URIPATH, ActionToUse: {Count: {}}}
+                    - {Name: JavaDeserializationRCE_QUERYSTRING, ActionToUse: {Count: {}}}
+                    - {Name: Host_localhost_HEADER, ActionToUse: {Count: {}}}
+                    - {Name: PROPFIND_METHOD, ActionToUse: {Count: {}}}
+                    - {Name: ExploitablePaths_URIPATH, ActionToUse: {Count: {}}}
+                    - {Name: Log4JRCE_HEADER, ActionToUse: {Count: {}}}
+                    - {Name: Log4JRCE_QUERYSTRING, ActionToUse: {Count: {}}}
+                    - {Name: Log4JRCE_BODY, ActionToUse: {Count: {}}}
+                    - {Name: Log4JRCE_URIPATH, ActionToUse: {Count: {}}}
+                    - {Name: ReactJSRCE_BODY, ActionToUse: {Count: {}}}
+                  - Ref: AWS::NoValue
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesKnownBadInputsRuleSet
+
+  # The log group name must start with aws-waf-logs- and be in the same Region as the web ACL.
+  WebAclLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: aws-waf-logs-${AWS::StackName}
+      RetentionInDays:
+        Ref: LogRetentionInDays
+
+  WebAclLogging:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Properties:
+      ResourceArn:
+        Fn::GetAtt: [WebAcl, Arn]
+      # The log group ARN without the trailing ":*" that Fn::GetAtt Arn returns.
+      LogDestinationConfigs:
+        - Fn::Sub: arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WebAclLogGroup}
 
 Outputs:
   WebAclArn:
     Description: Pass this value as CloudFrontWebAclArn of the CloudFront stack.
     Value:
       Fn::GetAtt: [WebAcl, Arn]
+  WebAclLogGroupName:
+    Value:
+      Ref: WebAclLogGroup

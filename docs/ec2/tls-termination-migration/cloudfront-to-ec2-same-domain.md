@@ -111,8 +111,11 @@ EC2 の証明書の更新の経路は、DNS の向き先が変わるので見直
 | ルール | 優先順位 | 条件 | 動作 |
 |---|---|---|---|
 | `AllowAcmeChallenge` | 0 | パスが `/.well-known/acme-challenge/` で始まる（URL のデコードとパスの正規化をしてから比べる） | 通す（以降のルールは見ない） |
-| `BlockOutsideAllowedCountries` | 1 | 送り元の国が `JP` 以外 | 止める（403） |
-| 既定の動作 | — | 上のどちらにも当たらない | 通す |
+| `BlockOutsideAllowedCountries` | 1 | 送り元の国が `JP` 以外で、例外の IP の一覧にもない | 止める（403） |
+| AWS のマネージドルール 3 つ | 2〜4 | 評判の悪い IP、よくある攻撃、既知の悪い入力 | 最初は記録だけ。誤検知がないことをログで確かめてから止める |
+| 既定の動作 | — | どれにも当たらない | 通す |
+
+ログは `us-east-1` の CloudWatch Logs に 30 日残す。詳しくは [definitions.md](./definitions.md#国の絞り込みwaf)。
 
 デコードと正規化は、`/.well-known/acme-challenge/../../` や `%2e%2e` で例外のパスの外へ出る要求を、例外に当てないためである。
 

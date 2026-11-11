@@ -86,13 +86,13 @@ CloudFront がオリジンへの TLS で送る名前（SNI）は、AWS のドキ
 
 今は HTTP-01（80 番の `/.well-known/acme-challenge/`）で更新している。移行の後は `app.example.com` が CloudFront を指すので、Let's Encrypt の確認は CloudFront を通る。
 
-**この構成の定義は、既定で地理的制限（日本だけを許可）を有効にしている。地理的制限を有効にすると、海外からも来る Let's Encrypt の確認が止まり、HTTP-01 では更新できない**。次のどれかに決める必要がある（未決定）。
+**WAF で国を絞り、`/.well-known/acme-challenge/` だけを例外にすると決めた（2026-11-11）**。EC2 の Let's Encrypt の証明書と HTTP-01 の更新は、今のまま続ける。CloudFront の地理的制限は使わない（地理的制限で止めた要求は WAF に届かないので、パスの例外を作れない）。定義は [definitions.md](./definitions.md#国の絞り込みwaf)。
 
 | 方法 | 内容 | 注意 |
 |---|---|---|
-| DNS-01 に変える | CloudFront の設定に左右されない | DNS の API の権限の持たせ方を決める |
-| 地理的制限の代わりに WAF を使う | 国で絞りつつ、`/.well-known/acme-challenge/` だけを例外にできる | WAF の月額の料金。httpd の 443 番に確認のパスの設定が要る |
-| オリジンの証明書を ACM のものにする | ACM の ACME かエクスポートできる証明書 | この用途では試していない。エクスポートできる証明書は有料 |
+| **地理的制限の代わりに WAF を使う（採用）** | 国で絞りつつ、`/.well-known/acme-challenge/` だけを例外にできる | WAF の料金（web ACL とルール 2 つで月 $7 と、100 万リクエストごとに $0.60）。httpd の 443 番に確認のパスの設定が要る（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
+| DNS-01 に変える（見送り） | CloudFront の設定に左右されない | DNS の API の権限の持たせ方を決める |
+| オリジンの証明書を ACM のものにする（見送り） | ACM の ACME かエクスポートできる証明書 | この用途では試していない。エクスポートできる証明書は有料 |
 
 外向きの証明書（ACM）は、どの方法でも影響を受けない。
 
@@ -117,8 +117,8 @@ CloudFront がオリジンへの TLS で送る名前（SNI）は、AWS のドキ
 
 | # | 論点 |
 |---|---|
-| C1 | オリジンの証明書の更新の方法（上の 3 つ） |
-| C2 | `app.example.com` の DNS が Route 53 か（検証の CNAME とオリジンの名前のレコードを、定義で作れるか） |
+| C1 | オリジンの証明書の更新の方法 → **WAF で確認のパスを例外にし、HTTP-01 を続ける**（2026-11-11 に決めた） |
+| C2 | `app.example.com` の DNS が Route 53 か → **ステージングは Route 53、本番は別のサービス**（2026-11-11）。ステージングは `HostedZoneId`・`OriginHostedZoneId` を指定して定義で作る。本番は空にして、ACM の検証の CNAME と `origin.app.example.com` を、その DNS のサービスに手で足す |
 | C3 | ドメインに CAA レコードがあるか。あれば ACM の発行を許可する必要がある（AWS のドキュメントでは確かめられなかった） |
 
 ## 参考
@@ -133,3 +133,4 @@ AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-10）�
 - [AWS Certificate Manager DNS validation（検証の CNAME と自動更新）](https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html)
 - [AWS::CertificateManager::Certificate（Route 53 での自動検証）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-certificatemanager-certificate.html)
 - [Supported CloudWatch metrics（ACM の DaysToExpiry）](https://docs.aws.amazon.com/acm/latest/userguide/cloudwatch-metrics.html)
+- [Geographic match rule statement（CloudFront の地理的制限で止めた要求は WAF に届かない）](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-geo-match.html)（2026-11-11）

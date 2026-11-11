@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed countries,
+  except the Let's Encrypt HTTP-01 challenge path. Deploy this stack in us-east-1.
+
+Parameters:
+  AllowedCountries:
+    Type: CommaDelimitedList
+    Default: JP
+    Description: ISO 3166-1 alpha-2 country codes allowed to reach the distribution.
+
+Rules:
+  MustBeInUsEast1:
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: AWS::Region
+            - us-east-1
+        AssertDescription: A web ACL for CloudFront (CLOUDFRONT scope) must be created in us-east-1.
+
+Resources:
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name:
+        Ref: AWS::StackName
+      Scope: CLOUDFRONT
+      Description: Allowed countries only, except the ACME HTTP-01 challenge path.
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName:
+          Ref: AWS::StackName
+      Rules:
+        # Let's Encrypt validates from several countries. Allow only the challenge path from anywhere.
+        # URL_DECODE then NORMALIZE_PATH so that ".." or "%2e%2e" cannot escape the prefix.
+        - Name: AllowAcmeChallenge
+          Priority: 0
+          Action:
+            Allow: {}
+          Statement:
+            ByteMatchStatement:
+              FieldToMatch:
+                UriPath: {}
+              PositionalConstraint: STARTS_WITH
+              SearchString: /.well-known/acme-challenge/
+              TextTransformations:
+                - Priority: 0
+                  Type: URL_DECODE
+                - Priority: 1
+                  Type: NORMALIZE_PATH
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AllowAcmeChallenge
+        - Name: BlockOutsideAllowedCountries
+          Priority: 1
+          Action:
+            Block: {}
+          Statement:
+            NotStatement:
+              Statement:
+                GeoMatchStatement:
+                  CountryCodes:
+                    Ref: AllowedCountries
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: BlockOutsideAllowedCountries
+
+Outputs:
+  WebAclArn:
+    Description: Pass this value as CloudFrontWebAclArn of the CloudFront stack.
+    Value:
+      Fn::GetAtt: [WebAcl, Arn]

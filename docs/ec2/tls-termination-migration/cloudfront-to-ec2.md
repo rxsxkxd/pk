@@ -74,7 +74,7 @@ aws ec2 authorize-security-group-ingress --group-id <専用のグループ> \
   --ip-permissions 'IpProtocol=tcp,FromPort=443,ToPort=443,PrefixListIds=[{PrefixListId=<pl-...>}]'
 ```
 
-**port-guard**: CloudFront の拠点のアドレスは日本の範囲にほとんど入らないので、そのままでは CloudFront からの通信が止まる。次のどちらかにする。
+**port-guard**（port-guard を入れた台の場合だけ。この移行の対象の台には port-guard を入れていない（port-guard-rollout の対象は別の台。2026-11-11））: CloudFront の拠点のアドレスは日本の範囲にほとんど入らないので、そのままでは CloudFront からの通信が止まる。次のどちらかにする。
 
 | 方法 | 内容 |
 |---|---|
@@ -105,6 +105,8 @@ curl -v --resolve <ドメイン>:443:<CloudFront の IP> https://<ドメイン>/
 | 地理的制限 | 追加の料金なし。パスごとの例外はできない |
 | WAF（`us-east-1` に web ACL） | 個別の IP の許可やパスの例外ができる。[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)を HTTP-01 で続けるなら、`/.well-known/acme-challenge/` を例外にする |
 
+**WAF にすると決めた（2026-11-11）**。地理的制限で止めた要求は WAF に届かないので、地理的制限は使わない。定義は [cloudfront-waf.yml](./cloudformation/cloudfront-waf.yml)（[使い方](./definitions.md#国の絞り込みwaf)）。
+
 ### 8. DNS を切り替える
 
 DNS を CloudFront へ向ける。Route 53 ならエイリアスレコードにする（IPv6 を有効にしているなら A と AAAA の 2 つ）。
@@ -115,7 +117,7 @@ DNS を CloudFront へ向ける。Route 53 ならエイリアスレコードに�
 |---|---|
 | 1 | httpd の[秘密のヘッダーの確認](./cloudfront-to-ec2-httpd.md#3-秘密のヘッダーを確認する)を有効にする。`curl -v https://origin.app.example.com/` が 403 になり、CloudFront 経由は通ることを確かめる |
 | 2 | EC2 のグループから、`0.0.0.0/0` などの 80・443 番の許可を消す |
-| 3 | 国の絞り込みを CloudFront へ移し、直接のアクセスがセキュリティグループで止まることを確かめてから、port-guard を外す |
+| 3 | 国の絞り込みを CloudFront へ移し、直接のアクセスがセキュリティグループで止まることを確かめる。port-guard を入れた台なら、その後に外す |
 | 4 | 証明書の更新が新しい経路で成功することを確かめる（`sudo certbot renew --dry-run`） |
 | 5 | 証明書の有効期限の監視を入れる。**オリジンの証明書が切れると、すべての利用者に 502 が返る** |
 

@@ -96,7 +96,8 @@ AWS WAF を関連付けられるのは **CloudFront と ALB** で、EC2 のイ�
 - CloudFront に関連付けた web ACL は、ALB など別の種類のリソースには関連付けられない。C で両方に置くなら、web ACL も 2 つになる。
 - 料金は、web ACL 1 つで月 $5、ルール 1 つで月 $1、100 万リクエストで $0.60 である（2026-11-09 確認。リージョンで異なる場合があると書かれている）。
 - CloudFront の月額固定のプランには WAF が含まれる（[料金の考え方](../notes/instance-provisioning/cloudfront-alb-front-options.md)）。
-- 国で絞るだけなら、CloudFront は地理的制限で足りて WAF は要らない。ただし、個別の IP の許可やパスごとの例外が要るなら WAF を使う（[国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)）。
+- 国で絞るだけなら、CloudFront は地理的制限で足りて WAF は要らない。ただし、個別の IP の許可やパスごとの例外が要るなら WAF を使う（[国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)）。地理的制限で止めた要求は WAF に届かないので、パスの例外を作るなら地理的制限は使わない。
+- B は、EC2 の Let's Encrypt の証明書を HTTP-01 で更新し続けるため、WAF で `/.well-known/acme-challenge/` だけを例外にすると決めた（2026-11-11。[定義](./definitions.md#国の絞り込みwaf)）。
 
 ## 最初に片付けること: 2 つのアプリの分かれ方
 
@@ -118,7 +119,7 @@ AWS WAF を関連付けられるのは **CloudFront と ALB** で、EC2 のイ�
 
 | 項目 | 内容 |
 |---|---|
-| 今の国での絞り込み（port-guard） | CloudFront を前に置くと、拠点のアドレスが日本の範囲に入らず、**すべての通信が止まる**。ALB なら VPC の範囲の許可で通るが、絞り込みは効かなくなる。[国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)と各手順の順番に従う |
+| 今の国での絞り込み（port-guard） | この移行の対象の台には port-guard を入れていない（port-guard-rollout の対象は別の台。2026-11-11）。port-guard を入れた台に当てはめるときだけ考える。CloudFront を前に置くと、拠点のアドレスが日本の範囲に入らず、**すべての通信が止まる**。ALB なら VPC の範囲の許可で通るが、絞り込みは効かなくなる。[国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)と各手順の順番に従う |
 | IP で直接つないでいる相手 | Elastic IP を指定して API を呼んでいる相手は、切り替えの後も前段を通らず EC2 へ向かい、セキュリティグループで止まる。[API のアクセス元の洗い出し](../api-access-sources/design.md)で探す |
 | 外部に Elastic IP を伝えている先 | EC2 から外へ出る通信の送り元は変わらない。Elastic IP を外すときだけ影響する |
 | 古い TLS しか話せない相手 | 前段のセキュリティポリシーで受ける TLS のバージョンが変わる |
@@ -130,11 +131,11 @@ AWS WAF を関連付けられるのは **CloudFront と ALB** で、EC2 のイ�
 
 | # | 論点 |
 |---|---|
-| T1 | 何のために移すのか（証明書の管理をなくす、WAF を置く、複数台にする、キャッシュを効かせる、のどれが主か） |
-| T2 | A・B・C のどれにするか。対象が多数の台なら、[ALB を共有する案](../notes/instance-provisioning/cloudfront-alb-front-options.md#今の運用物件ごとの単体のサーバーに当てはめた選択肢)も含めて考える |
-| T3 | `old_app_a` の扱い（平文のまま残す相手がいるか） |
-| T4 | 国で絞る要件を前段のどこで満たすか（WAF か地理的制限か）。port-guard をいつ外すか |
-| T5 | B の場合、EC2 の証明書の更新の経路（[cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
+| T1 | 何のために移すのか → **WAF による防御**（2026-11-11 に決めた） |
+| T2 | A・B・C のどれにするか → **まず B（CloudFront → EC2）で進める**（2026-11-11 に決めた）。対象が多数の台なら、[ALB を共有する案](../notes/instance-provisioning/cloudfront-alb-front-options.md#今の運用物件ごとの単体のサーバーに当てはめた選択肢)も含めて考える |
+| T3 | `old_app_a` の扱い → **平文のまま残す相手はいない前提**（2026-11-11）。[443 番へ移す](./cloudfront-to-ec2-httpd.md#6-old_app_a-を-443-番へ移す) |
+| T4 | 国で絞る要件を前段のどこで満たすか → B は **WAF**（確認のパスだけを例外にする。2026-11-11 に決めた）。この移行の対象の台には port-guard を入れていない（port-guard-rollout の対象は別の台。2026-11-11）ので、port-guard を外す作業はない |
+| T5 | B の場合、EC2 の証明書の更新の経路 → **CloudFront と WAF を経た HTTP-01**（T4 の決定に伴う。[cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
 
 ## 参考
 

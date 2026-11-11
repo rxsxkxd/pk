@@ -28,12 +28,16 @@ alb_certificate_arn: arn:aws:acm:ap-northeast-1:111122223333:certificate/0000000
 # us-east-1 の ACM の証明書
 cloudfront_certificate_arn: arn:aws:acm:us-east-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
 
-# 付けないときは空のままにする
+# 付けないときは空のままにする。CloudFront 用は <prefix>-cloudfront-waf の出力 WebAclArn を書く
 alb_web_acl_arn: ""
 cloudfront_web_acl_arn: ""
 
-# CloudFront -> EC2 の地理的制限で許可する国。空のリスト [] にすると制限しない
-geo_restriction_countries: [JP]
+# CloudFront 用の web ACL（<prefix>-cloudfront-waf）で許可する国。
+# /.well-known/acme-challenge/ だけはどの国からも通す（EC2 の Let's Encrypt の HTTP-01 の更新のため）
+waf_allowed_countries: [JP]
+# CloudFront -> EC2 の地理的制限で許可する国。既定は空（制限しない）。国の絞り込みは上の WAF で行う。
+# 地理的制限で止めた要求は WAF に届かないので、ここに書くと HTTP-01 の更新が止まる
+geo_restriction_countries: []
 
 # CloudFront -> ALB -> EC2 だけで使う。DNS を CloudFront へ向けた後に true にする
 restrict_to_cloudfront: false

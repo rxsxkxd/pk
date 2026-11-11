@@ -2,7 +2,7 @@
 
 > 位置付け: [3 つの構成](./README.md)の ALB と CloudFront を、CloudFormation の YAML と CDK（Python）で定義したもの。同じ構成を 2 通りの書き方で置いている。
 >
-> 状態: **骨組み（AWS へのデプロイはしていない）**。YAML と CDK の出力は `cfn-lint` を通した。CDK は `aws-cdk-lib` 2.275.0 で合成し、`restrict_to_cloudfront` の両方の値と WAF を付けた場合を確かめた。合成の結果は YAML と内容を突き合わせた（下の「YAML と CDK の違い」）。
+> 状態: **骨組み（AWS へのデプロイはしていない）**。YAML と CDK の出力は `cfn-lint` を通した。CDK は `aws-cdk-lib` 2.275.0 で合成し、`restrict_to_cloudfront` の両方の値と WAF を付けた場合を確かめた。合成の結果は YAML と内容を突き合わせた（下の「YAML と CDK の違い」）。CloudFront 用の WAF の web ACL（2026-11-11 に追加）も、`cfn-lint` と合成で確かめた。
 >
 > 作成日: 2026-11-10
 
@@ -15,6 +15,7 @@
 | CloudFront → ALB → EC2 | `cloudformation/cloudfront-alb-to-ec2.yml` | `<prefix>-cloudfront-alb-to-ec2` |
 | CloudFront → EC2（[外部のドメイン名を変えない場合](./cloudfront-to-ec2-same-domain.md)） | `cloudformation/cloudfront-to-ec2-same-domain.yml` | `<prefix>-cloudfront-to-ec2-same-domain` |
 | 上の構成の外向きの ACM の証明書（`us-east-1`） | `cloudformation/cloudfront-to-ec2-same-domain-certificate.yml` | `<prefix>-cloudfront-certificate` |
+| CloudFront 用の WAF の web ACL（`us-east-1`。CloudFront → EC2 の国の絞り込み） | `cloudformation/cloudfront-waf.yml` | `<prefix>-cloudfront-waf` |
 
 ```
 cdk/python/
@@ -29,6 +30,7 @@ cdk/python/
       cloudfront_to_ec2.py
       cloudfront_to_ec2_same_domain.py
       cloudfront_certificate.py
+      cloudfront_waf.py
       cloudfront_alb_to_ec2.py
 ```
 
@@ -39,22 +41,76 @@ CDK は L2 で書いているので、論理 ID は CloudFormation の YAML と�
 | 種類 | リソース |
 |---|---|
 | ALB | ロードバランサー、ターゲットグループ（`new_app_b`: 8080 番、`old_app_a`: 80 番）、HTTPS・HTTP のリスナー、パスとヘッダーのルール |
-| CloudFront | ディストリビューション（HTTPS only、`CachingDisabled`、`AllViewer`、秘密のヘッダー）。CloudFront → EC2 の 2 つの定義は、地理的制限（既定は日本だけを許可）も含む |
+| CloudFront | ディストリビューション（HTTPS only、`CachingDisabled`、`AllViewer`、秘密のヘッダー）。CloudFront → EC2 の 2 つの定義は、地理的制限の設定も持つが、既定は使わない（国の絞り込みは WAF） |
 | セキュリティグループ | ALB 用、CloudFront → EC2 のオリジン用、既存のインスタンスのグループへの許可の追加 |
-| WAF | **関連付けだけ**（web ACL の ARN を渡したとき） |
+| WAF | 構成の定義は**関連付けだけ**（web ACL の ARN を渡したとき）。CloudFront 用の web ACL は `cloudfront-waf.yml`（下の「国の絞り込み（WAF）」） |
 
 ## 定義に含めないもの
 
 | もの | 理由・行うこと |
 |---|---|
 | ACM の証明書 | CloudFront 用は `us-east-1` に要り、スタックのリージョンと分かれる。先に作って ARN を渡す（外部のドメイン名を変えない構成は、`us-east-1` の証明書のスタックを別に用意している） |
-| WAF の web ACL | 中身のルールは要件次第。先に作って ARN を渡す。CloudFront 用は `us-east-1` |
+| ALB 用の WAF の web ACL | 中身のルールは要件次第。先に作って ARN を渡す（CloudFront 用は `cloudfront-waf.yml` を用意した） |
 | DNS のレコード | 切り替えの時点を担当者が決めるため。`origin.<ドメイン>` と本番の名前は別に用意する |
 | インスタンスへのセキュリティグループの付け替え | CloudFront → EC2 の出力 `OriginSecurityGroupId` を、既存のグループに**足して**付ける（`modify-instance-attribute --groups` は全部を置き換えるので、既存のグループも並べる） |
 | 静的なファイルのキャッシュ | 使うと決まってから足す |
 | CloudFront → ALB → EC2 の地理的制限 | 国で絞る方法を決めてから足す（CloudFront → EC2 だけ先に入れた） |
 
-**地理的制限（CloudFront → EC2）**: パラメータ `GeoRestrictionType`（既定 `whitelist`）と `GeoRestrictionCountries`（既定 `JP`）で決める。`GeoRestrictionType=none` で制限しない。CDK は設定値の `geo_restriction_countries`（既定 `[JP]`。空のリストで制限しない）。止めた要求には CloudFront が 403 を返す。**有効にすると、EC2 の Let's Encrypt の証明書を CloudFront 経由の HTTP-01 で更新できなくなる**（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)）。
+## 国の絞り込み（WAF）
+
+CloudFront → EC2 では、国の絞り込みを WAF で行う（2026-11-11 に決めた）。EC2 の Let's Encrypt の証明書を、CloudFront 経由の HTTP-01 で更新し続けるため、確認のパスだけはどの国からも通す。
+
+| ルール | 優先順位 | 条件 | 動作 |
+|---|---|---|---|
+| `AllowAcmeChallenge` | 0 | パスが `/.well-known/acme-challenge/` で始まる。比べる前に `URL_DECODE`、`NORMALIZE_PATH` の順で変換する | 通す（以降のルールは見ない） |
+| `BlockOutsideAllowedCountries` | 1 | 送り元の国が許可する国（既定 `JP`）にない | 止める（CloudFront が 403 を返す） |
+| 既定の動作 | — | どちらにも当たらない | 通す |
+
+- **変換の理由**: `/.well-known/acme-challenge/../../admin` や `%2e%2e` のように、例外のパスで始まって外へ出る要求を、例外に当てないため。`NORMALIZE_PATH` は重複したスラッシュ、`.`、`..` を取り除く
+- **CloudFront の地理的制限は使わない**: 地理的制限で止めた要求は WAF に届かないので、パスの例外を作れない。CloudFront → EC2 の 2 つの定義のパラメータ `GeoRestrictionType` の既定を `none` に変えた（CDK は `geo_restriction_countries` の既定を空に変えた）。`whitelist` にすると、HTTP-01 の更新が止まる
+- **国の判定**: 送り元の IP アドレス（CloudFront に接続した利用者）で行う。`X-Forwarded-For` は使わない（利用者が書き換えられるため）
+- **料金**: web ACL 1 つとルール 2 つで月 $7、100 万リクエストごとに $0.60（[README](./README.md#waf-を置ける場所)。2026-11-09 確認）
+- **httpd**: 443 番の VirtualHost に確認のパスの設定が要る（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)）
+- `CloudFrontWebAclArn` は空でもデプロイできる（その間は国で絞らない）。本番で空にしない
+
+**決めた前提（2026-11-11。定義にはまだ入れていない）**: 移す目的は WAF による防御。国の絞り込みに加えて、(1) 特定の IP を国の判定の例外にできるようにする、(2) WAF のログを残す、(3) AWS のマネージドルールを入れる。
+
+| パラメータ・設定値 | 内容 |
+|---|---|
+| `cloudfront-waf.yml` の `AllowedCountries` | 許可する国（ISO 3166-1 alpha-2。既定 `JP`） |
+| CDK の `waf_allowed_countries` | 同上（既定 `[JP]`。空はエラー） |
+
+### デプロイ
+
+```bash
+# 1. web ACL（us-east-1）
+aws cloudformation deploy --region us-east-1 \
+  --template-file cloudformation/cloudfront-waf.yml \
+  --stack-name <スタック名>-waf
+
+# 2. web ACL の ARN を確かめる
+aws cloudformation describe-stacks --region us-east-1 --stack-name <スタック名>-waf \
+  --query "Stacks[0].Outputs[?OutputKey=='WebAclArn'].OutputValue" --output text
+
+# 3. CloudFront のスタック（ap-northeast-1）に CloudFrontWebAclArn=<2 の ARN> を足して反映する
+```
+
+CDK では、`<prefix>-cloudfront-waf` を合成・デプロイし、出力の ARN を設定値の `cloudfront_web_acl_arn` に書いてから、CloudFront のスタックを合成する。
+
+### 確かめ方（AWS では未確認）
+
+海外のリージョン（例: `us-west-2`）の EC2 か Lambda と、国内から流す。`--path-as-is` は、curl が `..` を手元で消さないようにするため。
+
+| 送り元 | 要求 | 期待 |
+|---|---|---|
+| 海外 | `curl -sI https://app.example.com/` | 403（WAF） |
+| 海外 | `curl -sI https://app.example.com/.well-known/acme-challenge/test` | httpd の 404（WAF を通った） |
+| 海外 | `curl -sI --path-as-is https://app.example.com/.well-known/acme-challenge/../../` | 403 |
+| 海外 | `curl -sI --path-as-is https://app.example.com/.well-known/acme-challenge/%2e%2e/%2e%2e/` | 403 |
+| 国内 | `curl -sI https://app.example.com/` | アプリの応答 |
+| 稼働サーバー | `sudo certbot renew --dry-run` | 成功 |
+
+止めた件数と例は、web ACL の CloudWatch のメトリクスと、サンプルのリクエスト（`SampledRequestsEnabled`）で見られる。ログの保存は定義に含めていない。
 
 httpd の設定は別に要る（[ALB](./alb-to-ec2.md#3-httpd-に-http-の-virtualhost-を足す)、[CloudFront](./cloudfront-to-ec2-httpd.md)）。
 
@@ -102,6 +158,7 @@ CDK_CONTEXT_JSON='{"config":"config.yml"}' CDK_OUTDIR=cdk.out .venv/bin/python a
 | スタック | リージョン | 内容 |
 |---|---|---|
 | `cloudfront-to-ec2-same-domain-certificate.yml` | `us-east-1` | `app.example.com` の ACM の証明書 |
+| `cloudfront-waf.yml` | `us-east-1` | WAF の web ACL（[国の絞り込み](#国の絞り込みwaf)） |
 | `cloudfront-to-ec2-same-domain.yml` | `ap-northeast-1` | CloudFront、オリジン用のセキュリティグループ、`origin.app.example.com` の Route 53 のレコード（任意） |
 
 | パラメータ | 内容 |
@@ -122,19 +179,22 @@ aws cloudformation deploy --region us-east-1 \
 aws cloudformation describe-stacks --region us-east-1 --stack-name <スタック名>-certificate \
   --query "Stacks[0].Outputs[?OutputKey=='CertificateArn'].OutputValue" --output text
 
-# 3. CloudFront など（ap-northeast-1）。変更セットを確認してから反映する
+# 3. WAF の web ACL（us-east-1）を作り、ARN を確かめる（上の「国の絞り込み（WAF）」の 1・2）
+
+# 4. CloudFront など（ap-northeast-1）。変更セットを確認してから反映する
 aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
   --template-file cloudformation/cloudfront-to-ec2-same-domain.yml \
   --stack-name <スタック名> \
   --parameter-overrides VpcId=<VPC> CloudFrontPrefixListId=<pl-...> \
     DomainName=app.example.com OriginDomainName=origin.app.example.com \
-    CloudFrontCertificateArn=<2 の ARN> OriginVerifyHeaderValue=<秘密の値> \
+    CloudFrontCertificateArn=<2 の ARN> CloudFrontWebAclArn=<3 の ARN> \
+    OriginVerifyHeaderValue=<秘密の値> \
     OriginHostedZoneId=<ホストゾーン ID> OriginElasticIp=<Elastic IP>
 ```
 
 CloudFront のプレフィックスリストの ID は、上の `describe-managed-prefix-lists` に `--region ap-northeast-1` を付けて調べる。
 
-CDK では、`<prefix>-cloudfront-certificate` を先に合成・デプロイし、出力の ARN を設定値の `cloudfront_certificate_arn` に書いてから、`<prefix>-cloudfront-to-ec2-same-domain` を合成する。
+CDK では、`<prefix>-cloudfront-certificate` と `<prefix>-cloudfront-waf` を先に合成・デプロイし、出力の ARN を設定値の `cloudfront_certificate_arn` と `cloudfront_web_acl_arn` に書いてから、`<prefix>-cloudfront-to-ec2-same-domain` を合成する。
 
 ### 秘密のヘッダーの値
 
@@ -180,3 +240,10 @@ AWS のドキュメントと照らし合わせた（2026-11-09、2026-11-10）�
 - [AWS::EC2::SecurityGroup（既定の外向きの規則）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-securitygroup.html)
 - [AWS::EC2::SecurityGroupEgress](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-ec2-securitygroupegress.html)
 - [AWS::CertificateManager::Certificate（DNS 検証）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-certificatemanager-certificate.html)
+
+WAF は 2026-11-11 に照らし合わせた。
+
+- [AWS::WAFv2::WebACL（CLOUDFRONT は us-east-1 に作る、GetAtt の Arn）](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-wafv2-webacl.html)
+- [Geographic match rule statement（CloudFront の地理的制限で止めた要求は WAF に届かない、送り元の IP で判定）](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-geo-match.html)
+- [String match rule statement（Starts with、変換は並べた順に行う）](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-string-match.html)
+- [Using text transformations（URL_DECODE、NORMALIZE_PATH）](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-transformation.html)

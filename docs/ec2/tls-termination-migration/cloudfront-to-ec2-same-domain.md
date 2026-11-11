@@ -76,8 +76,8 @@ EC2 の証明書の更新の経路は、DNS の向き先が変わるので見直
 
 | 方法 | 内容 | 注意 |
 |---|---|---|
-| HTTP-01 を CloudFront 経由で続ける | Let's Encrypt の確認は `app.example.com` → CloudFront → EC2 の 443 番と届く | **地理的制限（この構成の既定）を有効にすると、海外からの確認が止まって使えない**。使うなら、地理的制限の代わりに WAF でこのパスを例外にする。httpd の 443 番に `/.well-known/acme-challenge` の設定が要る |
-| DNS-01 に変える | CloudFront の設定に左右されない | DNS の API の権限の持たせ方を決める |
+| **HTTP-01 を CloudFront 経由で続ける（採用。2026-11-11）** | Let's Encrypt の確認は `app.example.com` → CloudFront → EC2 の 443 番と届く | 国の絞り込みは WAF で行い、このパスだけを例外にする（地理的制限を使うと、海外からの確認が止まる）。httpd の 443 番に `/.well-known/acme-challenge` の設定が要る |
+| DNS-01 に変える（見送り） | CloudFront の設定に左右されない | DNS の API の権限の持たせ方を決める |
 
 詳しくは [証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)。
 
@@ -103,9 +103,20 @@ EC2 の証明書の更新の経路は、DNS の向き先が変わるので見直
 | Viewer protocol policy | Redirect HTTP to HTTPS | |
 | Allowed HTTP methods | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE | フォームと API のため |
 | Add custom header | `X-Origin-Verify: <長いランダムな値>` | CloudFront を通らない要求の見分け |
-| Geographic restrictions | 許可する国の一覧に `JP` だけ | 日本以外からの要求に 403 を返す（今の port-guard と同じ国の絞り込み）。追加の料金はかからない |
+| Geographic restrictions | 使わない | 止めた要求が WAF に届かず、確認のパスを例外にできないため |
+| AWS WAF | `us-east-1` の web ACL（下の WAF） | 日本以外からの要求に 403 を返す。`/.well-known/acme-challenge/` だけはどの国からも通す |
 
-定義は CloudFormation の [cloudfront-to-ec2-same-domain.yml](./cloudformation/cloudfront-to-ec2-same-domain.yml)（`ap-northeast-1`）と [cloudfront-to-ec2-same-domain-certificate.yml](./cloudformation/cloudfront-to-ec2-same-domain-certificate.yml)（ACM の証明書。`us-east-1`）、および同じ内容の CDK。使い方は [definitions.md](./definitions.md#cloudfront--ec2外部のドメイン名を変えない場合)。
+### WAF
+
+| ルール | 優先順位 | 条件 | 動作 |
+|---|---|---|---|
+| `AllowAcmeChallenge` | 0 | パスが `/.well-known/acme-challenge/` で始まる（URL のデコードとパスの正規化をしてから比べる） | 通す（以降のルールは見ない） |
+| `BlockOutsideAllowedCountries` | 1 | 送り元の国が `JP` 以外 | 止める（403） |
+| 既定の動作 | — | 上のどちらにも当たらない | 通す |
+
+デコードと正規化は、`/.well-known/acme-challenge/../../` や `%2e%2e` で例外のパスの外へ出る要求を、例外に当てないためである。
+
+定義は CloudFormation の [cloudfront-to-ec2-same-domain.yml](./cloudformation/cloudfront-to-ec2-same-domain.yml)（`ap-northeast-1`）と [cloudfront-to-ec2-same-domain-certificate.yml](./cloudformation/cloudfront-to-ec2-same-domain-certificate.yml)（ACM の証明書。`us-east-1`）、[cloudfront-waf.yml](./cloudformation/cloudfront-waf.yml)（web ACL。`us-east-1`）、および同じ内容の CDK。使い方は [definitions.md](./definitions.md#cloudfront--ec2外部のドメイン名を変えない場合)。
 
 ### EC2 のセキュリティグループ
 
@@ -159,10 +170,10 @@ curl -s https://ip-ranges.amazonaws.com/ip-ranges.json \
 | # | 作業 | 利用者への影響 |
 |---|---|---|
 | 1 | `app.example.com` の DNS の TTL を短くする | なし |
-| 2 | ACM の証明書を `us-east-1` に発行する（検証の CNAME を足す） | なし |
+| 2 | ACM の証明書と WAF の web ACL を `us-east-1` に作る（証明書は検証の CNAME を足す） | なし |
 | 3 | `origin.app.example.com` を作る | なし |
 | 4 | httpd に、秘密のヘッダーの確認**以外**の設定を入れる | なし |
-| 5 | セキュリティグループと port-guard で、CloudFront からの接続を通す（今の許可は残す） | なし |
+| 5 | セキュリティグループで、CloudFront からの接続を通す（今の許可は残す。この移行の対象の台には port-guard を入れていない） | なし |
 | 6 | CloudFront を作り、本番のドメイン名で確かめる（`curl --resolve`） | なし |
 | 7 | `app.example.com` を CloudFront へ向ける | 順次 CloudFront 経由になる |
 | 8 | 元の TTL より長く待つ | |
@@ -209,7 +220,8 @@ CloudFront の実際の範囲のアドレス（`130.176.88.20`）から、コン
 |---|---|
 | CloudFront の実際の動作 | 実際のディストリビューションで、`AllViewer` の Host の受け渡しと証明書の確認が、ドキュメントどおりに動くこと |
 | CloudFront が TLS で送る名前（SNI） | `AllViewer` のときに利用者のドメイン名を送るかは、AWS のドキュメントで確かめられなかった |
-| Let's Encrypt の更新 | CloudFront 経由の HTTP-01 が通ること（`sudo certbot renew --dry-run`） |
+| Let's Encrypt の更新 | CloudFront と WAF を経た HTTP-01 が通ること（`sudo certbot renew --dry-run`） |
+| WAF の例外 | 海外のリージョンの EC2 か Lambda から、[definitions.md の確かめ方](./definitions.md#国の絞り込みwaf)で、確認のパスだけが通り、ほかは 403 になること |
 | 本物のアプリ | Cookie、CSRF のトークン、ファイルのアップロードなど |
 
 本番の前に、別の環境で 1 度通して確かめる。
@@ -225,3 +237,4 @@ AWS のドキュメントと照らし合わせた（2026-11-09）。
 - [Routing traffic to a CloudFront distribution](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-to-cloudfront-distribution.html)
 - [AWS Certificate Manager DNS validation](https://docs.aws.amazon.com/acm/latest/userguide/dns-validation.html)
 - [AWS-managed prefix lists（weight）](https://docs.aws.amazon.com/vpc/latest/userguide/working-with-aws-managed-prefix-lists.html)
+- WAF は [definitions.md の参考](./definitions.md#参考)（2026-11-11）

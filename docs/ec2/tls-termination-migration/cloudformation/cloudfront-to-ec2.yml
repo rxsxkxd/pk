@@ -39,9 +39,12 @@ Parameters:
     MaxValue: 300
   GeoRestrictionType:
     Type: String
-    Default: whitelist
+    Default: none
     AllowedValues: [whitelist, none]
-    Description: whitelist allows only the countries in GeoRestrictionCountries. none disables the restriction.
+    Description: >-
+      none (default) leaves country filtering to the web ACL in CloudFrontWebAclArn (cloudfront-waf.yml).
+      whitelist allows only GeoRestrictionCountries, but it also blocks the Let's Encrypt HTTP-01
+      validation of the origin certificate, because blocked requests never reach AWS WAF.
   GeoRestrictionCountries:
     Type: CommaDelimitedList
     Default: JP
@@ -49,7 +52,9 @@ Parameters:
   CloudFrontWebAclArn:
     Type: String
     Default: ""
-    Description: Optional. AWS WAF web ACL created in us-east-1 (CLOUDFRONT scope).
+    Description: >-
+      AWS WAF web ACL created in us-east-1 (CLOUDFRONT scope), such as WebAclArn of cloudfront-waf.yml.
+      Empty means no web ACL.
 
 Conditions:
   HasGeoRestriction:

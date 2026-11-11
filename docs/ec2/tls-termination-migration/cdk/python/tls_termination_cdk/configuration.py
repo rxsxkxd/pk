@@ -50,8 +50,12 @@ class Configuration:
     certificate_hosted_zone_id: str = ""
     origin_hosted_zone_id: str = ""
     origin_elastic_ip: str = ""
-    # CloudFront -> EC2 の地理的制限で許可する国（ISO 3166-1 alpha-2）。空にすると制限しない
-    geo_restriction_countries: list[str] = field(default_factory=lambda: ["JP"])
+    # CloudFront -> EC2 の地理的制限で許可する国（ISO 3166-1 alpha-2）。既定は空で、制限しない。
+    # 国の絞り込みは WAF（waf_allowed_countries）で行う。地理的制限で止めた要求は WAF に届かないので、
+    # 地理的制限を使うと、EC2 の Let's Encrypt の証明書を HTTP-01 で更新できなくなる
+    geo_restriction_countries: list[str] = field(default_factory=list)
+    # CloudFront 用の web ACL（<prefix>-cloudfront-waf）で許可する国
+    waf_allowed_countries: list[str] = field(default_factory=lambda: ["JP"])
     restrict_to_cloudfront: bool = False
     new_app_port: int = 8080
     old_app_port: int = 80
@@ -84,4 +88,6 @@ def load_configuration(path: str) -> Configuration:
         raise ConfigurationError("origin_domain_name は domain_name と別の名前にしてください")
     if configuration.origin_hosted_zone_id and not configuration.origin_elastic_ip:
         raise ConfigurationError("origin_hosted_zone_id を指定するときは origin_elastic_ip も必要です")
+    if not configuration.waf_allowed_countries:
+        raise ConfigurationError("waf_allowed_countries に許可する国を 1 つ以上書いてください")
     return configuration

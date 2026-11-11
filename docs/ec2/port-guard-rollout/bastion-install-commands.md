@@ -38,7 +38,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 | 項目 | 内容 |
 |---|---|
 | 流し方 | 上の「流し方」。複数台へは、踏み台サーバーにある今のスクリプトで |
-| ファイルの置き場所（踏み台サーバー） | 踏み台サーバーのカレントのフォルダの下に置く。**`command/` の直下には、踏み台サーバーで実行するものだけ**（ステップ 0-1 の `make-jp-lists.sh`、ステップ 0-3 の `make-aws-lists.sh`、ステップ 3-1 の `make-ipset-files-ipv4.sh`・`make-ipset-files-ipv6.sh`、一覧を新しくするときの `make-refresh.sh`、証明書の期限の確認の `cert-expiry-check.sh`）。**`command/port_guard/` の下には、対象のサーバーに送るものだけ**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 3 で作る `03-*.sh`、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくするときに作る `refresh-ipv4.sh`・`refresh-ipv6.sh`、保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するものは、カレントのフォルダで `bash command/<ファイル>.sh` と実行する（中で使う `port_guard_whitelists/` と `command/port_guard/` は、カレントのフォルダから見た場所）。一覧は `port_guard_whitelists/` |
+| ファイルの置き場所（踏み台サーバー） | 踏み台サーバーのカレントのフォルダの下に置く。**`command/` の直下には、踏み台サーバーで実行するものだけ**（ステップ 0-1 の `make-jp-lists.sh`、ステップ 0-3 の `make-aws-lists.sh`、ステップ 3-1 の `make-ipset-files-ipv4.sh`・`make-ipset-files-ipv6.sh`、一覧を新しくするときの `make-refresh.sh`、証明書の期限の確認の `cert-expiry-check.sh`）。**`command/port_guard/` の下には、対象のサーバーに送るものだけ**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 3 で作る `03-*.sh`、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくするときに作る `refresh-ipv4.sh`・`refresh-ipv6.sh`、保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、検証で集合の中身を書き出す `export-ipv4.sh`・`export-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するものは、カレントのフォルダで `bash command/<ファイル>.sh` と実行する（中で使う `port_guard_whitelists/` と `command/port_guard/` は、カレントのフォルダから見た場所）。一覧は `port_guard_whitelists/` |
 | 日本の範囲の一覧を作る場所 | **踏み台サーバー**（IPv4 と IPv6）。対象のサーバーは APNIC に取りに行かない（対象のサーバーに `curl`・`python3` は要らない） |
 | 一覧の渡し方 | 一覧を、ステップ 3 のファイルの中に `ipset` に読ませる行（`add <集合> <範囲>`）として並べて送る。そのファイルは、踏み台サーバーで一覧から `command/make-ipset-files-ipv4.sh`（IPv6 は `-ipv6.sh`）で作る |
 | 実行する人 | `centos`。`root` の権限が要るコマンドは `sudo -n` |
@@ -1358,6 +1358,83 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 ```
 
 `save-ipv4.sh` の代わりに、`05-persist-ipv4.sh` を丸ごと流し直してもよい（保存の 3 行に加えて、起動時のコマンドの並びのファイルを同じ中身で置き直すだけ）。ステップ 6 まで流していない（永続化していない）台では、要らない。
+
+### 更新の前後で、1 台の ipset の集合の中身を書き出す（リリース前の検証）
+
+リリース前の検証で、1 台について、一覧の入れ替え（`refresh-ipv4.sh`）の前と後に、カーネルの中の ipset の集合の中身を書き出す。書き出したファイルは作業者の PC に落として、比べたり、作業者の PC の git で残したりする（踏み台サーバーでは比べない・残さない）。**読み取りだけで、何も変えない**。
+
+`command/port_guard/export-ipv4.sh`:
+
+```bash
+#!/bin/bash
+# ipset の集合（IPv4）の中身を、1 行 1 件（集合の名前 範囲）で並べ替えて書き出す（読み取りだけ）
+set -euo pipefail
+echo "# host: $(hostname)  exported: $(date '+%FT%T%z')"
+sudo -n ipset save port_guard_jp | awk '$1 == "add" { print $2, $3 }' | LC_ALL=C sort
+sudo -n ipset save port_guard_allow | awk '$1 == "add" { print $2, $3 }' | LC_ALL=C sort
+sudo -n ipset save port_guard_aws | awk '$1 == "add" { print $2, $3 }' | LC_ALL=C sort
+```
+
+`command/port_guard/export-ipv6.sh`（IPv6 も絞っている台だけ）:
+
+```bash
+#!/bin/bash
+# ipset の集合（IPv6）の中身を、1 行 1 件（集合の名前 範囲）で並べ替えて書き出す（読み取りだけ）
+set -euo pipefail
+echo "# host: $(hostname)  exported: $(date '+%FT%T%z')"
+sudo -n ipset save port_guard_jp6 | awk '$1 == "add" { print $2, $3 }' | LC_ALL=C sort
+sudo -n ipset save port_guard_allow6 | awk '$1 == "add" { print $2, $3 }' | LC_ALL=C sort
+sudo -n ipset save port_guard_aws6 | awk '$1 == "add" { print $2, $3 }' | LC_ALL=C sort
+```
+
+書き出したものの形:
+
+```
+# host: web01  exported: 2026-11-11T10:00:00+0900
+port_guard_jp 1.0.16.0/20
+port_guard_jp 1.0.64.0/18
+...
+port_guard_allow 10.0.0.0/16
+...
+port_guard_aws 15.152.0.0/16
+...
+```
+
+| 行 | 意味 |
+|---|---|
+| `ipset save <集合>` | 集合を作る行（`create ...`）と、中身の行（`add <集合> <範囲>`）を書き出す |
+| `awk '$1 == "add" { print $2, $3 }'` | 中身の行だけを残し、「集合の名前 範囲」にする。`create` の行は、中身と関係なく変わる値（`hashsize` など）を含むので、比べるときの雑音にならないように落とす |
+| `LC_ALL=C sort` | 並べ替える（ipset が書き出す順は決まっていないので、前後で比べられるように） |
+
+**流し方**（踏み台サーバーで。`<台>` は検証する 1 台）:
+
+```bash
+# 1. 更新の前に書き出す
+ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@<台> 'bash' < ./command/port_guard/export-ipv4.sh > ./output/ipset-<台>-ipv4-before.txt
+
+# 2. 一覧を入れ替える（「一覧を新しくするとき」の 3）
+ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@<台> 'bash' < ./command/port_guard/refresh-ipv4.sh >> ./output/result.txt
+
+# 3. 更新の後に書き出す
+ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@<台> 'bash' < ./command/port_guard/export-ipv4.sh > ./output/ipset-<台>-ipv4-after.txt
+```
+
+IPv6 も絞っている台は、`export-ipv6.sh` で同じように書き出す（ファイルの名前は `-ipv6-before.txt`・`-ipv6-after.txt`）。書き出しは `>>`（書き足す）ではなく `>`（作り直す）で受ける。
+
+**作業者の PC で比べる例**（踏み台サーバーから `scp` で落とした後）:
+
+```bash
+# 更新の前と後の差分（足された行は +、消えた行は -）
+diff -u ipset-<台>-ipv4-before.txt ipset-<台>-ipv4-after.txt
+
+# 配った一覧（踏み台サーバーの port_guard_whitelists/last-refresh/jp-ipv4.txt を落としたもの）と、入った中身が同じか（何も出なければ同じ）
+grep '^port_guard_jp ' ipset-<台>-ipv4-after.txt | cut -d' ' -f2 | LC_ALL=C sort | diff - jp-ipv4.txt
+```
+
+| 点 | 内容 |
+|---|---|
+| 書き方の違い | 1 つのアドレスを一覧に `/32` 付きで書いた場合、ipset の書き出しには `/32` が付かないかもしれず、その場合は配った一覧との比べで違いとして出る（ipset の実際の書き出しの形は、まだ確かめていない） |
+| 個人に関わる情報 | 書き出したものには、VPC の範囲や許可の相手が入る。`pk` のリポジトリには入れない |
 
 ## 前の版の手順で入れた台に、AWS の東京と大阪の許可を足す
 

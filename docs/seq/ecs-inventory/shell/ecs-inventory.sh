@@ -1,105 +1,53 @@
 #!/usr/bin/env bash
-# ECS のサービスとコンテナインスタンスを 1 件 1 行の JSONL で出力する
-#
-# API 呼び出しは ListClusters と、クラスターごとの ListServices / ListContainerInstances（ページ分）、
-# それを 10 件（サービス）・100 件（コンテナインスタンス）ずつまとめた Describe 系、
-# 使われているタスク定義ごとの DescribeTaskDefinition だけ。出力の項目は ../README.md を参照。
-set -euo pipefail
+# ECS のサービスとコンテナインスタンスの棚卸し（シェル版）。使い方は ../README.md、出力の項目は ../DATA.md を参照。
+TOOL=ecs-inventory.sh
+SNAPSHOT_USAGE='[--cluster NAME]...'
+DETAIL_KINDS='task_definition:ecs_service tasks:ecs_service'
+# shellcheck source=/dev/null
+source "$(dirname "$0")/lib.sh"
 
-for cmd in aws jq; do
-  command -v "$cmd" >/dev/null || { echo "$cmd が必要です" >&2; exit 1; }
-done
+snapshot_main() {
+  local clusters=() cluster arns
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --cluster) clusters+=("$2"); shift 2 ;;
+      *) usage ;;
+    esac
+  done
+  if [ ${#clusters[@]} -eq 0 ]; then
+    aws_json ecs list-clusters | jq -r '.clusterArns[]' >"$work/clusters.txt"
+  else
+    printf '%s\n' "${clusters[@]}" >"$work/clusters.txt"
+  fi
 
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+  : >"$work/services.jsonl"
+  : >"$work/container-instances.jsonl"
+  while read -r cluster; do
+    aws_json ecs list-services --cluster "$cluster" | jq '.serviceArns' | chunks 10 |
+      while read -r arns; do
+        # shellcheck disable=SC2086 # ARN を別々の引数として渡す
+        aws_json ecs describe-services --cluster "$cluster" --services $arns --include TAGS | jq -c '.services[]'
+      done >>"$work/services.jsonl"
 
-# CLI のエラー文から 操作名・コード・本文 を取り出す（$1: 取り出せないときの操作名, $2: stderr のファイル）
-cli_error() {
-  jq -nc --arg op "$1" --arg err "$(<"$2")" '
-    ($err | capture("\\((?<code>[^)]+)\\) when calling the (?<operation>[A-Za-z]+) operation: (?<message>.*)"))
-      // {operation: $op, code: "Unknown", message: $err}
-    | {operation, code, message}'
-}
+    # コンテナインスタンスの応答にはクラスターが入っていないので足しておく
+    aws_json ecs list-container-instances --cluster "$cluster" | jq '.containerInstanceArns' | chunks 100 |
+      while read -r arns; do
+        # shellcheck disable=SC2086
+        aws_json ecs describe-container-instances --cluster "$cluster" --container-instances $arns |
+          jq -c --arg cluster "$cluster" '.containerInstances[] | . + {clusterArn: $cluster}'
+      done >>"$work/container-instances.jsonl"
+  done <"$work/clusters.txt"
 
-# 配列を n 件ずつ空白区切りの 1 行にする
-chunks() {
-  jq -r --argjson n "$1" ". as \$a | range(0; length; \$n) | \$a[.:. + \$n] | join(\" \")"
-}
+  jq -c -n \
+    --argjson common "$common" \
+    --slurpfile services "$work/services.jsonl" \
+    --slurpfile instances "$work/container-instances.jsonl" "$jq_lib"'
+    def cluster_name: split("/")[-1];
+    def attribute($name): first(.attributes[]? | select(.name == $name) | .value) // null;
 
-aws ecs list-clusters --output json | jq -r '.clusterArns[]' >"$work/clusters.txt"
-
-: >"$work/services.jsonl"
-: >"$work/container-instances.jsonl"
-while read -r cluster; do
-  aws ecs list-services --cluster "$cluster" --output json </dev/null | jq '.serviceArns' | chunks 10 |
-    while read -r arns; do
-      # shellcheck disable=SC2086 # ARN を別々の引数として渡す
-      aws ecs describe-services --cluster "$cluster" --services $arns --output json </dev/null | jq -c '.services[]'
-    done >>"$work/services.jsonl"
-
-  # コンテナインスタンスの応答にはクラスターが入っていないので足しておく
-  aws ecs list-container-instances --cluster "$cluster" --output json </dev/null | jq '.containerInstanceArns' | chunks 100 |
-    while read -r arns; do
-      # shellcheck disable=SC2086
-      aws ecs describe-container-instances --cluster "$cluster" --container-instances $arns --output json </dev/null |
-        jq -c --arg cluster "$cluster" '.containerInstances[] | . + {clusterArn: $cluster}'
-    done >>"$work/container-instances.jsonl"
-done <"$work/clusters.txt"
-
-# タスク定義は、サービスが使っているものだけを 1 回ずつ引く。
-# 取れなかったものは、そのサービスの errors に記録して続ける
-jq -r '.taskDefinition' "$work/services.jsonl" | sort -u |
-  while read -r arn; do
-    if aws ecs describe-task-definition --task-definition "$arn" --output json >"$work/td.json" 2>"$work/err" </dev/null; then
-      jq -c --arg arn "$arn" '{arn: $arn, task_definition: .taskDefinition, error: null}' "$work/td.json"
-    else
-      jq -nc --arg arn "$arn" --argjson error "$(cli_error DescribeTaskDefinition "$work/err")" \
-        '{arn: $arn, task_definition: null, error: $error}'
-    fi
-  done >"$work/task-definitions.jsonl"
-
-jq -c -n \
-  --slurpfile services "$work/services.jsonl" \
-  --slurpfile instances "$work/container-instances.jsonl" \
-  --slurpfile task_definitions "$work/task-definitions.jsonl" '
-  # CLI の日時（ISO 8601 のタイムゾーン付き、または設定によってはエポック秒）を UTC の秒単位にそろえる
-  def utc_iso:
-    if . == null then null
-    elif type == "number" then floor | todate
-    else
-      (capture("^(?<dt>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(\\.[0-9]+)?(?<tz>Z|[+-][0-9]{2}:?[0-9]{2})$") // null) as $m
-      | if $m == null then .
-        else
-          ($m.tz | if . == "Z" then 0
-                   else (if startswith("-") then -1 else 1 end) * ((.[1:3] | tonumber) * 3600 + (.[-2:] | tonumber) * 60)
-                   end) as $offset
-          | ($m.dt + "Z" | fromdateiso8601) - $offset | todate
-        end
-    end;
-
-  def cluster_name: split("/")[-1];
-
-  def attribute($name): first(.attributes[]? | select(.name == $name) | .value) // null;
-
-  def container:
-    {
-      name,
-      image,
-      essential,
-      cpu,
-      memory,
-      memory_reservation: .memoryReservation,
-      port_mappings: [.portMappings[]? | {container_port: .containerPort, host_port: .hostPort, protocol}],
-      log_driver: .logConfiguration.logDriver
-    };
-
-  ($task_definitions | map({key: .arn, value: .}) | from_entries) as $td_by_arn
-  | (
+    (
       $services[]
-      | $td_by_arn[.taskDefinition] as $entry
-      | ($entry.task_definition // {}) as $td
-      | {
-          record_type: "service",
+      | record("ecs_service"; {
           cluster_name: (.clusterArn | cluster_name),
           service_name: .serviceName,
           service_arn: .serviceArn,
@@ -113,23 +61,10 @@ jq -c -n \
           running_count: .runningCount,
           pending_count: .pendingCount,
           task_definition: .taskDefinition,
-          cpu: $td.cpu,
-          memory: $td.memory,
-          os_family: $td.runtimePlatform.operatingSystemFamily,
-          cpu_architecture: $td.runtimePlatform.cpuArchitecture,
-          network_mode: $td.networkMode,
-          requires_compatibilities: ($td.requiresCompatibilities // []),
-          task_role_arn: $td.taskRoleArn,
-          execution_role_arn: $td.executionRoleArn,
-          containers: [$td.containerDefinitions[]? | container],
           load_balancers: [
             .loadBalancers[]?
-            | {
-                target_group_arn: .targetGroupArn,
-                load_balancer_name: .loadBalancerName,
-                container_name: .containerName,
-                container_port: .containerPort
-              }
+            | {target_group_arn: .targetGroupArn, load_balancer_name: .loadBalancerName,
+               container_name: .containerName, container_port: .containerPort}
           ],
           service_registries: [.serviceRegistries[]?.registryArn],
           network: (
@@ -139,18 +74,16 @@ jq -c -n \
               end
           ),
           deployment_circuit_breaker: (
-            .deploymentConfiguration.deploymentCircuitBreaker
-            | if . == null then null else {enable, rollback} end
+            .deploymentConfiguration.deploymentCircuitBreaker | if . == null then null else {enable, rollback} end
           ),
           enable_execute_command: .enableExecuteCommand,
           created_at: (.createdAt | utc_iso),
-          errors: [$entry.error | select(. != null)]
-        }
+          tags: (.tags | tags_object)
+        })
     ),
     (
       $instances[]
-      | {
-          record_type: "container_instance",
+      | record("ecs_container_instance"; {
           cluster_name: (.clusterArn | cluster_name),
           container_instance_arn: .containerInstanceArn,
           ec2_instance_id: .ec2InstanceId,
@@ -166,7 +99,65 @@ jq -c -n \
           capacity_provider_name: .capacityProviderName,
           running_tasks_count: .runningTasksCount,
           pending_tasks_count: .pendingTasksCount,
-          registered_at: (.registeredAt | utc_iso),
-          errors: []
-        }
+          registered_at: (.registeredAt | utc_iso)
+        })
     )'
+}
+
+describe_task_definition() { aws_paced ecs describe-task-definition --task-definition "$1"; }
+
+# タスク定義の要約。同じタスク定義は 1 回だけ引く
+detail_task_definition() {
+  local arn
+  arn=$(jq -r '.task_definition' <<<"$1")
+  cached "td-$arn" describe_task_definition "$arn" | jq -c '.taskDefinition | {
+    family,
+    revision,
+    status,
+    cpu,
+    memory,
+    os_family: .runtimePlatform.operatingSystemFamily,
+    cpu_architecture: .runtimePlatform.cpuArchitecture,
+    network_mode: .networkMode,
+    requires_compatibilities: (.requiresCompatibilities // []),
+    task_role_arn: .taskRoleArn,
+    execution_role_arn: .executionRoleArn,
+    containers: [
+      .containerDefinitions[]
+      | {
+          name,
+          image,
+          essential,
+          cpu,
+          memory,
+          memory_reservation: .memoryReservation,
+          port_mappings: [.portMappings[]? | {container_port: .containerPort, host_port: .hostPort, protocol}],
+          log_driver: .logConfiguration.logDriver
+        }
+    ]
+  }'
+}
+
+# サービスのタスクと、それが動いているホスト
+detail_tasks() {
+  local cluster service arns
+  cluster=$(jq -r '.cluster_name' <<<"$1")
+  service=$(jq -r '.service_name' <<<"$1")
+  aws_paced ecs list-tasks --cluster "$cluster" --service-name "$service" | jq '.taskArns' | chunks 100 |
+    while read -r arns; do
+      # shellcheck disable=SC2086
+      aws_paced ecs describe-tasks --cluster "$cluster" --tasks $arns | jq -c '.tasks[]' || exit 1
+    done | jq -s -c "$jq_lib"'map({
+      task_arn: .taskArn,
+      task_definition: .taskDefinitionArn,
+      last_status: .lastStatus,
+      desired_status: .desiredStatus,
+      health_status: .healthStatus,
+      launch_type: .launchType,
+      container_instance_arn: .containerInstanceArn,
+      availability_zone: .availabilityZone,
+      started_at: (.startedAt | utc_iso)
+    })'
+}
+
+run_main "$@"

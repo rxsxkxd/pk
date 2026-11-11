@@ -1,0 +1,10 @@
+[
+  { "pattern": "^aws/codebuild/amazonlinux-(x86_64|aarch64)-standard:", "os": "Amazon Linux 2023" },
+  { "pattern": "^aws/codebuild/amazonlinux2-(x86_64|aarch64)-standard:", "os": "Amazon Linux 2" },
+  { "pattern": "^aws/codebuild/standard:7\\.0", "os": "Ubuntu 22.04" },
+  { "pattern": "^aws/codebuild/standard:6\\.0", "os": "Ubuntu 22.04" },
+  { "pattern": "^aws/codebuild/standard:5\\.0", "os": "Ubuntu 20.04" },
+  { "pattern": "^aws/codebuild/standard:4\\.0", "os": "Ubuntu 20.04" },
+  { "pattern": "^aws/codebuild/windows-base:2022-", "os": "Windows Server 2022" },
+  { "pattern": "^aws/codebuild/windows-base:2019-", "os": "Windows Server 2019" }
+]

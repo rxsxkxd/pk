@@ -1,0 +1,23 @@
+[
+  { "pattern": "^al2023-ami-", "os": "Amazon Linux 2023" },
+  { "pattern": "^amzn2-ami-", "os": "Amazon Linux 2" },
+  { "pattern": "^amzn-ami-", "os": "Amazon Linux" },
+  { "pattern": "^amazon-eks-node-al2023-", "os": "Amazon Linux 2023" },
+  { "pattern": "^amazon-eks-node-", "os": "Amazon Linux 2" },
+  { "pattern": "^bottlerocket-", "os": "Bottlerocket" },
+  { "pattern": "ubuntu-noble-24\\.04", "os": "Ubuntu 24.04" },
+  { "pattern": "ubuntu-jammy-22\\.04", "os": "Ubuntu 22.04" },
+  { "pattern": "ubuntu-focal-20\\.04", "os": "Ubuntu 20.04" },
+  { "pattern": "ubuntu-bionic-18\\.04", "os": "Ubuntu 18.04" },
+  { "pattern": "^debian-13-", "os": "Debian 13" },
+  { "pattern": "^debian-12-", "os": "Debian 12" },
+  { "pattern": "^debian-11-", "os": "Debian 11" },
+  { "pattern": "^RHEL-10\\.", "os": "Red Hat Enterprise Linux 10" },
+  { "pattern": "^RHEL-9\\.", "os": "Red Hat Enterprise Linux 9" },
+  { "pattern": "^RHEL-8\\.", "os": "Red Hat Enterprise Linux 8" },
+  { "pattern": "^suse-sles-15-", "os": "SUSE Linux Enterprise Server 15" },
+  { "pattern": "^Windows_Server-2025-", "os": "Windows Server 2025" },
+  { "pattern": "^Windows_Server-2022-", "os": "Windows Server 2022" },
+  { "pattern": "^Windows_Server-2019-", "os": "Windows Server 2019" },
+  { "pattern": "^Windows_Server-2016-", "os": "Windows Server 2016" }
+]

@@ -440,7 +440,7 @@ Number of entries: 0
 | 3-1 | **踏み台サーバー**（カレントのフォルダ。対象のサーバーには送らない） | `command/make-ipset-files-ipv4.sh`（IPv6 も絞るなら `-ipv6.sh` も） | 踏み台サーバーに `command/port_guard/03-jp-ipv4.sh`・`03-allow-ipv4.sh`・`03-aws-ipv4.sh`（IPv6 も絞るなら `03-jp-ipv6.sh`・`03-allow-ipv6.sh`・`03-aws-ipv6.sh`）が作られる |
 | 3-3 | **各サーバー**（踏み台サーバーにある今のスクリプトで、複数台に当て込む） | 3-1 で作られた `command/port_guard/03-*.sh` | 各サーバーの ipset の集合に、一覧が入る |
 
-### 3-1. 踏み台サーバーで、ファイルを作る
+### 3-1. 踏み台サーバーで、ファイルを作る（`command/make-ipset-files-ipv4.sh`・`make-ipset-files-ipv6.sh`）
 
 **踏み台サーバーのカレントのフォルダで**、次のスクリプトを実行する（一覧の `#` から後のコメントと、空の行は除く）。これらは対象のサーバーには送らない。実行すると、対象のサーバーに送るファイルが `command/port_guard/` に作られる。
 

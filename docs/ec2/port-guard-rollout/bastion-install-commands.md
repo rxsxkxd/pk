@@ -38,9 +38,9 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 | 項目 | 内容 |
 |---|---|
 | 流し方 | 上の「流し方」。複数台へは、踏み台サーバーにある今のスクリプトで |
-| ファイルの置き場所（踏み台サーバー） | **`command/port_guard/` の下には、対象のサーバーに送るファイルだけを置く**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくするときの `refresh-ipv4.sh`・`refresh-ipv6.sh`、保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するもの（ステップ 0-1 の `make-jp-lists.sh`、ステップ 0-3 の `make-aws-lists.sh`、一覧を新しくするときの `make-refresh.sh`、ステップ 3-1 の 1 行ずつのコマンド）は、カレントのフォルダに置く・カレントのフォルダで実行する。一覧は `port_guard_whitelists/` |
+| ファイルの置き場所（踏み台サーバー） | 踏み台サーバーのカレントのフォルダの下に置く。**`command/` の直下には、踏み台サーバーで実行するものだけ**（ステップ 0-1 の `make-jp-lists.sh`、ステップ 0-3 の `make-aws-lists.sh`、ステップ 3-1 の `make-ipset-files-ipv4.sh`・`make-ipset-files-ipv6.sh`、一覧を新しくするときの `make-refresh.sh`、証明書の期限の確認の `cert-expiry-check.sh`）。**`command/port_guard/` の下には、対象のサーバーに送るものだけ**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 3 で作る `03-*.sh`、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくするときに作る `refresh-ipv4.sh`・`refresh-ipv6.sh`、保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するものは、カレントのフォルダで `bash command/<ファイル>.sh` と実行する（中で使う `port_guard_whitelists/` と `command/port_guard/` は、カレントのフォルダから見た場所）。一覧は `port_guard_whitelists/` |
 | 日本の範囲の一覧を作る場所 | **踏み台サーバー**（IPv4 と IPv6）。対象のサーバーは APNIC に取りに行かない（対象のサーバーに `curl`・`python3` は要らない） |
-| 一覧の渡し方 | 一覧を、ステップ 3 のファイルの中に `ipset` に読ませる行（`add <集合> <範囲>`）として並べて送る。そのファイルは、踏み台サーバーで一覧から 1 行のコマンドで作る |
+| 一覧の渡し方 | 一覧を、ステップ 3 のファイルの中に `ipset` に読ませる行（`add <集合> <範囲>`）として並べて送る。そのファイルは、踏み台サーバーで一覧から `command/make-ipset-files-ipv4.sh`（IPv6 は `-ipv6.sh`）で作る |
 | 実行する人 | `centos`。`root` の権限が要るコマンドは `sudo -n` |
 | 絞るポート | 80・443 番。22 番は絞らない |
 | IPv6 | 対象のサーバーに IPv6 のアドレスがあり、セキュリティグループで IPv6 の 80・443 番を通しているときだけ要る。**IPv6 の分は、どのステップも別のファイル**（名前が `-ipv6.sh` で終わるもの）にしているので、IPv6 を絞らないなら流さない |
@@ -75,10 +75,10 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 
 | ステップ | どこで | ファイル | すること | このステップの後の状態 |
 |---|---|---|---|---|
-| 0 | 踏み台サーバー（VPC の範囲を調べるときだけ対象のサーバー） | `make-jp-lists.sh`・`make-aws-lists.sh`・`command/port_guard/00-vpc-cidr.sh` | 踏み台サーバーが、APNIC の一覧から日本の IPv4・IPv6 の範囲の一覧を、AWS の一覧から東京と大阪の範囲の一覧を作る。許可する IP アドレスの一覧（VPC の範囲を含む）を作業者が書く | 対象のサーバーは何も変わらない |
+| 0 | 踏み台サーバー（VPC の範囲を調べるときだけ対象のサーバー） | `command/make-jp-lists.sh`・`command/make-aws-lists.sh`・`command/port_guard/00-vpc-cidr.sh` | 踏み台サーバーが、APNIC の一覧から日本の IPv4・IPv6 の範囲の一覧を、AWS の一覧から東京と大阪の範囲の一覧を作る。許可する IP アドレスの一覧（VPC の範囲を含む）を作業者が書く | 対象のサーバーは何も変わらない |
 | 1 | 対象のサーバー | `command/port_guard/01-install.sh` | 対象のサーバーに ipset を入れ、邪魔になるものがないかを確かめる（iptables は最初から入っている） | 通信は今までどおり |
 | 2 | 対象のサーバー | `command/port_guard/02-sets-ipv4.sh`（IPv6 は `-ipv6.sh`） | 対象のサーバーに、ipset の空の集合を作る | 通信は今までどおり |
-| 3 | ファイルを作るコマンドは踏み台サーバーで実行し、作られたファイルは踏み台サーバーにある今のスクリプトで各サーバーに流す | `command/port_guard/03-jp-ipv4.sh`・`03-allow-ipv4.sh`・`03-aws-ipv4.sh`（IPv6 は `-ipv6.sh`） | 対象のサーバーの ipset の集合に、一覧を入れる | 通信は今までどおり（ipset の集合はルールから参照されるまで何もしない） |
+| 3 | ファイルを作るスクリプト（`command/make-ipset-files-ipv4.sh`）は踏み台サーバーで実行し、作られたファイルは踏み台サーバーにある今のスクリプトで各サーバーに流す | `command/port_guard/03-jp-ipv4.sh`・`03-allow-ipv4.sh`・`03-aws-ipv4.sh`（IPv6 は `-ipv6.sh`） | 対象のサーバーの ipset の集合に、一覧を入れる | 通信は今までどおり（ipset の集合はルールから参照されるまで何もしない） |
 | 4 | 対象のサーバー | `command/port_guard/04-rules-ipv4.sh`（IPv6 は `-ipv6.sh`） | 対象のサーバーに iptables のルールを入れる | **ここから 80・443 番の絞り込みが効く**（再起動すると消える） |
 | 5 | 対象のサーバー | `command/port_guard/05-persist-ipv4.sh`（IPv6 は `-ipv6.sh`） | 対象のサーバーで、ipset の集合をファイルに保存し、起動時に入れ直すコマンドの並びを置く | 再起動するとまだ消える（ステップ 6 で有効にする） |
 | 6 | 対象のサーバー | `command/port_guard/06-service.sh` | 対象のサーバーに、起動時に動くサービス `port-guard.service` を置いて有効にする | **再起動の後も効く** |
@@ -116,7 +116,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 - **IPv6** は「先頭のアドレス」と「CIDR の長さ」で書かれているので、`/` でつなぐだけで CIDR になる（例: `2001:200::` と `35` → `2001:200::/35`）
 - **IPv4** は「先頭のアドレス」と「個数」で書かれている。個数は 2 のべき乗（256、512、1024…）とは限らないので、CIDR で書ける区切りに分ける。例: 先頭 `10.0.0.0`・個数 768 → `10.0.0.0/23`（512 個）と `10.0.2.0/24`（256 個）。下の `while` の部分が、この分け方をしている（先頭から、区切りのよい、なるべく大きな塊を切り出していく）
 
-`make-jp-lists.sh`（踏み台サーバーで `bash make-jp-lists.sh` と実行する）:
+`command/make-jp-lists.sh`（踏み台サーバーのカレントのフォルダで `bash command/make-jp-lists.sh` と実行する）:
 
 ```bash
 #!/bin/bash
@@ -241,7 +241,7 @@ AWS が公開している IP アドレスの範囲の一覧（`ip-ranges.json`�
 
 **注意: リージョンを丸ごと許可する**。この範囲には、AWS の東京・大阪を使う**すべての利用者**（他社の EC2・Lambda・NAT ゲートウェイなど）が入る。東京か大阪に EC2 を借りれば、誰でも通れる。実際に呼んでくる相手が分かったら（[API のアクセス元の洗い出し](../api-access-sources/design.md)）、その相手だけを許可の一覧（0-2）に書く形に狭めることを考える。
 
-`make-aws-lists.sh`（踏み台サーバーで `bash make-aws-lists.sh` と実行する）:
+`command/make-aws-lists.sh`（踏み台サーバーのカレントのフォルダで `bash command/make-aws-lists.sh` と実行する）:
 
 ```bash
 #!/bin/bash
@@ -325,7 +325,7 @@ echo "ip-ranges.json の版: ${CREATED}、IPv4: $(grep -vc '^#' port_guard_white
 | `allow-ipv4.txt`・`allow-ipv6.txt`（0-2） | 自由（誰の・何のアドレスか。書かなくてもよい） |
 | `aws-ipv4.txt`・`aws-ipv6.txt`（0-3） | リージョン、サービス、`network_border_group`（ネットワークの区画。ローカルゾーンなどは別の名前になる） |
 
-ipset に入れるファイルを作るステップ 3-1 の 1 行のコマンドは、`#` から後を消し（`sed 's/#.*//'`）、空でない行の 1 列目だけ（`awk 'NF { print ... $1 }'`）を使う。そのため、情報の列があってもなくても、同じように読める。
+ipset に入れるファイルを作るステップ 3-1 のスクリプトは、`#` から後を消し（`sed 's/#.*//'`）、空でない行の 1 列目だけ（`awk 'NF { print ... $1 }'`）を使う。そのため、情報の列があってもなくても、同じように読める。
 
 ## ステップ 1: 対象のサーバーに ipset を入れ、邪魔になるものがないかを確かめる（`command/port_guard/01-install.sh`）
 
@@ -437,26 +437,45 @@ Number of entries: 0
 
 | 順 | どこで実行するか | 何を実行するか | 結果 |
 |---|---|---|---|
-| 3-1 | **踏み台サーバー**（カレントのフォルダ。対象のサーバーには送らない） | 下の 3-1 の 1 行ずつのコマンド | 踏み台サーバーに `command/port_guard/03-jp-ipv4.sh`・`03-allow-ipv4.sh`・`03-aws-ipv4.sh`（IPv6 も絞るなら `03-jp-ipv6.sh`・`03-allow-ipv6.sh`・`03-aws-ipv6.sh`）が作られる |
+| 3-1 | **踏み台サーバー**（カレントのフォルダ。対象のサーバーには送らない） | `command/make-ipset-files-ipv4.sh`（IPv6 も絞るなら `-ipv6.sh` も） | 踏み台サーバーに `command/port_guard/03-jp-ipv4.sh`・`03-allow-ipv4.sh`・`03-aws-ipv4.sh`（IPv6 も絞るなら `03-jp-ipv6.sh`・`03-allow-ipv6.sh`・`03-aws-ipv6.sh`）が作られる |
 | 3-3 | **各サーバー**（踏み台サーバーにある今のスクリプトで、複数台に当て込む） | 3-1 で作られた `command/port_guard/03-*.sh` | 各サーバーの ipset の集合に、一覧が入る |
 
 ### 3-1. 踏み台サーバーで、ファイルを作る
 
-**踏み台サーバーのカレントのフォルダで**、次の 1 行ずつを実行する（一覧の `#` から後のコメントと、空の行は除く）。これらは対象のサーバーには送らない。実行すると、対象のサーバーに送るファイルが `command/port_guard/` に作られる。
+**踏み台サーバーのカレントのフォルダで**、次のスクリプトを実行する（一覧の `#` から後のコメントと、空の行は除く）。これらは対象のサーバーには送らない。実行すると、対象のサーバーに送るファイルが `command/port_guard/` に作られる。
 
 ```bash
+bash command/make-ipset-files-ipv4.sh
+bash command/make-ipset-files-ipv6.sh   # IPv6 も絞るときだけ
+```
+
+`command/make-ipset-files-ipv4.sh`:
+
+```bash
+#!/bin/bash
+# 踏み台サーバーで実行する。IPv4 の一覧から、対象のサーバーで ipset の集合に一覧を入れるファイル（command/port_guard/03-*-ipv4.sh）を作る
+set -euo pipefail
 mkdir -p command/port_guard
 { echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_jp'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/jp-ipv4.txt | awk 'NF { print "add port_guard_jp " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_jp'; } > command/port_guard/03-jp-ipv4.sh
 { echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_allow'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/allow-ipv4.txt | awk 'NF { print "add port_guard_allow " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_allow'; } > command/port_guard/03-allow-ipv4.sh
 { echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_aws'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/aws-ipv4.txt | awk 'NF { print "add port_guard_aws " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_aws'; } > command/port_guard/03-aws-ipv4.sh
+echo "作った: command/port_guard/03-jp-ipv4.sh・03-allow-ipv4.sh・03-aws-ipv4.sh"
+```
 
-# IPv6 も絞るときだけ
+`command/make-ipset-files-ipv6.sh`（IPv6 も絞るときだけ）:
+
+```bash
+#!/bin/bash
+# 踏み台サーバーで実行する。IPv6 の一覧から、対象のサーバーで ipset の集合に一覧を入れるファイル（command/port_guard/03-*-ipv6.sh）を作る
+set -euo pipefail
+mkdir -p command/port_guard
 { echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_jp6'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/jp-ipv6.txt | awk 'NF { print "add port_guard_jp6 " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_jp6'; } > command/port_guard/03-jp-ipv6.sh
 { echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_allow6'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/allow-ipv6.txt | awk 'NF { print "add port_guard_allow6 " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_allow6'; } > command/port_guard/03-allow-ipv6.sh
 { echo '#!/bin/bash'; echo 'set -euo pipefail'; echo 'sudo -n ipset flush port_guard_aws6'; echo "sudo -n ipset restore -exist <<'EOF'"; sed 's/#.*//' port_guard_whitelists/aws-ipv6.txt | awk 'NF { print "add port_guard_aws6 " $1 }'; echo 'EOF'; echo 'sudo -n ipset list -t port_guard_aws6'; } > command/port_guard/03-aws-ipv6.sh
+echo "作った: command/port_guard/03-jp-ipv6.sh・03-allow-ipv6.sh・03-aws-ipv6.sh"
 ```
 
-1 行の読み方（1 行目の例）:
+1 行の読み方（`make-ipset-files-ipv4.sh` の日本の範囲の行の例）:
 
 | 部分 | 意味 |
 |---|---|
@@ -508,7 +527,7 @@ sudo -n ipset list -t port_guard_allow
 |---|---|
 | まだ効かない | ipset の集合は、ステップ 4 の iptables のルールから参照されるまで何もしない。このステップの後も、80・443 番は今までどおり |
 | 入っているかを 1 件ずつ確かめる | 対象のサーバーで `sudo ipset test port_guard_jp 1.0.16.1`。入っていれば `is in set` と表示される（終了コード 0） |
-| 一覧を作り直したら | ステップ 0 の後に、3-1 の 1 行ずつでファイルを作り直す |
+| 一覧を作り直したら | ステップ 0 の後に、3-1 のスクリプトでファイルを作り直す |
 | 絞り込みが効いた後に流し直すとき | `flush` してから入れ直すまでの短い間（1 秒もかからない）、集合が空になり、日本からの接続も捨てられる。永続化している台では、入れ直した後に `command/port_guard/save-ipv4.sh`（と `save-ipv6.sh`）も流して、起動時に読み込むファイルを保存し直す（後の「中身を入れ替えずに、起動時に読み込むファイルだけを保存し直すとき」）。集合が空になる時間を避けたいなら、後の「一覧を新しくするとき」の `refresh-ipv4.sh` を使う |
 
 ## ステップ 4: 対象のサーバーに iptables のルールを入れる。ここから絞り込みが効く（`command/port_guard/04-rules-ipv4.sh`・`04-rules-ipv6.sh`）
@@ -1030,8 +1049,8 @@ APNIC の割り当ては少しずつ変わり（月に数件〜数十件）、AW
 
 | 順 | どこで | すること |
 |---|---|---|
-| 1 | 踏み台サーバー | `bash make-jp-lists.sh` と `bash make-aws-lists.sh` で一覧を作り直す。許可する IP アドレスを変えるなら、`port_guard_whitelists/allow-ipv4.txt`（と `allow-ipv6.txt`）を書き直す（ステップ 0） |
-| 2 | 踏み台サーバー | `bash make-refresh.sh` で、一覧を確かめて、各サーバーに送るファイルを作る |
+| 1 | 踏み台サーバー | `bash command/make-jp-lists.sh` と `bash command/make-aws-lists.sh` で一覧を作り直す。許可する IP アドレスを変えるなら、`port_guard_whitelists/allow-ipv4.txt`（と `allow-ipv6.txt`）を書き直す（ステップ 0） |
+| 2 | 踏み台サーバー | `bash command/make-refresh.sh` で、一覧を確かめて、各サーバーに送るファイルを作る |
 | 3 | 1 台 | `command/port_guard/refresh-ipv4.sh`（IPv6 も絞っている台は `refresh-ipv6.sh` も）を流して、結果を確かめる |
 | 4 | 残りの台 | 踏み台サーバーにある今のスクリプトで、同じファイルを流す |
 
@@ -1039,23 +1058,23 @@ APNIC の割り当ては少しずつ変わり（月に数件〜数十件）、AW
 
 ```bash
 # 1. 踏み台サーバーのカレントのフォルダで、一覧を作り直す
-bash make-jp-lists.sh
-bash make-aws-lists.sh
+bash command/make-jp-lists.sh
+bash command/make-aws-lists.sh
 
 # 2. 踏み台サーバーのカレントのフォルダで、一覧を確かめて、各サーバーに送るファイルを作る
-bash make-refresh.sh
+bash command/make-refresh.sh
 
 # 3. まず 1 台に流す（4. 残りの台には、踏み台サーバーにある今のスクリプトで、同じファイルを流す）
 ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/refresh-ipv4.sh >> ./output/result.txt
 ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./command/port_guard/refresh-ipv6.sh >> ./output/result.txt   # IPv6 も絞っている台だけ
 ```
 
-`make-refresh.sh`（踏み台サーバーのカレントのフォルダで実行する）:
+`command/make-refresh.sh`（踏み台サーバーのカレントのフォルダで `bash command/make-refresh.sh` と実行する）:
 
 ```bash
 #!/bin/bash
 # 踏み台サーバーで実行する。一覧を確かめてから、各サーバーで ipset の集合を入れ替えるファイルを作る
-# 使い方: bash make-refresh.sh（増減の基準で止まり、内容を確かめたうえで進めるときは FORCE=1 bash make-refresh.sh）
+# 使い方: bash command/make-refresh.sh（増減の基準で止まり、内容を確かめたうえで進めるときは FORCE=1 bash command/make-refresh.sh）
 set -euo pipefail
 LISTS=port_guard_whitelists
 LAST=$LISTS/last-refresh
@@ -1154,7 +1173,7 @@ echo "作った: command/port_guard/refresh-ipv4.sh（$(wc -l < command/port_gua
 | 確かめること | 内容 |
 |---|---|
 | 件数の下限 | 日本 1,000 件（IPv6 は 200 件）、AWS 100 件（IPv6 は 50 件）。足りなければ、`FORCE=1` を付けても止まる |
-| 前回からの増減 | 日本と AWS の一覧で、前回 `make-refresh.sh` を流したときの一覧（`port_guard_whitelists/last-refresh/`）から 5% を超えて変わっていたら止まる。内容を確かめて問題なければ、`FORCE=1 bash make-refresh.sh` で進める |
+| 前回からの増減 | 日本と AWS の一覧で、前回 `make-refresh.sh` を流したときの一覧（`port_guard_whitelists/last-refresh/`）から 5% を超えて変わっていたら止まる。内容を確かめて問題なければ、`FORCE=1 bash command/make-refresh.sh` で進める |
 | 許可の一覧 | 0 件でもよく、増減の基準も当てない（件数が少ないので、1 件の変更で基準を超えてしまうため）。増減の件数は表示されるので、目で確かめる |
 | 必要なファイル | `allow-ipv4.txt`・`allow-ipv6.txt` がないと止まる。IPv6 を絞らないなら、空の `allow-ipv6.txt` を置く |
 
@@ -1267,7 +1286,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 
 AWS の東京と大阪の許可（ステップ 0-3 と、ipset の集合 `port_guard_aws`・`port_guard_aws6`、`PORT_GUARD` のルール）は、2026-11-06 に足した。それより前の手順で入れた台に足すときは、次の順に流す（IPv6 も絞っている台は、IPv6 の分も）。
 
-1. 踏み台サーバーで `bash make-aws-lists.sh`（ステップ 0-3）と、ステップ 3-1 の AWS の行で `command/port_guard/03-aws-ipv4.sh` を作る
+1. 踏み台サーバーで `bash command/make-aws-lists.sh`（ステップ 0-3）と `bash command/make-ipset-files-ipv4.sh`（ステップ 3-1）で `command/port_guard/03-aws-ipv4.sh` を作る（日本と許可の一覧のファイルも作り直されるが、流すのは AWS のものだけ）
 2. `02-sets-ipv4.sh` を流す（AWS の空の集合が増える。ほかの集合はすでにあるので変わらない）
 3. `03-aws-ipv4.sh` を流す（AWS の集合に一覧が入る。まだ通らない）
 4. `PORT_GUARD` チェーンに、AWS のルールを差し込む（ここから東京と大阪の AWS からも通る）

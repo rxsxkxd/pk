@@ -20,7 +20,7 @@
 
 証明書のファイルではなく返ってくる証明書を見るので、更新は成功したのに httpd が読み直していない場合も分かる。Let's Encrypt の期限切れの通知メールは 2025-06-04 に終了しているので、残り日数は自分で確かめる必要がある。
 
-スクリプトは [`command/port_guard/cert-expiry-check.sh`](./command/port_guard/cert-expiry-check.sh)。
+スクリプトは [`command/cert-expiry-check.sh`](./command/cert-expiry-check.sh)。
 
 ## 使い方
 
@@ -32,8 +32,8 @@ app.example.com 10.0.1.20
 ```
 
 ```bash
-bash command/port_guard/cert-expiry-check.sh cert-targets.txt       # しきい値は既定の 14 日
-bash command/port_guard/cert-expiry-check.sh cert-targets.txt 30    # しきい値を 30 日にする
+bash command/cert-expiry-check.sh cert-targets.txt       # しきい値は既定の 14 日
+bash command/cert-expiry-check.sh cert-targets.txt 30    # しきい値を 30 日にする
 ```
 
 ```text

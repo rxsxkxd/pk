@@ -1,6 +1,6 @@
 #!/bin/bash
 # 踏み台サーバーで実行する。一覧を確かめてから、各サーバーで ipset の集合を入れ替えるファイルを作る
-# 使い方: bash make-refresh.sh（増減の基準で止まり、内容を確かめたうえで進めるときは FORCE=1 bash make-refresh.sh）
+# 使い方: bash command/make-refresh.sh（増減の基準で止まり、内容を確かめたうえで進めるときは FORCE=1 bash command/make-refresh.sh）
 set -euo pipefail
 LISTS=port_guard_whitelists
 LAST=$LISTS/last-refresh

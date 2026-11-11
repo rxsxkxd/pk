@@ -97,7 +97,7 @@ CodePipeline は `Prepare` ステージの `BuildReportTool` アクションの�
 
 **Go module の取得先（`proxy.golang.org`）へ到達する必要があるのは `BuildReportToolProject` だけである。**イメージが提供する Go が `go.mod` の要求（`go 1.25`）より古い場合は、`GOTOOLCHAIN=auto`（Go 1.21 以降の既定。buildspec で明示している）が必要なツールチェーンを取得するため、その経路も要る。このプロジェクトは VPC 設定を与えないので、VPC 内の経路整備は不要である。
 
-**ビルドに使う Go は、可能なら 1.26.10 へ切り替える。**`build-report-tool.yml` の install フェーズは、`runtime-versions: golang: 1.26` で選ばれた Go の上から、イメージ同梱の goenv を更新し（`git pull`）、`goenv install --skip-existing 1.26.10` と `goenv global 1.26.10` で切り替える（CodeBuild 自身も `runtime-versions` を `goenv global` で実現しているので、後から上書きできる）。**どの手順も失敗してよい。**goenv の更新・Go の取得のどれかが失敗したら、理由を出して 1.26（イメージ同梱の版）のままビルドする。Go 1.26.10 の取得（数十 MB）と goenv の更新は毎回のビルドで外部ネットワークを使う。Local Agent で使う `golang:1.25` のイメージには goenv が無いので、ローカル検証ではこの切り替えは素通りになる。
+**ビルドに使う Go は、可能なら 1.26.11 へ切り替える。**`build-report-tool.yml` の install フェーズは、`runtime-versions: golang: 1.26` で選ばれた Go の上から、イメージ同梱の goenv を更新し（`git pull`）、`goenv install --skip-existing 1.26.11` と `goenv global 1.26.11` で切り替える（CodeBuild 自身も `runtime-versions` を `goenv global` で実現しているので、後から上書きできる）。**どの手順も失敗してよい。**goenv の更新・Go の取得のどれかが失敗したら、理由を出して 1.26（イメージ同梱の版）のままビルドする。Go 1.26.11 の取得（数十 MB）と goenv の更新は毎回のビルドで外部ネットワークを使う。Local Agent で使う `golang:1.25` のイメージには goenv が無いので、ローカル検証ではこの切り替えは素通りになる。
 
 ### VerifyGreen を RDS のある VPC 内で実行する
 

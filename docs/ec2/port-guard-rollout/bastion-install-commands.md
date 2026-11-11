@@ -6,7 +6,7 @@
 >
 > 状態: 対象のサーバー（Amazon Linux 2）ではまだ流していない。Let's Encrypt の更新への対応はステップ 7 に用意した（手元の偽物のコマンドでだけ確かめた）。一覧の更新は `make-refresh.sh`（「一覧を新しくするとき」）に用意した。**本番に流す前に確認が要ることは [確認すること](./confirmation-items.md) にまとめている**。
 >
-> 更新日: 2026-11-10
+> 更新日: 2026-11-11
 
 ## このドキュメントで行うこと
 
@@ -1021,7 +1021,84 @@ sudo -n journalctl -t port-guard-acme --no-pager 2>/dev/null | tail -2   # opene
 
 certbot から動くことまで確かめるには、**絞り込みが効いている 1 台で** `sudo certbot renew --dry-run` を流す（Let's Encrypt の試験用の窓口で、更新の手順だけを本物どおりに流す。証明書は変わらない。`--dry-run` でも pre と post の hook は動く）。確認が通り、`/var/log/letsencrypt/letsencrypt.log` に `port-guard-open-80.sh` と `port-guard-close-80.sh` が動いた記録があることを見る。海外からの確認まで含めて試せるので、ほかの台に広げる前に流す。
 
-`--dry-run` の成功だけではステップ 7 の完了としない。**実際の更新が 1 回通り、`journalctl -t port-guard-acme` に `opened` と `closed` が記録され、証明書の期限が延びたことを確かめて完了とする**。残り日数は [`cert-expiry-check.sh`](./certificate-expiry-check.md) で確かめる（[確認すること](./confirmation-items.md) の L16・L17）。
+`--dry-run` の成功だけではステップ 7 の完了としない。**実際の更新が 1 回通り、`journalctl -t port-guard-acme` に `opened` と `closed` が記録され、証明書の期限が延びたことを確かめて完了とする**。確かめ方は次の 7-4。残り日数は [`cert-expiry-check.sh`](./certificate-expiry-check.md) で確かめる（[確認すること](./confirmation-items.md) の L16・L17）。
+
+### 7-4. 実際の更新の後に確かめる（`command/port_guard/07-letsencrypt-renewal-check.sh`。読み取りだけ）
+
+hook で 80 番を一時的に開けた結果、**実際に証明書が更新され、httpd が新しい証明書を返しているか**を、ログと証明書で確かめる。7-3 の `--dry-run` では証明書は変わらないので、ここは実際の更新の後にしか確かめられない。
+
+| 項目 | 内容 |
+|---|---|
+| いつ流すか | 証明書の残り日数が 30 日を切った後の、最初の cron の実行（毎月 1 日と 16 日の 4:00 の見込み）の後。残り日数は 7-1 の `certbot certificates` か、[`cert-expiry-check.sh`](./certificate-expiry-check.md) で分かる |
+| 流す順 | 対象のサーバーでこのスクリプトを流し、続けて踏み台サーバーで `cert-expiry-check.sh` を流す（[確認すること](./confirmation-items.md) の L16・L17） |
+| 見るもの | cron の記録 → hook の記録 → certbot のログ → 証明書のファイル → 443 番が返す証明書の順に、どこまで進んだかを見る |
+
+```bash
+#!/bin/bash
+# 実際の証明書の更新の後に、hook が 80 番を開けて閉じたか、証明書が新しくなったか、httpd が新しい証明書を返しているかを確かめる（読み取りだけ。何も変えない）
+set -euo pipefail
+echo "== $(hostname) $(date '+%F %T') 07-letsencrypt-renewal-check"
+
+echo "-- cron の記録（certbot の行。cron が certbot を動かした時刻）"
+sudo -n sh -c 'grep -H certbot /var/log/cron*' 2>/dev/null || echo "/var/log/cron: certbot の行なし"
+
+echo "-- hook の記録（journalctl。開けた時刻と閉じた時刻）"
+sudo -n journalctl -t port-guard-acme --no-pager -o short-iso 2>&1 | tail -20 || echo "journalctl: 見られない"
+echo "-- hook の記録（/var/log/messages。再起動で journalctl から消えたとき用）"
+sudo -n sh -c 'grep -H port-guard-acme /var/log/messages*' 2>/dev/null || echo "/var/log/messages: port-guard-acme の行なし"
+
+# certbot certificates を流すと certbot のログが 1 つ増えるので、certbot のログは先に見る
+echo "-- certbot のログ（20 日以内に書かれたもの。新しい順）"
+sudo -n find /var/log/letsencrypt -type f -mtime -20 -exec ls -lt --time-style=long-iso {} + 2>&1 || echo "/var/log/letsencrypt: 見られない"
+echo "-- certbot のログの中の hook の名前とエラー（20 日以内に書かれたもの）"
+sudo -n find /var/log/letsencrypt -type f -mtime -20 -exec grep -Hi 'port-guard\|error' {} + 2>/dev/null | tail -40 || echo "該当の行なし"
+
+echo "-- 証明書と有効期限（certbot certificates）"
+sudo -n certbot certificates 2>&1 || echo "証明書の一覧: 取れない"
+
+echo "-- 証明書ごとの、ファイルのリンク先・期限と、443 番が返す証明書"
+for conf in $(sudo -n sh -c 'ls /etc/letsencrypt/renewal/*.conf' 2>/dev/null); do
+  name=$(basename "$conf" .conf)
+  echo "--- ${name}"
+  sudo -n ls -l --time-style=long-iso "/etc/letsencrypt/live/${name}/" 2>&1 | grep -- '->' || true
+  echo "ファイル（live/${name}/cert.pem）:"
+  sudo -n openssl x509 -noout -serial -dates -in "/etc/letsencrypt/live/${name}/cert.pem" 2>&1 || true
+  echo "443 番が返す証明書（127.0.0.1:443、SNI は ${name}）:"
+  echo | timeout 10 openssl s_client -connect 127.0.0.1:443 -servername "${name}" 2>/dev/null | openssl x509 -noout -serial -dates 2>&1 || echo "443 番から取れない"
+done
+```
+
+| 行 | 意味 |
+|---|---|
+| `grep -H certbot /var/log/cron*` | cron が certbot を動かした記録。Amazon Linux 2 では cron の記録は `/var/log/cron` に出る見込み（実環境では確かめていない）。古い記録は日付の付いたファイル（`/var/log/cron-<日付>`）に回されている見込みなので、まとめて見る |
+| `journalctl -t port-guard-acme` | 7-2 の hook と `port-guard-acme-close` が `logger -t port-guard-acme` で残した記録。`-o short-iso` で年月日まで表示する |
+| `grep -H port-guard-acme /var/log/messages*` | 同じ記録を、ファイルに書かれたほうから見る。再起動を挟むと `journalctl` から消える設定のことがあるため（対象のサーバーで journald が記録をファイルに残す設定かは確かめていない。`logger` の記録が `/var/log/messages` にも書かれるかも、実環境で確かめる） |
+| `find /var/log/letsencrypt -type f -mtime -20` | certbot のログ。certbot は既定で `/var/log/letsencrypt` に記録を残し、ファイルが 1,000 個になると古いものから消す（`--max-log-backups`）。ディストリビューションによっては certbot のこの仕組みを止めて logrotate で回している（`/etc/logrotate.d/` を見る）。cron の実行の後にも certbot を流すと（`certbot certificates` を含む）ログが増えるので、更新の日の 4:00 ごろの時刻のファイルを探す |
+| `grep -Hi 'port-guard\|error'` | certbot のログの中から、hook のファイルの名前と、エラーの行を拾う。hook を動かしたことが certbot のログに書かれるか、書かれるならどう書かれるかは、公式のドキュメントに書かれていないので、環境で確かめる |
+| `certbot certificates` | 証明書ごとの `Expiry Date`（期限）と残り日数（`VALID: ... days`） |
+| `ls -l /etc/letsencrypt/live/<証明書の名前>/` | `cert.pem` などのリンク先と、リンクの時刻。certbot は更新のときに `live` の下を新しいファイルに向け直す。リンク先のファイルの名前の付け方は公式のドキュメントに書かれていないので、**更新の前と変わったか**だけを見る |
+| `openssl x509 -noout -serial -dates -in .../cert.pem` | ファイルの証明書のシリアル番号と期限（`notBefore`・`notAfter`） |
+| `openssl s_client -connect 127.0.0.1:443 -servername <証明書の名前>` | httpd が 443 番で**実際に返している**証明書のシリアル番号と期限。ファイルのシリアル番号と比べる。証明書の名前がドメインと違う（`example.com-0001` など）と、別の証明書が返ることがある。そのときは、その証明書のドメインに読み替えて手で流す |
+
+結果の見方（上から順に見て、最初に「失敗のとき」に当たった行が原因の場所）:
+
+| 見ること | 成功のとき | 失敗のとき・次に見ること |
+|---|---|---|
+| cron の記録 | 更新の予定の日の 4:00 ごろに certbot の行がある | 行がない: cron が certbot を動かしていない（cron の行・時刻を 7-1 で見直す。L1）。この回は更新を試みていない |
+| hook の記録 | 同じ日に `opened tcp/80 ...` と `closed tcp/80` が組で並び、間が数秒〜数分 | **何もない**: 更新が要る証明書がなかった（`certbot certificates` の残り日数が 30 日より多いなら正常。hook は更新が要るときだけ動く）か、hook が動いていない（cron が `certbot certonly` を直接呼んでいる、hook のファイルに実行の権限がない。7-1・7-2 を見直す）<br>**`opened` と `closed` の間がほぼ 30 分**: 更新の後の hook が動かず、30 分後の予約で閉じた。certbot が途中で止まった見込みなので、certbot のログを見る<br>**`WARNING: failed to open tcp/80 (IPv4)`**: 80 番を開けられず、確認が通らなかった見込み。`iptables -S INPUT` の状態を見る<br>**`WARNING: tcp/80 rule (IPv4) is still in INPUT`**: ルールが残っている。`sudo -n iptables -w 10 -S INPUT` で確かめ、`sudo -n /usr/local/sbin/port-guard-acme-close` で削除する |
+| certbot のログ | 更新の日の 4:00 ごろのファイルに、エラーの行がない（成功のときの表示の例は、環境で確かめる） | エラーの行から原因を見る。確認の接続が届かなかった旨なら、80 番が開いていない・届いていない（hook の記録、L4 の HTTPS への転送、L5 の DNS、L8 のセキュリティグループ） |
+| `certbot certificates` | `Expiry Date` が更新の前より先に延び、残り日数が 90 日の証明書なら 89 日前後 | 延びていない: 更新されていない。certbot のログを見る |
+| ファイル（`live/.../cert.pem`）のリンク先と期限 | リンク先が更新の前と変わり、`notAfter` が延びている | 変わっていない: 更新されていない（上と同じ） |
+| 443 番が返す証明書 | シリアル番号がファイルと同じ、`notAfter` が延びている | **ファイルは新しいのに、443 番が古い証明書を返す**: httpd が新しい証明書を読み直していない。`sudo -n apachectl graceful` で読み直し、もう一度確かめる。次回からのために、7-1 で `deploy_hook` や cron の行の `--post-hook` で httpd を読み直しているかを見る（この手順では足さない。先に相談する） |
+| 踏み台サーバーの `cert-expiry-check.sh` | `OK` で、残り日数が延びている | `WARN` なら上の行を順に見る。`ERROR` なら接続を見る（[証明書の期限の確認](./certificate-expiry-check.md)） |
+
+注意:
+
+- `sudo certbot renew --dry-run`（7-3）でも更新の前と後の hook は動くので、`opened` と `closed` の記録が残る。cron の時刻（4:00 ごろ）のものかどうかで、実際の更新の記録と見分ける
+- `certbot renew` は、更新を試みて失敗したときだけ終了コード 1 を返し、更新が要る証明書がなかったときも成功したときも 0 を返す（公式のドキュメントの説明）。cron の終了コードだけでは、更新されたかは分からない
+- certbot は、webroot の方式で更新したときに httpd を読み直すとは、公式のドキュメントに書かれていない。更新の後に読み直すのは、更新が成功したときだけ動く deploy hook（`--deploy-hook`・`/etc/letsencrypt/renewal-hooks/deploy/`）などの仕組み。今の台にあるかは 7-1 の「すでにある hook」で分かる
+
+この節の certbot の挙動（ログの置き場所と回し方、hook が動く条件、`--dry-run` と hook、終了コード、`live` の下の更新、`certbot certificates` の表示、deploy hook）は、[User Guide（Certbot）](https://eff-certbot.readthedocs.io/en/stable/using.html) と照らし合わせた（2026-11-11）。certbot のログのファイルの名前（`letsencrypt.log`）とログの中の文言、hook を動かしたことがログに書かれるか、`archive` の下のファイルの名前の付け方は、公式のドキュメントには書かれておらず、確かめていない。
 
 ### hook を取り除く（`command/port_guard/07-letsencrypt-hooks-remove.sh`）
 

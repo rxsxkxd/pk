@@ -26,7 +26,7 @@
 | L14 | 更新の間、80 番が全世界に開くことを許容するか | 決めてもらう | 許容する（最大 30 分） | 80 番でアプリを出している台（`old_app_a` など）は、その間は国の絞り込みが外れる。許容しないなら、Apache で確認のパス以外を止めるなどを考える | 未確認 |
 | L15 | 7-3 と `--dry-run` を流す時間帯と承認 | 決めてもらう | 保守の時間帯に 1 台で流す | — | 未確認 |
 | L16 | 証明書の残り日数を確かめる仕組み | [証明書の期限の確認](./certificate-expiry-check.md) の `cert-expiry-check.sh` を流す | 定期の監視はせず、更新の時期の後に手で流す | `ERROR` なら接続、`WARN` なら更新の状態を確かめる | 未確認 |
-| L17 | 実際の更新で hook が動いたか | 更新の後に `journalctl -t port-guard-acme` と残り日数を見る | `opened` と `closed` が記録され、期限が延びている | `/var/log/letsencrypt/letsencrypt.log` で原因を見る。**ここまで確かめて、ステップ 7 の作業を完了とする** | 未確認 |
+| L17 | 実際の更新で hook が動き、証明書が更新されたか | 更新の後に、[手順](./bastion-install-commands.md) のステップ 7-4 の `07-letsencrypt-renewal-check.sh`（cron・hook・certbot のログ、証明書のファイル、443 番が返す証明書）と、残り日数（`cert-expiry-check.sh`）を見る | `opened` と `closed` が記録され、期限が延び、443 番が新しい証明書を返している | ステップ 7-4 の「結果の見方」の表で、最初に失敗に当たった行から原因を見る（certbot のログは `/var/log/letsencrypt/`）。**ここまで確かめて、ステップ 7 の作業を完了とする** | 未確認 |
 
 ## 2. 一覧の更新
 
@@ -62,7 +62,7 @@
 5. その台で `sudo certbot renew --dry-run` を流す（L7）
 6. ステップ 5・6 の後に再起動して確かめる（G9）
 7. 問題がなければ、ほかの台に広げる
-8. 実際の更新の後に、`cert-expiry-check.sh` で残り日数を確かめる（L16・L17）
+8. 実際の更新の後に、ステップ 7-4 の `07-letsencrypt-renewal-check.sh` と、`cert-expiry-check.sh` の残り日数で確かめる（L16・L17）
 
 ## 参考
 

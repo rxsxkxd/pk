@@ -142,6 +142,85 @@ aws ec2 run-instances \
 ssh centos@<パブリック IP> 'curl -s http://localhost/health'
 ```
 
+### IPv6 も試すとき
+
+port-guard の IPv6 の分（`-ipv6.sh`）を試すには、IPv4 と IPv6 の両方のアドレスを持つインスタンスにする。IPv6 の扱いの全体と、手元の AWS で確認できることは [port-guard と IPv6](../../ipv6.md)。AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-11）。**コマンドは実行していない**。
+
+#### IPv4 と IPv6 のアドレスの違い
+
+IPv4 と IPv6 は、同じアドレスではない。1 つのインスタンスが、形式の違う別々のアドレスを両方持つ。
+
+| 項目 | IPv4 | IPv6 |
+|---|---|---|
+| 例 | プライベート `10.0.1.20`、パブリック `203.0.113.10` | `2001:db8:1234:1a00::10`（1 つ） |
+| プライベートとパブリック | 別のアドレス。VPC の中はプライベート、インターネットからはパブリック | 同じアドレスを VPC の中からもインターネットからも使う（Amazon が用意する範囲はインターネットに公開される） |
+| 停止・起動 | パブリック IP は変わる（Elastic IP なら変わらない） | 変わらない（インスタンスを終了すると解放される） |
+| DNS のレコード | A | AAAA |
+| port-guard の集合 | `port_guard_jp`・`port_guard_allow`・`port_guard_aws` | `port_guard_jp6`・`port_guard_allow6`・`port_guard_aws6` |
+
+IPv4 で絞っても IPv6 は絞られない（逆も同じ）。IPv6 で 80・443 番を受けるなら、IPv6 の分も流す。
+
+#### 1. VPC とサブネットに IPv6 を付ける（一度だけ）
+
+```bash
+# VPC に Amazon が用意する IPv6 の範囲（/56）を付ける
+aws ec2 associate-vpc-cidr-block --vpc-id <VPC の ID> --amazon-provided-ipv6-cidr-block
+
+# 公開のサブネットに、その /56 の中から /64 を付ける
+aws ec2 associate-subnet-cidr-block --subnet-id <サブネットの ID> --ipv6-cidr-block <2001:db8:1234:1a00::/64 の形>
+
+# 公開のサブネットのルートテーブルに、IPv6 の既定の経路をインターネットゲートウェイへ足す
+aws ec2 create-route --route-table-id <ルートテーブルの ID> \
+  --destination-ipv6-cidr-block ::/0 --gateway-id <インターネットゲートウェイの ID>
+```
+
+#### 2. セキュリティグループに IPv6 の受信を足す
+
+```bash
+aws ec2 authorize-security-group-ingress --group-id <テスト用のセキュリティグループの ID> --ip-permissions \
+  'IpProtocol=tcp,FromPort=80,ToPort=80,Ipv6Ranges=[{CidrIpv6=::/0}]' \
+  'IpProtocol=tcp,FromPort=443,ToPort=443,Ipv6Ranges=[{CidrIpv6=::/0}]'
+```
+
+外向きの IPv6 の全許可は、VPC に IPv6 を付けたときに自動で足される（外向きの規則を変えていなければ）。ネットワーク ACL を独自に作っているなら、IPv6 の規則も足す。
+
+#### 3. IPv6 アドレス付きで起動する
+
+上の `run-instances` に `--ipv6-address-count 1` を足す。
+
+```bash
+aws ec2 run-instances \
+  --image-id <AMI の ID> --instance-type t3a.medium \
+  --subnet-id <公開のサブネットの ID> --security-group-ids <テスト用のセキュリティグループの ID> \
+  --associate-public-ip-address --ipv6-address-count 1 \
+  --user-data file://user-data.sh \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=port-guard-test-al2-v6-01},{Key=Purpose,Value=port-guard-rollout-test-instance}]'
+```
+
+t3a は IPv6 に対応している。今の版の Amazon Linux 2 の AMI から起動すれば、OS の側の IPv6 の設定は要らない。
+
+#### 4. 確かめる
+
+```bash
+aws ec2 describe-instances --instance-ids <インスタンスの ID> --query 'Reservations[].Instances[].Ipv6Address' --output text
+ssh centos@<パブリック IP> 'ip -6 addr show eth0'
+curl -g -6 -s -o /dev/null -w '%{http_code}\n' 'http://[<IPv6 アドレス>]/health'   # IPv6 が使える端末から
+```
+
+#### port-guard の IPv6 を試すときの注意
+
+| 項目 | 内容 |
+|---|---|
+| 許可の一覧 | `00-vpc-cidr.sh` を流すと VPC の IPv6 の範囲も表示されるので、`port_guard_whitelists/allow-ipv6.txt` に書く |
+| 流すスクリプト | ステップ 2〜5 の `-ipv6.sh` と、`command/make-ipset-files-ipv6.sh` |
+| 確かめる端末 | 日本と海外の両方に、IPv6 で接続できる端末が要る。作業者の回線と、[海外の確認の拠点](../../outside-probe.md) が IPv6 を使えるかは確かめていない |
+
+AWS のドキュメント:
+
+- [Add IPv6 support for your VPC](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-migrate-ipv6-add.html)
+- [Manage the IPv6 addresses for your EC2 instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/working-with-ipv6-addresses.html)
+- [Amazon EC2 instance IP addressing（IPv6 の停止・起動の扱い）](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-instance-addressing.html)
+
 ## port-guard-rollout を試す流れ
 
 開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。1〜3 はフェーズ 1 として `ssm-setup/py/` で `python3 -m ssm_setup`（バックアップは `python3 -m ssm_setup_backup`）を、4〜7 はフェーズ 2 として `port-guard-rollout/py/` で `python3 -m port_guard_rollout`（バックアップは `python3 -m port_guard_rollout_backup`）を使う。バックアップはフェーズごとに取る。手順の詳細は [ssm-setup の手順](../../../ssm-setup/steps.md) と [port-guard-rollout の手順](../../steps.md)。

@@ -31,7 +31,7 @@ phases:
     runtime-versions:
       golang: 1.26
     commands:
-      # --- Go 1.26.10 へ切り替える（できなければ runtime-versions の 1.26 のまま進む）------
+      # --- Go 1.26.11 へ切り替える（できなければ runtime-versions の 1.26 のまま進む）------
       # CodeBuild は runtime-versions を `goenv global <版>` で選ぶので、後から goenv global を
       # 実行すれば上書きできる。イメージ同梱の goenv は新しい Go の定義を持たないことがあるので、
       # 先に goenv 自体を更新する（git で入っている。外部ネットワークが要る）。
@@ -42,7 +42,7 @@ phases:
       # goenv があるときだけ更新する。
       - command -v goenv >/dev/null && git -C "$(goenv root)" pull --ff-only || echo 'goenv を更新できなかった（または goenv が無い）。手元の goenv のまま進める'
       - goenv --version || echo 'goenv が無い。Go の切り替えはせずに進める'
-      - goenv install --skip-existing 1.26.10 && goenv global 1.26.10 || echo 'Go 1.26.10 へ切り替えられなかった。今の Go のままビルドする'
+      - goenv install --skip-existing 1.26.11 && goenv global 1.26.11 || echo 'Go 1.26.11 へ切り替えられなかった。今の Go のままビルドする'
       # 使う Go を記録する。go.mod の go ディレクティブ（1.25）を満たさない場合は
       # GOTOOLCHAIN=auto が必要なツールチェーンを取得する（要ネットワーク）。
       - go version

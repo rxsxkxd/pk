@@ -13,11 +13,11 @@ AWS 上の `BuildReportToolProject` は `aws/codebuild/standard:8.0` を使う�
 | OS | Ubuntu（Debian 系） | Debian GNU/Linux |
 | `find` / `grep` / `dirname` | GNU coreutils / GNU grep | GNU coreutils / **GNU grep 3.11** |
 | 実行ユーザー | root | root |
-| Go | `runtime-versions: golang: 1.26` で用意し、可能なら 1.26.10 へ切り替える | **Go 1.25 が最初から入っている**（AWS 上と版が違う） |
+| Go | `runtime-versions: golang: 1.26` で用意し、可能なら 1.26.11 へ切り替える | **Go 1.25 が最初から入っている**（AWS 上と版が違う） |
 | `GOPATH` | `/go` | `/go` |
 | `/bin/sh` | dash | dash |
 
-**`runtime-versions` を解釈するのは AWS 側のマネージドイメージだけである。**Local Agent もこれを解決しない。`golang:1.25` は最初から Go 1.25 で、**AWS 上（1.26、可能なら 1.26.10）とは版が違う**。`go.mod` の要求は `go 1.25` なのでビルドは通るが、Go の版による違いはローカルでは確認できない。「`standard:8.0` が `golang: 1.26` を選べるか」もローカルでは確認できない（[I1](build-report-tool-troubleshooting.md#i1-unknown-runtime-version-named-126-of-golang)）。
+**`runtime-versions` を解釈するのは AWS 側のマネージドイメージだけである。**Local Agent もこれを解決しない。`golang:1.25` は最初から Go 1.25 で、**AWS 上（1.26、可能なら 1.26.11）とは版が違う**。`go.mod` の要求は `go 1.25` なのでビルドは通るが、Go の版による違いはローカルでは確認できない。「`standard:8.0` が `golang: 1.26` を選べるか」もローカルでは確認できない（[I1](build-report-tool-troubleshooting.md#i1-unknown-runtime-version-named-126-of-golang)）。
 
 **新しく pull・build するイメージは無い。**必要なものはこのリポジトリの既存手順で既に揃っている。
 

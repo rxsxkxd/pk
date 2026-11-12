@@ -160,6 +160,8 @@ aws cloudformation deploy --no-execute-changeset \
 
 ### CDK（Python）
 
+準備・合成・デプロイ・撤去のコマンドの一覧は [cdk/python/README.md](./cdk/python/README.md)。
+
 `aws-cdk-lib` の取得（約 60 MB）と Node.js が要る。合成だけなら `aws-cdk` の CLI は要らない。
 
 ```bash

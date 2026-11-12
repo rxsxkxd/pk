@@ -73,7 +73,7 @@ cd rb && bundle install && bundle exec rubocop
 | `rb/new_groups.rb` | B が付け替える先の 2 つのグループを用意する |
 | `rb/restore.rb` | 記録から元に戻す |
 | `rb/security_groups.rb` | セキュリティグループの読み書きの部品（22 番の規則の見分け方、規則の写し方、記録） |
-| `rb/lib.rb` | 共通の部品（ssm-setup の `rb/lib.rb` の写し） |
+| `rb/lib.rb` | 共通の部品（port-guard-rollout・al2-update の `rb/lib.rb` と、もとは同じもの） |
 | `rb/Gemfile`・`rb/.rubocop.yml` | 書き方の確認の rubocop だけを入れる。書き方は rubocop の既定（確かめる版を Ruby 2.6 にしているだけ） |
 
 どのスクリプトも 1 つのクラスで、流れの大枠を公開のメソッドとして上に並べ、ヘルパは `private` の下に分けている。

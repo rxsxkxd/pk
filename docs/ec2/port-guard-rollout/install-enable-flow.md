@@ -1,6 +1,6 @@
 # install・enable の処理の流れ（sh 版・Ruby 版）
 
-`install` と `enable` を、機能を絞って sh と Ruby で書き直した版の処理の流れ。作業の手順（どの順にコマンドを使うか）は [手順](./steps.md) が正本で、ここは 1 つのコマンドの中で何をしているかを書く。ssm-setup にも同じ作りの sh 版・Ruby 版があったが、ssm-setup の側は Python 版だけに絞った。
+`install` と `enable` を、機能を絞って sh と Ruby で書き直した版の処理の流れ。作業の手順（どの順にコマンドを使うか）は [手順](./steps.md) が正本で、ここは 1 つのコマンドの中で何をしているかを書く。ssm-setup にも同じ作りの sh 版・Ruby 版があったが、ssm-setup は作り直した（AWS の操作は Ruby、接続の確認とインスタンスの中の操作は sh）。
 
 > 状態: 書いただけ（構文と rubocop の確認だけ済み）。実際の AWS ではまだ動かしていない。Python 版（`py/`）は残してあり、どれを使うかは決めていない。
 
@@ -11,7 +11,7 @@
 | `sh/install.sh`・`rb/install.rb` | ipset の導入と設定（遮断はまだ効かせない） |
 | `sh/enable.sh`・`rb/enable.rb` | 遮断の有効化（台ごとに y/n/q で確かめ、自動で元に戻る予約を入れてから有効にし、確かめて確定か戻す） |
 | `rb/port_guard.rb` | Ruby 版のこのフェーズだけの部品。バックアップの確認、送った結果（`PG <キー>=<値>`・`PG blocked=<理由>`・`PGSTEP`）の読み取り、作業者の PC からの応答の確認 |
-| `sh/lib.sh`・`rb/lib.rb` | 共通の部品（ssm-setup の `sh/lib.sh`・`rb/lib.rb` の写し） |
+| `sh/lib.sh`・`rb/lib.rb` | 共通の部品（`rb/lib.rb` は sg-ssh-restrict・al2-update の `rb/lib.rb` と、もとは同じもの） |
 | `rb/Gemfile`・`rb/.rubocop.yml` | 書き方の確認の rubocop だけを入れる（道具は標準のライブラリだけで動く） |
 | `remote/` | インスタンスに送るもの（Python 版・sh 版・Ruby 版で共用）。sh 版・Ruby 版は、入れてよいか・有効にできるかを `install-preflight.sh`・`enable-preflight.sh` でインスタンスの側で確かめる |
 

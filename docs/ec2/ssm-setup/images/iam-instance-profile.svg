@@ -75,5 +75,5 @@
   <text class="s" x="20" y="480" text-anchor="start">・1 つのインスタンスプロファイルに入れられるロールは 1 つだけ（ポリシーは 1 つのロールに複数付けられる）</text>
   <text class="s" x="20" y="500" text-anchor="start">・1 つのインスタンスプロファイルは、何台のインスタンスにでも関連付けられる</text>
   <text class="s" x="20" y="520" text-anchor="start">・1 台のインスタンスに関連付けられるインスタンスプロファイルは 1 つだけ。権限を増やすときは、そのロールにポリシーを足す</text>
-  <text class="s" x="20" y="540" text-anchor="start">　（ssm-role は、IAM ロールが未設定の台に port-guard-ssm を関連付けるだけで、既存のロールには何もしない）</text>
+  <text class="s" x="20" y="540" text-anchor="start">　（rb/ssm_role.rb は、IAM ロールが未設定の台に port-guard-ssm を関連付けるだけで、既存のロールには何もしない）</text>
 </svg>

@@ -85,7 +85,7 @@ def overall():
         "pre": 60, "prep": 150, "backup": 240, "check": 330, "install": 430,
         "probe1": 520, "enable": 610, "probe2": 700, "watch": 790,
     }
-    s.box(X, rows["pre"], W, H, ["前提: SSM の有効化が済んでいる"], "done", ["ssm-setup の ssm-check で「入れる」になった台が対象"])
+    s.box(X, rows["pre"], W, H, ["前提: SSM の有効化が済んでいる"], "done", ["ssm-setup の接続の確認で「入れる」になった台が対象"])
     s.box(X, rows["prep"], W, H, ["0. 準備"], "done", ["対象の一覧・許可する IP・--backup-label を決める"])
     s.box(X, rows["backup"], W, H, ["1. backup"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
     s.box(X, rows["check"], W, H, ["check（補助）"], "check", ["作成済み（available）で 12 時間以内か"])

@@ -21,14 +21,14 @@
 - **中継サーバーからだけに絞ることは可能**。ただし、`aws:SourceVpce` だけでは「その VPC エンドポイントを通った」ことしか分からず、**同じ VPC のほかのサーバーと区別できない**。IAM のロールと、中継サーバーのプライベート IP の条件を組み合わせる。
 - **特定のユーザーだけが中継サーバー経由で入る形も可能**。ただし、提示の 3 層だけでは足りない。中継サーバーから AWS を呼ぶときに AWS が見るのは**中継サーバーのロール**で、誰が操作したかは見えない。特定のユーザーに絞る場所は、「誰が中継サーバーに入れるか」になる。
 - **Deny は `ssm:*` にしない**。稼働サーバーの SSM Agent も `ssm:` の操作を呼ぶので、`ssm:SendCommand` と `ssm:StartSession` に絞る。
-- **今の道具と作業の流れに影響する**（[影響を受けるもの](#影響を受けるもの)）。作業者の PC からの `ssm-connect-check` や port-guard の `--via ssm`、コンソールからの操作は止まる。
+- **今の道具と作業の流れに影響する**（[影響を受けるもの](#影響を受けるもの)）。作業者の PC からの接続の確認（ssm-setup の `connect/ssm-connect-check.sh`）や port-guard の `--via ssm`、コンソールからの操作は止まる。
 
 ## 提示の 3 層の確認
 
 | # | 提示の内容 | 判定 | 補足 |
 |---|---|---|---|
 | 1 | 中継サーバーのロールに、VPC エンドポイント条件付きで `ssm:SendCommand`・`ssm:StartSession` を Allow | 正しい。足すものがある | Run Command のドキュメントは、`ssm:SendCommand` にグローバル条件キーを使うときは `aws:ViaAWSService` を `true` にした文も含めるよう求めている。操作できる稼働サーバーと SSM ドキュメントも絞る |
-| 2 | 稼働サーバーのロールは `AmazonSSMManagedInstanceCore` のみ | 正しい | このポリシーに `ssm:SendCommand` と `ssm:StartSession` は含まれない。ただし、すでに別のロールが付いている台は、そのロールの内容を確かめる（`ssm-role` は既存のロールを変えない） |
+| 2 | 稼働サーバーのロールは `AmazonSSMManagedInstanceCore` のみ | 正しい | このポリシーに `ssm:SendCommand` と `ssm:StartSession` は含まれない。ただし、すでに別のロールが付いている台は、そのロールの内容を確かめる（ssm-setup の `rb/ssm_role.rb` は既存のロールを変えない） |
 | 3 | 指定の VPC エンドポイント以外からの SSM 操作を Deny | **このままでは不足があり、危険** | 下の表 |
 
 3 の注意点は次のとおり。
@@ -171,8 +171,8 @@ flowchart TD
 | 項目 | 内容 |
 |---|---|
 | `aws:VpcSourceIp` | VPC エンドポイントを通った要求の送り元のプライベート IP。`aws:SourceVpce` などと必ず組み合わせる。**これで同じ VPC のほかのサーバーと区別できる**。中継サーバーを作り直して IP が変わったら直す |
-| `ReadCommandResults` | `ssm-connect-check`・port-guard が使う結果の確認 |
-| `AWS-StartNonInteractiveCommand` | `ssm-connect-check` の既定の `--via session` が使う |
+| `ReadCommandResults` | `connect/ssm-connect-check.sh`・port-guard が使う結果の確認 |
+| `AWS-StartNonInteractiveCommand` | `connect/ssm-connect-check.sh` の `session` の確かめ方が使う |
 
 `iam:PassRole` で `ssm-relay` をほかのインスタンスに付けられる人がいないことも確かめる。
 
@@ -202,7 +202,7 @@ aws ec2 associate-iam-instance-profile --region ap-northeast-1 \
 
 ### 3. 稼働サーバーのロール
 
-`AmazonSSMManagedInstanceCore` だけを付ける。`ssm-setup` の `ssm-role` が関連付けるものと同じで、追加の設定はない。
+`AmazonSSMManagedInstanceCore` だけを付ける。`ssm-setup` の `rb/ssm_role.rb` が関連付けるものと同じで、追加の設定はない。
 
 ### 4. Deny（SCP）
 
@@ -356,12 +356,12 @@ Deny を入れる前に、次を確かめる。
 
 | 影響を受けるもの | 影響 | 対応 |
 |---|---|---|
-| `ssm-setup` の `ssm-connect-check`（作業者の PC） | 止まる | 中継サーバーから動かす |
+| `ssm-setup` の `connect/ssm-connect-check.sh`（作業者の PC） | 止まる | 中継サーバー（踏み台サーバーと兼ねるなら、そこ）から動かす |
 | `port-guard-rollout`・`al2-update` の Run Command（作業者の PC） | 止まる | 中継サーバーから動かす |
 | AWS のコンソールの Run Command・Session Manager | 止まる（中継サーバーへのセッションを除く） | 中継サーバーを使う |
 | AMI 公開パイプラインのヘルスチェック（CodeBuild の `ssm:SendCommand`） | **止まる** | 上の Deny の例外に CodeBuild のロールを入れる |
 | 踏み台サーバーの今の前提 | もとは「踏み台サーバーに AWS の認証情報を置かない」前提だったが、[ssm-setup の手順](../../ssm-setup/steps.md#踏み台サーバーのロール)で、接続の確認のために踏み台サーバーに IAM ロール（`ssm-bastion`）を付けることにした（2026-11-12） | 中継サーバーを今の踏み台サーバーと兼ねるなら、`ssm-bastion` のロールとまとめて考える |
-| `ssm-check` など読み取りのコマンド | 影響なし | Deny の対象外 |
+| `rb/ssm_check.rb` など読み取りの道具 | 影響なし | Deny の対象外 |
 | 中継サーバーで動かす道具 | AWS CLI、Session Manager を使うなら session-manager-plugin が要る | 中継サーバーに入れる |
 
 ## 入れる順番

@@ -28,7 +28,7 @@
   <text class="title" x="20" y="30">port-guard-rollout: 全体の流れ</text>
   <rect class="box done" x="190" y="60" width="420" height="58"/>
   <text class="t" x="400.0" y="84.5" text-anchor="middle">前提: SSM の有効化が済んでいる</text>
-  <text class="s" x="400.0" y="103.5" text-anchor="middle">ssm-setup の ssm-check で「入れる」になった台が対象</text>
+  <text class="s" x="400.0" y="103.5" text-anchor="middle">ssm-setup の接続の確認で「入れる」になった台が対象</text>
   <rect class="box done" x="190" y="150" width="420" height="58"/>
   <text class="t" x="400.0" y="174.5" text-anchor="middle">0. 準備</text>
   <text class="s" x="400.0" y="193.5" text-anchor="middle">対象の一覧・許可する IP・--backup-label を決める</text>

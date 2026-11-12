@@ -8,7 +8,7 @@ require_relative 'al2_update'
 require_relative 'backups'
 
 # 更新の前のバックアップ: インスタンスごとに AMI を作る（create-image --no-reboot。再起動しない。完了は待たない）。
-# ssm-setup/py/ssm_setup_backup/backup.py と同じ考え方で、タグ Purpose だけを al2-update-backup に分ける。
+# ssm-setup の rb/backup.rb と同じ考え方で、タグ Purpose だけを al2-update-backup に分ける。
 # 作り終わったかは rb/backup_check.rb で確かめる（rb/update.rb も、更新の前に同じ条件で確かめる）。
 # 公開のメソッドが流れの大枠、private の下がヘルパ。
 class UpdateBackup

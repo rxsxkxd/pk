@@ -4,7 +4,7 @@
 
 ## 役割
 
-今の環境（Amazon Linux 2・Apache（httpd 2.4）・Passenger・Rails 4.2・Ruby 2.7.7（rbenv。OpenSSL 1.0.2k にリンク））の運用中のインスタンスで、**OS のパッケージの更新（yum の更新）を、複数台まとめて、1 台ずつ**行う。作業者の PC で動き、AWS CLI のコマンドと SSM の Run Command で各インスタンスを操作する（SSH の経路は作らない）。インスタンスには、暫定対応のフェーズ 1（[ssm-setup](../ssm-setup/README.md)）で SSM で入れるようにしておく（`ssm-connect-check` の `--ok-out` の一覧を、この道具の標準入力に渡せる）。
+今の環境（Amazon Linux 2・Apache（httpd 2.4）・Passenger・Rails 4.2・Ruby 2.7.7（rbenv。OpenSSL 1.0.2k にリンク））の運用中のインスタンスで、**OS のパッケージの更新（yum の更新）を、複数台まとめて、1 台ずつ**行う。作業者の PC で動き、AWS CLI のコマンドと SSM の Run Command で各インスタンスを操作する（SSH の経路は作らない）。インスタンスには、暫定対応のフェーズ 1（[ssm-setup](../ssm-setup/README.md)）で SSM で入れるようにしておく（`connect/ssm-connect-check.sh` の `--ok-out` の一覧を、この道具の標準入力に渡せる）。
 
 暫定対応の 2 つのフェーズ（ssm-setup・[port-guard-rollout](../port-guard-rollout/README.md)）とは別の作業で、別のフォルダ・別の道具・別のバックアップ（AMI のタグ `Purpose=al2-update-backup`）に分けている。AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../initial-image-build/existing-system-rebuild-on-al2023.md)）とも別。
 
@@ -86,7 +86,7 @@ cd rb && bundle install && bundle exec rubocop
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "16px"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 40}}}%%
 flowchart TD
-    Ssm["ssm-setup の ssm-connect-check<br>（SSM で実際に入れた台の一覧 ok.txt）"] --> Check["1. 更新の確認（rb/check.rb。読み取りだけ）<br>更新する・除くパッケージ、注意が要るもの、今の状態"]
+    Ssm["ssm-setup の connect/ssm-connect-check.sh<br>（SSM で実際に入れた台の一覧 ok.txt）"] --> Check["1. 更新の確認（rb/check.rb。読み取りだけ）<br>更新する・除くパッケージ、注意が要るもの、今の状態"]
     Check --> Decide{"Apache・openssl・カーネルを<br>含めるか、ほかに除くものは"}
     Decide -->|指定を決める| Backup["2. バックアップ（rb/backup.rb）<br>AMI を作る（再起動しない。完了は待たない）"]
     Backup --> BackupCheck["rb/backup_check.rb<br>作成が終わったか（available、12 時間以内）"]
@@ -178,8 +178,8 @@ flowchart TD
 | `rb/remote_result.rb` | 送った結果（`PG <キー>=<値>`・`PGSTEP`・`PG blocked=<理由>`）の読み取り（`RemoteResult`） |
 | `rb/al2_update.rb` | このフォルダの部品。何を更新の対象にするかの指定（check と update で共通）、送るスクリプトの組み立て、パッケージの見分け方（除く・注意が要る） |
 | `rb/backups.rb` | バックアップの決まり（タグ、名前、更新の前の確認の条件） |
-| `rb/lib.rb` | 共通の部品（ssm-setup の `rb/lib.rb` の写し） |
-| `rb/Gemfile`・`rb/Gemfile.lock`・`rb/.rubocop.yml` | 書き方の確認の rubocop だけを入れる（ssm-setup の `rb/` の写し）。書き方は rubocop の既定（確かめる版を Ruby 2.6 にしているだけ） |
+| `rb/lib.rb` | 共通の部品（port-guard-rollout・sg-ssh-restrict の `rb/lib.rb` と、もとは同じもの） |
+| `rb/Gemfile`・`rb/Gemfile.lock`・`rb/.rubocop.yml` | 書き方の確認の rubocop だけを入れる（port-guard-rollout・sg-ssh-restrict の `rb/` と同じ）。書き方は rubocop の既定（確かめる版を Ruby 2.6 にしているだけ） |
 | `remote/` | インスタンスに送るシェル（上の「インスタンスに送るもの」） |
 
 どのスクリプトも 1 つのクラスで、流れの大枠を公開のメソッドとして上に並べ（流れは `run` の上のコメント）、ヘルパは `private` の下に分けている。AWS に書き込む箇所（AMI の作成、更新のスクリプトの送信）には `# [変更]` コメントを付けている。

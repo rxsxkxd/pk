@@ -58,12 +58,12 @@
 
 | 案 | 内容 | 試せる port-guard の場面 |
 |---|---|---|
-| **A. 起動のときの UserData で消す（勧める既定）** | `yum remove -y amazon-ssm-agent` | 本番と同じ「入っていない」状態から、ssm-setup の `ssm-agent`（分類 B: インストール）を試せる |
-| B. 起動のときに止めて、起動時の有効化も外す | `systemctl disable --now amazon-ssm-agent` | `ssm-agent` の分類 C（有効化と起動）を試せる |
-| C. そのまま（動いている） | 何もしない | インスタンスプロファイルを付ければ、すぐに `--via ssm` を試せる。`ssm-agent` は「何もしない」になる |
+| **A. 起動のときの UserData で消す（勧める既定）** | `yum remove -y amazon-ssm-agent` | 本番と同じ「入っていない」状態から、ssm-setup の `instance/agent-install.sh` のインストールを試せる |
+| B. 起動のときに止めて、起動時の有効化も外す | `systemctl disable --now amazon-ssm-agent` | `instance/agent-install.sh` の有効化と起動を試せる |
+| C. そのまま（動いている） | 何もしない | インスタンスプロファイルを付ければ、すぐに `--via ssm` を試せる。`rb/ssm_check.rb` で「SSM 有効」になり、SSM Agent の導入は要らない |
 | D. Image Builder の `UninstallAfterBuild: true` で、AMI から外す | レシピの `AdditionalInstanceConfiguration` を変える | A と同じ状態の AMI になる。ただし、AL2 のように**最初から入っている** SSM Agent も外すのかは**未確認**（Image Builder が自分で入れたものだけを外す、という読み方もできる） |
 
-既定は **A** を勧める。本番の状態にいちばん近く、フェーズ 1（ssm-setup の `ssm-role` → `ssm-check` → `backup` → `ssm-agent` → `ssm-check`）→ フェーズ 2（`install --via ssm` → `enable --via ssm`）の流れを最初から試せる。B と C は、ほかの分類や経路を試すときに、同じ AMI から起動のしかたを変えるだけで作れる。
+既定は **A** を勧める。本番の状態にいちばん近く、フェーズ 1（ssm-setup の `rb/ssm_role.rb` → `rb/ssm_check.rb` → `rb/backup.rb` → `instance/agent-install.sh` → `rb/ssm_check.rb` → `connect/ssm-connect-check.sh`）→ フェーズ 2（`install --via ssm` → `enable --via ssm`）の流れを最初から試せる。B と C は、ほかの分類や経路を試すときに、同じ AMI から起動のしかたを変えるだけで作れる。
 
 ## 作り方
 
@@ -223,13 +223,13 @@ AWS のドキュメント:
 
 ## port-guard-rollout を試す流れ
 
-開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。1〜3 はフェーズ 1 として [ssm-setup の手順](../../../ssm-setup/steps.md) の道具（`ssm-setup/rb/` の Ruby、`connect/`・`instance/` の sh。Python 版から作り直したので、この節の 1〜3 のコマンドは古い）を、4〜7 はフェーズ 2 として `port-guard-rollout/py/` で `python3 -m port_guard_rollout`（バックアップは `python3 -m port_guard_rollout_backup`）を使う。バックアップはフェーズごとに取る。手順の詳細は [ssm-setup の手順](../../../ssm-setup/steps.md) と [port-guard-rollout の手順](../../steps.md)。
+開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。1〜3 はフェーズ 1 として `ssm-setup/` で [ssm-setup の手順](../../../ssm-setup/steps.md) の道具（`rb/` の Ruby、`connect/`・`instance/` の sh）を、4〜7 はフェーズ 2 として `port-guard-rollout/py/` で `python3 -m port_guard_rollout`（バックアップは `python3 -m port_guard_rollout_backup`）を使う。バックアップはフェーズごとに取る。手順の詳細は [ssm-setup の手順](../../../ssm-setup/steps.md) と [port-guard-rollout の手順](../../steps.md)。
 
 | # | コマンド | 確かめること |
 |---|---|---|
-| 1 | フェーズ 1: `ssm-role --instance-profile <用意したもの>` → `ssm-check --ok-out ok.txt --ng-out ng.txt` | 関連付けができる。案 A（SSM Agent を消した）なら「SSM Agent で直す」になり、`ng.txt` に載る。案 C なら「入れる」になり、`ok.txt` に載る |
-| 2 | フェーズ 1: `backup`・`check --backup-label <値> < ng.txt` → `ssm-agent --backup-label <値> --ssh-key <鍵> < ng.txt` | AMI が作られ、作成が終わったら「操作できる」になる。案 A なら「インストール」になり、入って `Online` になる |
-| 3 | フェーズ 1: もう一度 `ssm-check --ok-out ok2.txt < ng.txt`（`--via session` と `--via run-command` の両方） | 「入れる」になり、`ok2.txt` に載る（4 以降の対象の一覧になる） |
+| 1 | フェーズ 1: `ruby rb/ssm_role.rb --instance-profile <用意したもの>` → `ruby rb/ssm_check.rb --ok-out enabled.txt --ng-out ng.txt` → `bash connect/ssm-connect-check.sh --ok-out ok.txt < enabled.txt` | 関連付けができる。案 A（SSM Agent を消した）なら「SSM Agent で直す」になり、`ng.txt` に載る。案 C なら「SSM 有効」になり、接続の確認で `ok.txt` に載る |
+| 2 | フェーズ 1: `ruby rb/backup.rb --backup-label <値> < ng.txt` → `ruby rb/backup_check.rb --backup-label <値> --ok-out backup-ok.txt < ng.txt` → `backup-ok.txt` の台に SSH で `instance/agent-check.sh`・`instance/agent-install.sh` を流す | AMI が作られ、作成が終わったら「操作できる」になる。案 A なら SSM Agent が入り、`Online` になる |
+| 3 | フェーズ 1: もう一度 `ruby rb/ssm_check.rb --ok-out enabled2.txt < backup-ok.txt` → `bash connect/ssm-connect-check.sh --ok-out ok2.txt < enabled2.txt`（既定で session と run-command の両方） | 「入れる」になり、`ok2.txt` に載る（4 以降の対象の一覧になる） |
 | 4 | フェーズ 2: `backup`・`check` → `install --backup-label <値> --allow-file <一覧> --check-in-jp <作業者の IP> --check-outside <拠点の IP>`（`--via ssh` と `--via ssm` の両方） | 集合ができ、遮断はまだ効いていない |
 | 5 | フェーズ 2: `enable --backup-label <値>`（`--via ssh` と `--via ssm` の両方） | インスタンスごとの確認、自動で元に戻る予約、作業者の PC からの確認、確定。**systemd があるので、`systemctl enable --now port-guard` と、再起動の後にルールと集合が戻ることも試せる** |
 | 6 | 海外からの確認 | [海外の確認の拠点](../../outside-probe.md) から、遮断の前は届き、後は届かないこと |

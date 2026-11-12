@@ -3,7 +3,7 @@
 require 'time'
 require_relative 'al2_update'
 
-# 更新の前のバックアップ（AMI）の作り方の決まりと確認（ssm-setup/py/ssm_setup_backup/backups.py と同じ考え方）。
+# 更新の前のバックアップ（AMI）の作り方の決まりと確認（ssm-setup の rb/backups.rb と同じ考え方）。
 # rb/backup.rb で作った AMI には、Purpose（al2-update-backup）・SourceInstanceId・BackupLabel のタグが付く。
 # rb/update.rb は、インスタンスごとに次の 3 つがそろった AMI があるときだけ更新する。
 # - BackupLabel のタグが、指定した値と一致する

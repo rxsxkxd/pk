@@ -3,13 +3,27 @@
 require 'json'
 require 'open3'
 
-# rb/ の道具の共通の部品（port-guard-rollout/rb/lib.rb の写し）。AWS CLI のコマンドを呼んで JSON を読む（AWS SDK は使わない。標準のライブラリだけ）。
+# rb/ の道具の共通の部品。AWS CLI のコマンドを呼んで JSON を読む（AWS SDK は使わない。標準のライブラリだけ）。
+# port-guard-rollout・sg-ssh-restrict・al2-update の rb/lib.rb と同じところから写し、ssm-setup に要るものだけを残して、
+# AWS のエラーのコード（AwsError#code）を足した。
 # 認証情報・リージョンは、AWS CLI の設定（AWS_PROFILE・AWS_REGION など）をそのまま使う。Ruby 2.6 以上で動く。
 module Tools
-  class AwsError < StandardError; end
+  # AWS CLI のコマンドが失敗したとき。code は AWS のエラーのコード（取れなければ nil）
+  class AwsError < StandardError
+    attr_reader :code
+
+    def initialize(message)
+      super
+      @code = message[/An error occurred \(([^)]+)\)/, 1]
+    end
+
+    # 表示用の 1 行（最後の行）
+    def summary
+      message.lines.last.to_s.strip
+    end
+  end
 
   ID_PATTERN = /\Ai-[0-9a-f]{8}([0-9a-f]{9})?\z/.freeze
-  WAITING = %w[Pending InProgress Delayed].freeze
 
   module_function
 
@@ -21,50 +35,32 @@ module Tools
     out.strip.empty? ? nil : JSON.parse(out)
   end
 
-  # 標準入力から、インスタンスの ID を 1 行に 1 つ読む（# から後と空の行は無視。2 列目があっても使わない）
+  # 標準入力から、インスタンスの ID を 1 行に 1 つ読む（# から後と空の行は無視。2 列目があっても使わない。同じ ID は 1 回だけ）。
+  # 形式の誤りは表示して無視する。1 台もなければ終了コード 2 で止める
   def read_ids(io = $stdin)
-    ids = io.each_line.map { |line| line.sub(/#.*/, '').split.first }.grep(ID_PATTERN).uniq
+    ids = io.each_line.map { |line| line.sub(/#.*/, '').split.first }.compact
+    invalid = ids.grep_v(ID_PATTERN)
+    invalid.each { |value| warn "形式が正しくないので無視する: #{value}" }
+    ids = (ids - invalid).uniq
     return ids unless ids.empty?
 
     warn 'インスタンスの ID がない（標準入力に 1 行 1 つで渡す）'
     exit 2
   end
 
-  # 端末から y を受けたら true（標準入力はインスタンスの一覧に使っているため、/dev/tty から読む）
+  # 端末から y を受けたら true、ほかは false。端末がなければ nil
+  # （標準入力はインスタンスの一覧に使っているため、/dev/tty から読む）
   def ask(question)
     File.open('/dev/tty', 'r+') do |tty|
       tty.print("#{question} [y/N]: ")
-      tty.gets.to_s.strip == 'y'
+      tty.gets.to_s.strip.downcase.start_with?('y')
     end
   rescue SystemCallError
-    false
-  end
-
-  # SSM の Run Command で、スクリプトを root として実行する。結果（get-command-invocation）を返す。待ちきれなければ nil
-  def run_ssm(id, script, tries: 320)
-    command_id = send_script(id, script)
-    tries.times do
-      sleep 3
-      result = fetch_command_result(command_id, id)
-      return result if result && !WAITING.include?(result['Status'])
-    end
     nil
   end
 
-  # スクリプトは base64 にして 1 行のコマンドとして送る（引用符や改行で壊れないように）
-  def send_script(id, script)
-    parameters = { commands: ["echo #{[script].pack('m0')} | base64 -d | bash"], executionTimeout: ['900'] }
-    aws('ssm', 'send-command', '--instance-ids', id, '--document-name', 'AWS-RunShellScript',
-        '--comment', File.basename($PROGRAM_NAME), '--parameters', parameters.to_json).dig('Command', 'CommandId')
+  # PATH にコマンドがあるか
+  def command?(name)
+    ENV['PATH'].to_s.split(File::PATH_SEPARATOR).any? { |dir| File.executable?(File.join(dir, name)) }
   end
-
-  # 送った直後は、まだ結果の記録がない（nil を返して待ち続ける）
-  def fetch_command_result(command_id, id)
-    aws('ssm', 'get-command-invocation', '--command-id', command_id, '--instance-id', id)
-  rescue AwsError
-    nil
-  end
-
-  # run_ssm の中だけで使う補助は、外（Tools.send_script など）から呼べないようにする
-  private_class_method :send_script, :fetch_command_result
 end

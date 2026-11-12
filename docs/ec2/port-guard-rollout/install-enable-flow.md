@@ -1,6 +1,6 @@
 # install・enable の処理の流れ（sh 版・Ruby 版）
 
-`install` と `enable` を、機能を絞って sh と Ruby で書き直した版の処理の流れ。作業の手順（どの順にコマンドを使うか）は [手順](./steps.md) が正本で、ここは 1 つのコマンドの中で何をしているかを書く。ssm-setup の [ssm-role・ssm-check の処理の流れ](../ssm-setup/role-check-flow.md) と同じ作りにしている。
+`install` と `enable` を、機能を絞って sh と Ruby で書き直した版の処理の流れ。作業の手順（どの順にコマンドを使うか）は [手順](./steps.md) が正本で、ここは 1 つのコマンドの中で何をしているかを書く。ssm-setup にも同じ作りの sh 版・Ruby 版があったが、ssm-setup の側は Python 版だけに絞った。
 
 > 状態: 書いただけ（構文と rubocop の確認だけ済み）。実際の AWS ではまだ動かしていない。Python 版（`py/`）は残してあり、どれを使うかは決めていない。
 

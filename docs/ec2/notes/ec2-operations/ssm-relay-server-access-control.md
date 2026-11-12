@@ -178,14 +178,14 @@ flowchart TD
 
 #### CloudFormation で作る
 
-今の中継サーバーには IAM ロールが付いていないので、新しく作って関連付ける。ロール、上のポリシー、`AmazonSSMManagedInstanceCore`、インスタンスプロファイルは [cloudformation/relay-role.yml](./cloudformation/relay-role.yml) で定義している。**AWS ではまだデプロイしていない**（`cfn-lint` と、上のポリシーとの突き合わせだけを確かめた）。
+今の中継サーバーには IAM ロールが付いていないので、新しく作って関連付ける。ロール、上のポリシー、`AmazonSSMManagedInstanceCore`、インスタンスプロファイルは [ssm-relay-role.yml](./ssm-relay-role.yml) で定義している。**AWS ではまだデプロイしていない**（`cfn-lint` と、上のポリシーとの突き合わせだけを確かめた）。
 
 CloudFormation のスタックの外にある既存のインスタンスには、インスタンスプロファイルを定義で関連付けられないので、関連付けは AWS CLI で行う。SCP の Deny と VPC エンドポイントは、このスタックに含めない（VPC エンドポイントは先に作っておく）。
 
 ```bash
 # スタックの作成（変更セットを確認してから反映する）
 aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
-  --template-file ssm-setup/cloudformation/relay-role.yml \
+  --template-file notes/ec2-operations/ssm-relay-role.yml \
   --stack-name ssm-relay-role \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides VpcEndpointId=vpce-0123456789abcdef0 RelayPrivateIp=10.0.1.10
@@ -360,7 +360,7 @@ Deny を入れる前に、次を確かめる。
 | `port-guard-rollout`・`al2-update` の Run Command（作業者の PC） | 止まる | 中継サーバーから動かす |
 | AWS のコンソールの Run Command・Session Manager | 止まる（中継サーバーへのセッションを除く） | 中継サーバーを使う |
 | AMI 公開パイプラインのヘルスチェック（CodeBuild の `ssm:SendCommand`） | **止まる** | 上の Deny の例外に CodeBuild のロールを入れる |
-| 踏み台サーバーの今の前提 | [手順](./bastion-commands.md)は「踏み台サーバーに AWS の認証情報を置かない」前提 | 中継サーバーを今の踏み台サーバーと兼ねるなら、この前提が変わる。別のサーバーにするかを決める |
+| 踏み台サーバーの今の前提 | もとは「踏み台サーバーに AWS の認証情報を置かない」前提だったが、[ssm-setup の手順](../../ssm-setup/steps.md#踏み台サーバーのロール)で、接続の確認のために踏み台サーバーに IAM ロール（`ssm-bastion`）を付けることにした（2026-11-12） | 中継サーバーを今の踏み台サーバーと兼ねるなら、`ssm-bastion` のロールとまとめて考える |
 | `ssm-check` など読み取りのコマンド | 影響なし | Deny の対象外 |
 | 中継サーバーで動かす道具 | AWS CLI、Session Manager を使うなら session-manager-plugin が要る | 中継サーバーに入れる |
 

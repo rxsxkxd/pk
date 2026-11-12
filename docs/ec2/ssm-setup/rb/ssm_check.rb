@@ -3,147 +3,86 @@
 
 #   ruby rb/ssm_check.rb [--ok-out enabled.txt] [--ng-out ng.txt] < instance-ids.txt
 require 'optparse'
-require_relative 'lib'
+require_relative 'host_state'
 
-# SSM が使える状態かを、AWS の上の情報だけで確かめる（インスタンスには何も送らない。設定も変えない）。
-# 1 台ずつ、状態、インスタンスプロファイルのロール、そのロールの AmazonSSMManagedInstanceCore、登録（Online）を見て、
-# 3 つに分ける。実際につながるかは、--ok-out の一覧を rb/ssm_connect_check.rb に渡して確かめる。
+# SSM が使える状態かを、権限と AWS の上のインスタンスの状態だけで確かめる（ssm_role.rb の後に使う）。
+# インスタンスには何も送らない（設定も変えない）。1 台ずつ確かめて（rb/host_state.rb）、次の 3 つに分ける。
+# - SSM 有効: Online → connect/ssm-connect-check.sh で実際に入れるかを確かめる
+# - SSM Agent で直す: running で、ロールに AmazonSSMManagedInstanceCore が付いているのに Online でない
+#   → backup.rb でバックアップを取ってから、SSM Agent の導入（instance/）
+# - 手で直す: それ以外（止まっている、インスタンスプロファイルがない、ロールに権限がない見込み、など）
 # 公開のメソッドが流れの大枠、private の下がヘルパ。
 class SsmCheck
-  CORE_POLICY = 'AmazonSSMManagedInstanceCore'
-  LABELS = { enabled: 'SSM 有効', fixable_by_agent: 'SSM Agent で直す' }.freeze
+  TITLES = {
+    HostState::OK => 'SSM 有効（Online）→ connect/ssm-connect-check.sh で実際に入れるかを確かめる',
+    HostState::AGENT => 'SSM 有効でない: SSM Agent で直す見込み → backup.rb、SSM Agent の導入（instance/）',
+    HostState::MANUAL => 'SSM 有効でない: 手で直す（SSM Agent の導入では直らない見込み）'
+  }.freeze
 
-  def initialize(ok_out:, ng_out:)
+  def initialize(ok_out: nil, ng_out: nil)
     @ok_out = ok_out
     @ng_out = ng_out
-    @core_policy_cache = Hash.new { |cache, role| cache[role] = core_policy_attached?(role) } # 同じロールは 1 回だけ読む
   end
 
-  # 流れ: 1 台ずつ確かめて分ける → 一覧を書き出す → 結果を表示する
+  # 流れ: 1 台ずつ確かめる → 3 つに分けて表示する → 一覧を書き出す
   def run(ids)
-    results = check_all(ids)
-    write_lists(results)
-    print_summary(results)
-    all_enabled?(results) ? 0 : 1
-  end
-
-  # 1 台ずつ確かめて、区分（SSM 有効・SSM Agent で直す・手で直す）ごとに、一覧に書く行を集める
-  def check_all(ids)
-    results = { enabled: [], fixable_by_agent: [], fix_by_hand: [] }
-    ids.each do |id|
-      kind, line = check_instance(id)
-      results[kind] << line
-    end
-    results
-  end
-
-  # 一覧を書き出す（--ok-out は ssm_connect_check.rb へ、--ng-out はバックアップと ssm-agent へ）
-  def write_lists(results)
-    write_list(@ok_out, '# SSM 有効の台（rb/ssm_connect_check.rb の標準入力に渡す）', results[:enabled])
-    write_list(@ng_out, '# SSM Agent で直す台（バックアップと ssm-agent に渡せる）。手で直す台は行の先頭を # にして残す',
-               results[:fixable_by_agent] + results[:fix_by_hand])
-  end
-
-  def print_summary(results)
-    puts "== 結果: SSM 有効 #{results[:enabled].size} 台、SSM Agent で直す #{results[:fixable_by_agent].size} 台、" \
-         "手で直す #{results[:fix_by_hand].size} 台"
+    hosts = inspect_all(ids)
+    groups = TITLES.keys.to_h { |category| [category, hosts.select { |host| host.category == category }] }
+    print_groups(groups, hosts.count(&:no_core_policy?))
+    write_lists(groups)
+    groups[HostState::OK].size == hosts.size ? 0 : 1
   end
 
   private
 
-  def all_enabled?(results)
-    results[:fixable_by_agent].empty? && results[:fix_by_hand].empty?
-  end
-
-  # 1 台を確かめて表示し、[区分, 一覧に書く行] を返す
-  def check_instance(id)
-    status = gather_status(id)
-    print_status(id, status)
-    case (verdict = classify(status))
-    when :enabled, :fixable_by_agent
-      puts "   #{LABELS[verdict]}"
-      [verdict, id]
-    else
-      puts "   手で直す: #{verdict}"
-      [:fix_by_hand, "# #{id}  # #{verdict}"]
+  def inspect_all(ids)
+    puts "#{ids.size} 台を確かめる（権限と AWS の上の状態だけ。インスタンスには何も送らない）"
+    policy_cache = {}
+    ids.map do |id|
+      puts "  確認中: #{id}"
+      HostState.new(id, policy_cache).inspect!
     end
   end
 
-  def gather_status(id)
-    role = attached_role_name(id)
-    { state: instance_state(id), role: role, core_policy: role && @core_policy_cache[role],
-      registration: registration_status(id) }
+  def print_groups(groups, no_policy)
+    groups.each do |category, hosts|
+      puts "\n== #{TITLES[category]}（#{hosts.size} 台）"
+      hosts.each { |host| host.lines.each { |line| puts "  #{line}" } }
+    end
+    counts = groups.map { |category, hosts| "#{category} #{hosts.size} 台" }.join('、')
+    puts "\n== 結果: #{counts}（#{SsmSetup::CORE_POLICY} が付いていないもの #{no_policy} 台）"
   end
 
-  def print_status(id, status)
-    core_policy = status[:core_policy] ? 'あり' : 'なし'
-    puts "== #{id}  状態 #{status[:state]}  ロール #{status[:role] || 'なし'}（#{CORE_POLICY} #{core_policy}）  " \
-         "登録 #{status[:registration]}"
+  def write_lists(groups)
+    write_ok_list(groups[HostState::OK]) if @ok_out
+    write_ng_list(groups[HostState::AGENT], groups[HostState::MANUAL]) if @ng_out
   end
 
-  # :enabled（SSM 有効）、:fixable_by_agent（SSM Agent で直す）、または手で直す理由の文字列
-  def classify(status)
-    return :enabled if status[:registration] == 'Online'
-
-    reason_to_fix_by_hand(status) || :fixable_by_agent
+  # 「SSM 有効」の台の一覧（connect/ssm-connect-check.sh の標準入力の形）
+  def write_ok_list(hosts)
+    SsmSetup.write_list(@ok_out, 'ssm_check.rb で SSM 有効の台（connect/ssm-connect-check.sh の標準入力に渡す）',
+                        hosts.map { |host| host.name.empty? ? host.id : "#{host.id}  # #{host.name}" })
+    puts "SSM 有効の台の一覧を書き出した: #{@ok_out}（#{hosts.size} 台）"
   end
 
-  # SSM Agent を入れ直しても直らない理由（当てはまらなければ nil）
-  def reason_to_fix_by_hand(status)
-    return "状態が #{status[:state] || '見つからない'}（running でない）" unless status[:state] == 'running'
-    return '登録を読めない（作業者の権限 ssm:DescribeInstanceInformation を見る）' if status[:registration] == '読めない'
-    return 'インスタンスプロファイルかロールがない（ssm-role を見直す）' unless status[:role]
-
-    "ロールに #{CORE_POLICY} が付いていない、または読めない" unless status[:core_policy]
-  end
-
-  def instance_state(id)
-    instances = aws_or_nil('ec2', 'describe-instances', '--instance-ids', id)
-    instances&.dig('Reservations', 0, 'Instances', 0, 'State', 'Name')
-  end
-
-  # 関連付けられたインスタンスプロファイルに入っているロールの名前（なければ nil）
-  def attached_role_name(id)
-    filter = "Name=instance-id,Values=#{id}"
-    associations = aws_or_nil('ec2', 'describe-iam-instance-profile-associations', '--filters', filter)
-    association = associations&.fetch('IamInstanceProfileAssociations')&.find { |a| a['State'] == 'associated' }
-    return nil unless association
-
-    profile_name = association.dig('IamInstanceProfile', 'Arn').split('/').last
-    profile = aws_or_nil('iam', 'get-instance-profile', '--instance-profile-name', profile_name)
-    profile&.dig('InstanceProfile', 'Roles', 0, 'RoleName')
-  end
-
-  def core_policy_attached?(role)
-    policies = aws_or_nil('iam', 'list-attached-role-policies', '--role-name', role)
-    (policies&.fetch('AttachedPolicies') || []).any? { |p| p['PolicyName'] == CORE_POLICY }
-  end
-
-  # SSM の登録の状態（Online・ConnectionLost など。登録がなければ「未登録」、読めなければ「読めない」）
-  def registration_status(id)
-    info = aws_or_nil('ssm', 'describe-instance-information', '--filters', "Key=InstanceIds,Values=#{id}")
-    info ? info.dig('InstanceInformationList', 0, 'PingStatus') || '未登録' : '読めない'
-  end
-
-  # 読めなければ nil（読めないことも、手で直す理由として表示する）
-  def aws_or_nil(*args)
-    Tools.aws(*args)
-  rescue Tools::AwsError
-    nil
-  end
-
-  def write_list(path, header, lines)
-    File.write(path, [header, *lines].map { |line| "#{line}\n" }.join)
+  # 「SSM Agent で直す」台の一覧（backup.rb・backup_check.rb の標準入力の形。理由は # の後ろ）。
+  # 手で直す台は、行の先頭を # にして残す（読み飛ばされる）
+  def write_ng_list(agent, manual)
+    lines = agent.map { |host| "#{host.id}  # #{host.problems.join(' / ')}" }
+    unless manual.empty?
+      lines += ['', '# 手で直す台（SSM Agent の導入では直らない見込み。行の先頭が # なので読み飛ばされる）']
+      lines += manual.map { |host| "# #{host.id}  # #{host.problems.join(' / ')}  見るところ: #{host.hint}" }
+    end
+    SsmSetup.write_list(@ng_out, 'ssm_check.rb で SSM Agent で直す見込みの台（backup.rb・backup_check.rb の標準入力に渡す）', lines)
+    puts "SSM Agent で直す台の一覧を書き出した: #{@ng_out}（#{agent.size} 台。手で直す #{manual.size} 台は # で残した）"
   end
 end
 
-def parse_options
-  options = { ok_out: File::NULL, ng_out: File::NULL }
-  OptionParser.new do |o|
-    o.on('--ok-out PATH') { |v| options[:ok_out] = v }
-    o.on('--ng-out PATH') { |v| options[:ng_out] = v }
-  end.parse!
-  options
+if $PROGRAM_NAME == __FILE__
+  options = SsmSetup.parse_options do |o, opts|
+    o.on('--ok-out PATH', '「SSM 有効」の台を書き出す（connect/ssm-connect-check.sh の標準入力に渡す）') { |v| opts[:ok_out] = v }
+    o.on('--ng-out PATH', '「SSM Agent で直す」台を書き出す（backup.rb・backup_check.rb の標準入力に渡す）') { |v| opts[:ng_out] = v }
+  end
+  SsmSetup.require_aws_cli
+  exit SsmCheck.new(ok_out: options[:ok_out], ng_out: options[:ng_out]).run(Tools.read_ids)
 end
-
-exit SsmCheck.new(**parse_options).run(Tools.read_ids)

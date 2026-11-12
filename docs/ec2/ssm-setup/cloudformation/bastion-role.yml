@@ -1,0 +1,72 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  IAM role and instance profile of the bastion server, used to check from the bastion server that the
+  running servers can be reached by SSM (Session Manager and Run Command). Associate the instance profile
+  with the existing bastion server by using the AWS CLI.
+
+Parameters:
+  RoleName:
+    Type: String
+    Default: ssm-bastion
+    Description: Also used as the instance profile name.
+
+Resources:
+  BastionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Ref: RoleName
+      Description: Bastion server that checks SSM Session Manager and Run Command connections
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: bastion-ssm-connect-check
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SendCommand
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunShellScript
+              - Sid: ReadCommandResults
+                Effect: Allow
+                Action: ssm:GetCommandInvocation
+                Resource: "*"
+              - Sid: StartSession
+                Effect: Allow
+                Action: ssm:StartSession
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-StartNonInteractiveCommand
+              - Sid: ManageOwnSessions
+                Effect: Allow
+                Action:
+                  - ssm:TerminateSession
+                  - ssm:ResumeSession
+                  - ssmmessages:OpenDataChannel
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:*:*:session/*
+                Condition:
+                  StringEquals:
+                    ssm:resourceTag/aws:ssmmessages:session-id: ${aws:userid}
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName:
+        Ref: RoleName
+      Roles:
+        - Ref: BastionRole
+
+Outputs:
+  InstanceProfileName:
+    Description: Associate this instance profile with the bastion server by using associate-iam-instance-profile.
+    Value:
+      Ref: BastionInstanceProfile

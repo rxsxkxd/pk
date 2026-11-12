@@ -1,4 +1,4 @@
-# sh/ の道具の共通の部品（source して使う）。ssm-setup/sh/lib.sh と同じもの。
+# sh/ の道具の共通の部品（source して使う）。
 # AWS CLI の認証情報・リージョンは、AWS CLI の設定（AWS_PROFILE・AWS_REGION など）をそのまま使う。
 
 # 標準入力から、インスタンスの ID を 1 行に 1 つ読む（# から後と空の行は無視。2 列目があっても使わない）

@@ -133,7 +133,7 @@ flowchart TD
 
 ## バックアップ
 
-[ssm-setup の Python 版のバックアップ](../ssm-setup/py/ssm_setup_backup/) と同じ考え方で、タグ `Purpose` だけを `al2-update-backup` に分けている（ssm-setup の `ssm-setup-backup`、port-guard-rollout の `port-guard-rollout-backup` とは混ぜない。ほかのフェーズで取ったバックアップは、この道具の更新の前の確認では数えない）。
+[ssm-setup のバックアップ](../ssm-setup/steps.md)（もとは Python 版。今は `ssm-setup/rb/backup.rb`・`backups.rb`）と同じ考え方で、タグ `Purpose` だけを `al2-update-backup` に分けている（ssm-setup の `ssm-setup-backup`、port-guard-rollout の `port-guard-rollout-backup` とは混ぜない。ほかのフェーズで取ったバックアップは、この道具の更新の前の確認では数えない）。
 
 | 項目 | 内容 |
 |---|---|

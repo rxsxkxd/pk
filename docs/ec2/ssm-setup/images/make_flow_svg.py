@@ -85,17 +85,19 @@ def flow():
     lane = R + 220  # 「入れる」の通り道
     rows = {"prep": 60, "role": 150, "ssmcheck": 240, "backup": 350, "check": 440, "agent": 540,
             "recheck": 640, "manual": 750}
-    s.box(X, rows["prep"], W, H, ["0. 準備"], "done", ["対象の一覧・インスタンスプロファイルを用意する"])
-    s.box(X, rows["role"], W, H, ["1. ssm-role（AWS の API だけ）"], "command",
+    s.box(X, rows["prep"], W, H, ["0. 準備"], "done", ["一覧・インスタンスプロファイル・踏み台サーバーのロール"])
+    s.box(X, rows["role"], W, H, ["1. rb/ssm_role.rb（AWS の操作）"], "command",
           ["IAM ロールが未設定の台にインスタンスプロファイルを関連付ける"])
-    s.box(X, rows["ssmcheck"], W, H, ["2. ssm-check"], "check", ["入れる・SSM Agent で直す・手で直す に分ける"])
-    s.box(X, rows["backup"], W, H, ["3. backup（ng.txt の台だけ）"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
-    s.box(X, rows["check"], W, H, ["check（補助）"], "check", ["作成済み（available）で 12 時間以内か"])
-    s.box(X, rows["agent"], W, H, ["4. ssm-agent（SSH）"], "command", ["SSM Agent を入れる・有効にする・起動し直す"])
-    s.box(X, rows["recheck"], W, H, ["5. ssm-check（もう一度。ng.txt の台）"], "check", ["入れる・入れない に分ける"])
-    s.box(X, rows["manual"], W, H, ["手で直す"], "manual", ["理由と「見るところ」を見て直し、ssm-check で確かめる"])
+    s.box(X, rows["ssmcheck"], W, H, ["2. rb/ssm_check.rb → connect/ssm-connect-check.sh"], "check",
+          ["SSM 有効なら、作業者の PC と踏み台サーバーから echo"])
+    s.box(X, rows["backup"], W, H, ["3. rb/backup.rb（ng.txt の台だけ）"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
+    s.box(X, rows["check"], W, H, ["rb/backup_check.rb"], "check", ["作成済み（available）で 12 時間以内か"])
+    s.box(X, rows["agent"], W, H, ["4. instance/agent-check.sh → agent-install.sh"], "command",
+          ["backup-ok.txt の台だけ。届けて流すのは別の枠組み"])
+    s.box(X, rows["recheck"], W, H, ["5. 2 をもう一度（backup-ok.txt の台）"], "check", ["入れる・入れない に分ける"])
+    s.box(X, rows["manual"], W, H, ["手で直す"], "manual", ["理由と「見るところ」を見て直し、2 で確かめる"])
     order = ["prep", "role", "ssmcheck", "backup", "check", "agent", "recheck", "manual"]
-    labels = {"ssmcheck": "SSM Agent で直す（ng.txt）", "check": "そろった", "recheck": "入れない（ng2.txt）"}
+    labels = {"ssmcheck": "SSM Agent で直す（ng.txt）", "check": "そろった（backup-ok.txt）", "recheck": "入れない"}
     for a, b in zip(order, order[1:]):
         s.edge([(cx, rows[a] + H), (cx, rows[b])], labels.get(a), (cx + 8, rows[a] + H + 30))
     # 入れる台はフェーズ 2 へ（2 と 5 の両方から）
@@ -117,12 +119,12 @@ def flow():
     s.text(48, rows["ssmcheck"] + 21, "手で直す")
     s.text(48, rows["ssmcheck"] + 50, "（ng.txt に")
     s.text(48, rows["ssmcheck"] + 68, "# で残る）")
-    s.legend(R, 60, [("command", "道具のコマンド"), ("check", "確認（道具）"), ("manual", "作業者が手で行う"),
+    s.legend(R, 60, [("command", "設定を変えるもの"), ("check", "確認"), ("manual", "作業者が手で行う"),
                      ("done", "準備・待ち・次のフェーズ")])
     s.text(20, 850, "ほとんどの台は、SSM Agent は入って動いていて、IAM ロールがないだけと見込んでいる。まずインスタンスプロファイルを関連付けて確かめ、")
     s.text(20, 872, "SSM Agent で直る見込みの台（running・インスタンスプロファイルとロールの権限がある・Online でない）だけにバックアップを取って SSM Agent を入れる。")
-    s.text(20, 894, "それ以外の入れない台（止まっている、権限がない、Online なのにつながらない、など）は手で直す。バックアップが要るのは ssm-agent だけ。")
-    s.text(20, 916, "ssm-check --ok-out / --ng-out で書き出した一覧を、そのまま次のコマンドの標準入力に渡す。どの手順も、OS の再起動は要らない。")
+    s.text(20, 894, "それ以外の入れない台（止まっている、権限がない、Online なのにつながらない、など）は手で直す。バックアップが要るのは SSM Agent の導入だけ。")
+    s.text(20, 916, "道具が書き出した一覧（--ok-out / --ng-out）を、そのまま次の道具の標準入力に渡す。どの手順も、OS の再起動は要らない。")
     return s.render()
 
 out = sys.argv[1]

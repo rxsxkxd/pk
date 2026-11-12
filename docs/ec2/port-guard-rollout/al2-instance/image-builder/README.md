@@ -223,7 +223,7 @@ AWS のドキュメント:
 
 ## port-guard-rollout を試す流れ
 
-開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。1〜3 はフェーズ 1 として `ssm-setup/py/` で `python3 -m ssm_setup`（バックアップは `python3 -m ssm_setup_backup`）を、4〜7 はフェーズ 2 として `port-guard-rollout/py/` で `python3 -m port_guard_rollout`（バックアップは `python3 -m port_guard_rollout_backup`）を使う。バックアップはフェーズごとに取る。手順の詳細は [ssm-setup の手順](../../../ssm-setup/steps.md) と [port-guard-rollout の手順](../../steps.md)。
+開発用のアカウントの認証情報（`--profile`）を使う。対象の一覧（`instance-ids.txt`）には、テスト用のインスタンスの ID を書く（接続先は AWS CLI でパブリック IP を引く）。1〜3 はフェーズ 1 として [ssm-setup の手順](../../../ssm-setup/steps.md) の道具（`ssm-setup/rb/` の Ruby、`connect/`・`instance/` の sh。Python 版から作り直したので、この節の 1〜3 のコマンドは古い）を、4〜7 はフェーズ 2 として `port-guard-rollout/py/` で `python3 -m port_guard_rollout`（バックアップは `python3 -m port_guard_rollout_backup`）を使う。バックアップはフェーズごとに取る。手順の詳細は [ssm-setup の手順](../../../ssm-setup/steps.md) と [port-guard-rollout の手順](../../steps.md)。
 
 | # | コマンド | 確かめること |
 |---|---|---|

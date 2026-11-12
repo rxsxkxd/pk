@@ -60,6 +60,12 @@ class LaunchTemplateStack(NamedStack):
             managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("AmazonSSMManagedInstanceCore")],
         )
 
+        # 既存のセキュリティグループ（設定値で 1 つ以上）。L2 は作るときに 1 つ渡さないと connections を使えないので、
+        # 1 つ目は作るときに渡し、2 つ目からは connections で足す
+        security_groups = [
+            ec2.SecurityGroup.from_security_group_id(self, f"SecurityGroup{index}", security_group_id)
+            for index, security_group_id in enumerate(settings.security_group_ids)
+        ]
         launch_template = ec2.LaunchTemplate(
             self,
             "LaunchTemplate",
@@ -68,21 +74,29 @@ class LaunchTemplateStack(NamedStack):
             instance_type=ec2.InstanceType(settings.instance_type),
             role=role,
             require_imdsv2=True,
+            security_group=security_groups[0],
         )
-        for index, security_group_id in enumerate(settings.security_group_ids):
-            launch_template.connections.add_security_group(
-                ec2.SecurityGroup.from_security_group_id(self, f"SecurityGroup{index}", security_group_id)
-            )
+        for security_group in security_groups[1:]:
+            launch_template.connections.add_security_group(security_group)
         # AMI は初回は空（指定しない）にするため、L2 の machine_image ではなく、L1 のプロパティを条件付きで上書きする
         cfn_launch_template: ec2.CfnLaunchTemplate = launch_template.node.default_child
         cfn_launch_template.add_property_override(
             "LaunchTemplateData.ImageId",
             cdk.Fn.condition_if(has_ami_id.logical_id, ami_id.value_as_string, cdk.Aws.NO_VALUE),
         )
+        # 合成時の検証は ImageId を空の文字列（AmiId の既定値）として形式を確かめて警告する。空のときは Fn::If で
+        # ImageId を指定しない（AWS::NoValue）ので、承知済みとして扱う
+        cdk.Validations.of(cfn_launch_template).acknowledge(
+            cdk.Acknowledgment(
+                id="CloudFormation-Validate::E1152", reason="ImageId is omitted by Fn::If when AmiId is empty"
+            )
+        )
 
         # 起動テンプレートと、そこから起動したインスタンス・ボリュームに付くタグ
         cdk.Tags.of(launch_template).add("App", application)
         cdk.Tags.of(launch_template).add("AppVersion", if_has_ami_id(app_version.value_as_string, "none"))
+        # L2 が自動で付ける Name タグ（構成要素のパス）は付けない（生成ツールの出力と同じく、インスタンスの名前は決めない）
+        cdk.Tags.of(launch_template).remove("Name")
 
         # スタック名: AMI 公開パイプラインのスタックが参照する（権限の対象）
         self.export_output("StackName", self.stack_name, environment.launch_template_stack_export("StackName"))

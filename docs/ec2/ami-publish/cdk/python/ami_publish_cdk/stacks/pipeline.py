@@ -7,6 +7,7 @@ from aws_cdk import aws_codebuild as codebuild
 from aws_cdk import aws_codecommit as codecommit
 from aws_cdk import aws_codepipeline as codepipeline
 from aws_cdk import aws_codepipeline_actions as actions
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_s3 as s3
 from constructs import Construct
@@ -38,6 +39,10 @@ class PipelineStack(NamedStack):
             f"{environment.application_name} AMI publish pipeline ({environment.name})",
             environment,
         )
+        # cfn-lint の検査のうち、意図どおりのものを外す。W6001: 出力の値が他のスタックの Export の Import
+        # （AMI 公開ツールが他のスタックの名前を引くため。生成ツールの出力も外している）。
+        # W3005: L2 の CodePipeline が足す DependsOn が、GetAtt による依存と重なる（合成の結果に影響しない）
+        self.template_options.metadata = {"cfn-lint": {"config": {"ignore_checks": ["W6001", "W3005"]}}}
 
         # AMI 公開ツールが CodeBuild で読む設定値ファイル。デプロイ時に --parameter-overrides ConfigFile=... で変えられる
         config_file = cdk.CfnParameter(
@@ -143,6 +148,8 @@ class PipelineStack(NamedStack):
                 ),
             ],
         )
+        if settings.source_type != SOURCE_TYPE_CODECOMMIT:
+            self._allow_codeconnections(pipeline, settings.source_connection_arn)
 
         self.output("PipelineName", pipeline.pipeline_name)
         self.output("CodeBuildProjectName", project.project_name)
@@ -154,6 +161,20 @@ class PipelineStack(NamedStack):
         self.output("ReleaseInstanceRoleArn", import_value(environment.release_instance_stack_export("RoleArn")))
         self.output(
             "ReleaseInstanceProfileArn", import_value(environment.release_instance_stack_export("InstanceProfileArn"))
+        )
+
+    @staticmethod
+    def _allow_codeconnections(pipeline: codepipeline.Pipeline, connection_arn: str) -> None:
+        """ソースのアクションのロールに、新しい接頭辞 codeconnections の UseConnection も許可する。
+
+        L2 は旧来の接頭辞の codestar-connections:UseConnection だけを付ける。生成ツールと同じく両方を許可する。
+        ソースのアクションのロールは、L2 がパイプラインの中に作る（パス: Pipeline/Source/Source/CodePipelineActionRole）。
+        """
+        role = (
+            pipeline.node.find_child("Source").node.find_child("Source").node.find_child("CodePipelineActionRole")
+        )
+        role.add_to_principal_policy(
+            iam.PolicyStatement(actions=["codeconnections:UseConnection"], resources=[connection_arn])
         )
 
     def _source_action(self, environment: Environment, source_output: codepipeline.Artifact) -> codepipeline.IAction:

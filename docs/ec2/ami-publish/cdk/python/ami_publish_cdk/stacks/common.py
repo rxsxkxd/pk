@@ -31,9 +31,9 @@ class NamedStack(cdk.Stack):
         """命名規則どおりの名前で Export する出力。"""
         cdk.CfnOutput(self, output_id, value=value, export_name=export_name)
 
-    def output(self, output_id: str, value: str) -> None:
+    def output(self, output_id: str, value: str, description: str | None = None) -> None:
         """Export しない出力。"""
-        cdk.CfnOutput(self, output_id, value=value)
+        cdk.CfnOutput(self, output_id, value=value, description=description)
 
 
 def import_value(export_name: str) -> str:

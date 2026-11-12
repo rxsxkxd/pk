@@ -141,7 +141,7 @@ def load_configuration(path: str) -> Configuration:
 def _environment(name: str, values: dict) -> Environment:
     def required(container: dict, key: str, label: str):
         value = container.get(key)
-        if value in (None, ""):
+        if value is None or value == "" or value == []:
             raise ConfigurationError(f"environments.{name}.{label} を指定する")
         return value
 
@@ -164,7 +164,9 @@ def _environment(name: str, values: dict) -> Environment:
         ),
         launch_template=LaunchTemplateSettings(
             instance_type=required(launch_template, "instance_type", "launch_template.instance_type"),
-            security_group_ids=list(launch_template.get("security_group_ids") or []),
+            security_group_ids=list(
+                required(launch_template, "security_group_ids", "launch_template.security_group_ids")
+            ),
         ),
         health_check=HealthCheckSettings(
             url=required(health_check, "url", "health_check.url"),

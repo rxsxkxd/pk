@@ -64,4 +64,8 @@ class HealthCheckStack(NamedStack):
                     )
                 ],
             )
-            self.output("BasicAuthParameterReadPolicyArn", policy.managed_policy_arn)
+            self.output(
+                "BasicAuthParameterReadPolicyArn",
+                policy.managed_policy_arn,
+                "Attach this managed policy to the IAM role of the release instance",
+            )

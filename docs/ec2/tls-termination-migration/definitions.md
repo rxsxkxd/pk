@@ -19,7 +19,8 @@
 
 ```
 cdk/python/
-  app.py                       設定値ファイルから 3 つのスタックを定義する
+  app.py                       設定値ファイルからスタックを定義する（証明書の ARN が空のスタックは定義しない）
+  README.md                    使い方と実行コマンド
   config.example.yml           設定値の例
   tls_termination_cdk/
     configuration.py           設定値の読み込み

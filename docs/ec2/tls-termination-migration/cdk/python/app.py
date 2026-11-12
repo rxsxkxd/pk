@@ -1,6 +1,7 @@
 """SSL/TLS の終端を前段へ移す 3 つの構成の CDK 版（Python）。
 
 設定値ファイルから各構成のスタックを定義する。同じ環境にデプロイする構成は 1 つだけ。
+証明書の ARN が空のスタックは定義せず、その名前を標準エラーに出す。使い方は README.md。
 CDK は CloudFormation テンプレートを作る（cdk synth）ためだけに使い、デプロイは担当者が AWS CLI で
 変更セットを作って確認してから反映する（cdk bootstrap は不要）。
 
@@ -25,7 +26,9 @@ def main() -> None:
         print(error, file=sys.stderr)
         sys.exit(2)
 
-    define_stacks(app, configuration)
+    skipped = define_stacks(app, configuration)
+    for stack in skipped:
+        print(f"定義しなかったスタック: {stack}", file=sys.stderr)
     app.synth()
 
 

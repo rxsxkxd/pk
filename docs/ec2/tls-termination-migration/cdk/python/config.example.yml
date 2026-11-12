@@ -23,9 +23,11 @@ certificate_hosted_zone_id: ""
 origin_hosted_zone_id: ""
 origin_elastic_ip: ""
 
-# ALB と同じリージョンの ACM の証明書
+# 証明書の ARN が空なら、それを使うスタックは合成しない（ALB を使わない構成や、
+# CloudFront の証明書のスタックを先に作る間は空でよい）
+# ALB と同じリージョンの ACM の証明書（ACM のコンソールの「証明書」。「ACME 証明書」ではない）
 alb_certificate_arn: arn:aws:acm:ap-northeast-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
-# us-east-1 の ACM の証明書
+# us-east-1 の ACM の証明書（<prefix>-cloudfront-certificate の出力 CertificateArn）
 cloudfront_certificate_arn: arn:aws:acm:us-east-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
 
 # 付けないときは空のままにする。CloudFront 用は <prefix>-cloudfront-waf の出力 WebAclArn を書く

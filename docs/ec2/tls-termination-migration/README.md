@@ -21,6 +21,7 @@
 | [external-dns-certificate.md](./external-dns-certificate.md) | DNS を外部の DNS サービスで管理しているドメイン（本番）で、ACM の証明書を発行して CloudFront に付け、DNS を切り替えるまでの流れ |
 | [cloudfront-alb-to-ec2.md](./cloudfront-alb-to-ec2.md) | CloudFront → ALB → EC2 への移行の手順 |
 | [definitions.md](./definitions.md) | 3 つの構成の ALB・CloudFront の定義（`cloudformation/` の YAML と `cdk/python/` の CDK）の説明と使い方 |
+| [cdk/python/README.md](./cdk/python/README.md) | CDK（Python）版の準備・合成・デプロイ・撤去のコマンドと、ACM の「証明書」と「ACME 証明書」の違い |
 
 ## 結論
 

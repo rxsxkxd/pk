@@ -2,7 +2,7 @@
 
 > 位置付け: `cdk/python/` の使い方。定義の中身（ルール、YAML との違い）は [definitions.md](../../definitions.md) を正本とし、ここでは**手元での準備・合成・デプロイのコマンド**をまとめる。
 >
-> 状態: 合成（`app.py` の実行）と `cfn-lint` までは確かめた（[definitions.md](../../definitions.md) の「状態」）。**AWS へのデプロイ（下の「デプロイ」のコマンド）は実行していない**。
+> 状態: 合成（`app.py` の実行）は確かめた（2026-11-12。Node.js 26、`aws-cdk-lib` 2.275.0）。2026-11-12 の変更（下の「証明書の ARN が空のとき」）の後も、合成したテンプレートは `cfn-lint` 1.60.0 を警告なしで通った（証明書の ARN が 2 つともある場合、2 つとも空の場合、CloudFront の分だけある場合の 3 通り。`cloudformation/` の YAML も同じく通った）。**AWS へのデプロイ（下の「デプロイ」のコマンド）は実行していない**。
 >
 > 作成日: 2026-11-12
 
@@ -21,14 +21,14 @@
 - CDK は**テンプレートを作るためだけ**に使う。デプロイは担当者が AWS CLI で変更セットを作り、確認してから反映する
 - `cdk bootstrap` は要らない（ブートストラップのバージョンの確認をテンプレートに入れていない。`stacks/common.py` の `TerminationStack`）
 - 合成は AWS を呼ばない（VPC などは ID で参照するだけで、検索しない）
-- 1 回の合成で、6 つのスタックのテンプレートがすべて出る。**同じ環境にデプロイする構成は 1 つだけ**で、使うテンプレートを選んでデプロイする
+- 1 回の合成で、設定値で作れるスタックのテンプレートがすべて出る（最大 6 つ。証明書の ARN が空のスタックは出ない）。**同じ環境にデプロイする構成は 1 つだけ**で、使うテンプレートを選んでデプロイする
 - CDK で出したテンプレートでデプロイしたスタックを、`cloudformation/` の YAML で更新しない（論理 ID が違う。逆も同じ）
 
 ## ファイル
 
 | ファイル | 内容 |
 |---|---|
-| `app.py` | 入口。設定値ファイルを読み、スタックを定義して合成する。設定値の誤りは終了コード 2 |
+| `app.py` | 入口。設定値ファイルを読み、スタックを定義して合成する。設定値の誤りは終了コード 2。定義しなかったスタックを標準エラーに出す |
 | `cdk.json` | `cdk` の CLI を使うときの設定（`app: python3 app.py`、既定の設定値ファイル `config.example.yml`） |
 | `config.example.yml` | 設定値の例（値はすべて架空） |
 | `requirements.txt` | `aws-cdk-lib` 2.275.0、`constructs` 10.8.1、`PyYAML` |
@@ -37,16 +37,18 @@
 
 ## 出るスタック
 
-`<prefix>` は設定値の `stack_name_prefix`。スタック名がそのままテンプレートのファイル名になる（`cdk.out/<スタック名>.template.json`）。
+`<prefix>` は設定値の `stack_name_prefix`。スタック名がそのままテンプレートのファイル名になる（`cdk.out/<スタック名>.template.json`）。パラメータと出力は、2026-11-12 に合成の結果で確かめた。
 
-| スタック名 | リージョン | 内容 | デプロイのときのパラメータ |
-|---|---|---|---|
-| `<prefix>-alb-to-ec2` | `aws_region` | A. ALB → EC2 | なし |
-| `<prefix>-cloudfront-to-ec2` | `aws_region` | B. CloudFront → EC2 | `OriginVerifyHeaderValue` |
-| `<prefix>-cloudfront-to-ec2-same-domain` | `aws_region` | B. CloudFront → EC2（外部のドメイン名を変えない場合） | `OriginVerifyHeaderValue` |
-| `<prefix>-cloudfront-alb-to-ec2` | `aws_region` | C. CloudFront → ALB → EC2 | `OriginVerifyHeaderValue` |
-| `<prefix>-cloudfront-certificate` | `us-east-1` | CloudFront の証明書（ACM） | なし |
-| `<prefix>-cloudfront-waf` | `us-east-1` | CloudFront 用の WAF の web ACL とログ | なし |
+| スタック名 | リージョン | 内容 | 合成する条件 | デプロイのときのパラメータ | 出力 |
+|---|---|---|---|---|---|
+| `<prefix>-cloudfront-certificate` | `us-east-1` | CloudFront の証明書（ACM） | いつも | なし | `CertificateArn` |
+| `<prefix>-cloudfront-waf` | `us-east-1` | CloudFront 用の WAF の web ACL とログ | いつも | なし | `WebAclArn`、`WebAclLogGroupName` |
+| `<prefix>-alb-to-ec2` | `aws_region` | A. ALB → EC2 | `alb_certificate_arn` がある | なし | `LoadBalancerDnsName`、`LoadBalancerCanonicalHostedZoneId` |
+| `<prefix>-cloudfront-to-ec2` | `aws_region` | B. CloudFront → EC2 | `cloudfront_certificate_arn` がある | `OriginVerifyHeaderValue` | `DistributionDomainName`、`OriginSecurityGroupId` |
+| `<prefix>-cloudfront-to-ec2-same-domain` | `aws_region` | B. CloudFront → EC2（外部のドメイン名を変えない場合） | `cloudfront_certificate_arn` がある | `OriginVerifyHeaderValue` | `DistributionDomainName`、`OriginSecurityGroupId` |
+| `<prefix>-cloudfront-alb-to-ec2` | `aws_region` | C. CloudFront → ALB → EC2 | 2 つの証明書の ARN がどちらもある | `OriginVerifyHeaderValue` | `DistributionDomainName`、`LoadBalancerDnsName`、`LoadBalancerCanonicalHostedZoneId` |
+
+テンプレートが参照するファイル（アセット）は、テンプレート自身だけである。`cdk bootstrap` で作る S3 のバケットは使わない（`cdk.out/*.assets.json` にはバケットの名前が書かれるが、AWS CLI でデプロイするので使われない）。
 
 ## 準備
 
@@ -75,8 +77,8 @@ cp config.example.yml config.yml   # 環境の値に直す（環境ごとに con
 | `cloudfront_prefix_list_id` | ○ | `com.amazonaws.global.cloudfront.origin-facing` の ID（下のコマンドで調べる） |
 | `domain_name` | ○ | 利用者が使う名前（例: `app.example.com`） |
 | `origin_domain_name` | ○ | CloudFront の接続先の名前。`domain_name` と同じにするとエラー |
-| `alb_certificate_arn` | ○ | ALB のリージョンの ACM の証明書 |
-| `cloudfront_certificate_arn` | ○ | `us-east-1` の ACM の証明書（CloudFront の証明書） |
+| `alb_certificate_arn` | | ALB のリージョンの ACM の証明書。空なら ALB を使うスタックを合成しない |
+| `cloudfront_certificate_arn` | | `us-east-1` の ACM の証明書（CloudFront の証明書）。空なら CloudFront を使うスタックを合成しない |
 | `cloudfront_web_acl_arn`、`alb_web_acl_arn` | | WAF の web ACL の ARN。空なら関連付けない |
 | `certificate_hosted_zone_id` | | `domain_name` の Route 53 のホストゾーン。指定すると ACM の検証用のレコードを自動で作る（本番は外部の DNS なので空） |
 | `origin_hosted_zone_id`、`origin_elastic_ip` | | `origin_domain_name` の A レコードも作るときに 2 つとも指定する |
@@ -85,9 +87,18 @@ cp config.example.yml config.yml   # 環境の値に直す（環境ごとに con
 | `restrict_to_cloudfront` | | C の 2 段階目で `true` にする |
 | `new_app_port` ほか | | 既定値あり（`config.example.yml` の末尾） |
 
-**注意: 必須の項目は、使わないスタックの分も埋める**。検証は全項目に対して行い、6 つのスタックを全部定義するため。たとえば B だけを使うときも `alb_certificate_arn` は空にできない。また、CloudFront の証明書のスタックを先に作るときは、まだ `cloudfront_certificate_arn` がないので、仮の値（例の値のまま）で合成し、証明書ができてから本当の値に書き換えて合成し直す。
+必須の項目は、どの構成でも埋める（証明書と WAF のスタックだけを合成するときも）。未知の項目を書くとエラーになる（綴りの誤りを見つけるため）。
 
-未知の項目を書くとエラーになる（綴りの誤りを見つけるため）。
+### 証明書の ARN が空のとき
+
+証明書の ARN が空のスタックは合成せず、標準エラーに次のように出す（終了コードは 0）。B だけを使うときは `alb_certificate_arn` を空のままにしてよい。CloudFront の証明書のスタックを先に作る間は、`cloudfront_certificate_arn` も空にしておく。
+
+```
+定義しなかったスタック: myapp-production-alb-to-ec2（alb_certificate_arn が空）
+定義しなかったスタック: myapp-production-cloudfront-alb-to-ec2（alb_certificate_arn と cloudfront_certificate_arn の両方が要る）
+```
+
+仮の ARN を書いて合成すると、存在しない証明書を指すテンプレートができる。デプロイのときに失敗するので、仮の値は書かない。
 
 CloudFront のプレフィックスリストの ID:
 
@@ -156,7 +167,7 @@ openssl rand -hex 32
 ```
 
 - 2 回目以降の更新で `OriginVerifyHeaderValue` を変えないなら、`--parameter-overrides OriginVerifyHeaderValue=<同じ値>` をもう一度渡す（`NoEcho` のため、CloudFormation から値を読み出せない）
-- テンプレートが 51,200 バイトを超えると、`aws cloudformation deploy` に `--s3-bucket` が要る。今の定義の大きさでは確かめていない
+- テンプレートが 51,200 バイトを超えると、`aws cloudformation deploy` に `--s3-bucket` が要る。`config.example.yml` で合成した大きさは、いちばん大きい `<prefix>-cloudfront-waf` で約 10 KB、ほかは 9 KB 以下なので要らない（2026-11-12）。例外の IP を数百件並べると大きくなる
 
 ## 構成ごとの順番
 
@@ -164,11 +175,11 @@ openssl rand -hex 32
 
 | # | 行うこと | コマンド・確かめること |
 |---|---|---|
-| 1 | 設定値ファイルを作り、合成する | 上の「設定値ファイル」「合成」。`cloudfront_certificate_arn`・`cloudfront_web_acl_arn` はまだ仮の値・空でよい |
+| 1 | 設定値ファイルを作り、合成する | 上の「設定値ファイル」「合成」。`alb_certificate_arn`・`cloudfront_certificate_arn`・`cloudfront_web_acl_arn` は空にしておく。証明書と WAF のスタックだけが出る |
 | 2 | `<prefix>-cloudfront-certificate` をデプロイ（`us-east-1`） | `certificate_hosted_zone_id` が空なら、ACM が示す検証用の CNAME を DNS に足すまでスタックは `CREATE_IN_PROGRESS` のまま待つ（本番の手順は [external-dns-certificate.md](../../external-dns-certificate.md)） |
 | 3 | `<prefix>-cloudfront-waf` をデプロイ（`us-east-1`） | |
 | 4 | 2 と 3 の出力を設定値ファイルに書く | `CertificateArn` → `cloudfront_certificate_arn`、`WebAclArn` → `cloudfront_web_acl_arn` |
-| 5 | 合成し直す | |
+| 5 | 合成し直す | `<prefix>-cloudfront-to-ec2-same-domain` が出る（`<prefix>-cloudfront-to-ec2` も出るが使わない） |
 | 6 | `<prefix>-cloudfront-to-ec2-same-domain` をデプロイ（`aws_region`） | `OriginVerifyHeaderValue` を渡す |
 | 7 | 出力 `OriginSecurityGroupId` をインスタンスに**足す** | 下のコマンド |
 | 8 | httpd の設定、確かめ、DNS の切り替え | [cloudfront-to-ec2-httpd.md](../../cloudfront-to-ec2-httpd.md)、[cloudfront-to-ec2-same-domain.md](../../cloudfront-to-ec2-same-domain.md) |

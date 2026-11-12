@@ -26,8 +26,6 @@ REQUIRED_KEYS = (
     "cloudfront_prefix_list_id",
     "domain_name",
     "origin_domain_name",
-    "alb_certificate_arn",
-    "cloudfront_certificate_arn",
 )
 
 
@@ -43,8 +41,10 @@ class Configuration:
     cloudfront_prefix_list_id: str
     domain_name: str
     origin_domain_name: str
-    alb_certificate_arn: str
-    cloudfront_certificate_arn: str
+    # 証明書の ARN は、空ならそれを使うスタックを定義しない（stacks/__init__.py の define_stacks）。
+    # CloudFront の証明書のスタックを先に作る間や、ALB を使わない構成で、仮の値を書かずに済むように
+    alb_certificate_arn: str = ""
+    cloudfront_certificate_arn: str = ""
     alb_web_acl_arn: str = ""
     cloudfront_web_acl_arn: str = ""
     certificate_hosted_zone_id: str = ""

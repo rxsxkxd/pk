@@ -1,4 +1,7 @@
-"""CloudFront → EC2（外部のドメイン名を変えない場合）。"""
+"""ステップ 2: CloudFront → EC2（利用者のドメイン名を変えない）の CloudFront とオリジン用のセキュリティグループ。
+
+利用者のドメイン名の DNS のレコードは、ステップ 3 で AWS CLI で変える（ここでは作らない）。
+"""
 
 from __future__ import annotations
 
@@ -14,18 +17,18 @@ from .common import (
 )
 
 
-class CloudFrontToEc2SameDomainStack(TerminationStack):
+class Step2CloudFrontStack(TerminationStack):
     def __init__(self, scope: Construct, stack_name: str, configuration: Configuration) -> None:
         super().__init__(
             scope,
             stack_name,
-            "CloudFront -> EC2 with the viewer domain name unchanged. CloudFront terminates viewer TLS and connects "
+            "Step 2 of CloudFront -> EC2 with the viewer domain name unchanged. CloudFront terminates viewer TLS and connects "
             "to httpd over HTTPS through a separate origin DNS name, keeping the viewer Host header.",
             configuration,
         )
 
         if configuration.origin_hosted_zone_id:
-            # 利用者のドメイン名のレコードは既にあるので、ここでは作らない。切り替えの時点を担当者が決める
+            # 利用者のドメイン名のレコードは既にあるので、ここでは作らない。ステップ 3 で担当者が切り替える
             route53.CfnRecordSet(
                 self,
                 "OriginRecord",
@@ -44,10 +47,10 @@ class CloudFrontToEc2SameDomainStack(TerminationStack):
         self.output(
             "DistributionDomainName",
             distribution.distribution_domain_name,
-            "Point domain_name to this name after checking the distribution.",
+            "Step 3: point domain_name to this name after checking the distribution.",
         )
         self.output(
             "OriginSecurityGroupId",
             origin_security_group.security_group_id,
-            "Attach this security group to the instance before switching DNS.",
+            "Add this security group to the instance before checking the distribution (step 2).",
         )

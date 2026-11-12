@@ -1,6 +1,6 @@
 # ALB → EC2 への移行の手順
 
-> 位置付け: 今 httpd が終端している SSL/TLS を ALB へ移す手順の下書き。比較は [README](./README.md)。
+> 位置付け: **オプション（採用しなかった構成）**。採用したのは B. CloudFront → EC2 で、手順は [README](../README.md) の 3 つのステップ。このドキュメントは、今 httpd が終端している SSL/TLS を ALB へ移す手順の下書きとして残す。比較は [comparison.md](./comparison.md)、定義は `cloudformation/options/alb-to-ec2.yml`（CDK は `option_stacks: [alb-to-ec2]`）。
 >
 > 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。Apache の設定は、今の構成に近いコンテナで確かめた（2026-11-10。下の「検証の結果」）。**AWS のコマンドは実行していない。実際の ALB でも試していない**。`<...>` は環境に合わせて置き換える。
 >
@@ -48,7 +48,7 @@ aws acm request-certificate --region <リージョン> \
   --domain-name <ドメイン> --validation-method DNS
 ```
 
-ACM が示す CNAME を DNS に登録する。CNAME を残しておけば、使われている間は自動で更新される。DNS が Route 53 でない場合の流れは [外部の DNS サービスで管理しているドメインの手順](./external-dns-certificate.md)（ALB の場合は、証明書を ALB と同じリージョンに作る）。
+ACM が示す CNAME を DNS に登録する。CNAME を残しておけば、使われている間は自動で更新される。DNS が Route 53 でない場合の流れは、B の [ステップ 1 の外部の DNS サービスの節](../step1-acm-certificate.md#1-a-2-外部の-dns-サービス本番)と同じ（ALB の場合は、証明書を `us-east-1` ではなく ALB と同じリージョンに作る。向き先は ALB の DNS 名）。
 
 ### 3. httpd に HTTP の VirtualHost を足す
 
@@ -152,7 +152,7 @@ aws elbv2 create-rule --listener-arn <HTTPS リスナーの ARN> --priority 10 \
 
 ### 6. 国で絞るなら WAF を付ける
 
-要件があれば、ALB と同じリージョンに web ACL を作り、国の条件を入れて関連付ける。内容は[国での絞り込みの案 B](../notes/ec2-operations/access-restriction-alb-cloudfront.md#案-b-alb--aws-waf-の国の条件--セキュリティグループで-alb-だけ)。
+要件があれば、ALB と同じリージョンに web ACL を作り、国の条件を入れて関連付ける。内容は[国での絞り込みの案 B](../../notes/ec2-operations/access-restriction-alb-cloudfront.md#案-b-alb--aws-waf-の国の条件--セキュリティグループで-alb-だけ)。
 
 ```bash
 aws wafv2 associate-web-acl --region <リージョン> \

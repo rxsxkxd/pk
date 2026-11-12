@@ -1,6 +1,6 @@
 # CloudFront → ALB → EC2 への移行の手順
 
-> 位置付け: CloudFront と ALB の両方を前に置く手順の下書き。比較は [README](./README.md)。ALB から EC2 までの部分は [alb-to-ec2.md](./alb-to-ec2.md) と同じ。
+> 位置付け: **オプション（採用しなかった構成）**。採用したのは B. CloudFront → EC2 で、手順は [README](../README.md) の 3 つのステップ。このドキュメントは、CloudFront と ALB の両方を稼働サーバー（EC2）の前に置く手順の下書きとして残す。比較は [comparison.md](./comparison.md)。ALB から EC2 までの部分は [alb-to-ec2.md](./alb-to-ec2.md) と同じ。定義は `cloudformation/options/cloudfront-alb-to-ec2.yml`（CDK は `option_stacks: [cloudfront-alb-to-ec2]`）。
 >
 > 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。httpd の設定は、今の構成に近いコンテナで確かめた（2026-11-10）。**実際の CloudFront・ALB では試していない**。`<...>` は環境に合わせて置き換える。
 >
@@ -85,7 +85,7 @@ RequestHeader unset X-Forwarded-For
 RequestHeader unset Client-IP
 ```
 
-読み込むファイルの作り方は [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md#4-利用者の-ip-を復元する)。`RemoteIPInternalProxy` と `RemoteIPTrustedProxyList` を同じ VirtualHost で使う形は、コンテナで確かめたときに CloudFront のアドレスが信頼されず、利用者の IP を取れなかったので使わない。
+読み込むファイルの作り方は [cloudfront-to-ec2-httpd.md](../cloudfront-to-ec2-httpd.md#4-利用者の-ip-を復元する)。`RemoteIPInternalProxy` と `RemoteIPTrustedProxyList` を同じ VirtualHost で使う形は、コンテナで確かめたときに CloudFront のアドレスが信頼されず、利用者の IP を取れなかったので使わない。
 
 Rails には、ALB が CloudFront との接続に基づいて付ける `X-Forwarded-Proto: https` が届く。
 

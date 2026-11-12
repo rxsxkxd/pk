@@ -89,7 +89,7 @@ docs/ec2/
 ├── al2-update/                      # 運用中の AL2 のインスタンスで OS のパッケージを yum で複数台まとめて更新する Ruby の道具（更新の確認、バックアップ、1 台ずつの更新。インスタンスに送るものは remote/。説明は README.md）
 │
 │  ── SSL/TLS の終端の移行の検討 ──
-├── tls-termination-migration/       # httpd が終端している SSL/TLS を前段へ移す 3 つの構成（ALB → EC2、CloudFront → EC2、CloudFront → ALB → EC2）の比較と手順、WAF を置ける場所（検討と手順の下書き）
+├── tls-termination-migration/       # EC2 の httpd が終端している SSL/TLS を CloudFront へ移す（B. CloudFront → EC2）。ACM の証明書 → CloudFront → DNS の向き先の 3 ステップの手順と定義。ALB を使う構成は options/（検討と手順の下書き）
 │
 │  ── リリースの仕組みの設計ドキュメント ──
 ├── ami-build-pipeline.md              # 全体の設計（リリース検証 → AMI 化 → 起動テンプレート）

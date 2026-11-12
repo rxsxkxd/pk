@@ -1,6 +1,6 @@
 # CloudFront → EC2 のときに httpd で行う設定
 
-> 位置付け: CloudFront をオリジンの EC2 の前に直接置くときに、httpd（Apache 2.4）で行う設定の下書き。移行の順番は [cloudfront-to-ec2.md](./cloudfront-to-ec2.md)。
+> 位置付け: 参考。採用した B. CloudFront → EC2 で、稼働サーバー（オリジンの EC2）の httpd（Apache 2.4）で行う設定の下書き。いつ入れるかは、[準備](./step0-preparation.md#3-稼働サーバーの-httpd-の設定)（秘密のヘッダーの確認以外）と [ステップ 3 の片付け](./step3-dns-switch.md#3-5-片付け)（秘密のヘッダーの確認）。
 >
 > 前提: CloudFront の Origin protocol は **HTTPS only**、オリジンリクエストポリシーは **`AllViewer`**（利用者の Host をそのまま渡す）。
 >
@@ -10,15 +10,15 @@
 
 ## 設定の一覧
 
-| # | 設定 | 必須か | 理由 |
+| # | 設定 | 入れるか（いつ） | 理由 |
 |---|---|---|---|
 | 1 | SSL/TLS の設定を残す | 必須 | CloudFront はオリジンの証明書を検証する。自己署名の証明書は使えない |
 | 2 | `ServerName` を利用者のドメインにする | 必須 | `AllViewer` で利用者の Host が届く |
-| 3 | 秘密のヘッダーの確認 | 強く勧める | プレフィックスリストは CloudFront 全体の範囲で、**他人のディストリビューションからも届く** |
-| 4 | 利用者の IP の復元 | 必須に近い | 何もしないと、送り元がすべて CloudFront になる |
-| 5 | `KeepAliveTimeout` | 勧める | 再利用の競合による 502 を避ける |
-| 6 | `old_app_a` を 443 番へ移す | 構成次第 | CloudFront は 443 番にだけ接続するため |
-| 7 | 証明書の更新の経路 | 必須 | 今の HTTP-01 の経路が変わる |
+| 3 | 秘密のヘッダーの確認 | **入れる**（ステップ 3 の片付け） | プレフィックスリストは CloudFront 全体の範囲で、**他人のディストリビューションからも届く** |
+| 4 | 利用者の IP の復元 | **入れる**（準備） | 何もしないと、送り元がすべて CloudFront になる |
+| 5 | `KeepAliveTimeout` | **入れる**（準備） | 再利用の競合による 502 を避ける |
+| 6 | `old_app_a` を 443 番へ移す | **必須**（[README の T3](./README.md#決めたこと)） | CloudFront は 443 番にだけ接続するため |
+| 7 | 証明書の更新の経路 | **入れる**（準備。確認のパスの設定） | 今の HTTP-01 の経路が変わる |
 
 ## 設定の全体
 
@@ -90,7 +90,7 @@ CloudFront の Add custom header に設定した値を、httpd で確認する�
 |---|---|
 | AMI | このファイルは AMI に入る。AMI の共有の範囲に注意する |
 | 値の入れ替え | CloudFront と httpd で両方の値を受ける期間を作ってから入れ替える |
-| 順番 | DNS の切り替えが行き渡ってから有効にする。先に入れると、まだ EC2 へ直接来ている利用者が 403 になる |
+| 順番 | DNS の切り替えが行き渡ってから有効にする（[ステップ 3 の片付け](./step3-dns-switch.md#3-5-片付け)）。先に入れると、まだ EC2 へ直接来ている利用者が 403 になる |
 
 ## 4. 利用者の IP を復元する
 
@@ -110,7 +110,7 @@ curl -s https://ip-ranges.amazonaws.com/ip-ranges.json \
 |---|---|
 | 範囲の更新 | 範囲は変わる。定期的に更新して `apachectl graceful` する。更新が遅れた場合、新しいアドレスからの要求はログの送り元が CloudFront のままになる |
 | `RequestHeader unset` | 利用者が偽って付けた `X-Forwarded-For` の残りが Rails に渡ると、Rails 4.2 の `request.remote_ip` がそちらを選ぶことがある。`Client-IP` も同じ |
-| ログ | `%a` を使う形式（[alb-to-ec2.md](./alb-to-ec2.md#3-httpd-に-http-の-virtualhost-を足す) の `combined_client_ip`）で利用者の IP が出る。Apache 2.4.56 のコンテナでは、`combined`（`%h`）でも利用者の IP が出た |
+| ログ | `%a` を使う形式（オプションの [alb-to-ec2.md](./options/alb-to-ec2.md#3-httpd-に-http-の-virtualhost-を足す) の `combined_client_ip`）で利用者の IP が出る。Apache 2.4.56 のコンテナでは、`combined`（`%h`）でも利用者の IP が出た |
 | アプリ側で行う場合 | [`trusted_proxies` の案](../notes/ec2-operations/access-restriction-alb-cloudfront.md#そのほかに変わること)もある。httpd で復元する方が、ログとアプリの両方に効く |
 
 ## 5. `KeepAliveTimeout`
@@ -141,9 +141,9 @@ Alias /old_app_a /home/ruby/old_app_a/public
 
 | 方法 | 内容 | 注意 |
 |---|---|---|
-| A. HTTP-01 を CloudFront 経由で続ける（勧める） | 下の設定を 443 番の VirtualHost に足す | 地理的制限を使うと、海外からの確認が止まる。WAF でこのパスを例外にする |
-| B. DNS-01 | CloudFront と無関係に更新できる | DNS の API の権限の持たせ方。[Let's Encrypt の自動化](../notes/ec2-operations/letsencrypt-automation.md) |
-| C. ACM の ACME またはエクスポートできる証明書 | EC2 で使える公開の証明書 | エクスポートできる証明書は有料で、有効期間は 198 日。配置は自分で行う。この用途で使えるかは試していない |
+| **A. HTTP-01 を CloudFront 経由で続ける（採用。2026-11-11）** | 下の設定を 443 番の VirtualHost に足す | 地理的制限を使うと、海外からの確認が止まる。WAF でこのパスを例外にする（`step2-waf.yml`） |
+| B. DNS-01（見送り） | CloudFront と無関係に更新できる | DNS の API の権限の持たせ方。[Let's Encrypt の自動化](../notes/ec2-operations/letsencrypt-automation.md) |
+| C. ACM の ACME 証明書またはエクスポートできる証明書（見送り） | EC2 で使える公開の証明書 | エクスポートできる証明書は有料で、有効期間は 198 日。配置は自分で行う。この用途で使えるかは試していない |
 
 A の設定:
 
@@ -164,7 +164,7 @@ Alias /.well-known/acme-challenge /var/www/html/.well-known/acme-challenge
 | `X-Forwarded-Proto` の設定 | HTTPS で受けるので、Rails は `HTTPS=on` で HTTPS と認識する |
 | HTTP/2（`mod_http2`） | CloudFront からオリジンへは HTTP/1.1 で接続する。利用者との HTTP/2 は CloudFront が受ける。httpd の設定は残しても害はない |
 
-**Origin protocol を HTTP only にする場合**（勧めない）は、CloudFront が `X-Forwarded-Proto` を取り除くので、Rails が HTTP と誤認する。`force_ssl` が有効なら無限にリダイレクトする。`RequestHeader set X-Forwarded-Proto "https"` が要る。
+**Origin protocol を HTTP only にする場合**（採らない）は、CloudFront が `X-Forwarded-Proto` を取り除くので、Rails が HTTP と誤認する。`force_ssl` が有効なら無限にリダイレクトする。`RequestHeader set X-Forwarded-Proto "https"` が要る。
 
 ## 検証の結果
 

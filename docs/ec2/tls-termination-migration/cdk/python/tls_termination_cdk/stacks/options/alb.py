@@ -1,4 +1,4 @@
-"""ALB から EC2 までの部分。ALB → EC2 と CloudFront → ALB → EC2 で共用する。"""
+"""オプション: ALB から EC2 までの部分。ALB → EC2 と CloudFront → ALB → EC2 で共用する。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_elasticloadbalancingv2_targets as targets
 from constructs import Construct
 
-from ..configuration import Configuration
+from ...configuration import Configuration
 
 
 @dataclass(frozen=True)

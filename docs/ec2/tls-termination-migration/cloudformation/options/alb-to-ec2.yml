@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  ALB -> EC2. ALB terminates TLS and forwards HTTP to httpd on the existing instance.
+  Option (not the adopted CloudFront -> EC2). ALB -> EC2. ALB terminates TLS and forwards HTTP to httpd on the existing instance.
 
 Parameters:
   VpcId:

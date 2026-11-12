@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  CloudFront -> ALB -> EC2. CloudFront terminates viewer TLS, connects to the ALB over HTTPS,
+  Option (not the adopted CloudFront -> EC2). CloudFront -> ALB -> EC2. CloudFront terminates viewer TLS, connects to the ALB over HTTPS,
   and the ALB forwards HTTP to httpd on the existing instance.
 
 Parameters:

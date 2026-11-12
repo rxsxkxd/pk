@@ -1,6 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  ACM certificate for the viewer domain name of CloudFront. Deploy this stack in us-east-1.
+  Step 1 of CloudFront -> EC2: ACM certificate for the viewer domain name of CloudFront.
+  Deploy this stack in us-east-1. Importing an existing certificate is done with the AWS CLI instead,
+  because CloudFormation cannot import certificates into ACM.
 
 Parameters:
   DomainName:
@@ -47,6 +49,6 @@ Resources:
 
 Outputs:
   CertificateArn:
-    Description: Pass this value as CloudFrontCertificateArn of the CloudFront stack.
+    Description: Pass this value as CloudFrontCertificateArn of step2-cloudfront.yml.
     Value:
       Ref: Certificate

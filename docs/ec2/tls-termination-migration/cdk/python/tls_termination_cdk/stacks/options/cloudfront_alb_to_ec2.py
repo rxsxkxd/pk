@@ -1,12 +1,12 @@
-"""CloudFront → ALB → EC2。"""
+"""オプション: CloudFront → ALB → EC2（採用した CloudFront → EC2 ではない構成）。"""
 
 from __future__ import annotations
 
 from constructs import Construct
 
-from ..configuration import Configuration
+from ...configuration import Configuration
+from ..common import TerminationStack, define_distribution, origin_verify_header_value
 from .alb import AlbFront, OriginVerifyHeader
-from .common import TerminationStack, define_distribution, origin_verify_header_value
 
 
 class CloudFrontAlbToEc2Stack(TerminationStack):

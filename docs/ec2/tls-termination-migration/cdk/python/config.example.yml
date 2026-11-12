@@ -1,40 +1,38 @@
 # 設定値の例。値はすべて架空のもの。環境ごとに写して、-c config=<ファイル> で指定する。
-stack_name_prefix: myapp-production
-aws_region: ap-northeast-1
+# 本線は CloudFront -> EC2 の 3 ステップ（使い方は README.md）。
+#   ステップ 1: ACM の証明書  ステップ 2: WAF と CloudFront  ステップ 3: DNS の向き先の変更（AWS CLI。スタックはない）
 
+# ---- どのステップでも要る ----
+stack_name_prefix: myapp-production
+# ステップ 2 の CloudFront のスタックを置くリージョン（ステップ 1 と WAF のスタックはいつも us-east-1）
+aws_region: ap-northeast-1
 vpc_id: vpc-0123456789abcdef0
 availability_zones: [ap-northeast-1a, ap-northeast-1c]
-# availability_zones と同じ順番で、AZ ごとに 1 つ
-subnet_ids: [subnet-0123456789abcdef0, subnet-0123456789abcdef1]
-instance_id: i-0123456789abcdef0
-# インスタンスの既存のセキュリティグループ。ALB からの許可を足す
-instance_security_group_id: sg-0123456789abcdef0
 # com.amazonaws.global.cloudfront.origin-facing の ID（リージョンごとに違う）
 cloudfront_prefix_list_id: pl-0123456789abcdef0
-
 # 利用者が使う名前
 domain_name: app.example.com
 # CloudFront の接続先の名前。domain_name とは別の名前にする
 origin_domain_name: origin.app.example.com
-# CloudFront -> EC2（外部のドメイン名を変えない場合）で使う
-# domain_name の Route 53 のホストゾーン。指定すると ACM の検証用のレコードを自動で作る
+
+# ---- ステップ 1: ACM の証明書 ----
+# 手順ではステップ 1 を CloudFormation の YAML（cloudformation/step1-certificate.yml）で行うので、
+# CDK の <prefix>-step1-certificate は使わない。その場合はこの値も空のままでよい。
+# （使う場合）domain_name の Route 53 のホストゾーン。指定すると ACM の検証用のレコードを自動で作る
 certificate_hosted_zone_id: ""
-# origin_domain_name の Route 53 のレコードも作るときに指定する
+
+# ---- ステップ 2: WAF と CloudFront ----
+# ステップ 1（CloudFormation の step1-certificate.yml）の出力 CertificateArn（または登録した証明書の ARN）。us-east-1 の ACM の証明書で、
+# ACM のコンソールの「証明書」に出るもの（「ACME 証明書」は CloudFront に付けられない）。
+# 空の間は、<prefix>-step2-cloudfront を合成しない
+cloudfront_certificate_arn: ""
+# <prefix>-step2-waf の出力 WebAclArn。空なら関連付けない（本番では空にしない）
+cloudfront_web_acl_arn: ""
+# origin_domain_name の A レコードも Route 53 に作るときに、2 つとも指定する（本番は空にして手で足す）
 origin_hosted_zone_id: ""
 origin_elastic_ip: ""
 
-# 証明書の ARN が空なら、それを使うスタックは合成しない（ALB を使わない構成や、
-# CloudFront の証明書のスタックを先に作る間は空でよい）
-# ALB と同じリージョンの ACM の証明書（ACM のコンソールの「証明書」。「ACME 証明書」ではない）
-alb_certificate_arn: arn:aws:acm:ap-northeast-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
-# us-east-1 の ACM の証明書（<prefix>-cloudfront-certificate の出力 CertificateArn）
-cloudfront_certificate_arn: arn:aws:acm:us-east-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
-
-# 付けないときは空のままにする。CloudFront 用は <prefix>-cloudfront-waf の出力 WebAclArn を書く
-alb_web_acl_arn: ""
-cloudfront_web_acl_arn: ""
-
-# CloudFront 用の web ACL（<prefix>-cloudfront-waf）で許可する国。
+# <prefix>-step2-waf で許可する国。
 # /.well-known/acme-challenge/ だけはどの国からも通す（EC2 の Let's Encrypt の HTTP-01 の更新のため）
 waf_allowed_countries: [JP]
 # 許可する国の外から通す IP（CIDR。例: 192.0.2.44/32）。マネージドルールは通る
@@ -42,21 +40,33 @@ waf_exception_ipv4_addresses: []
 waf_exception_ipv6_addresses: []
 # count: マネージドルールは記録だけ。ログで誤検知がないことを確かめてから block にする
 waf_managed_rules_mode: count
-# us-east-1 の CloudWatch Logs（aws-waf-logs-<prefix>-cloudfront-waf）に残す日数
+# us-east-1 の CloudWatch Logs（aws-waf-logs-<prefix>-step2-waf）に残す日数
 waf_log_retention_days: 30
-# CloudFront -> EC2 の地理的制限で許可する国。既定は空（制限しない）。国の絞り込みは上の WAF で行う。
+# CloudFront の地理的制限で許可する国。既定は空（制限しない）。国の絞り込みは上の WAF で行う。
 # 地理的制限で止めた要求は WAF に届かないので、ここに書くと HTTP-01 の更新が止まる
 geo_restriction_countries: []
 
-# CloudFront -> ALB -> EC2 だけで使う。DNS を CloudFront へ向けた後に true にする
-restrict_to_cloudfront: false
+# 省略すると、次の既定値になる
+origin_read_timeout_seconds: 30
+origin_keepalive_timeout_seconds: 5
+origin_verify_header_name: X-Origin-Verify
 
-# ここから下は省略すると、次の既定値になる
+# ---- オプション: ALB を使う構成（採用した CloudFront -> EC2 ではない） ----
+# 合成する構成を並べる: alb-to-ec2、cloudfront-alb-to-ec2。空なら合成しない（既定）
+option_stacks: []
+# 以下は option_stacks に書いた構成でだけ使う（書いたときは必須）
+# availability_zones と同じ順番で、AZ ごとに 1 つ
+subnet_ids: []
+instance_id: ""
+# インスタンスの既存のセキュリティグループ。ALB からの許可を足す
+instance_security_group_id: ""
+# ALB と同じリージョンの ACM の証明書
+alb_certificate_arn: ""
+alb_web_acl_arn: ""
+# cloudfront-alb-to-ec2 だけで使う。DNS を CloudFront へ向けた後に true にする
+restrict_to_cloudfront: false
 new_app_port: 8080
 old_app_port: 80
 old_app_path_pattern: /old_app_a*
 health_check_path: /alb-health.txt
 idle_timeout_seconds: 60
-origin_read_timeout_seconds: 30
-origin_keepalive_timeout_seconds: 5
-origin_verify_header_name: X-Origin-Verify

@@ -1,13 +1,13 @@
-"""ALB → EC2。"""
+"""オプション: ALB → EC2（採用した CloudFront → EC2 ではない構成）。"""
 
 from __future__ import annotations
 
 from aws_cdk import aws_wafv2 as wafv2
 from constructs import Construct
 
-from ..configuration import Configuration
+from ...configuration import Configuration
+from ..common import TerminationStack
 from .alb import AlbFront
-from .common import TerminationStack
 
 
 class AlbToEc2Stack(TerminationStack):

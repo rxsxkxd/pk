@@ -1,155 +1,130 @@
-# SSL/TLS の終端を httpd から ALB・CloudFront へ移す
+# SSL/TLS の終端を EC2 の httpd から CloudFront へ移す
 
-> 位置付け: 検討と手順の下書き。採用済みの設計ではない。今 httpd（Apache）が SSL/TLS を終端している Web サービスについて、終端を前段へ移す 3 つの構成を比べ、それぞれの移行の手順をまとめる。
+> 位置付け: 検討と手順の下書き。今 EC2 の httpd（Apache）が SSL/TLS を終端している Web サービスの前に CloudFront を置き、利用者から見た SSL/TLS の終端を CloudFront へ移す。構成は **B. CloudFront → EC2** でほぼ確定している（2026-11-11）。移行は 3 つのステップに分け、ステップの間で設定が正常かを確かめてから次へ進む。
 >
-> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09）。Apache の設定は、今の構成に近いコンテナで確かめた（2026-11-10）。**AWS のコマンドは実行しておらず、実際の ALB・CloudFront では試していない**。結果と、確かめていない点は、各ドキュメントの「検証の結果」と「確かめること」に書いた。
+> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-12）。Apache の設定は、今の構成に近いコンテナで確かめた（2026-11-10）。定義（CloudFormation の YAML と CDK）は `cfn-lint` と合成まで、ステップ 3 のシェルスクリプトは構文の確認まで確かめた（2026-11-12）。**AWS のコマンドは実行しておらず、実際の CloudFront・ACM・Route 53 では試していない**。
 >
-> 関連: [前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)、[前段の構成と料金の考え方](../notes/instance-provisioning/cloudfront-alb-front-options.md)、[Let's Encrypt の扱い](../notes/instance-provisioning/letsencrypt-certificate-timing.md)
+> 関連: [前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)、[稼働サーバーの前に置く構成と料金の考え方](../notes/instance-provisioning/cloudfront-alb-front-options.md)、[Let's Encrypt の扱い](../notes/instance-provisioning/letsencrypt-certificate-timing.md)
 >
-> 作成日: 2026-11-09
+> 作成日: 2026-11-09（3 ステップの形に書き直した: 2026-11-12）
 
-## ドキュメント
+## 用語
 
-| ファイル | 内容 |
+| 用語 | 指すもの |
 |---|---|
-| このファイル | 3 つの構成の比較、WAF を置ける場所、共通して決めること |
-| [alb-to-ec2.md](./alb-to-ec2.md) | ALB → EC2 への移行の手順 |
-| [cloudfront-to-ec2.md](./cloudfront-to-ec2.md) | CloudFront → EC2 への移行の手順 |
-| [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md) | CloudFront → EC2 のときに httpd で行う設定 |
-| [cloudfront-to-ec2-same-domain.md](./cloudfront-to-ec2-same-domain.md) | CloudFront → EC2 で外部のドメイン名を変えない場合の、DNS・証明書・Host の対応 |
-| [cloudfront-to-ec2-domains-certificates.md](./cloudfront-to-ec2-domains-certificates.md) | CloudFront → EC2 のドメイン名・DNS のレコード・証明書の構成と、オリジンの証明書の更新の決めごと |
-| [external-dns-certificate.md](./external-dns-certificate.md) | DNS を外部の DNS サービスで管理しているドメイン（本番）で、ACM の証明書を発行して CloudFront に付け、DNS を切り替えるまでの流れ |
-| [cloudfront-alb-to-ec2.md](./cloudfront-alb-to-ec2.md) | CloudFront → ALB → EC2 への移行の手順 |
-| [definitions.md](./definitions.md) | 3 つの構成の ALB・CloudFront の定義（`cloudformation/` の YAML と `cdk/python/` の CDK）の説明と使い方 |
-| [cdk/python/README.md](./cdk/python/README.md) | CDK（Python）版の準備・合成・デプロイ・撤去のコマンドと、ACM の「証明書」と「ACME 証明書」の違い |
+| 稼働サーバー | 今 SSL/TLS を終端している EC2 のインスタンス（httpd）。移行の後は CloudFront の接続先（オリジン）になる |
+| 利用者のドメイン名 | 利用者が使う名前（例 `app.example.com`）。移行の前後で変わらない |
+| オリジンの名前 | CloudFront が稼働サーバーへ接続するためだけに使う名前（例 `origin.app.example.com` → 稼働サーバーの Elastic IP） |
+| CloudFront の証明書 | 利用者と CloudFront の間で使う証明書。ACM の `us-east-1` に置く。ACM のコンソールの「**証明書**」に出るもので、「ACME 証明書」ではない（[ステップ 1](./step1-acm-certificate.md#証明書の種類)） |
+| オリジンの証明書 | CloudFront と稼働サーバーの間で使う証明書。今の Let's Encrypt の証明書を使い続ける |
+| 秘密のヘッダー | CloudFront がオリジンへの要求に付けるヘッダー（`X-Origin-Verify`）。稼働サーバーの httpd が値を確かめ、CloudFront を通らない要求を止める |
+| 稼働サーバーの前に置くサービス | 利用者と稼働サーバーの間に置く CloudFront や ALB。このドキュメント群では「前段」とは書かず、この言い方をする |
+| 本線 | 採用した構成（B. CloudFront → EC2）の手順と定義 |
+| オプション | 採用しなかった構成（ALB を使う構成）の手順と定義。`options/` に分けている |
 
-## 結論
-
-- **httpd から証明書と SSL/TLS の処理をなくしたいなら、ALB → EC2 か CloudFront → ALB → EC2**。ALB から EC2 までは VPC の中なので HTTP にできる。
-- **CloudFront → EC2 では、EC2 の証明書は残る**。CloudFront から EC2 まではインターネットを通るので、HTTPS を続けるのが前提になる。終端は利用者から見て CloudFront に移るが、httpd の SSL/TLS の処理はなくならない。
-- 既定の案は **ALB → EC2**。今の用途（国内向けの Rails アプリ）では、CloudFront の世界中の拠点とキャッシュの利点が小さく、証明書を ACM に寄せられる利点の方が大きい。CloudFront の案は、ALB の時間課金を避けたいときや、静的なファイルのキャッシュが効くときに選ぶ。
-- **WAF は 3 つの構成のどれでも置ける**（[下の節](#waf-を置ける場所)）。EC2 に直接は付けられない。
-- **どの案でも、今の `rails.conf` の 2 つの VirtualHost の分かれ方を先に片付ける必要がある**（[下の節](#最初に片付けること-2-つのアプリの分かれ方)）。
-
-## 3 つの構成
-
-今の構成は、手前に何も置かない Client → EC2 で、httpd が Let's Encrypt の証明書で SSL/TLS を終端している。ここから、次の A・B・C のどれかへ移す。同じ内容の図を [architecture.svg](./architecture.svg) にも置いている。
+## 移行の後の形
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "16px"}}}%%
 flowchart TD
-  subgraph Now["今の構成: Client → EC2"]
-    N1["利用者"] -- "HTTPS（Let's Encrypt の証明書）" --> N2["EC2 の httpd<br/>証明書あり"]
-  end
-  subgraph A["A. ALB → EC2"]
-    A1["利用者"] -- "HTTPS（ACM の証明書）" --> A2["ALB<br/>WAF を置ける"]
-    A2 -- "HTTP（VPC の中）" --> A3["EC2 の httpd<br/>証明書なし"]
-  end
-  subgraph B["B. CloudFront → EC2"]
-    B1["利用者"] -- "HTTPS（ACM の証明書）" --> B2["CloudFront<br/>WAF を置ける"]
-    B2 -- "HTTPS（インターネット）" --> B3["EC2 の httpd<br/>証明書あり"]
-  end
-  subgraph C["C. CloudFront → ALB → EC2"]
-    C1["利用者"] -- "HTTPS（ACM の証明書）" --> C2["CloudFront<br/>WAF を置ける"]
-    C2 -- "HTTPS（インターネット）" --> C3["ALB<br/>WAF を置ける"]
-    C3 -- "HTTP（VPC の中）" --> C4["EC2 の httpd<br/>証明書なし"]
-  end
+  U["利用者"] -- "HTTPS（CloudFront の証明書。ACM の us-east-1）" --> CF["CloudFront<br/>代替ドメイン名: app.example.com<br/>WAF の web ACL（国の絞り込み）"]
+  CF -- "HTTPS（インターネット）<br/>Host は app.example.com のまま、秘密のヘッダーを付ける<br/>接続先は origin.app.example.com" --> SG["稼働サーバーのセキュリティグループ<br/>CloudFront のプレフィックスリストだけ"]
+  SG --> H["稼働サーバーの httpd *:443<br/>オリジンの証明書（Let's Encrypt）"]
 ```
 
-| | A. ALB → EC2 | B. CloudFront → EC2 | C. CloudFront → ALB → EC2 |
-|---|---|---|---|
-| EC2 の証明書 | **要らない** | **要る**（Let's Encrypt などを続ける） | **要らない** |
-| 用意する ACM の証明書 | ALB のリージョン | `us-east-1` | `us-east-1` と ALB のリージョンの 2 つ |
-| 直接のアクセスの塞ぎ方 | EC2 のセキュリティグループで ALB からだけ許可 | EC2 のセキュリティグループで CloudFront のプレフィックスリストと、httpd で秘密のヘッダーの確認 | ALB のセキュリティグループで CloudFront のプレフィックスリストと、ALB のリスナーで秘密のヘッダーの確認 |
-| 国での絞り込み | WAF が要る | CloudFront の地理的制限（無料）か WAF | CloudFront の地理的制限（無料）か WAF |
-| 負荷分散・ヘルスチェック | ある | **ない** | ある |
-| キャッシュ | ない | ある | ある |
-| 置いておくだけの費用 | ALB の時間課金 | なし（従量課金の場合） | ALB の時間課金 |
-| httpd の変更 | 中（HTTP の VirtualHost、利用者の IP） | 中（秘密のヘッダー、利用者の IP、更新の経路） | 中（A と同じ。信頼する中継が増える） |
-| アプリの応答の上限 | ALB のアイドルタイムアウト（既定 60 秒、最大 4000 秒） | オリジンの応答タイムアウト（既定 30 秒、1〜120 秒。それより長くは申請） | 両方の短い方 |
+CloudFront から稼働サーバーまではインターネットを通るので、HTTPS を続ける。**オリジンの証明書（Let's Encrypt）は残る**。httpd から SSL/TLS の処理をなくしたい場合の構成は、[オプション](#オプション採用しなかった構成)にある。
 
-ALB の料金は、AWS の料金のページの計算例では `us-east-1` で 1 時間 $0.0225、1 LCU あたり 1 時間 $0.008 である（2026-11-09 確認）。東京リージョンの金額はページに載っていなかったので、[料金計算ツール](https://calculator.aws/)で確かめる。
+## 3 つのステップ
 
-## ALB を通さないことのデメリット
+```mermaid
+%%{init: {"themeVariables": {"fontSize": "16px"}}}%%
+flowchart TD
+  P["準備<br/>TTL・CAA の確認、httpd の設定（秘密のヘッダーの確認以外）"]
+  S1["ステップ 1: ACM の証明書<br/>ACM で作成（採用）か、既存の証明書を登録"]
+  C1{"確認 1<br/>証明書が ISSUED で、<br/>us-east-1 にあり、名前が合う"}
+  S2["ステップ 2: CloudFront のルーティング<br/>WAF、CloudFront、オリジンの名前、セキュリティグループ"]
+  C2{"確認 2<br/>DNS を変えずに<br/>CloudFront 経由でアプリが動く"}
+  S3["ステップ 3: 向き先の変更<br/>app.example.com を CloudFront へ（Route 53）"]
+  C3{"確認 3<br/>利用者のドメイン名で<br/>CloudFront を通っている"}
+  F["片付け<br/>秘密のヘッダーの確認、古い許可の削除、更新の確認"]
+  P --> S1 --> C1 --> S2 --> C2 --> S3 --> C3 --> F
+```
 
-CloudFront → EC2 は、ALB を通す 2 つの構成と比べて次の点で不利になる。
+| ステップ | 行うこと | 使う道具 | 利用者への影響 | 手順 |
+|---|---|---|---|---|
+| 準備 | DNS の管理先・CAA・TTL の確認、稼働サーバーの httpd の設定 | なし（稼働サーバーの上） | なし | [step0-preparation.md](./step0-preparation.md) |
+| 1 | CloudFront の証明書を ACM に用意する。**ACM で作成する（採用）**。既存の証明書を登録する方法は別の節 | **CloudFormation の YAML** `cloudformation/step1-certificate.yml`（`us-east-1`） | なし | [step1-acm-certificate.md](./step1-acm-certificate.md) |
+| 2 | WAF の web ACL、CloudFront、オリジンの名前、オリジン用のセキュリティグループを作り、DNS を変えずに CloudFront 経由で確かめる | **CDK** `<prefix>-step2-waf`（`us-east-1`）、`<prefix>-step2-cloudfront`（`ap-northeast-1`） | なし | [step2-cloudfront.md](./step2-cloudfront.md) |
+| 3 | 利用者のドメイン名の向き先を CloudFront へ変える。**Route 53（ステージング）が本線**、外部の DNS サービス（本番）は別の節（手で変える）。落ち着いたら片付ける | **シェルスクリプト** `scripts/step3-dns-switch.sh` | 順次 CloudFront 経由になる | [step3-dns-switch.md](./step3-dns-switch.md) |
 
-| # | デメリット | 内容 |
-|---|---|---|
-| 1 | EC2 の証明書が残る | httpd の SSL/TLS の処理も、証明書の更新もなくならない。オリジンの証明書が切れると、すべての利用者に 502 が返る。今の HTTP-01 の更新は CloudFront 経由に変わり、地理的制限を使うと海外からの確認が止まる（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
-| 2 | ヘルスチェックと負荷分散がない | CloudFront のオリジングループで予備の台への切り替えはできるが、負荷分散ではない |
-| 3 | 無停止の入れ替えがしにくい | ALB なら新しい台を登録してから古い台を外せる。直結では、オリジンの付け替えになる |
-| 4 | EC2 を外に出したままになる | 公開の DNS 名と IP アドレスが要る。プレフィックスリストは CloudFront 全体の範囲で、他人のディストリビューションからも届くので、httpd で秘密のヘッダーの確認も要る。[VPC オリジン](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html)を使えば避けられるが、EC2 をプライベートサブネットへ移す話になる |
-| 5 | セキュリティグループの枠を消費する | EC2 のセキュリティグループで、プレフィックスリストが 55 件に数えられる。既定の上限は 60 件 |
-| 6 | パスでの振り分けを ALB に任せられない | `old_app_a` は httpd の 443 番へ移すか、CloudFront のビヘイビアで分ける |
+- ステップ 1・2 は利用者に影響しない。確認で問題が見つかれば、作ったスタックを消すだけで戻せる
+- ステップ 3 は、片付けの前なら、DNS を元のレコードに戻すだけで戻せる
+- 定義の中身は [definitions.md](./definitions.md)、CDK のコマンドは [cdk/python/README.md](./cdk/python/README.md)。ステップ 1 の CDK のスタックと、ステップ 2 の CloudFormation の YAML も同じ内容で残しているが、手順では使わない
 
-一方で、ALB の時間課金がなく、構成要素も 1 つ減る。台数が 1 台のままなら、ALB を置いても冗長にはならないので、2 と 3 の差は小さくなる。1 台の運用で、入れ替えのときの停止と証明書の運用を許容できるなら、直結でも問題ない。
+## ドキュメント
 
-## WAF を置ける場所
+### 本線（B. CloudFront → EC2）
 
-AWS WAF を関連付けられるのは **CloudFront と ALB** で、EC2 のインスタンスには直接付けられない。
-
-| 構成 | WAF を置く場所 | 備考 |
-|---|---|---|
-| A. ALB → EC2 | ALB | web ACL は ALB と同じリージョンに作る |
-| B. CloudFront → EC2 | CloudFront | web ACL は `us-east-1`（Global (CloudFront)）に作る |
-| C. CloudFront → ALB → EC2 | **CloudFront を勧める** | ALB にも付けられるが、ALB から見た送り元は CloudFront になり、利用者の IP で判定するには追加の設定が要る。入口の 1 か所にまとめる |
-
-- CloudFront に関連付けた web ACL は、ALB など別の種類のリソースには関連付けられない。C で両方に置くなら、web ACL も 2 つになる。
-- 料金は、web ACL 1 つで月 $5、ルール 1 つで月 $1、100 万リクエストで $0.60 である（2026-11-09 確認。リージョンで異なる場合があると書かれている）。
-- CloudFront の月額固定のプランには WAF が含まれる（[料金の考え方](../notes/instance-provisioning/cloudfront-alb-front-options.md)）。
-- 国で絞るだけなら、CloudFront は地理的制限で足りて WAF は要らない。ただし、個別の IP の許可やパスごとの例外が要るなら WAF を使う（[国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)）。地理的制限で止めた要求は WAF に届かないので、パスの例外を作るなら地理的制限は使わない。
-- B は、EC2 の Let's Encrypt の証明書を HTTP-01 で更新し続けるため、WAF で `/.well-known/acme-challenge/` だけを例外にすると決めた（2026-11-11。[定義](./definitions.md#国の絞り込みwaf)）。
-
-## 最初に片付けること: 2 つのアプリの分かれ方
-
-今の `/etc/httpd/conf.d/rails.conf` は、ポートごとに別のアプリを出している。
-
-| VirtualHost | アプリ | SSL/TLS |
-|---|---|---|
-| `*:80` | `old_app_a`（`/old_app_a` の下） | なし（平文） |
-| `*:443` | `new_app_b`（ルート） | httpd が終端 |
-
-**前段から EC2 の 80 番へ単純に流すと、`new_app_b` ではなく `old_app_a` の VirtualHost に届く**。また、前段で HTTP を HTTPS へリダイレクトすると、`http://.../old_app_a` の使われ方が変わる。各手順は、次の形を前提にしている。
-
-| 決めること | 手順で置いた仮定 |
+| ファイル | 内容 |
 |---|---|
-| `old_app_a` を今も平文の HTTP で呼んでいる相手がいるか | いない、または HTTPS へ移せる。いるなら、平文のまま残す経路を別に作る |
-| `old_app_a` を HTTPS で出すか | 出す（前段のパスのルール、または 443 番の VirtualHost の中で振り分ける） |
+| このファイル | 結論、3 つのステップの全体、決めたこと |
+| [step0-preparation.md](./step0-preparation.md) | 準備（ステップ 1 の前）: 事前の確認と、稼働サーバーの httpd の設定 |
+| [step1-acm-certificate.md](./step1-acm-certificate.md) | ステップ 1: ACM の証明書の作成（と登録）、確認 1 |
+| [step2-cloudfront.md](./step2-cloudfront.md) | ステップ 2: WAF・CloudFront・オリジンの名前・セキュリティグループ、確認 2 |
+| [step3-dns-switch.md](./step3-dns-switch.md) | ステップ 3: 利用者のドメイン名の向き先の変更（`scripts/step3-dns-switch.sh`）、確認 3、片付け、元に戻す手順 |
+| [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md) | 参考: 稼働サーバーの httpd で行う設定の詳細と、コンテナでの検証の結果 |
+| [cloudfront-to-ec2-domains-certificates.md](./cloudfront-to-ec2-domains-certificates.md) | 参考: ドメイン名・DNS のレコード・証明書の役割と、通信の流れ |
+| [definitions.md](./definitions.md) | 定義（`cloudformation/` の YAML と `cdk/python/` の CDK）の中身と、ステップごとにどちらを使うか |
+| `scripts/step3-dns-switch.sh` | ステップ 3 のシェルスクリプト（Route 53 の A レコードの置き換えと戻し） |
+| [cdk/python/README.md](./cdk/python/README.md) | CDK（Python）版の準備・合成・デプロイ・撤去のコマンド |
 
-## どの案でも共通して確かめること
+### オプション（採用しなかった構成）
+
+| ファイル | 内容 |
+|---|---|
+| [options/comparison.md](./options/comparison.md) | 3 つの構成（A. ALB → EC2、B. CloudFront → EC2、C. CloudFront → ALB → EC2）の比較、ALB を通さないことのデメリット、WAF を置ける場所 |
+| [options/alb-to-ec2.md](./options/alb-to-ec2.md) | A. ALB → EC2 への移行の手順 |
+| [options/cloudfront-alb-to-ec2.md](./options/cloudfront-alb-to-ec2.md) | C. CloudFront → ALB → EC2 への移行の手順 |
+| `cloudformation/options/` | A と C の CloudFormation の YAML |
+| `cdk/python/tls_termination_cdk/stacks/options/` | A と C の CDK（設定値の `option_stacks` で指定したときだけ合成する） |
+
+## 結論
+
+- **B. CloudFront → EC2 で進める**（2026-11-11）。目的は **WAF による防御**で、WAF は CloudFront に付ける（EC2 には直接付けられない）
+- **オリジンの証明書（Let's Encrypt）は残る**。CloudFront から稼働サーバーまではインターネットを通るので、HTTPS を続ける
+- **利用者のドメイン名は変えない**。CloudFront の接続先には、別の名前（オリジンの名前）を使う
+- 国の絞り込みは **WAF** で行い、`/.well-known/acme-challenge/` だけはどの国からも通す（オリジンの証明書を HTTP-01 で更新し続けるため）。CloudFront の地理的制限は使わない
+- httpd から証明書と SSL/TLS の処理をなくしたい場合は、ALB を通すオプションの構成（A・C）になる。比較は [options/comparison.md](./options/comparison.md)
+
+## 決めたこと
+
+| # | 論点 | 決めたこと |
+|---|---|---|
+| T1 | 何のために移すのか | **WAF による防御**（2026-11-11） |
+| T2 | 3 つの構成のどれにするか | **B. CloudFront → EC2**（2026-11-11）。対象が多数の台なら、[ALB を共有する案](../notes/instance-provisioning/cloudfront-alb-front-options.md#今の運用物件ごとの単体のサーバーに当てはめた選択肢)も含めて考え直す |
+| T3 | `old_app_a` の扱い | **平文の HTTP のまま残す相手はいない前提**で、[443 番へ移す](./cloudfront-to-ec2-httpd.md#6-old_app_a-を-443-番へ移す)（2026-11-11） |
+| T4 | 国で絞る場所 | **WAF**（確認のパスだけを例外にする。2026-11-11）。この移行の対象の台には port-guard を入れていない（port-guard-rollout の対象は別の台。2026-11-11）ので、port-guard を外す作業はない |
+| T5 | オリジンの証明書の更新の経路 | **CloudFront と WAF を経た HTTP-01**（T4 に伴う。[cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
+| T6 | CloudFront の証明書の用意の仕方 | **ACM で作成する**（2026-11-12）。既存の証明書の登録は、ACM が自動で更新しないので別の節に分けた |
+| T7 | 利用者のドメイン名の DNS | **ステージングは Route 53、本番は外部の DNS サービス**（2026-11-11）。手順は Route 53 を本線にし、外部の DNS サービスは各ステップの別の節に書いた（2026-11-12） |
+| T8 | ステップ 3 を CloudFormation とシェルスクリプトのどちらで行うか | **シェルスクリプト**（`scripts/step3-dns-switch.sh`。2026-11-12）。利用者のドメイン名のレコードは今もあり、CloudFormation で作るには先に消すかスタックへの取り込みが要る。シェルスクリプトなら、今のレコードを読んで 1 つの変更バッチで置き換え、戻すのも逆の変更バッチで済む（[比べた表](./step3-dns-switch.md#シェルスクリプトにした理由)） |
+| T9 | ステップ 1・2 の道具 | **ステップ 1 は CloudFormation の YAML、ステップ 2 は CDK**（2026-11-12）。ステップ 1 はリソースが証明書 1 つだけで量がない。ステップ 2 は WAF のルールと CloudFront の設定の量が多い。両方の書き方の定義は残し、手順書だけを分けた |
+
+## どの手順でも共通して確かめること
 
 | 項目 | 内容 |
 |---|---|
-| 今の国での絞り込み（port-guard） | この移行の対象の台には port-guard を入れていない（port-guard-rollout の対象は別の台。2026-11-11）。port-guard を入れた台に当てはめるときだけ考える。CloudFront を前に置くと、拠点のアドレスが日本の範囲に入らず、**すべての通信が止まる**。ALB なら VPC の範囲の許可で通るが、絞り込みは効かなくなる。[国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)と各手順の順番に従う |
-| IP で直接つないでいる相手 | Elastic IP を指定して API を呼んでいる相手は、切り替えの後も前段を通らず EC2 へ向かい、セキュリティグループで止まる。[API のアクセス元の洗い出し](../api-access-sources/design.md)で探す |
-| 外部に Elastic IP を伝えている先 | EC2 から外へ出る通信の送り元は変わらない。Elastic IP を外すときだけ影響する |
-| 古い TLS しか話せない相手 | 前段のセキュリティポリシーで受ける TLS のバージョンが変わる |
+| IP で直接つないでいる相手 | Elastic IP を指定して API を呼んでいる相手は、切り替えの後も CloudFront を通らず稼働サーバーへ向かい、片付けの後はセキュリティグループで止まる。[API のアクセス元の洗い出し](../api-access-sources/design.md)で探す |
+| 外部に Elastic IP を伝えている先 | 稼働サーバーから外へ出る通信の送り元は変わらない。Elastic IP を外すときだけ影響する |
+| 古い TLS しか話せない相手 | CloudFront のセキュリティポリシー（TLSv1.2_2021）で受ける TLS のバージョンが変わる |
 | HTTP から HTTPS へのリダイレクト | `POST` で HTTP を呼ぶ API のクライアントは、リダイレクトで動かなくなることがある |
-| Rails の `force_ssl`、Secure の Cookie、URL の生成 | Rails が元の接続を HTTPS と認識できることが前提。各手順で確かめる |
+| Rails の `force_ssl`、Secure の Cookie、URL の生成 | Rails が元の接続を HTTPS と認識できることが前提（コンテナで確かめた。[検証の結果](./cloudfront-to-ec2-httpd.md#検証の結果)） |
 | AL2023 での作り直し | この移行を[作り直し](../initial-image-build/existing-system-rebuild-on-al2023.md)と同時に行うなら、新しい土台の Apache の設定に最初から入れる |
-
-## 決めること
-
-| # | 論点 |
-|---|---|
-| T1 | 何のために移すのか → **WAF による防御**（2026-11-11 に決めた） |
-| T2 | A・B・C のどれにするか → **まず B（CloudFront → EC2）で進める**（2026-11-11 に決めた）。対象が多数の台なら、[ALB を共有する案](../notes/instance-provisioning/cloudfront-alb-front-options.md#今の運用物件ごとの単体のサーバーに当てはめた選択肢)も含めて考える |
-| T3 | `old_app_a` の扱い → **平文のまま残す相手はいない前提**（2026-11-11）。[443 番へ移す](./cloudfront-to-ec2-httpd.md#6-old_app_a-を-443-番へ移す) |
-| T4 | 国で絞る要件を前段のどこで満たすか → B は **WAF**（確認のパスだけを例外にする。2026-11-11 に決めた）。この移行の対象の台には port-guard を入れていない（port-guard-rollout の対象は別の台。2026-11-11）ので、port-guard を外す作業はない |
-| T5 | B の場合、EC2 の証明書の更新の経路 → **CloudFront と WAF を経た HTTP-01**（T4 の決定に伴う。[cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
 
 ## 参考
 
-AWS のドキュメントと照らし合わせた（2026-11-09）。
+AWS のドキュメントと照らし合わせた（2026-11-09）。ステップごとの参考は各ドキュメントに書いた。
 
 - [Resources that you can protect with AWS WAF](https://docs.aws.amazon.com/waf/latest/developerguide/how-aws-waf-works-resources.html)
-- [AWS WAF Pricing](https://aws.amazon.com/waf/pricing/)
-- [Elastic Load Balancing pricing](https://aws.amazon.com/elasticloadbalancing/pricing/)
 - [Requirements for using SSL/TLS certificates with CloudFront](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html)
-- [Target groups for your Application Load Balancers](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-target-groups.html)
-- [Edit attributes for your Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html)
-- [CloudFront quotas](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-limits.html)
 - [Require HTTPS between CloudFront and your custom origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-https-cloudfront-to-custom-origin.html)
-- [Restrict access with VPC origins](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-vpc-origins.html)
-- [AWS-managed prefix lists（weight）](https://docs.aws.amazon.com/vpc/latest/userguide/working-with-aws-managed-prefix-lists.html)

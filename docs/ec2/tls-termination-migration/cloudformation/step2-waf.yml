@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed countries
+  Step 2 of CloudFront -> EC2 (deploy before step2-cloudfront.yml): AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed countries
   (with IP exceptions), except the Let's Encrypt HTTP-01 challenge path, and applies AWS managed rules.
   Logs go to CloudWatch Logs. Deploy this stack in us-east-1.
 
@@ -257,7 +257,7 @@ Resources:
 
 Outputs:
   WebAclArn:
-    Description: Pass this value as CloudFrontWebAclArn of the CloudFront stack.
+    Description: Pass this value as CloudFrontWebAclArn of step2-cloudfront.yml.
     Value:
       Fn::GetAtt: [WebAcl, Arn]
   WebAclLogGroupName:

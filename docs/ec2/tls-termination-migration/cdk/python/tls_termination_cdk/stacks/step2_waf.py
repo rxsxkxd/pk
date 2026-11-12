@@ -1,4 +1,4 @@
-"""CloudFront 用の AWS WAF の web ACL。CloudFront 用の web ACL は us-east-1 に要るので、スタックを分ける。
+"""ステップ 2（CloudFront のスタックより先）: CloudFront 用の AWS WAF の web ACL。CloudFront 用の web ACL は us-east-1 に要るので、スタックを分ける。
 
 ルールの順番:
   0. Let's Encrypt の HTTP-01 の確認のパスは、どの国からも通す（EC2 の証明書を HTTP-01 で更新し続けるため）
@@ -87,12 +87,12 @@ def _not(statement: wafv2.CfnWebACL.StatementProperty) -> wafv2.CfnWebACL.Statem
     )
 
 
-class CloudFrontWafStack(TerminationStack):
+class Step2WafStack(TerminationStack):
     def __init__(self, scope: Construct, stack_name: str, configuration: Configuration) -> None:
         super().__init__(
             scope,
             stack_name,
-            "AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed "
+            "Step 2 of CloudFront -> EC2: AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed "
             "countries (with IP exceptions), except the Let's Encrypt HTTP-01 challenge path, and applies "
             "AWS managed rules. Logs go to CloudWatch Logs. Deploy this stack in us-east-1.",
             configuration,

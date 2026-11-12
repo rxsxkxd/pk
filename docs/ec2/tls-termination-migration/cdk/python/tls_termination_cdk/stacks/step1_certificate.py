@@ -1,4 +1,7 @@
-"""CloudFront の外向きの ACM の証明書。CloudFront の証明書は us-east-1 に要るので、スタックを分ける。"""
+"""ステップ 1: CloudFront の証明書（ACM で作成する場合）。CloudFront の証明書は us-east-1 に要るので、スタックを分ける。
+
+既存の証明書を ACM に登録（インポート）する場合は、このスタックを使わず AWS CLI で行う（CloudFormation は登録に対応していない）。
+"""
 
 from __future__ import annotations
 
@@ -11,12 +14,13 @@ from ..configuration import Configuration
 from .common import TerminationStack
 
 
-class CloudFrontCertificateStack(TerminationStack):
+class Step1CertificateStack(TerminationStack):
     def __init__(self, scope: Construct, stack_name: str, configuration: Configuration) -> None:
         super().__init__(
             scope,
             stack_name,
-            "ACM certificate for the viewer domain name of CloudFront. Deploy this stack in us-east-1.",
+            "Step 1 of CloudFront -> EC2: ACM certificate for the viewer domain name of CloudFront. "
+            "Deploy this stack in us-east-1.",
             configuration,
             region="us-east-1",
         )
@@ -38,5 +42,5 @@ class CloudFrontCertificateStack(TerminationStack):
             self,
             "CertificateArn",
             value=certificate.certificate_arn,
-            description="Set this value as cloudfront_certificate_arn in the configuration file.",
+            description="Set this value as cloudfront_certificate_arn in the configuration file (step 2).",
         )

@@ -2,7 +2,7 @@
 
 > 位置付け: 検討と手順の下書き。今 EC2 の httpd（Apache）が SSL/TLS を終端している Web サービスの前に CloudFront を置き、利用者から見た SSL/TLS の終端を CloudFront へ移す。構成は **B. CloudFront → EC2** でほぼ確定している（2026-11-11）。移行は 3 つのステップに分け、ステップの間で設定が正常かを確かめてから次へ進む。
 >
-> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-12）。Apache の設定は、今の構成に近いコンテナで確かめた（2026-11-10）。定義（CloudFormation の YAML と CDK）は `cfn-lint` と合成まで、ステップ 3 のシェルスクリプトは構文の確認まで確かめた（2026-11-12）。**AWS のコマンドは実行しておらず、実際の CloudFront・ACM・Route 53 では試していない**。
+> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-12）。Apache の設定は、今の構成に近いコンテナで確かめた（2026-11-10）。定義（CloudFormation の YAML と CDK）は `cfn-lint` と合成まで（`cdk` の CLI の `cdk synth` も 2026-11-13 に確かめた）、ステップ 3 のシェルスクリプトは構文の確認まで確かめた（2026-11-12）。**AWS のコマンドは実行しておらず、実際の CloudFront・ACM・Route 53 では試していない**。
 >
 > 関連: [前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)、[稼働サーバーの前に置く構成と料金の考え方](../notes/instance-provisioning/cloudfront-alb-front-options.md)、[Let's Encrypt の扱い](../notes/instance-provisioning/letsencrypt-certificate-timing.md)
 >
@@ -20,7 +20,7 @@
 | 秘密のヘッダー | CloudFront がオリジンへの要求に付けるヘッダー（`X-Origin-Verify`）。稼働サーバーの httpd が値を確かめ、CloudFront を通らない要求を止める |
 | 稼働サーバーの前に置くサービス | 利用者と稼働サーバーの間に置く CloudFront や ALB。このドキュメント群では「前段」とは書かず、この言い方をする |
 | 本線 | 採用した構成（B. CloudFront → EC2）の手順と定義 |
-| オプション | 採用しなかった構成（ALB を使う構成）の手順と定義。`options/` に分けている |
+| オプション | 採用しなかった構成（ALB を使う構成）と、既定に入れなかった設定（WAF のマネージドルールとログ）の手順と定義。`options/` に分けている |
 
 ## 移行の後の形
 
@@ -32,7 +32,7 @@ flowchart TD
   SG --> H["稼働サーバーの httpd *:443<br/>オリジンの証明書（Let's Encrypt）"]
 ```
 
-CloudFront から稼働サーバーまではインターネットを通るので、HTTPS を続ける。**オリジンの証明書（Let's Encrypt）は残る**。httpd から SSL/TLS の処理をなくしたい場合の構成は、[オプション](#オプション採用しなかった構成)にある。
+CloudFront から稼働サーバーまではインターネットを通るので、HTTPS を続ける。**オリジンの証明書（Let's Encrypt）は残る**。httpd から SSL/TLS の処理をなくしたい場合の構成は、[オプション](#オプション採用しなかった構成既定に入れなかった設定)にある。
 
 ## 3 つのステップ
 
@@ -53,13 +53,13 @@ flowchart TD
 | ステップ | 行うこと | 使う道具 | 利用者への影響 | 手順 |
 |---|---|---|---|---|
 | 準備 | DNS の管理先・CAA・TTL の確認、稼働サーバーの httpd の設定 | なし（稼働サーバーの上） | なし | [step0-preparation.md](./step0-preparation.md) |
-| 1 | CloudFront の証明書を ACM に用意する。**ACM で作成する（採用）**。既存の証明書を登録する方法は別の節 | **CloudFormation の YAML** `cloudformation/step1-certificate.yml`（`us-east-1`） | なし | [step1-acm-certificate.md](./step1-acm-certificate.md) |
-| 2 | WAF の web ACL、CloudFront、オリジンの名前、オリジン用のセキュリティグループを作り、DNS を変えずに CloudFront 経由で確かめる | **CDK** `<prefix>-step2-waf`（`us-east-1`）、`<prefix>-step2-cloudfront`（`ap-northeast-1`） | なし | [step2-cloudfront.md](./step2-cloudfront.md) |
+| 1 | CloudFront の証明書を ACM に用意する。**ACM で作成する（採用）**。既存の証明書を登録する方法は別の節 | **CloudFormation の YAML** `cloudformation/step1-certificate.yml` か **CDK** `<prefix>-step1-certificate`（どちらか一方。`us-east-1`） | なし | [step1-acm-certificate.md](./step1-acm-certificate.md) |
+| 2 | WAF の web ACL、CloudFront、オリジンの名前、オリジン用のセキュリティグループを作り、DNS を変えずに CloudFront 経由で確かめる | **CDK** `<prefix>-step2-waf`（`us-east-1`）、`<prefix>-step2-cloudfront`（`ap-northeast-1`）。`cdk deploy` で直接反映するか、CDK から YAML のテンプレートを出して AWS CLI で反映する | なし | [step2-cloudfront.md](./step2-cloudfront.md) |
 | 3 | 利用者のドメイン名の向き先を CloudFront へ変える。**Route 53（ステージング）が本線**、外部の DNS サービス（本番）は別の節（手で変える）。落ち着いたら片付ける | **シェルスクリプト** `scripts/step3-dns-switch.sh` | 順次 CloudFront 経由になる | [step3-dns-switch.md](./step3-dns-switch.md) |
 
 - ステップ 1・2 は利用者に影響しない。確認で問題が見つかれば、作ったスタックを消すだけで戻せる
 - ステップ 3 は、片付けの前なら、DNS を元のレコードに戻すだけで戻せる
-- 定義の中身は [definitions.md](./definitions.md)、CDK のコマンドは [cdk/python/README.md](./cdk/python/README.md)。ステップ 1 の CDK のスタックと、ステップ 2 の CloudFormation の YAML も同じ内容で残しているが、手順では使わない
+- 定義の中身は [definitions.md](./definitions.md)、CDK のコマンドは [cdk/python/README.md](./cdk/python/README.md)。ステップ 2 の CloudFormation の YAML も同じ内容で残しているが、手順では使わない
 
 ## ドキュメント
 
@@ -78,10 +78,11 @@ flowchart TD
 | `scripts/step3-dns-switch.sh` | ステップ 3 のシェルスクリプト（Route 53 の A レコードの置き換えと戻し） |
 | [cdk/python/README.md](./cdk/python/README.md) | CDK（Python）版の準備・合成・デプロイ・撤去のコマンド |
 
-### オプション（採用しなかった構成）
+### オプション（採用しなかった構成・既定に入れなかった設定）
 
 | ファイル | 内容 |
 |---|---|
+| [options/waf-managed-rules.md](./options/waf-managed-rules.md) | ステップ 2 の WAF に、AWS のマネージドルールとログを足す方法（count で試してから block にする流れ）と、既定から外す前の定義の設定値 |
 | [options/comparison.md](./options/comparison.md) | 3 つの構成（A. ALB → EC2、B. CloudFront → EC2、C. CloudFront → ALB → EC2）の比較、ALB を通さないことのデメリット、WAF を置ける場所 |
 | [options/alb-to-ec2.md](./options/alb-to-ec2.md) | A. ALB → EC2 への移行の手順 |
 | [options/cloudfront-alb-to-ec2.md](./options/cloudfront-alb-to-ec2.md) | C. CloudFront → ALB → EC2 への移行の手順 |
@@ -93,7 +94,7 @@ flowchart TD
 - **B. CloudFront → EC2 で進める**（2026-11-11）。目的は **WAF による防御**で、WAF は CloudFront に付ける（EC2 には直接付けられない）
 - **オリジンの証明書（Let's Encrypt）は残る**。CloudFront から稼働サーバーまではインターネットを通るので、HTTPS を続ける
 - **利用者のドメイン名は変えない**。CloudFront の接続先には、別の名前（オリジンの名前）を使う
-- 国の絞り込みは **WAF** で行い、`/.well-known/acme-challenge/` だけはどの国からも通す（オリジンの証明書を HTTP-01 で更新し続けるため）。CloudFront の地理的制限は使わない
+- 国の絞り込みは **WAF** で行い、`/.well-known/acme-challenge/` だけはどの国からも通す（オリジンの証明書を HTTP-01 で更新し続けるため）。CloudFront の地理的制限は使わない。既定の WAF は国の絞り込みだけで、マネージドルールとログはオプション
 - httpd から証明書と SSL/TLS の処理をなくしたい場合は、ALB を通すオプションの構成（A・C）になる。比較は [options/comparison.md](./options/comparison.md)
 
 ## 決めたこと
@@ -108,7 +109,8 @@ flowchart TD
 | T6 | CloudFront の証明書の用意の仕方 | **ACM で作成する**（2026-11-12）。既存の証明書の登録は、ACM が自動で更新しないので別の節に分けた |
 | T7 | 利用者のドメイン名の DNS | **ステージングは Route 53、本番は外部の DNS サービス**（2026-11-11）。手順は Route 53 を本線にし、外部の DNS サービスは各ステップの別の節に書いた（2026-11-12） |
 | T8 | ステップ 3 を CloudFormation とシェルスクリプトのどちらで行うか | **シェルスクリプト**（`scripts/step3-dns-switch.sh`。2026-11-12）。利用者のドメイン名のレコードは今もあり、CloudFormation で作るには先に消すかスタックへの取り込みが要る。シェルスクリプトなら、今のレコードを読んで 1 つの変更バッチで置き換え、戻すのも逆の変更バッチで済む（[比べた表](./step3-dns-switch.md#シェルスクリプトにした理由)） |
-| T9 | ステップ 1・2 の道具 | **ステップ 1 は CloudFormation の YAML、ステップ 2 は CDK**（2026-11-12）。ステップ 1 はリソースが証明書 1 つだけで量がない。ステップ 2 は WAF のルールと CloudFront の設定の量が多い。両方の書き方の定義は残し、手順書だけを分けた |
+| T9 | ステップ 1・2 の道具 | **ステップ 1 は CloudFormation の YAML（量がないため）を基本に、CDK でも行えるよう手順書に両方を書く。ステップ 2 は CDK**（2026-11-12。ステップ 1 の併記は 2026-11-13）。ステップ 2 は WAF のルールと CloudFront の設定の量が多い。CDK のデプロイは、`cdk deploy` で直接反映する方法と、CDK から CloudFormation のテンプレート（YAML）を出して AWS CLI で反映する方法の両方を書いた（[cdk/python/README.md のデプロイ](./cdk/python/README.md#デプロイ)。2026-11-13）。どちらも `cdk bootstrap` はしない。両方の書き方の定義は残している |
+| T10 | 既定の WAF に何を入れるか | **国の絞り込みだけ**（`AllowAcmeChallenge` と `BlockOutsideAllowedCountries`。2026-11-13）。AWS のマネージドルールとログは既定から外し、入れ方と外す前の設定値を [options/waf-managed-rules.md](./options/waf-managed-rules.md) に残した。定義が短くなり（`step2_waf.py` 236 行 → 155 行）、料金は月 $10 → $7 と要求の料金。許可する国と例外の IP から来る攻撃は WAF では止めない |
 
 ## どの手順でも共通して確かめること
 

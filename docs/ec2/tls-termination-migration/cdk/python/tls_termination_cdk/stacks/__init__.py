@@ -20,6 +20,7 @@ from .step1_certificate import Step1CertificateStack
 from .step2_cloudfront import Step2CloudFrontStack
 from .step2_waf import Step2WafStack
 
+# option_stacks に書く名前と、そのスタックのクラス。名前は configuration.py の OPTION_REQUIRED_KEYS と同じにする
 OPTION_STACKS = {
     "alb-to-ec2": AlbToEc2Stack,
     "cloudfront-alb-to-ec2": CloudFrontAlbToEc2Stack,
@@ -31,15 +32,20 @@ def define_stacks(scope: Construct, configuration: Configuration) -> list[str]:
     prefix = configuration.stack_name_prefix
     skipped: list[str] = []
 
+    # スタックの構築 ID（第 2 引数）はスタック名と同じにする。cdk deploy <スタック名> や
+    # cdk.out/<スタック名>.template.json で、そのまま指定できるように
+
     # ステップ 1 とステップ 2 の WAF は、ステップ 2 の CloudFront に要る ARN を作る側なので、いつも定義する
     Step1CertificateStack(scope, f"{prefix}-step1-certificate", configuration)
     Step2WafStack(scope, f"{prefix}-step2-waf", configuration)
 
+    # CloudFront の証明書の ARN（ステップ 1 の出力）がないと CloudFront を作れないので、それまでは定義しない
     if configuration.cloudfront_certificate_arn:
         Step2CloudFrontStack(scope, f"{prefix}-step2-cloudfront", configuration)
     else:
         skipped.append(f"{prefix}-step2-cloudfront（cloudfront_certificate_arn が空。ステップ 1 の後に書く）")
 
+    # オプションの構成は、書かれたものだけを定義する（名前の誤りは configuration.py で止めている）
     for option in configuration.option_stacks:
         OPTION_STACKS[option](scope, f"{prefix}-option-{option}", configuration)
 

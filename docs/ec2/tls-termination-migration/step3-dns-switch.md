@@ -143,7 +143,7 @@ curl -sI https://app.example.com/
 | 3 | オリジンの証明書の更新が新しい経路で成功することを確かめる | `sudo certbot renew --dry-run` |
 | 4 | 証明書の残り日数の監視を入れる。**オリジンの証明書が切れると、すべての利用者に 502 が返る** | [残り日数の確かめ方](./cloudfront-to-ec2-domains-certificates.md#残り日数の確かめ方) |
 | 5 | 本番の CNAME の TTL を元に戻す（Route 53 のエイリアスのレコードは TTL を持たない） | `dig app.example.com` |
-| 6 | WAF のマネージドルールを、ログで誤検知がないことを確かめてから `block` にする（ステップ 2 の設定値 `waf_managed_rules_mode` を変えて、`<prefix>-step2-waf` を更新する） | [definitions.md のマネージドルール](./definitions.md#マネージドルール) |
+| 6 | （オプションの WAF のマネージドルールを入れるときだけ）count で入れて誤検知を確かめてから `block` にする。既定の WAF には入れていない | [options/waf-managed-rules.md の入れ方](./options/waf-managed-rules.md#入れ方方法論) |
 | 7 | 控えのファイルを片付ける（戻す見込みがなくなってから） | |
 
 ## 元に戻す

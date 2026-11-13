@@ -18,6 +18,11 @@ from .common import (
 
 
 class Step2CloudFrontStack(TerminationStack):
+    """CloudFront、オリジン用のセキュリティグループ、（ステージングでは）オリジンの名前の A レコード。
+
+    設定値の cloudfront_certificate_arn（ステップ 1 の出力）があるときだけ定義する（stacks/__init__.py）。
+    """
+
     def __init__(self, scope: Construct, stack_name: str, configuration: Configuration) -> None:
         super().__init__(
             scope,
@@ -27,6 +32,8 @@ class Step2CloudFrontStack(TerminationStack):
             configuration,
         )
 
+        # オリジンの名前（origin.app.example.com → 稼働サーバーの Elastic IP）。ホストゾーンを指定したとき
+        # （Route 53。ステージング）だけ作る。外部の DNS サービス（本番）では手で足す
         if configuration.origin_hosted_zone_id:
             # 利用者のドメイン名のレコードは既にあるので、ここでは作らない。ステップ 3 で担当者が切り替える
             route53.CfnRecordSet(
@@ -40,15 +47,18 @@ class Step2CloudFrontStack(TerminationStack):
             )
 
         origin_security_group = define_origin_security_group(self, configuration)
+        # 秘密のヘッダーの値はパラメータ（OriginVerifyHeaderValue）で受け取り、CloudFront のオリジンの設定に入れる
         distribution = define_distribution(
             self, configuration, origin_verify_header_value(self), configuration.geo_restriction_countries
         )
 
+        # ステップ 2 の確認（curl --connect-to の接続先）と、ステップ 3 の向き先に使う
         self.output(
             "DistributionDomainName",
             distribution.distribution_domain_name,
             "Step 3: point domain_name to this name after checking the distribution.",
         )
+        # ステップ 2 の 2-4 で、稼働サーバーに足すセキュリティグループ
         self.output(
             "OriginSecurityGroupId",
             origin_security_group.security_group_id,

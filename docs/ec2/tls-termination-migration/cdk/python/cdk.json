@@ -1,5 +1,6 @@
 {
   "app": "python3 app.py",
+  "pathMetadata": false,
   "context": {
     "config": "config.example.yml"
   }

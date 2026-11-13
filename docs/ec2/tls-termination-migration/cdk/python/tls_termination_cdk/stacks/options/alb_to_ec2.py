@@ -11,6 +11,11 @@ from .alb import AlbFront
 
 
 class AlbToEc2Stack(TerminationStack):
+    """ALB が利用者の TLS を終端し、稼働サーバーの httpd へ HTTP で転送する構成。
+
+    利用者のドメイン名を ALB へ向ける作業（DNS）は含めない。
+    """
+
     def __init__(self, scope: Construct, stack_name: str, configuration: Configuration) -> None:
         super().__init__(
             scope,
@@ -19,8 +24,10 @@ class AlbToEc2Stack(TerminationStack):
             configuration,
         )
 
+        # CloudFront を前に置かない形（秘密のヘッダーを見ない）で、ALB と転送の規則を作る
         front = AlbFront(self, "AlbFront", configuration)
 
+        # ALB 用の WAF の web ACL（リージョンの web ACL）を指定したときだけ関連付ける
         if configuration.alb_web_acl_arn:
             wafv2.CfnWebACLAssociation(
                 self,
@@ -29,5 +36,6 @@ class AlbToEc2Stack(TerminationStack):
                 web_acl_arn=configuration.alb_web_acl_arn,
             )
 
+        # 利用者のドメイン名を ALB へ向ける（Route 53 のエイリアス）ときに使う値
         self.output("LoadBalancerDnsName", front.load_balancer.load_balancer_dns_name)
         self.output("LoadBalancerCanonicalHostedZoneId", front.load_balancer.load_balancer_canonical_hosted_zone_id)

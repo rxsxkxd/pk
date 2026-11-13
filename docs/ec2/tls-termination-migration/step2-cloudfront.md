@@ -2,9 +2,9 @@
 
 > 位置付け: B. CloudFront → EC2 への移行の 3 つのステップの 2 つ目。WAF の web ACL、CloudFront のディストリビューション、オリジンの名前、オリジン用のセキュリティグループを用意し、**利用者のドメイン名の DNS を変えずに**、CloudFront 経由でアプリが動くことを確かめる。前は [ステップ 1: ACM の証明書](./step1-acm-certificate.md)、次は [ステップ 3: 向き先の変更](./step3-dns-switch.md)。全体は [README](./README.md#3-つのステップ)。
 >
-> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-11）。定義は CDK の合成と、合成したテンプレートの `cfn-lint` まで確かめた（2026-11-12）。**AWS のコマンドは実行しておらず、実際の CloudFront・WAF では試していない**。`app.example.com`・`origin.app.example.com`・`dxxxx.cloudfront.net` は例で、`<...>` は環境に合わせて置き換える。
+> 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-11）。定義は CDK の合成と、合成したテンプレートの `cfn-lint` まで確かめた（2026-11-12）。`cdk` の CLI のコマンドは AWS のドキュメントで確かめた（2026-11-13）。**AWS のコマンドと `cdk` の CLI は実行しておらず、実際の CloudFront・WAF では試していない**。`app.example.com`・`origin.app.example.com`・`dxxxx.cloudfront.net` は例で、`<...>` は環境に合わせて置き換える。
 >
-> 作成日: 2026-11-12（`cloudfront-to-ec2.md`・`cloudfront-to-ec2-same-domain.md`・`external-dns-certificate.md`・`definitions.md` から集めた）
+> 作成日: 2026-11-12（`cloudfront-to-ec2.md`・`cloudfront-to-ec2-same-domain.md`・`external-dns-certificate.md`・`definitions.md` から集めた。CDK のデプロイの 2 通りの仕方を書いた: 2026-11-13）
 
 ## 用語
 
@@ -23,7 +23,7 @@
 
 ## 行うこと
 
-**定義は CDK で扱う**（WAF のルールと CloudFront の設定の量が多く、設定値ファイル 1 つにまとめられるため。[README の T9](./README.md#決めたこと)）。CDK はテンプレートを作るためだけに使い、デプロイは合成したテンプレートを AWS CLI で反映する（`cdk bootstrap` は要らない）。同じ内容の CloudFormation の YAML（`step2-waf.yml`・`step2-cloudfront.yml`）もあるが、この手順では使わない。
+**定義は CDK で扱う**（WAF のルールと CloudFront の設定の量が多く、設定値ファイル 1 つにまとめられるため。[README の T9](./README.md#決めたこと)）。デプロイの仕方は 2 通りあり、環境ごとにどちらかに決める（[2-0](#2-0-cdk-の準備と設定値ファイル)）。どちらも `cdk bootstrap` はしない。同じ内容の CloudFormation の YAML（`step2-waf.yml`・`step2-cloudfront.yml`）もあるが、この手順では使わない。
 
 | # | 行うこと | リージョン | CDK のスタック |
 |---|---|---|---|
@@ -58,37 +58,56 @@ aws ec2 describe-managed-prefix-lists --region ap-northeast-1 \
   --query 'PrefixLists[0].PrefixListId' --output text
 ```
 
-合成とデプロイの形は、どのスタックも同じ（[cdk/python/README.md のデプロイ](./cdk/python/README.md#デプロイ)）。
+デプロイの仕方は 2 通りあり、どのスタックも同じ形で行う（詳しくは [cdk/python/README.md のデプロイ](./cdk/python/README.md#デプロイ)）。どちらも `cdk/python/` で、venv を有効にしてから流す。
+
+| | 方法 1: CDK で直接反映する | 方法 2: CDK から CloudFormation のテンプレート（YAML）を出し、AWS CLI で反映する |
+|---|---|---|
+| 変更の中身を見る | `cdk diff` と、`cdk deploy` の確認の問い合わせ | 変更セット（`describe-change-set`） |
+| 反映したテンプレート | 手元に残すことは考えない（`cdk.out/` は合成のたびに上書き） | `templates/<スタック名>.template.yml` に残る。`cfn-lint` にかけたり、人に渡したりできる |
+| 秘密のヘッダーの値 | `--parameters <スタック名>:OriginVerifyHeaderValue=<値>` | `--parameter-overrides OriginVerifyHeaderValue=<値>` |
 
 ```bash
-# 合成（cdk.out/ にテンプレートが出る）
-CDK_CONTEXT_JSON='{"config":"config.yml"}' CDK_OUTDIR=cdk.out .venv/bin/python app.py
+source .venv/bin/activate
 
-# 変更セットを作り、中身を確かめてから反映する
+# 方法 1: CDK で直接反映する
+cdk diff   -c config=config.yml <スタック名>
+cdk deploy -c config=config.yml <スタック名> --require-approval any-change [--parameters ...]
+
+# 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で反映する
+mkdir -p templates
+cdk synth -c config=config.yml <スタック名> > templates/<スタック名>.template.yml
 aws cloudformation deploy --region <リージョン> --no-execute-changeset \
-  --template-file cdk.out/<スタック名>.template.json --stack-name <スタック名> [--parameter-overrides ...]
+  --template-file templates/<スタック名>.template.yml --stack-name <スタック名> [--parameter-overrides ...]
 aws cloudformation describe-change-set --region <リージョン> --stack-name <スタック名> --change-set-name <名前>
 aws cloudformation execute-change-set --region <リージョン> --stack-name <スタック名> --change-set-name <名前>
 ```
 
-合成では、ステップ 1 の CDK のスタック（`<prefix>-step1-certificate`）のテンプレートも出るが、使わない（ステップ 1 は CloudFormation の YAML で済ませている）。
+- `cdk` の CLI を入れないときは、方法 2 で JSON のテンプレートを使う（`CDK_CONTEXT_JSON='{"config":"config.yml"}' CDK_OUTDIR=cdk.out .venv/bin/python app.py` で合成し、`--template-file cdk.out/<スタック名>.template.json` を渡す）
+- 合成すると、ステップ 1 の CDK のスタック（`<prefix>-step1-certificate`）のテンプレートも出る。ステップ 1 を CloudFormation の YAML で済ませたなら使わない。`<スタック名>` を指定して流すので、ステップ 1 のスタックが反映し直されることはない
 
 ## 2-1. WAF の web ACL
 
-国の絞り込み（既定は `JP` だけ）、例外の IP、AWS のマネージドルール、ログ（`us-east-1` の CloudWatch Logs に 30 日）を持つ web ACL を作る。`/.well-known/acme-challenge/` だけはどの国からも通す（オリジンの証明書を HTTP-01 で更新し続けるため）。ルールの中身は [definitions.md の WAF](./definitions.md#ステップ-2-の-waf国の絞り込み)。
+国の絞り込み（既定は `JP` だけ）と例外の IP だけを持つ web ACL を作る。`/.well-known/acme-challenge/` だけはどの国からも通す（オリジンの証明書を HTTP-01 で更新し続けるため）。ルールの中身は [definitions.md の WAF](./definitions.md#ステップ-2-の-waf国の絞り込み)。AWS のマネージドルールとログは既定では入れない（入れるなら [options/waf-managed-rules.md](./options/waf-managed-rules.md)。[README の T10](./README.md#決めたこと)）。
 
 | 決めること | 既定 | 内容 |
 |---|---|---|
 | 許可する国 | `JP` | 設定値 `waf_allowed_countries` |
 | 例外の IP | なし | 設定値 `waf_exception_ipv4_addresses`・`waf_exception_ipv6_addresses`。海外から使う相手がいれば CIDR で足す |
-| マネージドルール | **`count`（記録だけ）** | 設定値 `waf_managed_rules_mode`。ログで誤検知がないことを確かめてから `block` に切り替える（ステップ 3 の片付けの後） |
+
+2-0 のどちらかの方法で、`us-east-1` にデプロイする（パラメータはない。リージョンはスタックの定義に書いてある）。
 
 ```bash
-# 2-0 の形で合成し、us-east-1 にデプロイする（パラメータはない）
+# 方法 1: CDK で直接反映する
+cdk diff   -c config=config.yml <prefix>-step2-waf
+cdk deploy -c config=config.yml <prefix>-step2-waf --require-approval any-change
+
+# 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で反映する
+cdk synth -c config=config.yml <prefix>-step2-waf > templates/<prefix>-step2-waf.template.yml
 aws cloudformation deploy --region us-east-1 --no-execute-changeset \
-  --template-file cdk.out/<prefix>-step2-waf.template.json --stack-name <prefix>-step2-waf
+  --template-file templates/<prefix>-step2-waf.template.yml --stack-name <prefix>-step2-waf
 #   変更セットを確かめて反映する
 
+# どちらの方法でも、出力の WebAclArn を見る
 aws cloudformation describe-stacks --region us-east-1 --stack-name <prefix>-step2-waf \
   --query "Stacks[0].Outputs[?OutputKey=='WebAclArn'].OutputValue" --output text
 ```
@@ -109,19 +128,24 @@ aws cloudformation describe-stacks --region us-east-1 --stack-name <prefix>-step
 
 ## 2-3. CloudFront とオリジン用のセキュリティグループ
 
-`cloudfront_web_acl_arn` を書いた設定値ファイルで合成し直してから、デプロイする。秘密のヘッダーの値だけは、設定値ファイルに書かず、デプロイのときのパラメータで渡す（テンプレートに残さないため）。
+`cloudfront_web_acl_arn` を書いた設定値ファイルで、2-0 のどちらかの方法でデプロイする（どちらの方法も、流すたびに設定値ファイルから合成し直す）。秘密のヘッダーの値だけは、設定値ファイルに書かず、デプロイのときのパラメータで渡す（テンプレートに残さないため）。2 回目以降の更新では、渡さなければ前の値のまま（どちらの方法でも）。
 
 ```bash
-CDK_CONTEXT_JSON='{"config":"config.yml"}' CDK_OUTDIR=cdk.out .venv/bin/python app.py
+# 方法 1: CDK で直接反映する
+cdk diff   -c config=config.yml <prefix>-step2-cloudfront
+cdk deploy -c config=config.yml <prefix>-step2-cloudfront --require-approval any-change \
+  --parameters "<prefix>-step2-cloudfront:OriginVerifyHeaderValue=<準備の 4 で作った値>"
 
+# 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で反映する
+cdk synth -c config=config.yml <prefix>-step2-cloudfront > templates/<prefix>-step2-cloudfront.template.yml
 aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
-  --template-file cdk.out/<prefix>-step2-cloudfront.template.json \
+  --template-file templates/<prefix>-step2-cloudfront.template.yml \
   --stack-name <prefix>-step2-cloudfront \
   --parameter-overrides OriginVerifyHeaderValue=<準備の 4 で作った値>
 #   変更セットを確かめて反映する
 ```
 
-`cloudfront_certificate_arn` が空だと、このスタックは合成されない（標準エラーに「定義しなかったスタック」と出る）。
+`cloudfront_certificate_arn` が空だと、このスタックは合成されない（標準エラーに「定義しなかったスタック」と出る。`cdk synth`・`cdk deploy` は、そのスタック名が見つからないとして止まる見込み）。
 
 ディストリビューションの主な設定（定義に入っている）:
 
@@ -198,7 +222,7 @@ WAF は、海外の確認用の端末から同じく `--connect-to` で確かめ
 | 国内 | `curl -sI https://app.example.com/` | アプリの応答 |
 | 例外の IP（あれば） | `curl -sI https://app.example.com/` | アプリの応答 |
 
-止めた件数と例は、web ACL の CloudWatch のメトリクス、サンプルのリクエスト、ログ（`aws-waf-logs-<prefix>-step2-waf`）で見られる。マネージドルールで Count になった要求も、ここで見ておく。
+止めた件数と例は、web ACL の CloudWatch のメトリクス（ルールごと）と、サンプルのリクエスト（WAF のコンソールの web ACL の画面）で見られる。全件のログは既定では残さない（[オプション](./options/waf-managed-rules.md#ログ)）。
 
 ## 元に戻す
 
@@ -211,7 +235,7 @@ WAF は、海外の確認用の端末から同じく `--connect-to` で確かめ
 
 ## 参考
 
-AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-11）。WAF の参考は [definitions.md の参考](./definitions.md#参考)。
+AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-13）。CDK の CLI の参考は [cdk/python/README.md の参考](./cdk/python/README.md#参考)。WAF の参考は [definitions.md の参考](./definitions.md#参考)。
 
 - [Require HTTPS between CloudFront and your custom origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-https-cloudfront-to-custom-origin.html)
 - [Origin settings（Origin domain は公開の DNS 名）](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesOrigin.html)

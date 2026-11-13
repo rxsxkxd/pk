@@ -2,9 +2,9 @@
 
 > 位置付け: B. CloudFront → EC2 への移行の 3 つのステップの 1 つ目。CloudFront の証明書（利用者と CloudFront の間で使う証明書）を、ACM の `us-east-1` に用意する。前は [準備](./step0-preparation.md)、次は [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)。全体は [README](./README.md#3-つのステップ)。
 >
-> 確かめた範囲: ACM・CloudFormation の仕様は AWS のドキュメントと照らし合わせた（2026-11-11、2026-11-12）。定義は `cfn-lint` まで確かめた（2026-11-12）。**AWS のコマンドは実行しておらず、外部の DNS サービスでも試していない**。`app.example.com` は例で、`<...>` は環境に合わせて置き換える。
+> 確かめた範囲: ACM・CloudFormation・CDK の CLI の仕様は AWS のドキュメントと照らし合わせた（2026-11-11〜2026-11-13）。定義は `cfn-lint` まで確かめた（2026-11-12）。**AWS のコマンドと `cdk` の CLI は実行しておらず、外部の DNS サービスでも試していない**。`app.example.com` は例で、`<...>` は環境に合わせて置き換える。
 >
-> 作成日: 2026-11-12（`external-dns-certificate.md` と `definitions.md` から集めた）
+> 作成日: 2026-11-12（`external-dns-certificate.md` と `definitions.md` から集めた。CDK での実行方法を併記した: 2026-11-13）
 
 ## 用語
 
@@ -27,10 +27,10 @@
 
 | 方法 | 内容 | 更新 | 定義 |
 |---|---|---|---|
-| **1-A. ACM で作成する（採用）** | ACM に申請し、DNS 検証で発行してもらう | **ACM が自動で行う**（検証用の CNAME を残し、証明書が使われている間） | **CloudFormation の `step1-certificate.yml`** |
+| **1-A. ACM で作成する（採用）** | ACM に申請し、DNS 検証で発行してもらう | **ACM が自動で行う**（検証用の CNAME を残し、証明書が使われている間） | CloudFormation の `step1-certificate.yml`、または CDK の `<prefix>-step1-certificate`（[どちらか一方](#1-a-0-cloudformation-と-cdk-のどちらで行うか)） |
 | 1-B. 既存の証明書を ACM に登録する（オプション） | 手元の証明書と秘密鍵を `import-certificate` で取り込む | **ACM は自動で更新しない**。期限の前に新しい証明書を入れ直す | なし（CloudFormation は登録に対応していない。AWS CLI で行う） |
 
-1-A を使う（[README の T6](./README.md#決めたこと)）。**定義は CloudFormation の YAML で扱う**（リソースが証明書 1 つだけで、CDK を使うほどの量がないため。[README の T9](./README.md#決めたこと)）。同じ内容の CDK のスタック（`<prefix>-step1-certificate`）もあるが、この手順では使わない。1-B は、ACM で作成できない事情（CAA を変えられないなど）があるときのために[別の節](#1-b-既存の証明書を登録するオプション)に書いた。
+1-A を使う（[README の T6](./README.md#決めたこと)）。定義は CloudFormation の YAML と CDK の両方にあり、この手順書にはどちらの実行方法も書いた（[README の T9](./README.md#決めたこと)）。1-B は、ACM で作成できない事情（CAA を変えられないなど）があるときのために[別の節](#1-b-既存の証明書を登録するオプション)に書いた。
 
 ### 証明書の種類
 
@@ -42,11 +42,27 @@ CloudFront に付ける証明書は **`us-east-1`** に作る（CloudFront の�
 
 | | ステージング（Route 53） | 本番（外部の DNS サービス） |
 |---|---|---|
-| パラメータ `HostedZoneId` | `app.example.com` のホストゾーン ID | 空 |
+| ホストゾーン（CloudFormation のパラメータ `HostedZoneId`、CDK の設定値 `certificate_hosted_zone_id`） | `app.example.com` のホストゾーン ID | 空 |
 | 検証用の CNAME | CloudFormation が自動で作る | **手で足す** |
 | スタックの作成 | 数分で終わる見込み | CNAME を足して検証が済むまで `CREATE_IN_PROGRESS` のまま待つ |
 
+### 1-A-0. CloudFormation と CDK のどちらで行うか
+
+どちらでも、できる証明書は同じ（ACM で作成した証明書 1 つ）。スタック名も同じ `<prefix>-step1-certificate` にする。
+
+| | CloudFormation の YAML | CDK |
+|---|---|---|
+| 定義 | `cloudformation/step1-certificate.yml` | `cdk/python/` の `<prefix>-step1-certificate`（`stacks/step1_certificate.py`） |
+| 値の渡し方 | コマンドのパラメータ（`DomainName`、`HostedZoneId`） | 設定値ファイル（`domain_name`、`certificate_hosted_zone_id`） |
+| 要るもの | AWS CLI | CDK の準備（venv、`cdk` の CLI）と設定値ファイル。設定値ファイルにはステップ 2 の必須の項目（`vpc_id` など）も書く（書かないと合成が止まる） |
+| 向いているとき | ステップ 1 だけ先に済ませたい（CDK の準備がまだ） | ステップ 2 と同じ設定値ファイルで、値をまとめて管理したい |
+
+- **1 つの環境では、決めた方を使い続ける**。YAML と CDK では論理 ID（テンプレートの中のリソースの名前）が違うので、YAML で作ったスタックを CDK のテンプレートで更新すると（逆も）、CloudFormation は証明書を作り直す（ARN が変わる。CloudFront に付けた後は、古い証明書を消せずに失敗する見込み）
+- CDK の準備と設定値ファイルは [ステップ 2 の 2-0](./step2-cloudfront.md#2-0-cdk-の準備と設定値ファイル)と同じ。デプロイの 2 通りの仕方（方法 1: `cdk deploy`、方法 2: CDK から YAML のテンプレートを出して AWS CLI で反映）は [cdk/python/README.md のデプロイ](./cdk/python/README.md#デプロイ)。CDK のコマンドは `cdk/python/` で、venv を有効にしてから流す
+
 ### 1-A-1. Route 53（ステージング）
+
+**CloudFormation の YAML**:
 
 ```bash
 aws cloudformation deploy --region us-east-1 \
@@ -55,17 +71,53 @@ aws cloudformation deploy --region us-east-1 \
   --parameter-overrides DomainName=app.example.com HostedZoneId=<ホストゾーン ID>
 ```
 
+**CDK**: 設定値ファイルに `domain_name: app.example.com` と `certificate_hosted_zone_id: <ホストゾーン ID>` を書いてから流す。
+
+```bash
+cd cdk/python && source .venv/bin/activate
+
+# 方法 1: CDK で直接反映する
+cdk diff -c config=config.yml <prefix>-step1-certificate
+cdk deploy -c config=config.yml <prefix>-step1-certificate --require-approval any-change
+
+# 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で反映する
+mkdir -p templates
+cdk synth -c config=config.yml <prefix>-step1-certificate > templates/<prefix>-step1-certificate.template.yml
+aws cloudformation deploy --region us-east-1 --no-execute-changeset \
+  --template-file templates/<prefix>-step1-certificate.template.yml \
+  --stack-name <prefix>-step1-certificate
+#   変更セットを確かめて反映する（cdk/python/README.md の方法 2 の 3・4）
+```
+
 ### 1-A-2. 外部の DNS サービス（本番）
 
 **ACM が CNAME を示してから 72 時間以内に検証できないと、証明書は `Validation timed out` になり、申請し直しになる**（ACM のドキュメントの記述）。CNAME を足すのを人に頼むなら、72 時間以内に足してもらえる段取りを先に付けてから始める。
 
-1. `HostedZoneId` を空にしてスタックを作る。スタックは検証が済むまで戻ってこないので、2 は別の端末で行う。
+1. ホストゾーンを空にしてスタックを作る。スタックは検証が済むまで戻ってこないので（`cdk deploy` も同じく待つ）、2 は別の端末で行う。
+
+   **CloudFormation の YAML**:
 
    ```bash
    aws cloudformation deploy --region us-east-1 \
      --template-file cloudformation/step1-certificate.yml \
      --stack-name <prefix>-step1-certificate \
      --parameter-overrides DomainName=app.example.com
+   ```
+
+   **CDK**: 設定値ファイルの `certificate_hosted_zone_id` を空（`""`）にしてから流す。
+
+   ```bash
+   cd cdk/python && source .venv/bin/activate
+
+   # 方法 1: CDK で直接反映する
+   cdk deploy -c config=config.yml <prefix>-step1-certificate --require-approval any-change
+
+   # 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で反映する
+   mkdir -p templates
+   cdk synth -c config=config.yml <prefix>-step1-certificate > templates/<prefix>-step1-certificate.template.yml
+   aws cloudformation deploy --region us-east-1 \
+     --template-file templates/<prefix>-step1-certificate.template.yml \
+     --stack-name <prefix>-step1-certificate
    ```
 
 2. 足すレコードを取り出す。申請の直後は `ResourceRecord` がまだ空のことがある見込みで、その場合は少し待って流し直す（確かめていない）。
@@ -134,7 +186,7 @@ aws acm import-certificate --region us-east-1 \
 aws acm describe-certificate --region us-east-1 --certificate-arn <ARN> \
   --query 'Certificate.{Status:Status,Domain:DomainName,Names:SubjectAlternativeNames,Type:Type,NotAfter:NotAfter,InUseBy:InUseBy}'
 
-# 1-A の場合。スタックの出力の ARN
+# 1-A の場合。スタックの出力の ARN（CloudFormation の YAML でも CDK でも同じ）
 aws cloudformation describe-stacks --region us-east-1 --stack-name <prefix>-step1-certificate \
   --query "Stacks[0].Outputs[?OutputKey=='CertificateArn'].OutputValue" --output text
 ```
@@ -149,11 +201,11 @@ aws cloudformation describe-stacks --region us-east-1 --stack-name <prefix>-step
 | 検証用の CNAME（1-A） | `dig +short CNAME _<文字列>.app.example.com` で引ける（残しておく） |
 | スタック（1-A） | `CREATE_COMPLETE` |
 
-ARN を控える。ステップ 2（CDK）の設定値の `cloudfront_certificate_arn` に書く。
+ARN を控える。ステップ 2（CDK）の設定値の `cloudfront_certificate_arn` に書く（CDK の方法 1 なら、`cdk deploy` の最後に出る出力でもよい）。
 
 ## 元に戻す
 
-利用者への影響はない。1-A はスタックを消す（`aws cloudformation delete-stack --region us-east-1 --stack-name <prefix>-step1-certificate`）。1-B は `aws acm delete-certificate --region us-east-1 --certificate-arn <ARN>`。どちらも、CloudFront に付けた後（ステップ 2 の後）は、先に CloudFront のスタックを消さないと消せない。外部の DNS サービスに足した検証用の CNAME は、作り直す見込みがなければ消す。
+利用者への影響はない。1-A はスタックを消す（`aws cloudformation delete-stack --region us-east-1 --stack-name <prefix>-step1-certificate`。CDK で作ったスタックも同じ）。1-B は `aws acm delete-certificate --region us-east-1 --certificate-arn <ARN>`。どちらも、CloudFront に付けた後（ステップ 2 の後）は、先に CloudFront のスタックを消さないと消せない。外部の DNS サービスに足した検証用の CNAME は、作り直す見込みがなければ消す。
 
 ## 参考
 
@@ -164,5 +216,6 @@ AWS のドキュメントと照らし合わせた（2026-11-11、2026-11-12）�
 - [Requirements for using SSL/TLS certificates with CloudFront（us-east-1）](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html)
 - [Import certificates into AWS Certificate Manager（登録した証明書は自動で更新されない、CloudFront は us-east-1、再インポートで ARN を保つ）](https://docs.aws.amazon.com/acm/latest/userguide/import-certificate.html)（2026-11-12）
 - [Prerequisites for importing ACM certificates（PEM、暗号化しない秘密鍵、CloudFront の鍵の種類、CloudFormation は登録に対応しない）](https://docs.aws.amazon.com/acm/latest/userguide/import-certificate-prerequisites.html)（2026-11-12）
+- [cdk deploy](https://docs.aws.amazon.com/cdk/v2/guide/ref-cli-cmd-deploy.html)・[cdk synth（スタックを 1 つ渡すと YAML を標準出力に出す）](https://docs.aws.amazon.com/cdk/v2/guide/ref-cli-cmd-synth.html)（2026-11-13）
 - [ACME certificate automation（ACME 証明書は CloudFront に付けられない）](https://docs.aws.amazon.com/acm/latest/userguide/acm-acme.html)（2026-11-12）
 - [Supported CloudWatch metrics（ACM の DaysToExpiry）](https://docs.aws.amazon.com/acm/latest/userguide/cloudwatch-metrics.html)

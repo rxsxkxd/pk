@@ -38,6 +38,7 @@ class AlbFront(Construct):
     ) -> None:
         super().__init__(scope, construct_id)
 
+        # 既存の VPC とパブリックサブネットを ID で参照する（AWS を検索しない）
         vpc = ec2.Vpc.from_vpc_attributes(
             self,
             "Vpc",
@@ -47,6 +48,7 @@ class AlbFront(Construct):
         )
         security_group = self._define_security_group(vpc, configuration, restricted)
 
+        # 稼働サーバーのアプリは 2 つ（新しいアプリと /old_app_a）。ポートが違うので、ターゲットグループを分ける
         new_app_group = self._define_target_group("NewApp", vpc, configuration, configuration.new_app_port)
         old_app_group = self._define_target_group("OldApp", vpc, configuration, configuration.old_app_port)
 
@@ -60,6 +62,8 @@ class AlbFront(Construct):
             idle_timeout=cdk.Duration.seconds(configuration.idle_timeout_seconds),
         )
 
+        # どの規則にも当たらない要求の扱い。CloudFront だけに絞った後は、秘密のヘッダーのない要求を 403 にする。
+        # 絞る前は、ALB へ直接来た利用者のために新しいアプリへ転送する
         if restricted:
             default_action = elbv2.ListenerAction.fixed_response(
                 403, content_type="text/plain", message_body="Access denied"
@@ -74,17 +78,20 @@ class AlbFront(Construct):
             ssl_policy=elbv2.SslPolicy.RECOMMENDED_TLS,
             certificates=[elbv2.ListenerCertificate.from_arn(configuration.alb_certificate_arn)],
             default_action=default_action,
+            # open=False: CDK にセキュリティグループの規則を自動で足させない（_define_security_group で書く）
             open=False,
         )
         self.load_balancer.add_listener(
             "Http",
             port=80,
             protocol=elbv2.ApplicationProtocol.HTTP,
+            # 80 番は https へリダイレクトするだけ
             default_action=elbv2.ListenerAction.redirect(protocol="HTTPS", port="443", permanent=True),
             open=False,
         )
 
         old_app_path = elbv2.ListenerCondition.path_patterns([configuration.old_app_path_pattern])
+        # CloudFront を前に置かない構成（alb-to-ec2）: パスだけで /old_app_a のアプリへ振り分ける
         if origin_verify is None:
             https_listener.add_action(
                 "OldApp",
@@ -94,6 +101,7 @@ class AlbFront(Construct):
             )
             return
 
+        # CloudFront を前に置く構成: 秘密のヘッダーが正しい要求だけを、パスで振り分けてアプリへ転送する
         header = elbv2.ListenerCondition.http_header(origin_verify.name, [origin_verify.value])
         https_listener.add_action(
             "CloudFrontOldApp",
@@ -122,6 +130,8 @@ class AlbFront(Construct):
         configuration: Configuration,
         restricted: bool,
     ) -> ec2.SecurityGroup:
+        """ALB のセキュリティグループを作り、稼働サーバーの既存のグループに ALB からの許可を足す。"""
+        # 外向きは下で稼働サーバーへの 2 つのポートだけを書くので、既定の全許可は付けない
         security_group = ec2.SecurityGroup(
             self,
             "SecurityGroup",
@@ -129,6 +139,7 @@ class AlbFront(Construct):
             description="ALB in front of the instance",
             allow_all_outbound=False,
         )
+        # 受ける範囲。CloudFront だけに絞った後は、CloudFront のオリジン向けのアドレスから 443 番だけ
         if restricted:
             security_group.add_ingress_rule(
                 ec2.Peer.prefix_list(configuration.cloudfront_prefix_list_id),
@@ -139,6 +150,8 @@ class AlbFront(Construct):
             security_group.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(80), "HTTP from anywhere")
             security_group.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(443), "HTTPS from anywhere")
 
+        # 稼働サーバーの既存のグループに、ALB から 2 つのポートへの許可を足す。mutable=True で、このスタックが
+        # 規則（AWS::EC2::SecurityGroupIngress）を作る。スタックを消すと、足した許可も消える
         instance_security_group = ec2.SecurityGroup.from_security_group_id(
             self,
             "InstanceSecurityGroup",
@@ -171,6 +184,7 @@ class AlbFront(Construct):
         configuration: Configuration,
         port: int,
     ) -> elbv2.ApplicationTargetGroup:
+        """稼働サーバーの 1 つのポートを、HTTP で転送する先にする。ヘルスチェックは 200 だけを正常とする。"""
         return elbv2.ApplicationTargetGroup(
             self,
             construct_id,

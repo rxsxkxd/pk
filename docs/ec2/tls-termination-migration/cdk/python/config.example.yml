@@ -16,13 +16,14 @@ domain_name: app.example.com
 origin_domain_name: origin.app.example.com
 
 # ---- ステップ 1: ACM の証明書 ----
-# 手順ではステップ 1 を CloudFormation の YAML（cloudformation/step1-certificate.yml）で行うので、
-# CDK の <prefix>-step1-certificate は使わない。その場合はこの値も空のままでよい。
-# （使う場合）domain_name の Route 53 のホストゾーン。指定すると ACM の検証用のレコードを自動で作る
+# ステップ 1 は CloudFormation の YAML（cloudformation/step1-certificate.yml）か、この CDK の
+# <prefix>-step1-certificate のどちらかで行う。YAML で行うなら、この値は空のままでよい。
+# （CDK で行う場合）domain_name の Route 53 のホストゾーン。指定すると ACM の検証用のレコードを自動で作る。
+# 空なら、ACM が示す検証用の CNAME を手で足すまでスタックの作成が待つ（外部の DNS サービス）
 certificate_hosted_zone_id: ""
 
 # ---- ステップ 2: WAF と CloudFront ----
-# ステップ 1（CloudFormation の step1-certificate.yml）の出力 CertificateArn（または登録した証明書の ARN）。us-east-1 の ACM の証明書で、
+# ステップ 1（step1-certificate.yml か <prefix>-step1-certificate）の出力 CertificateArn（または登録した証明書の ARN）。us-east-1 の ACM の証明書で、
 # ACM のコンソールの「証明書」に出るもの（「ACME 証明書」は CloudFront に付けられない）。
 # 空の間は、<prefix>-step2-cloudfront を合成しない
 cloudfront_certificate_arn: ""
@@ -35,13 +36,10 @@ origin_elastic_ip: ""
 # <prefix>-step2-waf で許可する国。
 # /.well-known/acme-challenge/ だけはどの国からも通す（EC2 の Let's Encrypt の HTTP-01 の更新のため）
 waf_allowed_countries: [JP]
-# 許可する国の外から通す IP（CIDR。例: 192.0.2.44/32）。マネージドルールは通る
+# 許可する国の外から通す IP（CIDR。例: 192.0.2.44/32）
 waf_exception_ipv4_addresses: []
 waf_exception_ipv6_addresses: []
-# count: マネージドルールは記録だけ。ログで誤検知がないことを確かめてから block にする
-waf_managed_rules_mode: count
-# us-east-1 の CloudWatch Logs（aws-waf-logs-<prefix>-step2-waf）に残す日数
-waf_log_retention_days: 30
+# AWS のマネージドルールとログは、既定の WAF には入れていない（入れ方は ../../options/waf-managed-rules.md）
 # CloudFront の地理的制限で許可する国。既定は空（制限しない）。国の絞り込みは上の WAF で行う。
 # 地理的制限で止めた要求は WAF に届かないので、ここに書くと HTTP-01 の更新が止まる
 geo_restriction_countries: []

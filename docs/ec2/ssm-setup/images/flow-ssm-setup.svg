@@ -33,7 +33,7 @@
   <text class="t" x="470.0" y="174.5" text-anchor="middle">1. rb/ssm_role.rb（AWS の操作）</text>
   <text class="s" x="470.0" y="193.5" text-anchor="middle">IAM ロールが未設定の台にインスタンスプロファイルを関連付ける</text>
   <rect class="box check" x="260" y="240" width="420" height="58"/>
-  <text class="t" x="470.0" y="264.5" text-anchor="middle">2. rb/ssm_check.rb → connect/ssm-connect-check.sh</text>
+  <text class="t" x="470.0" y="264.5" text-anchor="middle">2. rb/ssm_check.rb → ssm-connect-check.sh</text>
   <text class="s" x="470.0" y="283.5" text-anchor="middle">SSM 有効なら、作業者の PC と踏み台サーバーから echo</text>
   <rect class="box command" x="260" y="350" width="420" height="58"/>
   <text class="t" x="470.0" y="374.5" text-anchor="middle">3. rb/backup.rb（ng.txt の台だけ）</text>
@@ -42,8 +42,8 @@
   <text class="t" x="470.0" y="464.5" text-anchor="middle">rb/backup_check.rb</text>
   <text class="s" x="470.0" y="483.5" text-anchor="middle">作成済み（available）で 12 時間以内か</text>
   <rect class="box command" x="260" y="540" width="420" height="58"/>
-  <text class="t" x="470.0" y="564.5" text-anchor="middle">4. instance/agent-check.sh → agent-install.sh</text>
-  <text class="s" x="470.0" y="583.5" text-anchor="middle">backup-ok.txt の台だけ。届けて流すのは別の枠組み</text>
+  <text class="t" x="470.0" y="564.5" text-anchor="middle">4. agent-check.sh → agent-install.sh</text>
+  <text class="s" x="470.0" y="583.5" text-anchor="middle">command/instance/。backup-ok.txt の台だけ。届け方は範囲外</text>
   <rect class="box check" x="260" y="640" width="420" height="58"/>
   <text class="t" x="470.0" y="664.5" text-anchor="middle">5. 2 をもう一度（backup-ok.txt の台）</text>
   <text class="s" x="470.0" y="683.5" text-anchor="middle">入れる・入れない に分ける</text>

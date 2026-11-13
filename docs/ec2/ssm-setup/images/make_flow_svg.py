@@ -88,12 +88,12 @@ def flow():
     s.box(X, rows["prep"], W, H, ["0. 準備"], "done", ["一覧・インスタンスプロファイル・踏み台サーバーのロール"])
     s.box(X, rows["role"], W, H, ["1. rb/ssm_role.rb（AWS の操作）"], "command",
           ["IAM ロールが未設定の台にインスタンスプロファイルを関連付ける"])
-    s.box(X, rows["ssmcheck"], W, H, ["2. rb/ssm_check.rb → connect/ssm-connect-check.sh"], "check",
+    s.box(X, rows["ssmcheck"], W, H, ["2. rb/ssm_check.rb → ssm-connect-check.sh"], "check",
           ["SSM 有効なら、作業者の PC と踏み台サーバーから echo"])
     s.box(X, rows["backup"], W, H, ["3. rb/backup.rb（ng.txt の台だけ）"], "command", ["AMI を作る（再起動しない・完了は待たない）"])
     s.box(X, rows["check"], W, H, ["rb/backup_check.rb"], "check", ["作成済み（available）で 12 時間以内か"])
-    s.box(X, rows["agent"], W, H, ["4. instance/agent-check.sh → agent-install.sh"], "command",
-          ["backup-ok.txt の台だけ。届けて流すのは別の枠組み"])
+    s.box(X, rows["agent"], W, H, ["4. agent-check.sh → agent-install.sh"], "command",
+          ["command/instance/。backup-ok.txt の台だけ。届け方は範囲外"])
     s.box(X, rows["recheck"], W, H, ["5. 2 をもう一度（backup-ok.txt の台）"], "check", ["入れる・入れない に分ける"])
     s.box(X, rows["manual"], W, H, ["手で直す"], "manual", ["理由と「見るところ」を見て直し、2 で確かめる"])
     order = ["prep", "role", "ssmcheck", "backup", "check", "agent", "recheck", "manual"]

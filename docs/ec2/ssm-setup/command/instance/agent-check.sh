@@ -1,7 +1,7 @@
 #!/bin/bash
 # SSM Agent の状態を見る（インスタンスの中の操作。読み取りだけ）。
 # 稼働サーバーの上で bash で動く（root でなければ、root が要るところだけ sudo -n）。AWS の API は呼ばない。
-# 稼働サーバーへの届け方（SSH など）は ssm-setup の範囲外。例: ssh centos@<稼働サーバー> 'bash' < instance/agent-check.sh
+# 稼働サーバーへの届け方（SSH など）は ssm-setup の範囲外。例: ssh centos@<稼働サーバー> 'bash' < command/instance/agent-check.sh
 # 結果は人が読む形で出す。最後の「見立て」に、次に行うことを出す。
 set -u
 SUDO=""

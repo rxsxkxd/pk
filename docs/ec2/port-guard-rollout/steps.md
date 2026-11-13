@@ -21,7 +21,7 @@
 | 1. SSM の有効化 | [`ssm-setup/`](../ssm-setup/README.md) | IAM ロール（インスタンスプロファイル）の関連付け、SSM Agent の導入、SSM で入れるかの確認 | AWS の API と SSM（SSM Agent の導入のスクリプトを届けて流すのは、ssm-setup の範囲外の別の枠組み） |
 | **2. 国内だけに絞る設定の導入（この手順）** | `port-guard-rollout/` | iptables ＋ ipset の導入と、遮断の有効化 | SSM（`--via ssm`）。SSH も使える |
 
-このフェーズは、フェーズ 1 の接続の確認（`connect/ssm-connect-check.sh`）で「入れる」になった台（`--ok-out` で書き出した `ok.txt` と `ok2.txt`）を対象にする。**バックアップはフェーズごとに取る**（AMI のタグ `Purpose` で分けている。このフェーズは `port-guard-rollout-backup`）。フェーズ 1 のバックアップは、このフェーズの確認には使わない。
+このフェーズは、フェーズ 1 の接続の確認（`command/connect/ssm-connect-check.sh`）で「入れる」になった台（`--ok-out` で書き出した `ok.txt` と `ok2.txt`）を対象にする。**バックアップはフェーズごとに取る**（AMI のタグ `Purpose` で分けている。このフェーズは `port-guard-rollout-backup`）。フェーズ 1 のバックアップは、このフェーズの確認には使わない。
 
 ## 流れ
 
@@ -105,7 +105,7 @@ python3 -m port_guard_rollout_backup check --backup-label 2026-10 < instance-ids
 | `--via` | 内容 |
 |---|---|
 | `ssh`（既定） | 作業者の PC の `ssh` を呼び、インスタンスの中で `sudo -n bash -s` で実行する。`--ssh-user`（既定 `centos`）、`--ssh-key`、`--ssh-option`（`ssh -o` に渡す値）。踏み台などは作業者の SSH の設定に書いておけばそのまま使える。初めての接続先のホストの鍵は自動で登録する |
-| `ssm` | AWS CLI の `aws ssm send-command`（`AWS-RunShellScript`）で送り、`get-command-invocation` で結果を待つ（root で実行される）。SSM に登録されて `Online` のインスタンスだけが対象（フェーズ 1 の `connect/ssm-connect-check.sh` の `run-command` と同じ経路）。処理は base64 にして 1 行のコマンドとして送る |
+| `ssm` | AWS CLI の `aws ssm send-command`（`AWS-RunShellScript`）で送り、`get-command-invocation` で結果を待つ（root で実行される）。SSM に登録されて `Online` のインスタンスだけが対象（フェーズ 1 の `command/connect/ssm-connect-check.sh` の `run-command` と同じ経路）。処理は base64 にして 1 行のコマンドとして送る |
 
 ### 終了コード
 
@@ -125,7 +125,7 @@ python3 -m port_guard_rollout_backup check --backup-label 2026-10 < instance-ids
 
 | # | 作業 | 内容 |
 |---|---|---|
-| 0-1 | 対象の一覧 | インスタンスの ID の一覧（`--via ssh` なら SSH の接続先も）を作る。フェーズ 1 の `connect/ssm-connect-check.sh --ok-out` で書き出した「入れる」台の一覧（`ok.txt` と `ok2.txt`）をそのまま使える |
+| 0-1 | 対象の一覧 | インスタンスの ID の一覧（`--via ssh` なら SSH の接続先も）を作る。フェーズ 1 の `command/connect/ssm-connect-check.sh --ok-out` で書き出した「入れる」台の一覧（`ok.txt` と `ok2.txt`）をそのまま使える |
 | 0-2 | 許可する IP の一覧 | 日本以外から 80・443 番に通す必要がある相手（海外の拠点、保守の委託先、外形監視、決済などの外部サービスの通知の送り元）。1 行 1 件、CIDR 可、`#` から後はコメント |
 | 0-3 | バックアップ作業のタイミング | `--backup-label` に使う値を決める（例 `2026-10`、`2026-10-29`） |
 | 0-4 | 作業者の道具と権限 | Python 3、AWS CLI、上の権限（`--via ssh` なら `ssh` と SSH の鍵） |

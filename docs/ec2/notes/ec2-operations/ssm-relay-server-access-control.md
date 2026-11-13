@@ -21,7 +21,7 @@
 - **中継サーバーからだけに絞ることは可能**。ただし、`aws:SourceVpce` だけでは「その VPC エンドポイントを通った」ことしか分からず、**同じ VPC のほかのサーバーと区別できない**。IAM のロールと、中継サーバーのプライベート IP の条件を組み合わせる。
 - **特定のユーザーだけが中継サーバー経由で入る形も可能**。ただし、提示の 3 層だけでは足りない。中継サーバーから AWS を呼ぶときに AWS が見るのは**中継サーバーのロール**で、誰が操作したかは見えない。特定のユーザーに絞る場所は、「誰が中継サーバーに入れるか」になる。
 - **Deny は `ssm:*` にしない**。稼働サーバーの SSM Agent も `ssm:` の操作を呼ぶので、`ssm:SendCommand` と `ssm:StartSession` に絞る。
-- **今の道具と作業の流れに影響する**（[影響を受けるもの](#影響を受けるもの)）。作業者の PC からの接続の確認（ssm-setup の `connect/ssm-connect-check.sh`）や port-guard の `--via ssm`、コンソールからの操作は止まる。
+- **今の道具と作業の流れに影響する**（[影響を受けるもの](#影響を受けるもの)）。作業者の PC からの接続の確認（ssm-setup の `command/connect/ssm-connect-check.sh`）や port-guard の `--via ssm`、コンソールからの操作は止まる。
 
 ## 提示の 3 層の確認
 
@@ -171,8 +171,8 @@ flowchart TD
 | 項目 | 内容 |
 |---|---|
 | `aws:VpcSourceIp` | VPC エンドポイントを通った要求の送り元のプライベート IP。`aws:SourceVpce` などと必ず組み合わせる。**これで同じ VPC のほかのサーバーと区別できる**。中継サーバーを作り直して IP が変わったら直す |
-| `ReadCommandResults` | `connect/ssm-connect-check.sh`・port-guard が使う結果の確認 |
-| `AWS-StartNonInteractiveCommand` | `connect/ssm-connect-check.sh` の `session` の確かめ方が使う |
+| `ReadCommandResults` | `command/connect/ssm-connect-check.sh`・port-guard が使う結果の確認 |
+| `AWS-StartNonInteractiveCommand` | `command/connect/ssm-connect-check.sh` の `session` の確かめ方が使う |
 
 `iam:PassRole` で `ssm-relay` をほかのインスタンスに付けられる人がいないことも確かめる。
 
@@ -356,7 +356,7 @@ Deny を入れる前に、次を確かめる。
 
 | 影響を受けるもの | 影響 | 対応 |
 |---|---|---|
-| `ssm-setup` の `connect/ssm-connect-check.sh`（作業者の PC） | 止まる | 中継サーバー（踏み台サーバーと兼ねるなら、そこ）から動かす |
+| `ssm-setup` の `command/connect/ssm-connect-check.sh`（作業者の PC） | 止まる | 中継サーバー（踏み台サーバーと兼ねるなら、そこ）から動かす |
 | `port-guard-rollout`・`al2-update` の Run Command（作業者の PC） | 止まる | 中継サーバーから動かす |
 | AWS のコンソールの Run Command・Session Manager | 止まる（中継サーバーへのセッションを除く） | 中継サーバーを使う |
 | AMI 公開パイプラインのヘルスチェック（CodeBuild の `ssm:SendCommand`） | **止まる** | 上の Deny の例外に CodeBuild のロールを入れる |

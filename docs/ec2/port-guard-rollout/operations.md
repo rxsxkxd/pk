@@ -38,7 +38,7 @@
 この文書のコマンドは、作業者の PC から次の形でまとめて流せる。結果はインスタンスごとに見る。
 
 ```bash
-ids="i-0123456789abcdef0 i-0fedcba9876543210"   # 対象（フェーズ 1 の connect/ssm-connect-check.sh で入れた台）
+ids="i-0123456789abcdef0 i-0fedcba9876543210"   # 対象（フェーズ 1 の command/connect/ssm-connect-check.sh で入れた台）
 
 command_id=$(aws ssm send-command --document-name AWS-RunShellScript --instance-ids $ids \
   --comment "port-guard status" \

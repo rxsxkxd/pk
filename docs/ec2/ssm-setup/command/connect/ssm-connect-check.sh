@@ -1,7 +1,7 @@
 #!/bin/bash
 # SSM で実際に入れるかを、害のないコマンド（echo）を 1 回だけ流して確かめる（接続の確認。設定は変えない）。
 #
-#   bash connect/ssm-connect-check.sh [--via session|run-command] [--timeout 60] [--ok-out ok.txt] [--ng-out connect-ng.txt] < enabled.txt
+#   bash command/connect/ssm-connect-check.sh [--via session|run-command] [--timeout 60] [--ok-out ok.txt] [--ng-out connect-ng.txt] < enabled.txt
 #
 # 作業者の PC と踏み台サーバーで、同じスクリプトを同じ形で流す（作業者の PC から入れても、踏み台サーバーから入れるとは限らない）。
 # 事前の確認はしない。rb/ssm_check.rb の --ok-out（SSM 有効の台）を渡す想定。

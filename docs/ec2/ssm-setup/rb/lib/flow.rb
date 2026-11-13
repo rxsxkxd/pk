@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
-require_relative 'lib'
+require_relative 'aws_cli'
+require_relative 'cli'
 
-# AWS の上の設定を変えるコマンド（ssm_role.rb・backup.rb）の共通の流れ:
+# AWS の上の設定を変えるコマンドの共通の流れ（汎用の部品。Infrastructure 層）:
 # 確かめて分けて表示する → 試行するかを確かめる → 1 台ずつ行う → 結果 → 後の確認（finish）。
 # 各コマンドは「確かめる（Plan を作る）」と「行う（execute のブロック）」だけを書く。
 # 終了コード: 0 = すべて済んだ・何もしなくてよい、1 = 失敗・対象外・後の確認の問題あり、2 = 入力・確認・前提の問題。
-# 設定を変えない ssm_check.rb・backup_check.rb は使わない。
+# 確かめるだけのコマンドは使わない。
 module Flow
   # 行う台。label は表示の 1 行目、value はコマンドの側の記録
   Item = Struct.new(:id, :label, :value)
@@ -40,12 +41,12 @@ module Flow
   # 確かめる（ブロックで Plan を作る）。AWS CLI が失敗したら、表示して終了コード 2 で止める（何も変えていない）
   def plan
     yield
-  rescue Tools::AwsError => e
+  rescue AwsCli::Error => e
     puts "止めた: #{e.message.strip}"
     exit 2
   end
 
-  # 表示 → 確認 → 1 台ずつ行う（ブロックは済んだときの説明を返す。AwsError で失敗）→ 結果。終了コードを返す
+  # 表示 → 確認 → 1 台ずつ行う（ブロックは済んだときの説明を返す。AwsCli::Error で失敗）→ 結果。終了コードを返す
   def execute(plan, heading:, check_only: false, assume_yes: false, &apply)
     show(plan)
     return 0 if check_only
@@ -77,7 +78,7 @@ module Flow
   def ask_go(plan, assume_yes)
     return nil if assume_yes
 
-    answer = Tools.ask("\n上の #{plan.todo.size} 台に、#{plan.question}")
+    answer = Cli.ask("\n上の #{plan.todo.size} 台に、#{plan.question}")
     return nil if answer
 
     puts answer.nil? ? '確認のための端末がない。確かめずに進めるなら --yes を付ける' : '中止した'
@@ -96,7 +97,7 @@ module Flow
     detail = yield
     puts detail ? "      #{plan.done_word}: #{detail}" : "      #{plan.done_word}"
     true
-  rescue Tools::AwsError => e
+  rescue AwsCli::Error => e
     puts "      失敗: #{e.summary}"
     false
   end

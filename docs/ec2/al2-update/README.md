@@ -4,7 +4,7 @@
 
 ## 役割
 
-今の環境（Amazon Linux 2・Apache（httpd 2.4）・Passenger・Rails 4.2・Ruby 2.7.7（rbenv。OpenSSL 1.0.2k にリンク））の運用中のインスタンスで、**OS のパッケージの更新（yum の更新）を、複数台まとめて、1 台ずつ**行う。作業者の PC で動き、AWS CLI のコマンドと SSM の Run Command で各インスタンスを操作する（SSH の経路は作らない）。インスタンスには、暫定対応のフェーズ 1（[ssm-setup](../ssm-setup/README.md)）で SSM で入れるようにしておく（`connect/ssm-connect-check.sh` の `--ok-out` の一覧を、この道具の標準入力に渡せる）。
+今の環境（Amazon Linux 2・Apache（httpd 2.4）・Passenger・Rails 4.2・Ruby 2.7.7（rbenv。OpenSSL 1.0.2k にリンク））の運用中のインスタンスで、**OS のパッケージの更新（yum の更新）を、複数台まとめて、1 台ずつ**行う。作業者の PC で動き、AWS CLI のコマンドと SSM の Run Command で各インスタンスを操作する（SSH の経路は作らない）。インスタンスには、暫定対応のフェーズ 1（[ssm-setup](../ssm-setup/README.md)）で SSM で入れるようにしておく（`command/connect/ssm-connect-check.sh` の `--ok-out` の一覧を、この道具の標準入力に渡せる）。
 
 暫定対応の 2 つのフェーズ（ssm-setup・[port-guard-rollout](../port-guard-rollout/README.md)）とは別の作業で、別のフォルダ・別の道具・別のバックアップ（AMI のタグ `Purpose=al2-update-backup`）に分けている。AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../initial-image-build/existing-system-rebuild-on-al2023.md)）とも別。
 
@@ -86,7 +86,7 @@ cd rb && bundle install && bundle exec rubocop
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "16px"}, "flowchart": {"nodeSpacing": 30, "rankSpacing": 40}}}%%
 flowchart TD
-    Ssm["ssm-setup の connect/ssm-connect-check.sh<br>（SSM で実際に入れた台の一覧 ok.txt）"] --> Check["1. 更新の確認（rb/check.rb。読み取りだけ）<br>更新する・除くパッケージ、注意が要るもの、今の状態"]
+    Ssm["ssm-setup の command/connect/ssm-connect-check.sh<br>（SSM で実際に入れた台の一覧 ok.txt）"] --> Check["1. 更新の確認（rb/check.rb。読み取りだけ）<br>更新する・除くパッケージ、注意が要るもの、今の状態"]
     Check --> Decide{"Apache・openssl・カーネルを<br>含めるか、ほかに除くものは"}
     Decide -->|指定を決める| Backup["2. バックアップ（rb/backup.rb）<br>AMI を作る（再起動しない。完了は待たない）"]
     Backup --> BackupCheck["rb/backup_check.rb<br>作成が終わったか（available、12 時間以内）"]

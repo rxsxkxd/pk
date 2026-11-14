@@ -9,6 +9,15 @@
 - 旧サービスには移行が難しい既存バッチやDBがあるため、旧App・既存バッチ・DBを残す。ECS移行の完了条件に旧環境の廃止やDB移行を含めない。
 - 将来は、必要な内部連携を維持したまま旧環境をインターネットから分離する。
 
+追加で確定したサービスの分担は次のとおり。
+
+- **Rails Web AppはDBへ直接接続しない**。PythonおよびGo BackgroundをClean ArchitectureのInfrastructure層の実装として利用する。DB間の結合はPythonのSQLAlchemyを主経路とし、重い処理はGo Backgroundへ委譲する。
+- **Go API・Go Background・PythonはすべてDB 1 / DB 2の両方へアクセスする**。Go APIは直接DB参照とPython経由を使い分け、性能重視のDB間結合はGo API・Go BackgroundでもORMを使わずSQL直書きで実行する。
+- **DB 1 / DB 2は同一MySQLインスタンス内の別データベース**。ローカルは各テナント1コンテナ内に`db1`・`db2`を作り、PythonはSQLAlchemyのスキーマ指定とJOIN機能を使う。
+- 元図のGo（Worker / Batch）は、以降 **Go Background** と呼ぶ。Railsで重い処理や、RailsからPythonを経由しても重い処理の実行先であり、Infrastructure層の役割も一部担う。旧バッチの置き換えを意味しない。
+
+ローカル実装はまず**2テナント分**を対象とする。[Docker構成・起動手順](./docker/README.md)と[追加取得物・検証結果](./docker/dependency-report.md)を参照。
+
 本書は[元の構成図（a.svg）](./a.svg)と上記の移行方針を整理したものであり、稼働環境の設定を調査した結果ではない。構成図は旧環境と移行先の関係を示すものとして扱い、各サービスの移行済み・未移行は断定しない。以降の「分離後の構成」「移行手順」は、この方針に基づく整理案である。
 
 ## 2. 元の構成図
@@ -35,13 +44,13 @@
 | 旧環境 | 既存バッチ | ユーザー指定の残置対象。元図では独立した箱として描かれていない | 実行場所・起動方式・依存関係を確認したうえで継続運用する |
 | 旧環境 | DB 1 / DB 2 | 旧AppとECSサービス群から利用するテナント別DB | 当面は移行せず利用を継続する |
 | 移行先 | ECS（共通1セット） | 複数テナントで共通利用するサービス群 | テナントごとにサービス群を複製せず、接続先などを動的に切り替える構成 |
-| 移行先 | Go（API） | API、ルーティング、テナント切替制御。Go Worker / BatchおよびPythonと連携する | 公開APIなどの移行先 |
-| 移行先 | Rails（Web App） | 公開Webアプリ。Go Worker / BatchおよびPythonと連携する | Web機能の移行先。左側の旧Railsとは別の構成要素 |
-| 移行先 | Go（Worker / Batch） | ワーカー・バッチ処理。テナントDBとBI用DBへアクセスする | ECS側で実行する処理を担う。既存バッチの全移行を意味しない |
-| 移行先 | Python | Go API・Railsから連携され、テナントDBとBI用DBへアクセスする | 業務処理の詳細は未確認 |
+| 移行先 | Go（API） | API、テナント切替、DB 1 / DB 2の直接参照・SQL直書きJOINとPython経由の参照。Go Backgroundとも連携する | 公開APIなどの移行先 |
+| 移行先 | Rails（Web App） | 公開Webアプリ。DB参照をPythonへ委譲し、重い処理をGo Backgroundへ委譲する | Web機能の移行先。DBへ直接接続しない |
+| 移行先 | Go Background（元図：Worker / Batch） | 重い処理の実行先。DB 1 / DB 2の両方を参照し、性能重視のDB間結合はSQL直書きで行う。BI用DBにもアクセスする | Infrastructure層の役割も一部担う。既存バッチの全移行を意味しない |
+| 移行先 | Python | Rails向けInfrastructure層。SQLAlchemyでDB 1 / DB 2間をJOINする主経路。Go APIからの委譲も受ける | 重い処理はGo Backgroundへ委譲できる |
 | システム外 | BI用データベース群 | 旧App、Go Worker / Batch、Pythonからアクセスされる | 分離後も必要な接続を維持できるか確認する |
 
-「共通1セット」はサービス群の共用を意味し、タスク数やインスタンス数が1であることを意味しない。また、DBが旧環境の枠内に描かれていても、Appと同一EC2上で稼働しているか、別ホストかは確定できない。DB 1 / DB 2の用途や相互関係も未確認である。
+「共通1セット」はサービス群の共用を意味し、タスク数やインスタンス数が1であることを意味しない。DB 1 / DB 2は同一MySQLインスタンス内の別DBである。Appとの本番ホストの共有有無や、それぞれのDBの業務上の用途は未確認である。
 
 ## 4. リクエストとデータアクセス
 
@@ -68,18 +77,21 @@
 
 キューやスケジューラーは描かれていないため、起動方式やジョブの受け渡し方式は未確定とする。
 
+上表のGo Worker / Batchは、追加方針ではGo Backgroundに対応する。PythonからGo Backgroundへの委譲も定義する。DB間の結合はPythonのSQLAlchemyを主経路とし、性能が必要な場合はGo API・Go BackgroundがSQL直書きで行う。いずれも同一MySQLインスタンス内でDB名を修飾したSQL JOINを実行できる。
+
 ### 4.3 テナント別DBへのアクセス
 
-旧Appは自身のテナントに対応するDB 1 / DB 2へアクセスする。共通ECS側では対象テナントに応じて接続先を切り替える。図に描かれた個別の矢印は以下のとおり。
+旧Appは自身のテナントに対応するDB 1 / DB 2へアクセスする。共通ECS側では対象テナントのMySQL接続先を切り替える。最新のアクセス方針は以下のとおり。
 
-| 接続元 | 図に描かれた接続先 |
+| 接続元 | アクセス対象・結合方式 |
 | --- | --- |
 | 旧App | DB 1、DB 2 |
-| Go API | 対象テナントのDB 1 |
-| Go Worker / Batch | 対象テナントのDB 2 |
-| Python | 対象テナントのDB 2 |
+| Go API | 対象テナントのDB 1 / DB 2。性能重視の結合はSQL直書き。Python経由も利用 |
+| Go Background（元図：Worker / Batch） | 対象テナントのDB 1 / DB 2。結合はSQL直書き |
+| Python | 対象テナントのDB 1 / DB 2。SQLAlchemyのモデルにDB名を指定し、ORMのJOIN機能を利用 |
+| Rails Web App | 直接DB接続なし。Python・Go BackgroundをInfrastructure層の実装として利用 |
 
-この表は図の接続を列挙したものであり、実際のアクセス権限や接続先の全一覧を確定するものではない。ECS上のRailsからDBへの直接接続は図に描かれていない。
+元図の緑線はGo APIからDB 1、Go Worker / Batch・PythonからDB 2へ描かれているが、アクセス先を片方に限定するものとしては扱わない。DB 1 / DB 2は同一インスタンス内の別DBであり、3サービスすべてが両方を利用する。
 
 共通サービスから既存DBを利用するため、移行時にはテナントの判定方法、テナントとDB接続先の対応、サービス別の更新対象を明確にする必要がある。旧App・既存バッチとECS側が同じデータを更新する場合は、処理の重複や競合、スキーマ変更による相互影響も確認する。
 
@@ -99,26 +111,32 @@ flowchart TB
     subgraph ECS[移行先：共通ECSサービス群]
         API[Go API]
         Web[Rails Web App]
-        Worker[Go Worker / Batch]
-        Python[Python]
+        Worker[Go Background：重い処理／Infrastructureの一部]
+        Python[Python：Infrastructure／DBアクセス・データ結合]
         API --> Worker
         API --> Python
         Web --> Worker
         Web --> Python
+        Python --> Worker
     end
     CF --> API
     CF --> Web
     subgraph Legacy[残置する旧環境：5テナント／公開経路を閉鎖]
         App[旧App]
         Batch[既存バッチ：実行基盤は要確認]
-        DB1[テナント別 DB 1]
-        DB2[テナント別 DB 2]
+        subgraph MySQL[テナント別MySQL：DB 1 / DB 2は同一インスタンス]
+            DB1[DB 1]
+            DB2[DB 2]
+        end
         App --> DB1
         App --> DB2
     end
     API -. テナント切替・内部接続 .-> DB1
+    API -. テナント切替・内部接続 .-> DB2
+    Worker -. テナント切替・内部接続 .-> DB1
     Worker -. テナント切替・内部接続 .-> DB2
     Python -. テナント切替・内部接続 .-> DB2
+    Python -. テナント切替・内部接続 .-> DB1
     BI[システム外：BI用データベース群]
     App -->|分離後の接続方式を確認| BI
     Worker --> BI

@@ -4,6 +4,10 @@
 
 対象：[システム構成と段階的なECS移行方針](./README.md)、[元の構成図](./a.svg)
 
+> 本書は構築前の調査記録。後続の構築内容・起動手順は[Docker構成](./docker/README.md)、追加取得物と実測結果は[依存関係・検証報告](./docker/dependency-report.md)を参照。ローカル実装は2テナント分とし、Go Worker / BatchはGo Backgroundと呼ぶ。RailsはDBへ直接接続せず、PythonとGo BackgroundをInfrastructure層の実装として利用する。Go APIは直接DB参照とPython経由を使い分ける。Go BackgroundはRailsやPythonで重い処理を担い、Infrastructure層の役割も一部担う。
+
+> 最新方針：DB 1 / DB 2は、各テナントの同一MySQLインスタンス内の別DB。Go API・Go Background・Pythonはいずれも両方にアクセスする。結合の主経路はPythonのSQLAlchemyによるORM JOINとし、性能重視の経路はGoのSQL直書きJOINを使う。以下の初回調査時点の別コンテナ案は、現行実装ではテナントごとにMySQL 1台へ統合している。
+
 ## 1. 判定
 
 **取得済みイメージを使い、旧App・テナント別DB・共通サービスの接続と、旧環境の公開経路を閉じる動作をローカルで検証できる見込みがある。ただし、現在のコンテナを起動するだけでは構成図全体を再現できない。**

@@ -1,7 +1,8 @@
 #!/bin/bash
 # SSM で実際に入れるかを、害のないコマンド（echo）を 1 回だけ流して確かめる（接続の確認。設定は変えない）。
 #
-#   bash command/connect/ssm-connect-check.sh [--via session|run-command] [--timeout 60] [--ok-out ok.txt] [--ng-out connect-ng.txt] < enabled.txt
+#   bash command/connect/ssm-connect-check.sh [--via session|run-command] [--timeout 60] [--ok-out ok.txt] [--ng-out connect-ng.txt]
+#                                             [--profile NAME] [--region REGION] < enabled.txt
 #
 # 作業者の PC と踏み台サーバーで、同じスクリプトを同じ形で流す（作業者の PC から入れても、踏み台サーバーから入れるとは限らない）。
 # 事前の確認はしない。rb/ssm_check.rb の --ok-out（SSM 有効の台）を渡す想定。
@@ -11,7 +12,8 @@
 # 確かめた経路のすべてで入れた台を --ok-out に、どれかで入れなかった台を、理由と一緒に --ng-out に書き出す
 # （--ng-out の行は # で消していないので、直した後にそのまま渡し直せる）。セッションやコマンドの履歴は AWS の側に残る。
 # 依るもの: bash（macOS の 3.2 でも動く書き方）、AWS CLI（v2）、session-manager-plugin（session のとき）。jq などは使わない。
-# 認証情報・リージョンは、AWS CLI の設定（AWS_PROFILE・AWS_REGION、踏み台サーバーではインスタンスプロファイル）をそのまま使う。
+# --profile・--region を付けると、すべての aws の呼び出しに付ける。付けなければ、AWS CLI の設定
+# （AWS_PROFILE・AWS_REGION など。踏み台サーバーではインスタンスプロファイル）をそのまま使う。
 # 終了コード: 0 = すべての台に入れる、1 = 入れない台がある、2 = 入力・道具の問題。
 set -u
 export AWS_PAGER=""
@@ -20,6 +22,8 @@ vias="session run-command"
 timeout=60
 ok_out=""
 ng_out=""
+profile=""
+region=""
 hint="ssmmessages・ec2messages への送信の 443 番、この場所の認証情報と権限（ssm:StartSession・ssm:SendCommand）、SSM Agent の版を見る"
 
 usage() { echo "$1" >&2; exit 2; }
@@ -30,7 +34,9 @@ while [ $# -gt 0 ]; do
     --timeout) case "${2:-}" in ''|*[!0-9]*) usage "--timeout は秒の数" ;; *) timeout="$2" ;; esac; shift 2 ;;
     --ok-out) ok_out="${2:?--ok-out にファイルの名前が要る}"; shift 2 ;;
     --ng-out) ng_out="${2:?--ng-out にファイルの名前が要る}"; shift 2 ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    --profile) profile="${2:?--profile にプロファイルの名前が要る}"; shift 2 ;;
+    --region) region="${2:?--region にリージョンが要る}"; shift 2 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) usage "知らない指定: $1" ;;
   esac
 done
@@ -55,6 +61,13 @@ while IFS= read -r line || [ -n "$line" ]; do
 done
 [ -n "$ids" ] || usage "インスタンスの ID がない（標準入力に 1 行 1 つで渡す）"
 
+# aws を呼ぶ。--profile・--region が指定されていれば、最後に付ける（空の配列を使わないのは、bash 3.2 の set -u で止まるため）
+aws_cmd() {
+  [ -n "$profile" ] && set -- "$@" --profile "$profile"
+  [ -n "$region" ] && set -- "$@" --region "$region"
+  aws "$@"
+}
+
 # コマンドを、時間を決めて実行する（macOS には timeout のコマンドがないため）。標準出力と標準エラーは $out_file に
 run_limited() {
   "$@" > "$out_file" 2>&1 < /dev/null &
@@ -77,7 +90,7 @@ last_line() { grep -v '^[[:space:]]*$' "$1" | tail -n 1; }
 # Session Manager で echo を流す。入れれば何も出さず 0、入れなければ理由を出して 1
 try_session() {
   local id=$1 marker=$2
-  run_limited aws ssm start-session --target "$id" --document-name AWS-StartNonInteractiveCommand \
+  run_limited aws_cmd ssm start-session --target "$id" --document-name AWS-StartNonInteractiveCommand \
     --parameters "{\"command\":[\"echo $marker\"]}"
   grep -q "$marker" "$out_file" && return 0
   echo "session: つながらない（$(last_line "$out_file")）"
@@ -87,7 +100,7 @@ try_session() {
 # Run Command で echo を流して、結果を待つ。入れれば何も出さず 0、入れなければ理由を出して 1
 try_run_command() {
   local id=$1 marker=$2 command_id status waited=0
-  if ! command_id=$(aws ssm send-command --instance-ids "$id" --document-name AWS-RunShellScript \
+  if ! command_id=$(aws_cmd ssm send-command --instance-ids "$id" --document-name AWS-RunShellScript \
       --comment ssm-connect-check --parameters "{\"commands\":[\"echo $marker\"]}" \
       --query Command.CommandId --output text 2>&1 < /dev/null); then
     echo "run-command: 送れない（$(printf '%s\n' "$command_id" | tail -n 1)）"
@@ -97,7 +110,7 @@ try_run_command() {
     sleep 3
     waited=$((waited + 3))
     # 送った直後は、まだ結果の記録がない（失敗しても待ち続ける）
-    status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" \
+    status=$(aws_cmd ssm get-command-invocation --command-id "$command_id" --instance-id "$id" \
       --query '[Status,StandardOutputContent]' --output text 2>/dev/null < /dev/null) || continue
     case "$status" in
       Pending*|InProgress*|Delayed*) continue ;;

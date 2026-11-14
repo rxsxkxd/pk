@@ -99,6 +99,17 @@ i-0123456789abcdef0
 i-0fedcba9876543210  # web-02
 ```
 
+### プロファイルとリージョン（`--profile`・`--region`）
+
+AWS を呼ぶ道具（`rb/` のすべてと `command/connect/ssm-connect-check.sh`）は、`--profile`（AWS CLI のプロファイル）と `--region`（リージョン）を受け付け、すべての `aws` の呼び出しに付ける。付けなければ、AWS CLI の設定（`AWS_PROFILE`・`AWS_REGION` など。踏み台サーバーではインスタンスプロファイル）をそのまま使う。`command/instance/` のスクリプトは AWS を呼ばないので、受け付けない。
+
+```bash
+ruby rb/ssm_check.rb --profile <プロファイル> --region ap-northeast-1 --ok-out enabled.txt --ng-out ng.txt < instance-ids.txt
+bash command/connect/ssm-connect-check.sh --profile <プロファイル> --region ap-northeast-1 --ok-out ok.txt < enabled.txt
+```
+
+`rb/ssm_role.rb`・`rb/ssm_role_force.rb` の `--instance-profile`（関連付けるインスタンスプロファイル）は、`--profile`（AWS CLI のプロファイル）とは別のもの。
+
 ### 確認の形（`rb/ssm_role.rb`・`rb/ssm_role_force.rb`・`rb/backup.rb`）
 
 AWS の上の設定を変える 3 つは、次の順に進む（共通の流れ `rb/lib/flow.rb`）。`rb/ssm_role_force.rb` は 1 で何も読まず、渡した一覧をそのまま表示する。
@@ -124,7 +135,7 @@ AWS の上の設定を変える 3 つは、次の順に進む（共通の流れ 
 
 | 場所 | 要るもの |
 |---|---|
-| 作業者の PC | Ruby 2.6 以上（macOS に入っている Ruby でもよい。標準のライブラリだけを使い、gem は要らない）、bash、AWS CLI（v2）、session-manager-plugin（接続の確認の `session`）。認証情報・リージョンは AWS CLI の設定（`AWS_PROFILE`・`AWS_REGION` など） |
+| 作業者の PC | Ruby 2.6 以上（macOS に入っている Ruby でもよい。標準のライブラリだけを使い、gem は要らない）、bash、AWS CLI（v2）、session-manager-plugin（接続の確認の `session`）。認証情報・リージョンは、`--profile`・`--region` か AWS CLI の設定（`AWS_PROFILE`・`AWS_REGION` など） |
 | 踏み台サーバー | bash、AWS CLI（v2）、session-manager-plugin、IAM ロール（0-4） |
 
 | 道具 | 作業者の IAM に要る権限 |

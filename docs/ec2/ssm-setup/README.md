@@ -55,7 +55,7 @@ bash command/connect/ssm-connect-check.sh --help
 | 項目 | 内容 |
 |---|---|
 | 言語 | AWS の操作は **Ruby**（2.6 以上。標準のライブラリだけ）。接続の確認とインスタンスの中の操作は **sh**（bash。macOS の bash 3.2 でも動く書き方。`jq` などは使わない）。AMI 公開パイプラインの決定事項 D10（作業者の PC で動く道具は Go）は、この暫定対応の道具には当てはめない |
-| AWS の操作 | **作業者の PC に入っている AWS CLI のコマンドを呼ぶ**（AWS SDK は使わない）。認証情報・リージョンは AWS CLI の設定（`AWS_PROFILE`・`AWS_REGION` など） |
+| AWS の操作 | **作業者の PC に入っている AWS CLI のコマンドを呼ぶ**（AWS SDK は使わない）。プロファイルとリージョンは、どの道具も `--profile`・`--region` で指定できる（すべての `aws` の呼び出しに付ける）。付けなければ AWS CLI の設定（`AWS_PROFILE`・`AWS_REGION` など） |
 | ライブラリとコマンド | コマンドは `rb/` の直下、ライブラリは `rb/lib/`。**`rb/lib/` には汎用の部品（Infrastructure 層）だけを置く**: `aws_cli.rb`（AWS CLI を呼んで JSON を読む）、`cli.rb`（一覧の読み込み、端末での確認、オプション、一覧の書き出し）、`flow.rb`（設定を変えるコマンドの共通の流れ）。**AWS の機能の仕様に紐づくもの**（どの API をどう読むか、タグの決まり、AMI の名前など）**は、重複があっても共通化せず、各コマンドに書く** |
 | 共通の流れ | 設定を変える `rb/ssm_role.rb`・`rb/ssm_role_force.rb`・`rb/backup.rb` は、確かめる（Plan を作る）と行う（ブロック）だけを書き、表示・`--check-only`・`[y/N]` の確認・`--yes`・1 台ごとの失敗・終了コードは `rb/lib/flow.rb` に任せる。確かめるだけの道具は使わない |
 | バックアップ | 本体と別の道具（`rb/backup.rb`・`rb/backup_check.rb`）。タグ `Purpose=ssm-setup-backup` で、ほかの作業のバックアップと分ける |

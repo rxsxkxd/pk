@@ -44,12 +44,24 @@ module Cli
     usage_error('aws のコマンドが見つからない（AWS CLI を入れて、PATH を通す）') unless AwsCli.available?
   end
 
-  # OptionParser でオプションを読む（ブロックでオプションを定義する）。誤りなら終了コード 2
+  # OptionParser でオプションを読む（ブロックでコマンドのオプションを定義する）。誤りなら終了コード 2。
+  # どのコマンドにも --profile・--region を足し、AwsCli に渡す（options には入れない）
   def parse_options(options = {})
-    OptionParser.new { |parser| yield parser, options }.parse!
+    aws = {}
+    OptionParser.new do |parser|
+      yield parser, options
+      define_aws_options(parser, aws)
+    end.parse!
+    AwsCli.configure(**aws)
     options
   rescue OptionParser::ParseError => e
     usage_error(e.message)
+  end
+
+  # AWS CLI に渡すプロファイルとリージョン
+  def define_aws_options(parser, aws)
+    parser.on('--profile NAME', 'AWS CLI のプロファイル（省略すると AWS CLI の設定。AWS_PROFILE など）') { |v| aws[:profile] = v }
+    parser.on('--region REGION', 'リージョン（省略すると AWS CLI の設定。AWS_REGION など）') { |v| aws[:region] = v }
   end
 
   # 設定を変えるコマンドの --check-only・--yes（action は、行うことの説明）

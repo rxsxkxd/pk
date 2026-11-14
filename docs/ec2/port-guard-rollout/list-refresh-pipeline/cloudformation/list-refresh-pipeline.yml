@@ -1,60 +1,49 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  port-guard list refresh pipeline (optional). The pipeline source is fetch-generator-scripts.zip (only the fetch
-  script). In the build, the fetch script downloads the three generator scripts (make-jp-lists.sh,
-  make-aws-lists.sh, make-refresh.sh) stored uncompressed under generator-scripts/command/ in the pipeline bucket.
-  The build makes the IP lists for ipset (Japan and AWS ranges from APNIC and ip-ranges.json; the individually
-  allowed list from the VPC range and SSM Parameter Store) and the ipset replacement scripts (refresh-ipv4.sh,
-  refresh-ipv6.sh), and the pipeline places them as one zip file in the deploy bucket. One stack per environment
-  (VPC). Started manually only.
+  port-guard list refresh pipeline (optional). Automates the human workflow on the bastion server as it is:
+  fetch-allow-and-last-lists.sh -> make-jp-lists.sh -> make-aws-lists.sh -> make-refresh.sh -> human check
+  (manual approval) -> publish-refresh-scripts.sh. The same bastion scripts are stored uncompressed under
+  bastion-scripts/command/ in the pipeline bucket and fetched in the build by fetch-bastion-scripts.sh (the
+  pipeline source, fetch-bastion-scripts.zip). The ipset replacement scripts are published to the S3 publish
+  location. One stack per environment (VPC). Started manually only.
 
 Parameters:
   EnvironmentName:
     Type: String
     AllowedPattern: "^[a-z0-9][a-z0-9-]{0,30}$"
-    Description: Environment (VPC) name. Used in resource names, the deploy key and the parameter names.
-  VpcId:
-    Type: AWS::EC2::VPC::Id
-    Description: VPC of the servers. Its IPv4 (and IPv6, if any) ranges are written to the individually allowed IP lists.
-  AllowListParameterPrefix:
-    Type: String
-    Default: /port-guard
-    AllowedPattern: "^/[A-Za-z0-9/_.-]*[A-Za-z0-9]$"
-    Description: >-
-      The other allowed addresses are read from the SSM parameters <prefix>/<EnvironmentName>/allow-ipv4 and
-      allow-ipv6 (String, one address or CIDR per line, # comments allowed). Create them before running.
-  DeployBucketName:
+    Description: Environment (VPC) name. Used in resource names and in the S3 publish location.
+  PublishBucketName:
     Type: String
     Default: ""
     Description: >-
-      Existing bucket to place the result zip file in. Leave empty to create a new bucket in this stack
-      (versioning enabled). An existing bucket must use SSE-S3 (not SSE-KMS) encryption.
-  DeployKeyPrefix:
+      Existing bucket of the S3 publish location (the same bucket the human workflow uses). Leave empty to create
+      a new bucket in this stack (versioning enabled). An existing bucket must use SSE-S3 (not SSE-KMS) encryption.
+  PublishKeyPrefix:
     Type: String
     Default: port-guard
     AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9/_.-]*[A-Za-z0-9]$"
-    Description: The result zip file is placed at <DeployKeyPrefix>/<EnvironmentName>/ip-lists-and-ipset-refresh-scripts.zip.
+    Description: The S3 publish location is s3://<bucket>/<PublishKeyPrefix>/<EnvironmentName>/current.
   RequireApproval:
     Type: String
     Default: "true"
     AllowedValues: ["true", "false"]
-    Description: Insert a manual approval stage between the build and the deploy.
+    Description: Insert a manual approval stage (the human check) between making and publishing.
   LogRetentionInDays:
     Type: Number
     Default: 90
 
 Conditions:
-  CreateDeployBucket:
-    Fn::Equals: [Ref: DeployBucketName, ""]
+  CreatePublishBucket:
+    Fn::Equals: [Ref: PublishBucketName, ""]
   UseApproval:
     Fn::Equals: [Ref: RequireApproval, "true"]
 
 Resources:
   # パイプライン用バケット。置くもの:
-  #   source/fetch-generator-scripts.zip   生成スクリプトの取得スクリプトの圧縮ファイル（パイプラインのソース。中身は fetch-generator-scripts.sh だけ）
-  #   generator-scripts/command/make-*.sh  生成スクリプト 3 つ（圧縮しない）
+  #   source/fetch-bastion-scripts.zip   踏み台サーバーの手順のスクリプトの取得スクリプトの圧縮ファイル（パイプラインのソース。中身は fetch-bastion-scripts.sh だけ）
+  #   bastion-scripts/command/*.sh       踏み台サーバーの手順のスクリプト 5 つ（圧縮しない。踏み台サーバーの command/ と同じもの）
   #   パイプラインの中間の成果物（CodePipeline が置く）
-  # S3 のソースアクションはバージョニングが必要。生成スクリプトの前の版を取り出せるようにするためにも使う
+  # S3 のソースアクションはバージョニングが必要。踏み台サーバーの手順のスクリプトの前の版を取り出せるようにするためにも使う
   PipelineBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -79,10 +68,10 @@ Resources:
             NoncurrentVersionExpiration:
               NoncurrentDays: 90
 
-  # 配置先バケット: DeployBucketName が空のときだけ作る。誤った一覧を置いたときに前の版へ戻せるよう、バージョニングを有効にする
-  DeployBucket:
+  # 公開バケット: PublishBucketName が空のときだけ作る。誤ったものを上げたときに前の版へ戻せるよう、バージョニングを有効にする
+  PublishBucket:
     Type: AWS::S3::Bucket
-    Condition: CreateDeployBucket
+    Condition: CreatePublishBucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
@@ -109,10 +98,11 @@ Resources:
       RetentionInDays:
         Ref: LogRetentionInDays
 
-  BuildRole:
+  # 一覧を作るビルドのロール: S3 の公開場所は読むだけ
+  MakeRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: CodeBuild of the port-guard list refresh pipeline
+      Description: CodeBuild that makes the port-guard IP lists and ipset replacement scripts (reads the S3 publish location only)
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -121,7 +111,7 @@ Resources:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: port-guard-list-refresh-build
+        - PolicyName: port-guard-list-refresh-make
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -132,7 +122,7 @@ Resources:
                   - logs:PutLogEvents
                 Resource:
                   Fn::GetAtt: BuildLogGroup.Arn
-              # パイプラインの中間の成果物の読み書きと、生成スクリプトの取得（版を指定して取る）
+              # パイプラインの中間の成果物の読み書きと、踏み台サーバーの手順のスクリプトの取得（版を指定して取る）
               - Sid: PipelineBucketObjects
                 Effect: Allow
                 Action:
@@ -141,48 +131,79 @@ Resources:
                   - s3:PutObject
                 Resource:
                   Fn::Sub: ${PipelineBucket.Arn}/*
-              # 個別許可の IP の一覧に入れる VPC の範囲（DescribeVpcs はリソースで絞れない）
-              - Sid: ReadVpcRange
-                Effect: Allow
-                Action: ec2:DescribeVpcs
-                Resource: "*"
-              - Sid: ReadAllowListParameters
-                Effect: Allow
-                Action: ssm:GetParameter
-                Resource:
-                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AllowListParameterPrefix}/${EnvironmentName}/allow-ipv4
-                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${AllowListParameterPrefix}/${EnvironmentName}/allow-ipv6
-              # 前回の成果物の圧縮ファイル（中の前回分の IP の一覧が、増減の比較の基準）を読むだけ。配置先バケットには書かない
-              - Sid: ReadLastResult
+              # fetch-allow-and-last-lists.sh: 個別許可の IP の一覧と前回分の IP の一覧を、S3 の公開場所から取る
+              - Sid: ReadPublishLocation
                 Effect: Allow
                 Action: s3:GetObject
                 Resource:
                   Fn::Sub:
-                    - arn:${AWS::Partition}:s3:::${Bucket}/${DeployKeyPrefix}/${EnvironmentName}/ip-lists-and-ipset-refresh-scripts.zip
+                    - arn:${AWS::Partition}:s3:::${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current/*
                     - Bucket:
-                        Fn::If: [CreateDeployBucket, Ref: DeployBucket, Ref: DeployBucketName]
-              # 前回の成果物の圧縮ファイルがあるかを確かめる（初回はない）
-              - Sid: CheckLastResult
+                        Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
+              - Sid: ListPublishLocation
                 Effect: Allow
                 Action: s3:ListBucket
                 Resource:
                   Fn::Sub:
                     - arn:${AWS::Partition}:s3:::${Bucket}
                     - Bucket:
-                        Fn::If: [CreateDeployBucket, Ref: DeployBucket, Ref: DeployBucketName]
+                        Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
                 Condition:
-                  StringEquals:
+                  StringLike:
                     s3:prefix:
-                      Fn::Sub: ${DeployKeyPrefix}/${EnvironmentName}/ip-lists-and-ipset-refresh-scripts.zip
+                      Fn::Sub: ${PublishKeyPrefix}/${EnvironmentName}/current/*
 
-  BuildProject:
+  # S3 に上げるビルドのロール: 承認の後にだけ動く。S3 の公開場所に書けるのはこのロールだけ
+  PublishRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: CodeBuild that publishes the ipset replacement scripts to the S3 publish location (after approval)
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: port-guard-list-refresh-publish
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  Fn::GetAtt: BuildLogGroup.Arn
+              # 一覧を作るビルドの成果物（中間の成果物）を読む
+              - Sid: ReadPipelineArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource:
+                  Fn::Sub: ${PipelineBucket.Arn}/*
+              # [変更] publish-refresh-scripts.sh: S3 の公開場所に上げる。この環境の current/ の下だけ
+              - Sid: WritePublishLocation
+                Effect: Allow
+                Action: s3:PutObject
+                Resource:
+                  Fn::Sub:
+                    - arn:${AWS::Partition}:s3:::${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current/*
+                    - Bucket:
+                        Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
+
+  # 一覧を作るビルド: 人の作業フローの 1〜4（S3 から取る → 一覧を作る → make-refresh.sh）
+  MakeProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Name:
-        Fn::Sub: port-guard-list-refresh-${EnvironmentName}
-      Description: Make the port-guard IP lists for ipset and the ipset replacement scripts
+        Fn::Sub: port-guard-list-refresh-${EnvironmentName}-make
+      Description: Make the port-guard IP lists and the ipset replacement scripts (same steps as the human workflow)
       ServiceRole:
-        Fn::GetAtt: BuildRole.Arn
+        Fn::GetAtt: MakeRole.Arn
       TimeoutInMinutes: 15
       Artifacts:
         Type: CODEPIPELINE
@@ -191,38 +212,28 @@ Resources:
           Status: ENABLED
           GroupName:
             Ref: BuildLogGroup
+          StreamName: make
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
         Image: aws/codebuild/amazonlinux-x86_64-standard:5.0
         EnvironmentVariables:
-          - Name: GENERATOR_SCRIPTS_BUCKET
+          - Name: BASTION_SCRIPTS_BUCKET
             Value:
               Ref: PipelineBucket
-          - Name: GENERATOR_SCRIPTS_PREFIX
-            Value: generator-scripts
-          - Name: RESULT_BUCKET
+          - Name: BASTION_SCRIPTS_PREFIX
+            Value: bastion-scripts
+          - Name: PORT_GUARD_S3_URI
             Value:
-              Fn::If: [CreateDeployBucket, Ref: DeployBucket, Ref: DeployBucketName]
-          - Name: RESULT_KEY
-            Value:
-              Fn::Sub: ${DeployKeyPrefix}/${EnvironmentName}/ip-lists-and-ipset-refresh-scripts.zip
-          - Name: VPC_ID
-            Value:
-              Ref: VpcId
-          - Name: ALLOW_IPV4_PARAMETER
-            Value:
-              Fn::Sub: ${AllowListParameterPrefix}/${EnvironmentName}/allow-ipv4
-          - Name: ALLOW_IPV6_PARAMETER
-            Value:
-              Fn::Sub: ${AllowListParameterPrefix}/${EnvironmentName}/allow-ipv6
+              Fn::Sub:
+                - s3://${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current
+                - Bucket:
+                    Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
           - Name: FORCE
             Value: "0"
       Source:
         Type: CODEPIPELINE
-        # 入力（パイプラインのソース）は、生成スクリプトの取得スクリプトの圧縮ファイル（中身は fetch-generator-scripts.sh だけ）。
-        # 生成スクリプト 3 つは、取得スクリプトがパイプライン用バケットの generator-scripts/command/ から取る。
-        # ipset に入れる IP の一覧（日本・AWS・個別許可）と ipset 入れ替えスクリプトは、すべてこのビルドの中で作る
+        # 入力（パイプラインのソース）は、踏み台サーバーの手順のスクリプトの取得スクリプトの圧縮ファイル（中身は fetch-bastion-scripts.sh だけ）
         BuildSpec: |
           version: 0.2
           env:
@@ -230,62 +241,67 @@ Resources:
           phases:
             build:
               commands:
-                # 生成スクリプト 3 つを command/ に取る（使った版を generator-scripts-versions.txt に書く）
-                - bash fetch-generator-scripts.sh
-                - |
-                  # 個別許可の IP の一覧 = VPC の範囲（describe-vpcs）＋ 個別許可の IP のパラメータ（パラメータストア）
-                  mkdir -p port_guard_whitelists
-                  v4=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --output text \
-                    --query 'Vpcs[0].CidrBlockAssociationSet[?CidrBlockState.State==`associated`].CidrBlock') || exit 1
-                  v6=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --output text \
-                    --query 'Vpcs[0].Ipv6CidrBlockAssociationSet[?Ipv6CidrBlockState.State==`associated`].Ipv6CidrBlock') || exit 1
-                  extra4=$(aws ssm get-parameter --name "$ALLOW_IPV4_PARAMETER" --query Parameter.Value --output text) || exit 1
-                  extra6=$(aws ssm get-parameter --name "$ALLOW_IPV6_PARAMETER" --query Parameter.Value --output text) || exit 1
-                  [ -n "$(echo "$v4" | tr -d '[:space:]')" ] || { echo "VPC ${VPC_ID} の IPv4 の範囲が取れない"; exit 1; }
-                  {
-                    echo "# VPC ${VPC_ID}（describe-vpcs）"
-                    echo "$v4" | tr '\t' '\n'
-                    echo "# ${ALLOW_IPV4_PARAMETER}（パラメータストア）"
-                    echo "$extra4"
-                  } > port_guard_whitelists/allow-ipv4.txt
-                  {
-                    echo "# VPC ${VPC_ID}（describe-vpcs）"
-                    echo "$v6" | tr '\t' '\n' | sed '/^None$/d'
-                    echo "# ${ALLOW_IPV6_PARAMETER}（パラメータストア）"
-                    echo "$extra6"
-                  } > port_guard_whitelists/allow-ipv6.txt
-                  cat port_guard_whitelists/allow-ipv4.txt port_guard_whitelists/allow-ipv6.txt
-                - |
-                  # 前回の成果物の圧縮ファイルから、前回分の IP の一覧だけを取り出す（増減の比較の基準。初回はなし）
-                  mkdir -p port_guard_whitelists/last-refresh
-                  keys=$(aws s3api list-objects-v2 --bucket "$RESULT_BUCKET" --prefix "$RESULT_KEY" --query 'Contents[].Key' --output text) || exit 1
-                  if echo "$keys" | tr '\t' '\n' | grep -qxF "$RESULT_KEY"; then
-                    aws s3 cp "s3://${RESULT_BUCKET}/${RESULT_KEY}" /tmp/last-result.zip || exit 1
-                    unzip -o /tmp/last-result.zip 'port_guard_whitelists/last-refresh/*' || exit 1
-                  else
-                    echo "前回の成果物の圧縮ファイルがない（初回）: s3://${RESULT_BUCKET}/${RESULT_KEY}"
-                  fi
+                # 0. 踏み台サーバーの手順のスクリプト 5 つを command/ に取る（使った版を bastion-scripts-versions.txt に書く）
+                - bash fetch-bastion-scripts.sh
+                # 1. S3 の公開場所から、個別許可の IP の一覧と前回分の IP の一覧を取る
+                - bash command/fetch-allow-and-last-lists.sh
+                # 2・3. 公開元の IP の一覧を取り、日本・AWS の IP の一覧を作る
                 - bash command/make-jp-lists.sh
                 - bash command/make-aws-lists.sh
+                # 4. 件数・前回分との増減を確かめ、ipset 入れ替えスクリプトを作る（前回分の IP の一覧も今回の分に更新される）
                 - FORCE="${FORCE}" bash command/make-refresh.sh
-                - |
-                  sha256sum command/port_guard/refresh-ipv4.sh command/port_guard/refresh-ipv6.sh \
-                    port_guard_whitelists/{jp,aws,allow}-ipv{4,6}.txt generator-scripts-versions.txt > SHA256SUMS &&
-                  cat SHA256SUMS
-          # 成果物。デプロイのアクションが、この形のまま 1 つの圧縮ファイルにして配置先に置く
+          # 承認の後の S3 に上げるビルドに渡すもの（上げる処理の publish-refresh-scripts.sh も、ここで取った版を渡す）
           artifacts:
             files:
-              - SHA256SUMS
-              - generator-scripts-versions.txt
+              - bastion-scripts-versions.txt
+              - command/publish-refresh-scripts.sh
               - command/port_guard/refresh-ipv4.sh
               - command/port_guard/refresh-ipv6.sh
-              - port_guard_whitelists/jp-ipv4.txt
-              - port_guard_whitelists/jp-ipv6.txt
-              - port_guard_whitelists/aws-ipv4.txt
-              - port_guard_whitelists/aws-ipv6.txt
               - port_guard_whitelists/allow-ipv4.txt
               - port_guard_whitelists/allow-ipv6.txt
               - port_guard_whitelists/last-refresh/*.txt
+
+  # S3 に上げるビルド: 人の作業フローの 6（publish-refresh-scripts.sh）
+  PublishProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name:
+        Fn::Sub: port-guard-list-refresh-${EnvironmentName}-publish
+      Description: Publish the ipset replacement scripts to the S3 publish location (same script as the human workflow)
+      ServiceRole:
+        Fn::GetAtt: PublishRole.Arn
+      TimeoutInMinutes: 10
+      Artifacts:
+        Type: CODEPIPELINE
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName:
+            Ref: BuildLogGroup
+          StreamName: publish
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-x86_64-standard:5.0
+        EnvironmentVariables:
+          - Name: PORT_GUARD_S3_URI
+            Value:
+              Fn::Sub:
+                - s3://${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current
+                - Bucket:
+                    Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          env:
+            shell: bash
+          phases:
+            build:
+              commands:
+                - cat bastion-scripts-versions.txt
+                # 6. ipset 入れ替えスクリプト・個別許可の IP の一覧・前回分の IP の一覧を上げ、最後に SHA256SUMS を上げる
+                - bash command/publish-refresh-scripts.sh
 
   PipelineRole:
     Type: AWS::IAM::Role
@@ -319,22 +335,14 @@ Resources:
                   - s3:ListBucket
                 Resource:
                   Fn::GetAtt: PipelineBucket.Arn
-              - Sid: RunBuild
+              - Sid: RunBuilds
                 Effect: Allow
                 Action:
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
                 Resource:
-                  Fn::GetAtt: BuildProject.Arn
-              # [変更] 配置先バケットに書くのは、この環境の成果物の圧縮ファイル 1 つだけ
-              - Sid: DeployResult
-                Effect: Allow
-                Action: s3:PutObject
-                Resource:
-                  Fn::Sub:
-                    - arn:${AWS::Partition}:s3:::${Bucket}/${DeployKeyPrefix}/${EnvironmentName}/ip-lists-and-ipset-refresh-scripts.zip
-                    - Bucket:
-                        Fn::If: [CreateDeployBucket, Ref: DeployBucket, Ref: DeployBucketName]
+                  - Fn::GetAtt: MakeProject.Arn
+                  - Fn::GetAtt: PublishProject.Arn
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -352,11 +360,11 @@ Resources:
       Variables:
         - Name: FORCE
           DefaultValue: "0"
-          Description: Set 1 to proceed when a list changed by more than 5% from the last result (make-refresh.sh FORCE=1)
+          Description: Set 1 to proceed when a list changed by more than 5% from the last published one (make-refresh.sh FORCE=1)
       Stages:
         - Name: Source
           Actions:
-            - Name: FetchGeneratorScripts
+            - Name: FetchBastionScripts
               ActionTypeId:
                 Category: Source
                 Owner: AWS
@@ -365,11 +373,11 @@ Resources:
               Configuration:
                 S3Bucket:
                   Ref: PipelineBucket
-                S3ObjectKey: source/fetch-generator-scripts.zip
+                S3ObjectKey: source/fetch-bastion-scripts.zip
                 PollForSourceChanges: "false"
               OutputArtifacts:
                 - Name: FetchScript
-        - Name: Build
+        - Name: Make
           Actions:
             - Name: MakeListsAndRefreshScripts
               ActionTypeId:
@@ -379,17 +387,17 @@ Resources:
                 Version: "1"
               Configuration:
                 ProjectName:
-                  Ref: BuildProject
+                  Ref: MakeProject
                 EnvironmentVariables: '[{"name":"FORCE","value":"#{variables.FORCE}","type":"PLAINTEXT"}]'
               InputArtifacts:
                 - Name: FetchScript
               OutputArtifacts:
-                - Name: Result
+                - Name: MadeFiles
         - Fn::If:
             - UseApproval
-            - Name: Approval
+            - Name: Check
               Actions:
-                - Name: CheckBuildLog
+                - Name: HumanCheck
                   ActionTypeId:
                     Category: Approval
                     Owner: AWS
@@ -397,25 +405,22 @@ Resources:
                     Version: "1"
                   Configuration:
                     CustomData: >-
-                      Check the build log (generator script versions, allow lists, counts, added and removed per
-                      list, SHA256SUMS) before approving.
+                      Check the make build log (bastion script versions, allow lists fetched, counts, added and
+                      removed per list) as in the human workflow before approving.
             - Ref: AWS::NoValue
-        - Name: Deploy
+        - Name: Publish
           Actions:
-            - Name: PlaceResultZip
+            - Name: PublishRefreshScripts
               ActionTypeId:
-                Category: Deploy
+                Category: Build
                 Owner: AWS
-                Provider: S3
+                Provider: CodeBuild
                 Version: "1"
               Configuration:
-                BucketName:
-                  Fn::If: [CreateDeployBucket, Ref: DeployBucket, Ref: DeployBucketName]
-                Extract: "false"
-                ObjectKey:
-                  Fn::Sub: ${DeployKeyPrefix}/${EnvironmentName}/ip-lists-and-ipset-refresh-scripts.zip
+                ProjectName:
+                  Ref: PublishProject
               InputArtifacts:
-                - Name: Result
+                - Name: MadeFiles
 
 Outputs:
   PipelineName:
@@ -424,17 +429,18 @@ Outputs:
   PipelineBucketName:
     Value:
       Ref: PipelineBucket
-  GeneratorScriptsUri:
-    Description: Upload the three generator scripts (uncompressed) here
+  BastionScriptsUri:
+    Description: Upload the five bastion scripts (uncompressed) here
     Value:
-      Fn::Sub: s3://${PipelineBucket}/generator-scripts/command/
+      Fn::Sub: s3://${PipelineBucket}/bastion-scripts/command/
   FetchScriptZipUri:
-    Description: Upload fetch-generator-scripts.zip (only fetch-generator-scripts.sh) here
+    Description: Upload fetch-bastion-scripts.zip (only fetch-bastion-scripts.sh) here
     Value:
-      Fn::Sub: s3://${PipelineBucket}/source/fetch-generator-scripts.zip
-  ResultZipUri:
+      Fn::Sub: s3://${PipelineBucket}/source/fetch-bastion-scripts.zip
+  PublishLocation:
+    Description: PORT_GUARD_S3_URI for the human workflow and the pipeline
     Value:
       Fn::Sub:
-        - s3://${Bucket}/${DeployKeyPrefix}/${EnvironmentName}/ip-lists-and-ipset-refresh-scripts.zip
+        - s3://${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current
         - Bucket:
-            Fn::If: [CreateDeployBucket, Ref: DeployBucket, Ref: DeployBucketName]
+            Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]

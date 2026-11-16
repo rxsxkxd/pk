@@ -73,7 +73,7 @@
 Python 3 と Node.js（22 か 24。26 は jsii が未検証の警告を出すが合成はできた。警告は `JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION=1` で消せる）が要る。`aws-cdk-lib` の取得は約 60 MB。
 
 ```bash
-cd docs/ec2/tls-termination-migration/cdk/python
+cd docs/ec2-tls-termination-migration/cdk/python
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
@@ -91,6 +91,8 @@ cdk --version          # 確かめた版: 2.1148.1 (build fcf5e34)
 `cdk.json` の `app` は `python3 app.py` なので、`cdk` のコマンドは venv を有効にしてから流す（`source .venv/bin/activate`）。
 
 `.venv/`、`cdk.out/`、`templates/`（方法 2 で出す YAML）は `.gitignore` に入っている。
+
+フォルダを移したら、venv を作り直す（`.venv/bin/activate` には作ったときの絶対パスが書かれていて、移した後に有効にしても venv の Python が使われない。2026-11-16 に確かめた）。作り直すまでは、`cdk` のコマンドに `--app ".venv/bin/python app.py"` を付ければ venv の Python で合成できる。
 
 ## 設定値ファイル
 

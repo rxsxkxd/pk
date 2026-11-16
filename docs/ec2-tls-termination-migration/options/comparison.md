@@ -79,8 +79,8 @@ AWS WAF を関連付けられるのは **CloudFront と ALB** で、EC2 のイ�
 
 - CloudFront に関連付けた web ACL は、ALB など別の種類のリソースには関連付けられない。C で両方に置くなら、web ACL も 2 つになる
 - 料金は、web ACL 1 つで月 $5、ルール 1 つで月 $1、100 万リクエストで $0.60 である（2026-11-09 確認。リージョンで異なる場合があると書かれている）
-- CloudFront の月額固定のプランには WAF が含まれる（[料金の考え方](../../notes/instance-provisioning/cloudfront-alb-front-options.md)）
-- 地理的制限で止めた要求は WAF に届かないので、パスの例外を作るなら地理的制限は使わない（[国での絞り込み](../../notes/ec2-operations/access-restriction-alb-cloudfront.md)）
+- CloudFront の月額固定のプランには WAF が含まれる（[料金の考え方](../../ec2/notes/instance-provisioning/cloudfront-alb-front-options.md)）
+- 地理的制限で止めた要求は WAF に届かないので、パスの例外を作るなら地理的制限は使わない（[国での絞り込み](../../ec2/notes/ec2-operations/access-restriction-alb-cloudfront.md)）
 
 ## 最初に片付けること: 2 つのアプリの分かれ方
 

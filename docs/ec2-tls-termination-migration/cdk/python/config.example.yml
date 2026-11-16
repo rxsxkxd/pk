@@ -25,10 +25,12 @@ certificate_hosted_zone_id: ""
 # ---- ステップ 2: WAF と CloudFront ----
 # ステップ 1（step1-certificate.yml か <prefix>-step1-certificate）の出力 CertificateArn（または登録した証明書の ARN）。us-east-1 の ACM の証明書で、
 # ACM のコンソールの「証明書」に出るもの（「ACME 証明書」は CloudFront に付けられない）。
-# 空の間は、<prefix>-step2-cloudfront を合成しない
-cloudfront_certificate_arn: ""
+# 空の間は、<prefix>-step2-cloudfront を合成しない。
+# 下の 2 つの値は、合成の結果を見るための架空の値（アカウント 111122223333 は AWS のドキュメントの例）。
+# 実際の環境では、ステップ 1 とステップ 2 の WAF の出力に置き換える
+cloudfront_certificate_arn: arn:aws:acm:us-east-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
 # <prefix>-step2-waf の出力 WebAclArn。空なら関連付けない（本番では空にしない）
-cloudfront_web_acl_arn: ""
+cloudfront_web_acl_arn: arn:aws:wafv2:us-east-1:111122223333:global/webacl/myapp-production-step2-waf/00000000-0000-0000-0000-000000000000
 # origin_domain_name の A レコードも Route 53 に作るときに、2 つとも指定する（本番は空にして手で足す）
 origin_hosted_zone_id: ""
 origin_elastic_ip: ""

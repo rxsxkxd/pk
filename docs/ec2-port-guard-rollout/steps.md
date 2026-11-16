@@ -1,6 +1,6 @@
 # 手順: 80・443 番を国内だけに絞る設定を、複数台に入れる
 
-> 位置付け: `port-guard-rollout` を使った作業（フェーズ 2）の手順の**正本**。前のフェーズ（SSM の有効化）の手順は [ssm-setup の手順](../ssm-setup/steps.md)。インスタンスに入れる仕組み（iptables ＋ ipset）の詳細は [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md)、入れた後の運用は [運用の手順](./operations.md)。もとは README の「使い方」と、note の [作業計画](../notes/ec2-operations/access-restriction-os-firewall-work-plan.md) にあった内容を、確定した内容に合わせてここに移した。
+> 位置付け: `port-guard-rollout` を使った作業（フェーズ 2）の手順の**正本**。前のフェーズ（SSM の有効化）の手順は [ssm-setup の手順](../ec2/ssm-setup/steps.md)。インスタンスに入れる仕組み（iptables ＋ ipset）の詳細は [iptables ＋ ipset の仕組みと確認](./iptables-ipset.md)、入れた後の運用は [運用の手順](./operations.md)。もとは README の「使い方」と、note の [作業計画](./notes/access-restriction-os-firewall-work-plan.md) にあった内容を、確定した内容に合わせてここに移した。
 >
 > 更新日: 2026-10-29
 
@@ -11,14 +11,14 @@
 | 方式 | OS の iptables ＋ ipset |
 | 絞るポート | **80 番と 443 番だけ**。SSH の 22 番は**既定では絞らない**（ほかのシステムからの SSH の接続がありうるため。外部からの SSH は、基本はセキュリティグループで弾く前提）。必要になったときだけ、`install --include-ssh` で 22 番も対象にできる |
 | 受け付ける相手 | 日本の IP の範囲と、許可する IP の一覧 |
-| インスタンスでの操作 | SSM（Session Manager・Run Command）で入れることを前提にする。SSM の有効化（IAM ロールの関連付け、SSM Agent の導入、入れるかの確認）は、前のフェーズとして [ssm-setup](../ssm-setup/steps.md) で行う |
+| インスタンスでの操作 | SSM（Session Manager・Run Command）で入れることを前提にする。SSM の有効化（IAM ロールの関連付け、SSM Agent の導入、入れるかの確認）は、前のフェーズとして [ssm-setup](../ec2/ssm-setup/steps.md) で行う |
 | 作業の前提 | 各操作の前に、決めたバックアップ作業のタイミングのバックアップ（AMI）が、作成済みで 12 時間以内のものとしてあること |
 
 ## フェーズの分け方
 
 | フェーズ | フォルダ | 行うこと | インスタンスへの入り方 |
 |---|---|---|---|
-| 1. SSM の有効化 | [`ssm-setup/`](../ssm-setup/README.md) | IAM ロール（インスタンスプロファイル）の関連付け、SSM Agent の導入、SSM で入れるかの確認 | AWS の API と SSM（SSM Agent の導入のスクリプトを届けて流すのは、ssm-setup の範囲外の別の枠組み） |
+| 1. SSM の有効化 | [`ssm-setup/`](../ec2/ssm-setup/README.md) | IAM ロール（インスタンスプロファイル）の関連付け、SSM Agent の導入、SSM で入れるかの確認 | AWS の API と SSM（SSM Agent の導入のスクリプトを届けて流すのは、ssm-setup の範囲外の別の枠組み） |
 | **2. 国内だけに絞る設定の導入（この手順）** | `port-guard-rollout/` | iptables ＋ ipset の導入と、遮断の有効化 | SSM（`--via ssm`）。SSH も使える |
 
 このフェーズは、フェーズ 1 の接続の確認（`command/connect/ssm-connect-check.sh`）で「入れる」になった台（`--ok-out` で書き出した `ok.txt` と `ok2.txt`）を対象にする。**バックアップはフェーズごとに取る**（AMI のタグ `Purpose` で分けている。このフェーズは `port-guard-rollout-backup`）。フェーズ 1 のバックアップは、このフェーズの確認には使わない。

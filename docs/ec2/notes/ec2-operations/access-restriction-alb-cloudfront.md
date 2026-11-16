@@ -1,6 +1,6 @@
 # ロードバランサー（ALB・NLB）や CloudFront を前に置くときの、国での絞り込み
 
-> 位置付け: 80・443 番を日本（と許可した IP アドレス）からだけにする要件を、Web サーバーの前にロードバランサーや CloudFront を置いた構成で満たすときの考え方の**検討メモ**。2026-11-04 の時点では、ロードバランサーも CloudFront も置いておらず、今の環境ではサーバーの中の iptables ＋ ipset（[踏み台サーバーから入れる手順](../../port-guard-rollout/bastion-install-commands.md)）で絞っている。前に置くことを決めたときに、ここから考え始める。**動かして確かめてはいない**。
+> 位置付け: 80・443 番を日本（と許可した IP アドレス）からだけにする要件を、Web サーバーの前にロードバランサーや CloudFront を置いた構成で満たすときの考え方の**検討メモ**。2026-11-04 の時点では、ロードバランサーも CloudFront も置いておらず、今の環境ではサーバーの中の iptables ＋ ipset（[踏み台サーバーから入れる手順](../../../ec2-port-guard-rollout/bastion-install-commands.md)）で絞っている。前に置くことを決めたときに、ここから考え始める。**動かして確かめてはいない**。
 >
 > 同じ要件のほかの層: [OS（iptables ＋ ipset、または firewalld）で絞る](./access-restriction-os-firewall.md)、[Apache で絞る](./access-restriction-apache.md)、[アプリ（Rails）で絞る](./access-restriction-rails-app.md)
 >

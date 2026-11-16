@@ -88,7 +88,7 @@ AL2 では、`mod_http2` が Apache とは別の版の番号で出ている。�
 
 ## 確かめた構成（2026-10-28）
 
-今のインスタンスについての推定（[今の構成を AL2023 で作り直す検討の補足](../../initial-image-build/existing-system-rebuild-on-al2023.md#補足-今の-al2-の構成の状態推定)）を、この再現の環境で確かめた。
+今のインスタンスについての推定（[今の構成を AL2023 で作り直す検討の補足](../../ec2/initial-image-build/existing-system-rebuild-on-al2023.md#補足-今の-al2-の構成の状態推定)）を、この再現の環境で確かめた。
 
 | 項目 | 結果 |
 |---|---|
@@ -121,13 +121,13 @@ AL2 では、`mod_http2` が Apache とは別の版の番号で出ている。�
 | ipset の導入、集合の作成と中身の入れ替え、iptables のルールの追加と削除（`NET_ADMIN` があるので、コンテナのネットワークの中だけに効く） | systemd のユニットの起動・有効化・再起動の後の復元 |
 | 許可する IP の集合で、手元（Mac）からの接続を許可・遮断できるか | 国の判定（接続元が Docker の IP になるため） |
 | 「事前の確認」のスクリプトの、パッケージ・ルール・集合の確認の部分 | SSM の Run Command・Session Manager、AWS の API を使う処理（AMI の作成など） |
-| SSH でのログインと、SSH を通した処理（[ssm-setup](../../ssm-setup/README.md) の `command/instance/agent-check.sh`・`agent-install.sh` による SSM Agent の確認とインストール） | SSM Agent の登録（`Online`）と、その後の動作の確認 |
+| SSH でのログインと、SSH を通した処理（[ssm-setup](../../ec2/ssm-setup/README.md) の `command/instance/agent-check.sh`・`agent-install.sh` による SSM Agent の確認とインストール） | SSM Agent の登録（`Online`）と、その後の動作の確認 |
 | cron での定期の更新 | x86_64 での動作（手元は arm64） |
 
 ipset と iptables の照合は、コンテナではなく Docker Desktop の仮想マシンのカーネルが行う。ipset のカーネルのモジュールが使えるかは、port-guard の処理を試すときに確かめる。
 
 ## 参考
 
-- [今の構成を AL2023 で作り直す検討](../../initial-image-build/existing-system-rebuild-on-al2023.md)（今の構成と、OpenSSL の使われ方の推定）
-- [暫定対応: OS（iptables ＋ ipset、または firewalld）](../../notes/ec2-operations/access-restriction-os-firewall.md)（このインスタンスに入れる設定とスクリプト）
-- [設計: 国内だけに絞る設定を複数台に入れるスクリプト](../../notes/ec2-operations/access-restriction-rollout-script-design.md)
+- [今の構成を AL2023 で作り直す検討](../../ec2/initial-image-build/existing-system-rebuild-on-al2023.md)（今の構成と、OpenSSL の使われ方の推定）
+- [暫定対応: OS（iptables ＋ ipset、または firewalld）](../../ec2/notes/ec2-operations/access-restriction-os-firewall.md)（このインスタンスに入れる設定とスクリプト）
+- [設計: 国内だけに絞る設定を複数台に入れるスクリプト](../notes/access-restriction-rollout-script-design.md)

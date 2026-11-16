@@ -6,7 +6,7 @@
 
 今の環境（Amazon Linux 2）の運用中の稼働サーバーを、**SSM（Session Manager・Run Command）で入れる状態にする**。ほとんどの台は SSM Agent が入って動いていて、IAM ロール（インスタンスプロファイル）がないだけと見込んでいる。そのため、まず未設定の台に SSM 用のインスタンスプロファイルを関連付けて、SSM で実際に入れるかを確かめ、**SSM Agent で直る見込みの台だけ**にバックアップを取ってから、SSM Agent を入れて有効にする。それ以外の入れない台は、理由を表示して手で直す。
 
-80・443 番を国内だけに絞る設定を入れる [port-guard-rollout](../port-guard-rollout/README.md) の**前のフェーズ**として、作業を完全に分けている。port-guard-rollout は、このフェーズの接続の確認で「入れる」になった台を、SSM で操作する。
+80・443 番を国内だけに絞る設定を入れる [port-guard-rollout](../../ec2-port-guard-rollout/README.md) の**前のフェーズ**として、作業を完全に分けている。port-guard-rollout は、このフェーズの接続の確認で「入れる」になった台を、SSM で操作する。
 
 手順の正本は [steps.md](./steps.md)（用語、流れの図、各道具の使い方、権限、元に戻す方法）。
 
@@ -74,7 +74,7 @@ bash command/connect/ssm-connect-check.sh --help
 
 ## 関連ドキュメント
 
-- [port-guard-rollout（フェーズ 2）](../port-guard-rollout/README.md)
-- [検討の経緯: 設計（note）](../notes/ec2-operations/access-restriction-rollout-script-design.md)（「SSM の準備」の検討の記録）
+- [port-guard-rollout（フェーズ 2）](../../ec2-port-guard-rollout/README.md)
+- [検討の経緯: 設計（note）](../../ec2-port-guard-rollout/notes/access-restriction-rollout-script-design.md)（「SSM の準備」の検討の記録）
 - [SSM Session Manager の運用（note）](../notes/ec2-operations/ssm-session-manager-operations.md)
 - [SSM の操作を特定の中継サーバーからだけに絞る IAM の設定（note。検討と設定の下書き）](../notes/ec2-operations/ssm-relay-server-access-control.md)

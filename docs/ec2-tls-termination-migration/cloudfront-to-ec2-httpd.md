@@ -111,7 +111,7 @@ curl -s https://ip-ranges.amazonaws.com/ip-ranges.json \
 | 範囲の更新 | 範囲は変わる。定期的に更新して `apachectl graceful` する。更新が遅れた場合、新しいアドレスからの要求はログの送り元が CloudFront のままになる |
 | `RequestHeader unset` | 利用者が偽って付けた `X-Forwarded-For` の残りが Rails に渡ると、Rails 4.2 の `request.remote_ip` がそちらを選ぶことがある。`Client-IP` も同じ |
 | ログ | `%a` を使う形式（オプションの [alb-to-ec2.md](./options/alb-to-ec2.md#3-httpd-に-http-の-virtualhost-を足す) の `combined_client_ip`）で利用者の IP が出る。Apache 2.4.56 のコンテナでは、`combined`（`%h`）でも利用者の IP が出た |
-| アプリ側で行う場合 | [`trusted_proxies` の案](../notes/ec2-operations/access-restriction-alb-cloudfront.md#そのほかに変わること)もある。httpd で復元する方が、ログとアプリの両方に効く |
+| アプリ側で行う場合 | [`trusted_proxies` の案](../ec2/notes/ec2-operations/access-restriction-alb-cloudfront.md#そのほかに変わること)もある。httpd で復元する方が、ログとアプリの両方に効く |
 
 ## 5. `KeepAliveTimeout`
 
@@ -142,7 +142,7 @@ Alias /old_app_a /home/ruby/old_app_a/public
 | 方法 | 内容 | 注意 |
 |---|---|---|
 | **A. HTTP-01 を CloudFront 経由で続ける（採用。2026-11-11）** | 下の設定を 443 番の VirtualHost に足す | 地理的制限を使うと、海外からの確認が止まる。WAF でこのパスを例外にする（`step2-waf.yml`） |
-| B. DNS-01（見送り） | CloudFront と無関係に更新できる | DNS の API の権限の持たせ方。[Let's Encrypt の自動化](../notes/ec2-operations/letsencrypt-automation.md) |
+| B. DNS-01（見送り） | CloudFront と無関係に更新できる | DNS の API の権限の持たせ方。[Let's Encrypt の自動化](../ec2/notes/ec2-operations/letsencrypt-automation.md) |
 | C. ACM の ACME 証明書またはエクスポートできる証明書（見送り） | EC2 で使える公開の証明書 | エクスポートできる証明書は有料で、有効期間は 198 日。配置は自分で行う。この用途で使えるかは試していない |
 
 A の設定:

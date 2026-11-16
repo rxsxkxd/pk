@@ -132,7 +132,7 @@ CloudFront の証明書（ACM）は、どの方法でも影響を受けない。
 | 証明書 | 確かめ方 |
 |---|---|
 | CloudFront の証明書 | ACM の `DaysToExpiry`（CloudWatch のメトリクス） |
-| オリジンの証明書 | 踏み台サーバーから [`cert-expiry-check.sh`](../port-guard-rollout/certificate-expiry-check.md) で稼働サーバーの 443 番へ接続する。稼働サーバーのセキュリティグループを CloudFront のプレフィックスリストに絞った後も、踏み台サーバーからの 443 番の許可を残す |
+| オリジンの証明書 | 踏み台サーバーから [`cert-expiry-check.sh`](../ec2-port-guard-rollout/certificate-expiry-check.md) で稼働サーバーの 443 番へ接続する。稼働サーバーのセキュリティグループを CloudFront のプレフィックスリストに絞った後も、踏み台サーバーからの 443 番の許可を残す |
 
 ## 確かめたこと・確かめていないこと
 

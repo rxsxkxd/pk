@@ -4,7 +4,7 @@
 >
 > 同じ要件のほかの層: [Apache で絞る](./access-restriction-apache.md)、[アプリ（Rails）で絞る](./access-restriction-rails-app.md)、[ロードバランサー・CloudFront を前に置くとき](./access-restriction-alb-cloudfront.md)
 >
-> 作業の手順（iptables ＋ ipset の案。採用）: [port-guard-rollout の手順](../../port-guard-rollout/steps.md)
+> 作業の手順（iptables ＋ ipset の案。採用）: [port-guard-rollout の手順](../../../ec2-port-guard-rollout/steps.md)
 >
 > 作成日: 2026-10-28
 
@@ -27,8 +27,8 @@ iptables ＋ ipset の案は採用が決まり、詳細は道具の側に移し�
 
 | 内容 | 移した先 |
 |---|---|
-| 仕組み、日本の IP の範囲の取り方、事前の確認（すでに入っているか・有効か、Session Manager で入れるか、受信のポートを全部閉じた場合）、入れて有効にするときの挙動、手で確かめる・外す方法 | [iptables ＋ ipset の仕組みと確認](../../port-guard-rollout/iptables-ipset.md) |
-| 作業の手順（複数台をまとめて行う道具の使い方） | [手順](../../port-guard-rollout/steps.md) |
+| 仕組み、日本の IP の範囲の取り方、事前の確認（すでに入っているか・有効か、Session Manager で入れるか、受信のポートを全部閉じた場合）、入れて有効にするときの挙動、手で確かめる・外す方法 | [iptables ＋ ipset の仕組みと確認](../../../ec2-port-guard-rollout/iptables-ipset.md) |
+| 作業の手順（複数台をまとめて行う道具の使い方） | [手順](../../../ec2-port-guard-rollout/steps.md) |
 
 確定した内容: 絞るのは **80・443 番だけ**（SSH の 22 番は絞らない）。SSM の導入を前提にする。
 
@@ -80,7 +80,7 @@ sudo systemctl enable --now firewalld
 
 ## 気を付けること
 
-iptables ＋ ipset の案での注意（Let's Encrypt の更新への影響、位置の判定、IPv6 など）は、[iptables ＋ ipset の仕組みと確認の「気を付けること」](../../port-guard-rollout/iptables-ipset.md#気を付けること) に移した。
+iptables ＋ ipset の案での注意（Let's Encrypt の更新への影響、位置の判定、IPv6 など）は、[iptables ＋ ipset の仕組みと確認の「気を付けること」](../../../ec2-port-guard-rollout/iptables-ipset.md#気を付けること) に移した。
 
 ## 決めること
 

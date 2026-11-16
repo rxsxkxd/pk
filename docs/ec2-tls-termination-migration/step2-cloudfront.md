@@ -145,7 +145,7 @@ aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
 #   変更セットを確かめて反映する
 ```
 
-`cloudfront_certificate_arn` が空だと、このスタックは合成されない（標準エラーに「定義しなかったスタック」と出る。`cdk synth`・`cdk deploy` は、そのスタック名が見つからないとして止まる見込み）。
+`cloudfront_certificate_arn` が空だと、このスタックは合成されない（標準エラーに「定義しなかったスタック」と出る。`cdk synth <スタック名>` は `No stacks match the name(s)` で止まる。2026-11-13 に確かめた）。
 
 ディストリビューションの主な設定（定義に入っている）:
 

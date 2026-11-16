@@ -83,13 +83,9 @@ docs/ec2/
 │
 │  ── 今の環境（AL2）への暫定対応の道具 ──
 ├── ssm-setup/                         # 暫定対応のフェーズ 1: 運用中のインスタンスを SSM で入れる状態にする道具（IAM ロールの関連付け、SSM Agent の導入、SSM で入れるかの確認。AWS の操作は Ruby の rb/、接続の確認は sh の command/connect/、インスタンスの中の操作は sh の command/instance/。手順の正本は steps.md）
-├── port-guard-rollout/                # 暫定対応のフェーズ 2: 80・443 番を国内だけに絞る設定（iptables ＋ ipset）を複数台に入れる道具（AWS CLI を呼ぶ道具を py/・sh/・rb/ に言語ごとに置き、インスタンスに送るものは remote/ で共用。手順の正本は steps.md）と、試す相手になる今の構成に近いインスタンスの Docker の定義（al2-instance/）
-├── api-access-sources/              # port-guard を有効にする前に、Apache のアクセスログから API の送り元の IP を洗い出し、日本・許可・AWS・それ以外に分ける道具（設計の段階。設計は design.md）
+│  （暫定対応のフェーズ 2 の port-guard-rollout と、その前に API の送り元を洗い出す api-access-sources は、docs/ec2-port-guard-rollout/ に移した）
 ├── sg-ssh-restrict/                 # セキュリティグループの 22 番（SSH）を許可する範囲に絞る Ruby の道具（規則を直す・付け替えるの 2 通り。説明は README.md）
 ├── al2-update/                      # 運用中の AL2 のインスタンスで OS のパッケージを yum で複数台まとめて更新する Ruby の道具（更新の確認、バックアップ、1 台ずつの更新。インスタンスに送るものは remote/。説明は README.md）
-│
-│  ── SSL/TLS の終端の移行の検討 ──
-├── tls-termination-migration/       # EC2 の httpd が終端している SSL/TLS を CloudFront へ移す（B. CloudFront → EC2）。ACM の証明書 → CloudFront → DNS の向き先の 3 ステップの手順と定義。ALB を使う構成は options/（検討と手順の下書き）
 │
 │  ── リリースの仕組みの設計ドキュメント ──
 ├── ami-build-pipeline.md              # 全体の設計（リリース検証 → AMI 化 → 起動テンプレート）
@@ -119,8 +115,7 @@ docs/ec2/
 │       ├── ssm-session-manager-operations.md  # SSM Session Manager による EC2 運用
 │       ├── amazon-linux-2023-operations-tips.md # Amazon Linux 2023 の運用のチップス（セキュリティ更新の扱いなど）
 │       ├── access-restriction-os-firewall.md  # 暫定対応: OS（iptables ＋ ipset、または firewalld）で国内だけに絞る
-│       ├── access-restriction-os-firewall-work-plan.md # 上の iptables ＋ ipset の案の作業計画（port-guard-rollout/steps.md に移した）
-│       ├── access-restriction-rollout-script-design.md # 設計: 複数台に入れるスクリプト（検討の経緯。確定した手順は port-guard-rollout/steps.md）
+│       │   （port-guard の作業計画 access-restriction-os-firewall-work-plan.md と、複数台に入れるスクリプトの設計 access-restriction-rollout-script-design.md は、docs/ec2-port-guard-rollout/notes/ に移した）
 │       ├── firewalld-overview.md          # 補足: firewalld とは何か（利点と、向いている場面）
 │       ├── access-restriction-apache.md       # 暫定対応: Apache で国内だけに絞る（mod_maxminddb）
 │       ├── access-restriction-rails-app.md    # 暫定対応: アプリ（Rails 4.2）で国内だけに絞る（Rack::Attack）

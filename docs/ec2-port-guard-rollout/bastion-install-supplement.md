@@ -18,7 +18,7 @@
 
 **注意: Let's Encrypt の証明書を certbot で更新している台は、この手順を入れると、そのままでは証明書の更新が失敗する**。対応は、[手順のドキュメント](./bastion-install-commands.md) のステップ 7（更新の間だけ 80 番を開ける hook）。設計の理由は、後の「これから入れる運用の仕組み」の「A. Let's Encrypt の更新の間だけ 80 番を開ける」。本番で絞り込みを有効にしたら、次の証明書の更新の前に、これを入れる。
 
-**前提: 対象のサーバーは、インターネットから直接 80・443 番を受けている**（ロードバランサー（ALB）や CloudFront を前に置いていない）。前に置くと、対象のサーバーから見た送り元が利用者ではなくなるので、この手順では国で絞れない（そのまま入れると、すべての通信が止まることもある）。前に置くときの考え方は [ロードバランサー・CloudFront を前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)。
+**前提: 対象のサーバーは、インターネットから直接 80・443 番を受けている**（ロードバランサー（ALB）や CloudFront を前に置いていない）。前に置くと、対象のサーバーから見た送り元が利用者ではなくなるので、この手順では国で絞れない（そのまま入れると、すべての通信が止まることもある）。前に置くときの考え方は [ロードバランサー・CloudFront を前に置くときの国での絞り込み](../ec2/notes/ec2-operations/access-restriction-alb-cloudfront.md)。
 
 ## 読む前に知っておくこと
 
@@ -276,7 +276,7 @@ hook の置き場所（`/etc/letsencrypt/renewal-hooks/`）が効くのは、証
 | 方法 | 採らない理由 |
 |---|---|
 | DNS で確かめる方式（DNS-01、Route 53） | 80 番を開ける必要がなくなるが、certbot の Route 53 用の追加の部品の導入（Amazon Linux 2 では入れにくい）と、サーバーに Route 53 を書き換える権限を持たせることが要る |
-| ロードバランサー・CloudFront で AWS Certificate Manager の証明書を使う | 今は前に何も置いていない。構成を大きく変える（[ロードバランサー・CloudFront を前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)） |
+| ロードバランサー・CloudFront で AWS Certificate Manager の証明書を使う | 今は前に何も置いていない。構成を大きく変える（[ロードバランサー・CloudFront を前に置くときの国での絞り込み](../ec2/notes/ec2-operations/access-restriction-alb-cloudfront.md)） |
 
 #### A-6. 今の仕様での、証明書の期限切れのリスク
 
@@ -299,7 +299,7 @@ hook の置き場所（`/etc/letsencrypt/renewal-hooks/`）が効くのは、証
 
 期限切れの原因になりそうなのは、実質的に port-guard の導入で 80 番を絞ることである。今の運用で更新が通っているなら、その状態自体に危険はない。絞り込みを入れた後も、この hook が効いていることを 1 度確かめれば、cron の頻度を今すぐ変える必要はない。
 
-Let's Encrypt の有効期間は短くなる予定なので（[有効期間の短縮の予定](../notes/instance-provisioning/letsencrypt-certificate-timing.md#有効期間の短縮の予定)）、そのときに cron の頻度を見直す。残り日数の確かめ方は [証明書の期限の確認](./certificate-expiry-check.md)。
+Let's Encrypt の有効期間は短くなる予定なので（[有効期間の短縮の予定](../ec2/notes/instance-provisioning/letsencrypt-certificate-timing.md#有効期間の短縮の予定)）、そのときに cron の頻度を見直す。残り日数の確かめ方は [証明書の期限の確認](./certificate-expiry-check.md)。
 
 ### B. 日本の範囲の一覧を定期に新しくする（S3 の案。2026-11-09 に見送り）
 

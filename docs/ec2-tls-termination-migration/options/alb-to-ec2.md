@@ -152,7 +152,7 @@ aws elbv2 create-rule --listener-arn <HTTPS リスナーの ARN> --priority 10 \
 
 ### 6. 国で絞るなら WAF を付ける
 
-要件があれば、ALB と同じリージョンに web ACL を作り、国の条件を入れて関連付ける。内容は[国での絞り込みの案 B](../../notes/ec2-operations/access-restriction-alb-cloudfront.md#案-b-alb--aws-waf-の国の条件--セキュリティグループで-alb-だけ)。
+要件があれば、ALB と同じリージョンに web ACL を作り、国の条件を入れて関連付ける。内容は[国での絞り込みの案 B](../../ec2/notes/ec2-operations/access-restriction-alb-cloudfront.md#案-b-alb--aws-waf-の国の条件--セキュリティグループで-alb-だけ)。
 
 ```bash
 aws wafv2 associate-web-acl --region <リージョン> \

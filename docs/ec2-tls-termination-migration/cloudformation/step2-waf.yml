@@ -1,23 +1,52 @@
+# ステップ 2（step2-cloudfront.yml より先）: CloudFront 用の AWS WAF の web ACL。国の絞り込みだけを行う。
+#
+# - 置くリージョン: us-east-1（CloudFront 用の web ACL、つまりスコープ CLOUDFRONT のものは us-east-1 に作る決まり）
+# - スタック名の例: <prefix>-step2-waf（例 myapp-production-step2-waf）。web ACL と IP セットの名前にも使う
+# - デプロイの例:
+#     aws cloudformation deploy --region us-east-1 \
+#       --template-file cloudformation/step2-waf.yml \
+#       --stack-name <prefix>-step2-waf \
+#       [--parameter-overrides AllowedCountries=JP ExceptionIpv4Addresses=192.0.2.44/32]
+# - ルールは 2 つ。評価は優先順位（Priority）の小さい順で、どれにも当たらなければ通す（DefaultAction）
+#     0. AllowAcmeChallenge: Let's Encrypt の HTTP-01 の確認のパスは、どの国からも通す
+#     1. BlockOutsideAllowedCountries: 許可する国でなく、例外の IP でもない要求を止める（CloudFront が 403 を返す）
+# - AWS のマネージドルールとログは入れていない（入れ方は options/waf-managed-rules.md）
+# - 同じ内容の CDK の定義: cdk/python の <prefix>-step2-waf（手順のステップ 2 は CDK を使う）
+#
+# Description（英語）は CloudFormation のスタックの説明として出る。日本語の説明はこのコメントだけに書く
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Step 2 of CloudFront -> EC2 (deploy before step2-cloudfront.yml): AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed countries
   (with IP exceptions), except the Let's Encrypt HTTP-01 challenge path. Deploy this stack in us-east-1.
 
+# ---- パラメータ（デプロイのときに --parameter-overrides で渡す値） ----
 Parameters:
+  # 許可する国。送り元の IP アドレスから WAF が判定した国が、この一覧になければ止める（例外の IP は除く）。
+  # 値: ISO 3166-1 alpha-2 の国コードをカンマで区切る（例 JP、JP,US）。既定は JP だけ
   AllowedCountries:
     Type: CommaDelimitedList
     Default: JP
     Description: ISO 3166-1 alpha-2 country codes allowed to reach the distribution.
+
+  # 許可する国の外からでも通す IPv4 アドレス（任意）。海外から使う相手（海外の拠点、外部の監視など）のため。
+  # 値: CIDR をカンマで区切る（例 192.0.2.44/32、192.0.2.44/32,198.51.100.0/24）。既定は空（例外なし）。
+  # 例外の IP も、国の絞り込み以外のルール（今はない）は通る
   ExceptionIpv4Addresses:
     Type: CommaDelimitedList
     Default: ""
     Description: Optional. IPv4 CIDRs allowed from outside AllowedCountries, such as 192.0.2.44/32.
+
+  # 許可する国の外からでも通す IPv6 アドレス（任意）。
+  # 値: CIDR をカンマで区切る（例 2001:db8::1/128）。既定は空（例外なし）。
+  # CloudFront は IPv6 を無効にしている（step2-cloudfront.yml）ので、利用者は IPv4 で来る。普段は空のままでよい
   ExceptionIpv6Addresses:
     Type: CommaDelimitedList
     Default: ""
     Description: Optional. IPv6 CIDRs allowed from outside AllowedCountries, such as 2001:db8::1/128.
 
+# ---- 規則（デプロイの前に CloudFormation が確かめる条件） ----
 Rules:
+  # us-east-1 以外のリージョンでデプロイしようとしたら止める（スコープ CLOUDFRONT の web ACL は us-east-1 だけ）
   MustBeInUsEast1:
     Assertions:
       - Assert:
@@ -26,33 +55,44 @@ Rules:
             - us-east-1
         AssertDescription: A web ACL for CloudFront (CLOUDFRONT scope) must be created in us-east-1.
 
+# ---- 条件（パラメータの値で、作るものを切り替える） ----
 Conditions:
+  # 例外の IPv4 アドレスが 1 つ以上あるとき真。
+  # CommaDelimitedList の既定値 "" は [""]（空の文字列 1 つ）になるので、つなげて空かどうかで判定する
   HasExceptionIpv4:
     Fn::Not:
       - Fn::Equals:
           - Fn::Join: ["", {Ref: ExceptionIpv4Addresses}]
           - ""
+  # 例外の IPv6 アドレスが 1 つ以上あるとき真（判定の仕方は上と同じ）
   HasExceptionIpv6:
     Fn::Not:
       - Fn::Equals:
           - Fn::Join: ["", {Ref: ExceptionIpv6Addresses}]
           - ""
 
+# ---- リソース ----
 Resources:
-  # The IP sets always exist (possibly empty) so that adding an exception is a parameter change only.
+  # 例外の IPv4 アドレスの一覧（IP セット）。WAF のルールには IP を直接書けないので、別のリソースにして ARN で参照する。
+  # 1 つの IP セットには IPv4 か IPv6 の一方しか入れられないので、IPv6 は下の別の IP セットにする。
+  # 空でも作っておく（例外を足すときに、パラメータを変えて更新するだけで済むように）
   ExceptionIpv4Set:
     Type: AWS::WAFv2::IPSet
     Properties:
+      # 名前: <スタック名>-exception-ipv4。作った後は変えられない（変えると作り直しになる）
       Name:
         Fn::Sub: ${AWS::StackName}-exception-ipv4
+      # CLOUDFRONT: CloudFront 用（web ACL と同じスコープにする）
       Scope: CLOUDFRONT
       IPAddressVersion: IPV4
+      # 例外がなければ空の一覧（[""] のままだと不正な値になるため、条件で [] にする）
       Addresses:
         Fn::If:
           - HasExceptionIpv4
           - Ref: ExceptionIpv4Addresses
           - []
 
+  # 例外の IPv6 アドレスの一覧（IP セット）。中身は上の IPv4 と同じ形
   ExceptionIpv6Set:
     Type: AWS::WAFv2::IPSet
     Properties:
@@ -66,61 +106,79 @@ Resources:
           - Ref: ExceptionIpv6Addresses
           - []
 
+  # web ACL 本体。step2-cloudfront.yml の CloudFrontWebAclArn で CloudFront に関連付ける
   WebAcl:
     Type: AWS::WAFv2::WebACL
     Properties:
+      # 名前: スタック名と同じ（例 myapp-production-step2-waf）
       Name:
         Ref: AWS::StackName
       Scope: CLOUDFRONT
       Description: Allowed countries and IP exceptions, ACME challenge path.
+      # どのルールにも当たらない要求（許可する国か、例外の IP から来た要求）は通す
       DefaultAction:
         Allow: {}
+      # web ACL 全体の CloudWatch のメトリクスと、サンプルの要求（WAF のコンソールで見られる）を有効にする。
+      # メトリクスとサンプルの設定は、web ACL にもどのルールにも必須
       VisibilityConfig:
         SampledRequestsEnabled: true
         CloudWatchMetricsEnabled: true
         MetricName:
           Ref: AWS::StackName
       Rules:
-        # Let's Encrypt validates from several countries. Allow only the challenge path from anywhere.
-        # URL_DECODE then NORMALIZE_PATH so that ".." or "%2e%2e" cannot escape the prefix.
+        # 0. 確認のパスは、どの国からも通す。Let's Encrypt は複数の国から確認に来るため、国で絞ると
+        #    オリジンの証明書（EC2 の Let's Encrypt）の HTTP-01 の更新が止まる。
+        #    Allow はそこで評価を終えるので、この要求には次の国の絞り込みが効かない
         - Name: AllowAcmeChallenge
           Priority: 0
           Action:
             Allow: {}
           Statement:
             ByteMatchStatement:
+              # 比べる対象: URL のパス（クエリ文字列は含まない）
               FieldToMatch:
                 UriPath: {}
+              # パスが SearchString で始まるとき当たる
               PositionalConstraint: STARTS_WITH
               SearchString: /.well-known/acme-challenge/
+              # 比べる前の変換。URL のデコード（%2e → .）→ パスの正規化（.. や重複した / を解く）の順。
+              # /.well-known/acme-challenge/../../admin や %2e%2e のように、確認のパスで始めて外へ出る要求を通さないため
               TextTransformations:
                 - Priority: 0
                   Type: URL_DECODE
                 - Priority: 1
                   Type: NORMALIZE_PATH
+          # メトリクスの名前はルールの名前と同じにする（どのルールに当たったかが分かる）
           VisibilityConfig:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
             MetricName: AllowAcmeChallenge
 
-        # Block when the country is not allowed and the address is not an exception.
+        # 1. 国が許可されておらず、例外の IP でもないときに止める。
+        #    WAF には「止める。ただしこの IP は除く」という書き方がないので、
+        #    「許可する国でない」かつ「IPv4 の例外でない」かつ「IPv6 の例外でない」を NOT と AND で組む。
+        #    国は、CloudFront に接続した送り元の IP で判定する（X-Forwarded-For は使わない。利用者が書き換えられるため）
         - Name: BlockOutsideAllowedCountries
           Priority: 1
+          # 止める。CloudFront は利用者に 403 を返す
           Action:
             Block: {}
           Statement:
             AndStatement:
               Statements:
+                # 許可する国（AllowedCountries）でない
                 - NotStatement:
                     Statement:
                       GeoMatchStatement:
                         CountryCodes:
                           Ref: AllowedCountries
+                # 例外の IPv4 アドレスでない
                 - NotStatement:
                     Statement:
                       IPSetReferenceStatement:
                         Arn:
                           Fn::GetAtt: [ExceptionIpv4Set, Arn]
+                # 例外の IPv6 アドレスでない
                 - NotStatement:
                     Statement:
                       IPSetReferenceStatement:
@@ -131,7 +189,10 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: BlockOutsideAllowedCountries
 
+# ---- 出力（次のステップに渡す値） ----
 Outputs:
+  # web ACL の ARN（arn:aws:wafv2:us-east-1:<アカウント>:global/webacl/<名前>/<ID>）。
+  # step2-cloudfront.yml の CloudFrontWebAclArn（CDK なら設定値の cloudfront_web_acl_arn）に渡す
   WebAclArn:
     Description: Pass this value as CloudFrontWebAclArn of step2-cloudfront.yml.
     Value:

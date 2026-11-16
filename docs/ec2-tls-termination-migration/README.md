@@ -4,7 +4,7 @@
 >
 > 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-12）。Apache の設定は、今の構成に近いコンテナで確かめた（2026-11-10）。定義（CloudFormation の YAML と CDK）は `cfn-lint` と合成まで（`cdk` の CLI の `cdk synth` も 2026-11-13 に確かめた）、ステップ 3 のシェルスクリプトは構文の確認まで確かめた（2026-11-12）。**AWS のコマンドは実行しておらず、実際の CloudFront・ACM・Route 53 では試していない**。
 >
-> 関連: [前に置くときの国での絞り込み](../notes/ec2-operations/access-restriction-alb-cloudfront.md)、[稼働サーバーの前に置く構成と料金の考え方](../notes/instance-provisioning/cloudfront-alb-front-options.md)、[Let's Encrypt の扱い](../notes/instance-provisioning/letsencrypt-certificate-timing.md)
+> 関連: [前に置くときの国での絞り込み](../ec2/notes/ec2-operations/access-restriction-alb-cloudfront.md)、[稼働サーバーの前に置く構成と料金の考え方](../ec2/notes/instance-provisioning/cloudfront-alb-front-options.md)、[Let's Encrypt の扱い](../ec2/notes/instance-provisioning/letsencrypt-certificate-timing.md)
 >
 > 作成日: 2026-11-09（3 ステップの形に書き直した: 2026-11-12）
 
@@ -102,7 +102,7 @@ flowchart TD
 | # | 論点 | 決めたこと |
 |---|---|---|
 | T1 | 何のために移すのか | **WAF による防御**（2026-11-11） |
-| T2 | 3 つの構成のどれにするか | **B. CloudFront → EC2**（2026-11-11）。対象が多数の台なら、[ALB を共有する案](../notes/instance-provisioning/cloudfront-alb-front-options.md#今の運用物件ごとの単体のサーバーに当てはめた選択肢)も含めて考え直す |
+| T2 | 3 つの構成のどれにするか | **B. CloudFront → EC2**（2026-11-11）。対象が多数の台なら、[ALB を共有する案](../ec2/notes/instance-provisioning/cloudfront-alb-front-options.md#今の運用物件ごとの単体のサーバーに当てはめた選択肢)も含めて考え直す |
 | T3 | `old_app_a` の扱い | **平文の HTTP のまま残す相手はいない前提**で、[443 番へ移す](./cloudfront-to-ec2-httpd.md#6-old_app_a-を-443-番へ移す)（2026-11-11） |
 | T4 | 国で絞る場所 | **WAF**（確認のパスだけを例外にする。2026-11-11）。この移行の対象の台には port-guard を入れていない（port-guard-rollout の対象は別の台。2026-11-11）ので、port-guard を外す作業はない |
 | T5 | オリジンの証明書の更新の経路 | **CloudFront と WAF を経た HTTP-01**（T4 に伴う。[cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
@@ -116,12 +116,12 @@ flowchart TD
 
 | 項目 | 内容 |
 |---|---|
-| IP で直接つないでいる相手 | Elastic IP を指定して API を呼んでいる相手は、切り替えの後も CloudFront を通らず稼働サーバーへ向かい、片付けの後はセキュリティグループで止まる。[API のアクセス元の洗い出し](../api-access-sources/design.md)で探す |
+| IP で直接つないでいる相手 | Elastic IP を指定して API を呼んでいる相手は、切り替えの後も CloudFront を通らず稼働サーバーへ向かい、片付けの後はセキュリティグループで止まる。[API のアクセス元の洗い出し](../ec2-port-guard-rollout/api-access-sources/design.md)で探す |
 | 外部に Elastic IP を伝えている先 | 稼働サーバーから外へ出る通信の送り元は変わらない。Elastic IP を外すときだけ影響する |
 | 古い TLS しか話せない相手 | CloudFront のセキュリティポリシー（TLSv1.2_2021）で受ける TLS のバージョンが変わる |
 | HTTP から HTTPS へのリダイレクト | `POST` で HTTP を呼ぶ API のクライアントは、リダイレクトで動かなくなることがある |
 | Rails の `force_ssl`、Secure の Cookie、URL の生成 | Rails が元の接続を HTTPS と認識できることが前提（コンテナで確かめた。[検証の結果](./cloudfront-to-ec2-httpd.md#検証の結果)） |
-| AL2023 での作り直し | この移行を[作り直し](../initial-image-build/existing-system-rebuild-on-al2023.md)と同時に行うなら、新しい土台の Apache の設定に最初から入れる |
+| AL2023 での作り直し | この移行を[作り直し](../ec2/initial-image-build/existing-system-rebuild-on-al2023.md)と同時に行うなら、新しい土台の Apache の設定に最初から入れる |
 
 ## 参考
 

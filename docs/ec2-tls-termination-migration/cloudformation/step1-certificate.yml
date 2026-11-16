@@ -1,13 +1,39 @@
+# ステップ 1: CloudFront の証明書（利用者と CloudFront の間で使う証明書）を、ACM に作成してもらう。
+#
+# - 置くリージョン: us-east-1（CloudFront に付ける ACM の証明書は us-east-1 にある決まり）
+# - スタック名の例: <prefix>-step1-certificate（例 myapp-production-step1-certificate）
+# - デプロイの例:
+#     aws cloudformation deploy --region us-east-1 \
+#       --template-file cloudformation/step1-certificate.yml \
+#       --stack-name <prefix>-step1-certificate \
+#       --parameter-overrides DomainName=app.example.com [HostedZoneId=<ホストゾーン ID>]
+# - 作るのは ACM の「証明書」（通常の公開証明書）。「ACME 証明書」ではない（ACME 証明書は CloudFront に付けられない）
+# - 既存の証明書を ACM に登録（インポート）する場合は、このテンプレートを使わず AWS CLI で行う
+#   （CloudFormation は登録に対応していない。step1-acm-certificate.md の 1-B）
+# - 同じ内容の CDK の定義: cdk/python の <prefix>-step1-certificate。1 つの環境ではどちらか一方だけを使う
+#   （論理 ID が違うので、混ぜると証明書が作り直される）
+#
+# Description（英語）は CloudFormation のスタックの説明として出る。日本語の説明はこのコメントだけに書く
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Step 1 of CloudFront -> EC2: ACM certificate for the viewer domain name of CloudFront.
   Deploy this stack in us-east-1. Importing an existing certificate is done with the AWS CLI instead,
   because CloudFormation cannot import certificates into ACM.
 
+# ---- パラメータ（デプロイのときに --parameter-overrides で渡す値） ----
 Parameters:
+  # 利用者のドメイン名。証明書の名前（CN と SAN）になる。
+  # 値: 利用者がブラウザで使う名前そのもの（例 app.example.com）。この移行では変えない。
+  # ステップ 2 の CloudFront の代替ドメイン名（step2-cloudfront.yml の DomainName）と同じ値にする
   DomainName:
     Type: String
     Description: Domain name used by viewers, such as app.example.com.
+
+  # DomainName の Route 53 のホストゾーン ID（任意）。
+  # 値: ホストゾーン ID（例 Z0123456789ABCDEFGHIJ）か、空。
+  #   指定する（ステージング。Route 53）: ACM の検証用の CNAME を CloudFormation が自動で作り、数分で発行される見込み
+  #   空（既定。本番。外部の DNS サービス）: ACM が示す検証用の CNAME を、スタックの作成中に手で DNS に足す。
+  #     足すまでスタックは CREATE_IN_PROGRESS のまま待つ。72 時間以内に足さないと検証が時間切れになる
   HostedZoneId:
     Type: String
     Default: ""
@@ -15,7 +41,10 @@ Parameters:
       Optional. Route 53 hosted zone of DomainName. When set, CloudFormation creates the DNS validation record.
       When empty, add the validation CNAME that ACM shows to your DNS provider while the stack is being created.
 
+# ---- 規則（デプロイの前に CloudFormation が確かめる条件） ----
 Rules:
+  # us-east-1 以外のリージョンでデプロイしようとしたら止める。
+  # 他のリージョンでも証明書は作れてしまうが、CloudFront に付けられないため
   MustBeInUsEast1:
     Assertions:
       - Assert:
@@ -24,20 +53,30 @@ Rules:
             - us-east-1
         AssertDescription: CloudFront requires the ACM certificate to be in us-east-1.
 
+# ---- 条件（パラメータの値で、作るものを切り替える） ----
 Conditions:
+  # HostedZoneId が空でない（Route 53 で自動で検証する）とき真
   HasHostedZone:
     Fn::Not:
       - Fn::Equals:
           - Ref: HostedZoneId
           - ""
 
+# ---- リソース ----
 Resources:
+  # ACM の証明書。DNS 検証で発行してもらう。
+  # ACM は、検証用の CNAME が DNS に残っていて、証明書が使われている（CloudFront に付いている）間、自動で更新する。
+  # 検証用の CNAME は消さない（消すと自動更新が止まる）
   Certificate:
     Type: AWS::CertificateManager::Certificate
     Properties:
+      # 証明書に入れる名前（利用者のドメイン名だけ。別名は足さない）
       DomainName:
         Ref: DomainName
+      # DNS: ドメインの DNS に CNAME を置いて、持ち主であることを示す（メール検証は使わない）
       ValidationMethod: DNS
+      # ホストゾーンを指定したときだけ、どのゾーンに検証用のレコードを作るかを渡す。
+      # 空のときは書かない（AWS::NoValue）。その場合 ACM が示す CNAME を手で足す
       DomainValidationOptions:
         Fn::If:
           - HasHostedZone
@@ -47,7 +86,10 @@ Resources:
                 Ref: HostedZoneId
           - Ref: AWS::NoValue
 
+# ---- 出力（次のステップに渡す値） ----
 Outputs:
+  # 証明書の ARN（arn:aws:acm:us-east-1:<アカウント>:certificate/<ID>）。
+  # ステップ 2 の step2-cloudfront.yml の CloudFrontCertificateArn（CDK なら設定値の cloudfront_certificate_arn）に渡す
   CertificateArn:
     Description: Pass this value as CloudFrontCertificateArn of step2-cloudfront.yml.
     Value:

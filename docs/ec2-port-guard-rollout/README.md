@@ -6,9 +6,9 @@
 
 今の環境（Amazon Linux 2・Apache・Passenger・Rails 4.2）の運用中のインスタンスに、**80・443 番を国内（日本）と許可した IP だけに絞る設定**（OS の iptables ＋ ipset）を、**複数台まとめて**入れる。SSH の 22 番は既定では絞らない（外部からの SSH はセキュリティグループで弾く前提。必要なら `install --include-ssh` で対象にできる）。作業者の PC で動き、AWS CLI のコマンドと、SSM の Run Command（または SSH）で各インスタンスを操作する。
 
-作業は 2 つのフェーズに分けている。**このフォルダはフェーズ 2**（国内だけに絞る設定の導入）で、その前に、フェーズ 1 として [ssm-setup](../ssm-setup/README.md) で SSM を使えるようにしておく（IAM ロールの関連付け、SSM Agent の導入、SSM で入れるかの確認）。
+作業は 2 つのフェーズに分けている。**このフォルダはフェーズ 2**（国内だけに絞る設定の導入）で、その前に、フェーズ 1 として [ssm-setup](../ec2/ssm-setup/README.md) で SSM を使えるようにしておく（IAM ロールの関連付け、SSM Agent の導入、SSM で入れるかの確認）。
 
-AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../initial-image-build/existing-system-rebuild-on-al2023.md)）とは別の、**暫定対応**のための道具である。
+AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../ec2/initial-image-build/existing-system-rebuild-on-al2023.md)）とは別の、**暫定対応**のための道具である。
 
 ## ドキュメント
 
@@ -31,7 +31,7 @@ AL2023 での作り直し（[今の構成を AL2023 で作り直す検討](../in
 
 流れの図は [手順の「流れ」](./steps.md#流れ)（Mermaid）にある。SVG 版: [全体の流れ](images/flow-overall.svg)、[enable のインスタンスごとの流れ](images/flow-enable.svg)。
 
-フェーズ 1（[ssm-setup](../ssm-setup/README.md)）の接続の確認（`command/connect/ssm-connect-check.sh`）で「入れる」になった台を対象に、`backup` → `check`（補助）→ `install` → `enable` の順に使う。バックアップ（`backup`・`check`）は本体と分けて、別のコマンド `python3 -m port_guard_rollout_backup` にしている。
+フェーズ 1（[ssm-setup](../ec2/ssm-setup/README.md)）の接続の確認（`command/connect/ssm-connect-check.sh`）で「入れる」になった台を対象に、`backup` → `check`（補助）→ `install` → `enable` の順に使う。バックアップ（`backup`・`check`）は本体と分けて、別のコマンド `python3 -m port_guard_rollout_backup` にしている。
 
 ```bash
 cd port-guard-rollout/py
@@ -77,6 +77,6 @@ python3 -m unittest discover -s tests
 
 ## 関連ドキュメント
 
-- [ssm-setup（フェーズ 1。SSM の有効化）](../ssm-setup/README.md)
-- [検討の経緯: 設計（note）](../notes/ec2-operations/access-restriction-rollout-script-design.md)（チェックポイント、決めること C1〜C9 などの検討の記録）
-- [暫定対応: OS（iptables ＋ ipset、または firewalld）で絞る（note）](../notes/ec2-operations/access-restriction-os-firewall.md)（方式の比較。iptables ＋ ipset の詳細は [iptables-ipset.md](./iptables-ipset.md) に移した）
+- [ssm-setup（フェーズ 1。SSM の有効化）](../ec2/ssm-setup/README.md)
+- [検討の経緯: 設計（note）](./notes/access-restriction-rollout-script-design.md)（チェックポイント、決めること C1〜C9 などの検討の記録）
+- [暫定対応: OS（iptables ＋ ipset、または firewalld）で絞る（note）](../ec2/notes/ec2-operations/access-restriction-os-firewall.md)（方式の比較。iptables ＋ ipset の詳細は [iptables-ipset.md](./iptables-ipset.md) に移した）

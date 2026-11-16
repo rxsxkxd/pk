@@ -187,11 +187,18 @@ aws cloudformation execute-change-set --region <リージョン> \
 
 合成の結果を YAML と項目ごとに比べた（セキュリティグループ、ディストリビューション、証明書、WAF。オプションはターゲットグループ、リスナー、ルールも）。違いは次のとおりで、動作は同じ見込み。
 
+本線の 3 つ（ステップ 1・2）は、2026-11-16 に次の形で比べ直した。`config.example.yml`（`cloudfront_certificate_arn`・`cloudfront_web_acl_arn` に架空の ARN を入れた）から `cdk synth <スタック名>` で YAML を出し、`cloudformation/step*-*.yml` のパラメータに同じ値を当てはめて条件（`Fn::If`）を解き、リソースの型ごとにプロパティを比べた。Route 53 のホストゾーン、Elastic IP、例外の IP、地理的制限を書いた設定値でも比べ、条件で作るもの（オリジンの名前のレコード、ステップ 1 の自動検証、例外の IP の一覧、地理的制限の国）も一致した。WAF の web ACL と IP セットは、違いがなかった。
+
 | 項目 | YAML | CDK の出力 |
 |---|---|---|
+| 値の渡し方 | パラメータ（ステップ 1 は 2 つ、WAF は 3 つ、CloudFront は 14） | 設定値ファイルの値を埋め込む。パラメータは秘密のヘッダーの値（`OriginVerifyHeaderValue`）だけ |
+| 規則（`Rules`） | `us-east-1` の確認（ステップ 1・WAF）、オリジンの名前と利用者のドメイン名が違うことの確認、Elastic IP の確認 | なし。名前と Elastic IP の確認は合成のときに `configuration.py` が行い、リージョンはスタックの定義で決まる（`cdk deploy` ならそのリージョンに入る）。**CDK から出したテンプレートを AWS CLI で反映するとき（方法 2）は、`--region` を誤っても止まらない**（ステップ 1 と WAF は `us-east-1`） |
 | プレフィックスリストからの許可 | セキュリティグループの中に書く | 別のリソース（`AWS::EC2::SecurityGroupIngress`） |
 | オリジン用のグループの外向き | 省略（既定の全許可） | 全許可を明示 |
 | オリジンの `HTTPSPort` | `443` を明示 | 省略（既定の 443） |
+| オリジンの `Id`（`TargetOriginId` も） | `ec2-origin` | CDK が生成する名前 |
+| 地理的制限を使わないときの `Restrictions` | `RestrictionType: none` を明示 | 省略（既定の制限なし） |
+| `AllowedMethods` の並び | `PUT, POST, PATCH` | `PUT, PATCH, POST`（同じ 7 つのメソッド） |
 | ACM の証明書の `Name` タグ | なし | CDK が付ける |
 | 論理 ID | 短い名前 | CDK が生成する名前 |
 | ALB の `deletion_protection.enabled`（オプション） | 省略（既定の `false`） | `false` を明示 |

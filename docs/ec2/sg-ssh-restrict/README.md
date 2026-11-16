@@ -6,7 +6,7 @@
 
 22・80・443 番を許可しているセキュリティグループが付いたインスタンスで、**22 番だけを、許可する範囲（`--allow-cidr`）からだけ受けるように絞る**。80・443 番の規則は変えない。やり方を 2 つ用意していて、どちらも、変える前に確かめるだけのモード（`--check-only`）、変えた内容の記録、記録から元に戻す道具（`restore.rb`）を持つ。
 
-80・443 番を国内だけに絞るのは、規則の件数の上限があるので、セキュリティグループではなく [port-guard-rollout](../port-guard-rollout/README.md)（iptables ＋ ipset）で行う。22 番をここで絞れば、port-guard の `--include-ssh` は要らない。
+80・443 番を国内だけに絞るのは、規則の件数の上限があるので、セキュリティグループではなく OS の iptables ＋ ipset で行う（この道具の範囲外）。
 
 ## どちらを使うか
 
@@ -73,7 +73,7 @@ cd rb && bundle install && bundle exec rubocop
 | `rb/new_groups.rb` | B が付け替える先の 2 つのグループを用意する |
 | `rb/restore.rb` | 記録から元に戻す |
 | `rb/security_groups.rb` | セキュリティグループの読み書きの部品（22 番の規則の見分け方、規則の写し方、記録） |
-| `rb/lib.rb` | 共通の部品（port-guard-rollout・al2-update の `rb/lib.rb` と、もとは同じもの） |
+| `rb/lib.rb` | 共通の部品（al2-update の `rb/lib.rb` と、もとは同じもの） |
 | `rb/Gemfile`・`rb/.rubocop.yml` | 書き方の確認の rubocop だけを入れる。書き方は rubocop の既定（確かめる版を Ruby 2.6 にしているだけ） |
 
 どのスクリプトも 1 つのクラスで、流れの大枠を公開のメソッドとして上に並べ、ヘルパは `private` の下に分けている。

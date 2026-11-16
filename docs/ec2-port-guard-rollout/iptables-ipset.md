@@ -1,6 +1,6 @@
 # iptables ＋ ipset の仕組みと確認（port-guard）
 
-> 位置付け: `port-guard-rollout` がインスタンスに入れる仕組み（iptables ＋ ipset）の詳細。道具での手順は [手順](./steps.md)、入れた後の運用は [運用の手順](./operations.md)、iptables・ipset そのものの説明は [iptables と ipset の基本](./iptables-ipset-basics.md)。もとは [暫定対応: OS で絞る（note）](../notes/ec2-operations/access-restriction-os-firewall.md) にあった iptables ＋ ipset の記述を、確定した内容に合わせてここに移した。
+> 位置付け: `port-guard-rollout` がインスタンスに入れる仕組み（iptables ＋ ipset）の詳細。道具での手順は [手順](./steps.md)、入れた後の運用は [運用の手順](./operations.md)、iptables・ipset そのものの説明は [iptables と ipset の基本](./iptables-ipset-basics.md)。もとは [暫定対応: OS で絞る（note）](../ec2/notes/ec2-operations/access-restriction-os-firewall.md) にあった iptables ＋ ipset の記述を、確定した内容に合わせてここに移した。
 >
 > 更新日: 2026-10-29
 
@@ -174,7 +174,7 @@ aws ssm start-session --target "$INSTANCE_ID"
 | `PingStatus` が `ConnectionLost` | 以前は登録されていたが、今はつながっていない |
 | `Online` | 登録されている。`start-session` で実際に入れることまで確かめれば確実 |
 
-ネットワークの面では、インスタンスから AWS の窓口（`ssm`・`ssmmessages`・`ec2messages`）へ HTTPS（443 番）で出られる必要がある。インターネットに出られるか、VPC エンドポイントがあれば届く。セキュリティグループの受信の許可は要らない。Session Manager の使い方は [SSM Session Manager による EC2 運用](../notes/ec2-operations/ssm-session-manager-operations.md)。
+ネットワークの面では、インスタンスから AWS の窓口（`ssm`・`ssmmessages`・`ec2messages`）へ HTTPS（443 番）で出られる必要がある。インターネットに出られるか、VPC エンドポイントがあれば届く。セキュリティグループの受信の許可は要らない。Session Manager の使い方は [SSM Session Manager による EC2 運用](../ec2/notes/ec2-operations/ssm-session-manager-operations.md)。
 
 ### 補足: 受信のポートを全部閉じても、Session Manager でメンテナンスできるか
 

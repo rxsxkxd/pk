@@ -1,6 +1,7 @@
 #!/bin/bash
-# 踏み台サーバー（と一覧更新パイプラインの CodeBuild）で実行する。make-refresh.sh の後、人が確かめてから流す
-# S3 の公開場所に、ipset 入れ替えスクリプト（refresh-ipv4.sh・refresh-ipv6.sh）、今回使った個別許可の IP の一覧、
+# ローカル・踏み台サーバー・CI のどこでも実行できる。make-refresh.sh の後、人が確かめてから流す
+# S3 の公開場所に、ipset 入れ替えスクリプト（refresh-ipv4.sh・refresh-ipv6.sh）、今回使った個別許可の IP の一覧の写し
+# （正本はリポジトリの allow-lists/<環境>/。S3 のものは、上げたときに使った内容の記録）、
 # 前回分の IP の一覧（make-refresh.sh が今回の一覧で更新したもの。次の回の比較の基準）を上げ、最後に照合の値（SHA256SUMS）を上げる
 # 使い方: PORT_GUARD_S3_URI=s3://<バケット>/port-guard/<環境>/current bash command/publish-refresh-scripts.sh
 set -euo pipefail
@@ -20,8 +21,12 @@ for f in "${files[@]}"; do
   [ -f "$f" ] || { echo "${f} がない（make-refresh.sh を先に流す）"; exit 1; }
 done
 
-# 照合の値を先に作る（上げるのは最後）
-sha256sum "${files[@]}" > SHA256SUMS
+# 照合の値を先に作る（上げるのは最後）。sha256sum がない環境（古い macOS）では shasum を使う（出る形は同じ）
+if command -v sha256sum > /dev/null; then
+  sha256sum "${files[@]}" > SHA256SUMS
+else
+  shasum -a 256 "${files[@]}" > SHA256SUMS
+fi
 
 # 各ファイルを上げてから、最後に SHA256SUMS を上げる（取る側は、SHA256SUMS と合わない組を使わない）
 for f in "${files[@]}"; do

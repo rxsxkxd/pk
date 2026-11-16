@@ -38,7 +38,7 @@ ssh -oStrictHostKeyChecking=no -i ~/.ssh/key.pem centos@server 'bash' < ./comman
 | 項目 | 内容 |
 |---|---|
 | 流し方 | 上の「流し方」。複数台へは、踏み台サーバーにある今のスクリプトで |
-| ファイルの置き場所（踏み台サーバー） | 踏み台サーバーのカレントのフォルダの下に置く。**`command/` の直下には、踏み台サーバーで実行するものだけ**（ステップ 0-1 の `make-jp-lists.sh`、ステップ 0-3 の `make-aws-lists.sh`、ステップ 3-1 の `make-ipset-files-ipv4.sh`・`make-ipset-files-ipv6.sh`、一覧を新しくするときの `make-refresh.sh`、S3 に上げる人の作業フロー（[list-refresh-pipeline](./list-refresh-pipeline/README.md)）の `fetch-allow-and-last-lists.sh`・`publish-refresh-scripts.sh`、証明書の期限の確認の `cert-expiry-check.sh`）。**`command/port_guard/` の下には、対象のサーバーに送るものだけ**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 3 で作る `03-*.sh`、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくするときに作る `refresh-ipv4.sh`・`refresh-ipv6.sh`、保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、検証で集合の中身を書き出す `export-ipv4.sh`・`export-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するものは、カレントのフォルダで `bash command/<ファイル>.sh` と実行する（中で使う `port_guard_whitelists/` と `command/port_guard/` は、カレントのフォルダから見た場所）。一覧は `port_guard_whitelists/` |
+| ファイルの置き場所（踏み台サーバー） | 踏み台サーバーのカレントのフォルダの下に置く。**`command/` の直下には、踏み台サーバーで実行するものだけ**（ステップ 0-1 の `make-jp-lists.sh`、ステップ 0-3 の `make-aws-lists.sh`、ステップ 3-1 の `make-ipset-files-ipv4.sh`・`make-ipset-files-ipv6.sh`、一覧を新しくするときの `make-refresh.sh`、ipset 入れ替えスクリプトを作って S3 に上げる流れ（[ip-port-guard-rule-refresh-pipeline](./ip-port-guard-rule-refresh-pipeline/README.md)）の部品の `fetch-last-lists.sh`・`publish-refresh-scripts.sh`、証明書の期限の確認の `cert-expiry-check.sh`）。**`command/port_guard/` の下には、対象のサーバーに送るものだけ**（ステップ 0-2 の `00-vpc-cidr.sh`、ステップ 1〜6、ステップ 3 で作る `03-*.sh`、ステップ 7 の `07-letsencrypt-*.sh`、一覧を新しくするときに作る `refresh-ipv4.sh`・`refresh-ipv6.sh`、保存し直しの `save-ipv4.sh`・`save-ipv6.sh`、検証で集合の中身を書き出す `export-ipv4.sh`・`export-ipv6.sh`、サービスの確認・停止・無効化・アンインストールの `status.sh`・`stop.sh`・`disable.sh`・`uninstall.sh`・`purge.sh`）。踏み台サーバーで実行するものは、カレントのフォルダで `bash command/<ファイル>.sh` と実行する（中で使う `port_guard_whitelists/` と `command/port_guard/` は、カレントのフォルダから見た場所）。一覧は `port_guard_whitelists/` |
 | 日本の範囲の一覧を作る場所 | **踏み台サーバー**（IPv4 と IPv6）。対象のサーバーは APNIC に取りに行かない（対象のサーバーに `curl`・`python3` は要らない） |
 | 一覧の渡し方 | 一覧を、ステップ 3 のファイルの中に `ipset` に読ませる行（`add <集合> <範囲>`）として並べて送る。そのファイルは、踏み台サーバーで一覧から `command/make-ipset-files-ipv4.sh`（IPv6 は `-ipv6.sh`）で作る |
 | 実行する人 | `centos`。`root` の権限が要るコマンドは `sudo -n` |
@@ -169,7 +169,7 @@ echo "APNIC の版: ${VERSION}、IPv4: $(grep -vc '^#' port_guard_whitelists/jp-
 
 ### 0-2. 作業者が、許可する IP アドレスの一覧を書く
 
-踏み台サーバーに `port_guard_whitelists/allow-ipv4.txt`（と、IPv6 も絞るなら `port_guard_whitelists/allow-ipv6.txt`）を手で置く。1 行 1 件、CIDR でもよい、`#` から後はコメント、空の行は無視される。ここに書いた送り元は、日本の範囲に入っていなくても 80・443 番を受け付ける。
+踏み台サーバーに `port_guard_whitelists/allow-ipv4.txt`（と、IPv6 も絞るなら `port_guard_whitelists/allow-ipv6.txt`）を手で置く。**正本はリポジトリの [`allow-lists/<環境>/`](./allow-lists/README.md)**（2026-11-16 に決めた。環境は `development`・`staging`・`production`。今あるのは空の仮置きだけで、実際の一覧はまだ入れていない）。リポジトリにあればそれを写し、新しく書いた・書き直したときは、リポジトリにも同じ内容を入れる。1 行 1 件、CIDR でもよい、`#` から後はコメント、空の行は無視される。ここに書いた送り元は、日本の範囲に入っていなくても 80・443 番を受け付ける。
 
 書くもの:
 

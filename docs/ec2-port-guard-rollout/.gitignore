@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+# ip-port-guard-rule-refresh-pipeline の作業フォルダ（取ったもの・作ったもの）
+/ip-port-guard-rule-refresh-pipeline/work/

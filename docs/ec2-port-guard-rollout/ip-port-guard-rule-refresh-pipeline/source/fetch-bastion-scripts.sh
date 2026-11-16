@@ -1,4 +1,6 @@
 #!/bin/bash
+# [2026-11-16] 2026-11-14 の作りのままで、今は使えない（下の fetch-allow-and-last-lists.sh は fetch-last-lists.sh に変わった）。
+# CodePipeline の定義を作り直すときに、このファイルは要らなくなる見込み（README の「CodePipeline の定義」）
 # 踏み台サーバーの手順のスクリプトの取得スクリプト。一覧更新パイプラインの CodeBuild（一覧を作るビルド）の中で流す
 # （このファイルだけを圧縮した fetch-bastion-scripts.zip が、パイプラインのソース）
 # パイプライン用バケットの bastion-scripts/command/ から、踏み台サーバーの手順のスクリプト 5 つを command/ に取る。

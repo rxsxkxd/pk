@@ -4,6 +4,8 @@
 
 状態: ローカルでの合成・CloudFormation 版との照合・`cfn-lint` を確認した。AWS へのデプロイとパイプラインの実行はしていない。引き続き、用意だけしたオプションである。
 
+> **2026-11-14 の作りのままで、今のスクリプトでは動かない**（2026-11-16）。個別許可の IP の一覧の正本をリポジトリに移し、`command/fetch-allow-and-last-lists.sh` を `fetch-last-lists.sh` に変えたため。この README の「人の作業フロー」「踏み台サーバーの手順のスクリプト 5 つ」「共通の手順の 2〜5」も、2026-11-14 の作りの言葉のまま。合っていない点と作り直すときにすることは、[一覧更新パイプラインの README の「CodePipeline の定義」](../../README.md#codepipeline-の定義2026-11-14-の作りのまま作り直しが要る)にある。
+
 ## 定義の方針
 
 - CDK の L1 の構成要素（`CfnBucket`・`CfnRole`・`CfnProject`・`CfnPipeline` など）で定義する。既存の YAML を読み込む方式ではない。
@@ -25,7 +27,7 @@
 Python 3 と、jsii に対応する Node.js が要る。ライブラリは、このリポジトリの既存の CDK Python 版と同じ `aws-cdk-lib` 2.275.0・`constructs` 10.8.1 に固定している。
 
 ```bash
-cd port-guard-rollout/list-refresh-pipeline/cdk/python
+cd ec2-port-guard-rollout/ip-port-guard-rule-refresh-pipeline/cdk/python
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
@@ -85,7 +87,7 @@ aws cloudformation deploy \
 | `RequireApproval` | `true` | `false` にすると承認のステージを省く |
 | `LogRetentionInDays` | `90` | ビルドのログを残す日数 |
 
-出力は `PipelineName`・`PipelineBucketName`・`BastionScriptsUri`・`FetchScriptZipUri`・`PublishLocation`。スタックを作った後は、[共通の手順の 2〜5](../../README.md#パイプラインの使い方)で、踏み台サーバーの手順のスクリプト 5 つと取得スクリプトの圧縮ファイルを上げ、パイプラインを開始する。初回の個別許可の IP の一覧は、人の作業フローで上げておく。
+出力は `PipelineName`・`PipelineBucketName`・`BastionScriptsUri`・`FetchScriptZipUri`・`PublishLocation`。スタックを作った後は、共通の手順の 2〜5（2026-11-16 の書き直しで README から外した。Git の履歴の 2026-11-14 の版にある）で、踏み台サーバーの手順のスクリプト 5 つと取得スクリプトの圧縮ファイルを上げ、パイプラインを開始する。初回の個別許可の IP の一覧は、人の作業フローで上げておく。
 
 既存の CloudFormation 版と論理 ID はそろえているが、デプロイ済みのスタックを相互に更新する操作は未検証。既存環境の更新では変更セットを確認する。
 

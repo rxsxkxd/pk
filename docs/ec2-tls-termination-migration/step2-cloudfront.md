@@ -192,6 +192,10 @@ aws cloudformation describe-stacks --region ap-northeast-1 --stack-name <prefix>
 aws cloudfront list-distributions \
   --query "DistributionList.Items[?DomainName=='dxxxx.cloudfront.net'].Status" --output text
 
+# ステップ 1 の証明書が CloudFront に付いたこと
+aws acm describe-certificate --region us-east-1 --certificate-arn <ステップ 1 の ARN> \
+  --query 'Certificate.{Status:Status,InUseBy:InUseBy,RenewalEligibility:RenewalEligibility}'
+
 # オリジンの名前
 dig +short origin.app.example.com
 
@@ -202,6 +206,7 @@ curl -sv --connect-to app.example.com:443:dxxxx.cloudfront.net:443 https://app.e
 | 確認 | 期待 |
 |---|---|
 | スタック | `<prefix>-step2-waf`・`<prefix>-step2-cloudfront` が `CREATE_COMPLETE`、ディストリビューションが `Deployed` |
+| ステップ 1 の証明書（ACM のコンソールの欄） | `Status`（ステータス）が `ISSUED`（発行済み）のまま。`InUseBy`（使用中ですか?）にこのディストリビューションの ARN が入る（はい）。`RenewalEligibility`（更新の適格性）が `ELIGIBLE`（対象）になる（1-A の場合。ACM が自動で更新するようになる。1-B の登録した証明書は `INELIGIBLE` のまま）。`ELIGIBLE` への変わり方（すぐか、時間がかかるか）は確かめていない |
 | オリジンの名前 | `origin.app.example.com` が稼働サーバーの Elastic IP を返す |
 | 利用者に見える証明書 | ステップ 1 の ACM の証明書（発行元が Amazon）で、名前の誤りがない |
 | 応答の見出し | `Via` に `cloudfront.net`、`X-Cache` が `Miss from cloudfront` |
@@ -235,7 +240,7 @@ WAF は、海外の確認用の端末から同じく `--connect-to` で確かめ
 
 ## 参考
 
-AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-13）。CDK の CLI の参考は [cdk/python/README.md の参考](./cdk/python/README.md#参考)。WAF の参考は [definitions.md の参考](./definitions.md#参考)。
+AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-16）。ACM の欄の意味の参考は [ステップ 1 の参考](./step1-acm-certificate.md#参考)。CDK の CLI の参考は [cdk/python/README.md の参考](./cdk/python/README.md#参考)。WAF の参考は [definitions.md の参考](./definitions.md#参考)。
 
 - [Require HTTPS between CloudFront and your custom origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-https-cloudfront-to-custom-origin.html)
 - [Origin settings（Origin domain は公開の DNS 名）](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/DownloadDistValuesOrigin.html)

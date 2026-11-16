@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 260" width="820" height="260" role="img">
+<title>一覧の更新の全体の流れ: CodePipeline が作って S3 に上げ、各サーバーが SSM で S3 から取って入れ替える</title>
+<defs>
+<!-- 矢印の先端マーカー -->
+<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+<path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#334155" />
+</marker>
+<!-- ドロップシャドウ -->
+<filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+<feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08" />
+</filter>
+</defs>
+<style>
+   .box { fill: #ffffff; stroke: #334155; stroke-width: 2; rx: 8; ry: 8; filter: url(#shadow); }
+   .box-aws { fill: #f8fafc; stroke: #2563eb; stroke-width: 2; rx: 8; ry: 8; filter: url(#shadow); }
+   .box-device { fill: #f8fafc; stroke: #0d9488; stroke-width: 2; rx: 8; ry: 8; filter: url(#shadow); }
+   .title { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 16px; font-weight: bold; fill: #0f172a; text-anchor: middle; dominant-baseline: central; }
+   .sub-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 13px; fill: #475569; text-anchor: middle; }
+   .arrow-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 13px; font-weight: 500; fill: #1e293b; text-anchor: middle; }
+   .strike-label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 12px; fill: #94a3b8; text-anchor: middle; text-decoration: line-through; }
+   .line { stroke: #334155; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+</style>
+<!-- 背景 -->
+<rect width="820" height="260" fill="#ffffff" />
+<!-- 1. CodePipeline -->
+<rect x="40" y="75" width="160" height="75" class="box-aws" />
+<text x="120" y="112.5" class="title">CodePipeline</text>
+<text x="120" y="175" class="sub-label">ルールのビルド</text>
+<!-- 矢印1: CodePipeline -> S3 -->
+<line x1="200" y1="112.5" x2="345" y2="112.5" class="line" />
+<text x="275" y="98" class="arrow-label">ルールのデプロイ</text>
+<!-- 2. S3 -->
+<rect x="355" y="75" width="120" height="75" class="box-aws" />
+<text x="415" y="112.5" class="title">S3</text>
+<text x="415" y="175" class="sub-label">ルールの管理</text>
+<!-- 矢印2: ipset 対象サーバー -> S3（各サーバーが S3 に取りに行く） -->
+<line x1="610" y1="112.5" x2="485" y2="112.5" class="line" />
+<text x="545" y="80" class="arrow-label">SSM</text>
+<text x="545" y="98" class="arrow-label">ルール取得</text>
+<!-- 3. ipset 対象サーバー -->
+<rect x="620" y="75" width="160" height="75" class="box-device" />
+<text x="700" y="112.5" class="title">ipset 対象サーバー</text>
+<text x="700" y="175" class="sub-label">IP制限の有効化</text>
+</svg>

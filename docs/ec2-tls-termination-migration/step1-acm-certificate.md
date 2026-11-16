@@ -184,19 +184,21 @@ aws acm import-certificate --region us-east-1 \
 
 ```bash
 aws acm describe-certificate --region us-east-1 --certificate-arn <ARN> \
-  --query 'Certificate.{Status:Status,Domain:DomainName,Names:SubjectAlternativeNames,Type:Type,NotAfter:NotAfter,InUseBy:InUseBy}'
+  --query 'Certificate.{Status:Status,Domain:DomainName,Names:SubjectAlternativeNames,Type:Type,NotAfter:NotAfter,InUseBy:InUseBy,RenewalEligibility:RenewalEligibility}'
 
 # 1-A の場合。スタックの出力の ARN（CloudFormation の YAML でも CDK でも同じ）
 aws cloudformation describe-stacks --region us-east-1 --stack-name <prefix>-step1-certificate \
   --query "Stacks[0].Outputs[?OutputKey=='CertificateArn'].OutputValue" --output text
 ```
 
-| 確認 | 期待 |
+| 確認（コンソールの欄） | 期待 |
 |---|---|
-| `Status` | `ISSUED` |
+| `Status`（ステータス） | `ISSUED`（発行済み）。証明書が使える状態かどうかはこの欄で見る。`PENDING_VALIDATION`（検証保留中）なら、検証用の CNAME がまだ引けていない |
 | リージョン | `us-east-1`（ARN が `arn:aws:acm:us-east-1:` で始まる） |
 | `DomainName`・`SubjectAlternativeNames` | `app.example.com` を含む |
-| `Type` | 1-A は `AMAZON_ISSUED`、1-B は `IMPORTED` |
+| `Type`（タイプ） | 1-A は `AMAZON_ISSUED`（Amazon により発行済み）、1-B は `IMPORTED`（インポート済み）。発行元の区別で、使えるかどうかとは関係がない |
+| `InUseBy`（使用中ですか?） | **空（いいえ）でよい**。まだ CloudFront に付けていないため。ステップ 2 の後に、ディストリビューションが入る（[確認 2](./step2-cloudfront.md#確認-2ステップ-3-へ進む条件)） |
+| `RenewalEligibility`（更新の適格性） | **`INELIGIBLE`（対象外）でよい**。ACM が発行した証明書は、CloudFront などに付いて初めて自動更新の対象になる。1-A はステップ 2 の後に `ELIGIBLE`（対象）になる見込み。1-B（登録した証明書）はいつも `INELIGIBLE`（ACM は更新しない） |
 | `NotAfter` | 1-B は、十分先であること |
 | 検証用の CNAME（1-A） | `dig +short CNAME _<文字列>.app.example.com` で引ける（残しておく） |
 | スタック（1-A） | `CREATE_COMPLETE` |
@@ -217,5 +219,7 @@ AWS のドキュメントと照らし合わせた（2026-11-11、2026-11-12）�
 - [Import certificates into AWS Certificate Manager（登録した証明書は自動で更新されない、CloudFront は us-east-1、再インポートで ARN を保つ）](https://docs.aws.amazon.com/acm/latest/userguide/import-certificate.html)（2026-11-12）
 - [Prerequisites for importing ACM certificates（PEM、暗号化しない秘密鍵、CloudFront の鍵の種類、CloudFormation は登録に対応しない）](https://docs.aws.amazon.com/acm/latest/userguide/import-certificate-prerequisites.html)（2026-11-12）
 - [cdk deploy](https://docs.aws.amazon.com/cdk/v2/guide/ref-cli-cmd-deploy.html)・[cdk synth（スタックを 1 つ渡すと YAML を標準出力に出す）](https://docs.aws.amazon.com/cdk/v2/guide/ref-cli-cmd-synth.html)（2026-11-13）
+- [Managed certificate renewal（ACM が発行した証明書は、CloudFront などに付いていれば自動更新の対象。登録した証明書は対象外）](https://docs.aws.amazon.com/acm/latest/userguide/managed-renewal.html)（2026-11-16）
+- [CertificateDetail（Status、Type、InUseBy、RenewalEligibility の意味）](https://docs.aws.amazon.com/acm/latest/APIReference/API_CertificateDetail.html)（2026-11-16）
 - [ACME certificate automation（ACME 証明書は CloudFront に付けられない）](https://docs.aws.amazon.com/acm/latest/userguide/acm-acme.html)（2026-11-12）
 - [Supported CloudWatch metrics（ACM の DaysToExpiry）](https://docs.aws.amazon.com/acm/latest/userguide/cloudwatch-metrics.html)

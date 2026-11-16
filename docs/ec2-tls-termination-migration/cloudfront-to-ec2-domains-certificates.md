@@ -42,7 +42,7 @@ flowchart TD
 | レコード | 今 | 移行後 | 作り方 |
 |---|---|---|---|
 | `app.example.com` | 稼働サーバーの Elastic IP | CloudFront（Route 53 ならエイリアスの A レコード。IPv6 を有効にしたら AAAA も） | [ステップ 3](./step3-dns-switch.md) で AWS CLI で変える。定義には含めない。外部の DNS サービスなら CNAME |
-| `origin.app.example.com` | なし | 稼働サーバーの Elastic IP（A レコード） | [ステップ 2](./step2-cloudfront.md#2-2-オリジンの名前) で新しく作る。Route 53 なら `step2-cloudfront.yml` で作れる（`OriginHostedZoneId`）。外部の DNS サービスなら手で足す |
+| `origin.app.example.com` | なし | 稼働サーバーの Elastic IP（A レコード） | [ステップ 2](./step2-cloudfront.md#2-1-オリジンの名前) で新しく作る。Route 53 なら `step2-cloudfront.yml` で作れる（`OriginHostedZoneId`）。外部の DNS サービスなら手で足す |
 | ACM の検証用の CNAME（`_<文字列>.app.example.com`） | なし | ACM が示す値 | [ステップ 1](./step1-acm-certificate.md#1-a-acm-で作成する採用) の証明書のスタックの作成中に足す。Route 53 なら自動で作られる（`HostedZoneId`）。外部の DNS サービスなら手で足す。**ACM が自動で更新するために残しておく** |
 
 | 注意 | 内容 |
@@ -107,7 +107,7 @@ CloudFront がオリジンへの TLS で送る名前（SNI）は、AWS のドキ
 
 今は HTTP-01（80 番の `/.well-known/acme-challenge/`）で更新している。移行の後は `app.example.com` が CloudFront を指すので、Let's Encrypt の確認は CloudFront を通る。
 
-**WAF で国を絞り、`/.well-known/acme-challenge/` だけを例外にすると決めた（2026-11-11）**。EC2 の Let's Encrypt の証明書と HTTP-01 の更新は、今のまま続ける。CloudFront の地理的制限は使わない（地理的制限で止めた要求は WAF に届かないので、パスの例外を作れない）。定義は [definitions.md](./definitions.md#ステップ-2-の-waf国の絞り込み)。
+**WAF で国を絞り、`/.well-known/acme-challenge/` だけを例外にすると決めた（2026-11-11）**。EC2 の Let's Encrypt の証明書と HTTP-01 の更新は、今のまま続ける。CloudFront の地理的制限は使わない（地理的制限で止めた要求は WAF に届かないので、パスの例外を作れない）。定義は [definitions.md](./definitions.md#ステップ-15-の-waf国の絞り込み)。
 
 | 方法 | 内容 | 注意 |
 |---|---|---|

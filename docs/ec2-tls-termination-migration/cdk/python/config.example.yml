@@ -1,6 +1,6 @@
 # 設定値の例。値はすべて架空のもの。環境ごとに写して、-c config=<ファイル> で指定する。
 # 本線は CloudFront -> EC2 の 3 ステップ（使い方は README.md）。
-#   ステップ 1: ACM の証明書  ステップ 2: WAF と CloudFront  ステップ 3: DNS の向き先の変更（AWS CLI。スタックはない）
+#   ステップ 1: ACM の証明書  ステップ 1.5: WAF（省略できる）  ステップ 2: CloudFront  ステップ 3: DNS の向き先の変更（スタックはない）
 
 # ---- どのステップでも要る ----
 stack_name_prefix: myapp-production
@@ -22,20 +22,20 @@ origin_domain_name: origin.app.example.com
 # 空なら、ACM が示す検証用の CNAME を手で足すまでスタックの作成が待つ（外部の DNS サービス）
 certificate_hosted_zone_id: ""
 
-# ---- ステップ 2: WAF と CloudFront ----
+# ---- ステップ 1.5（WAF）とステップ 2（CloudFront） ----
 # ステップ 1（step1-certificate.yml か <prefix>-step1-certificate）の出力 CertificateArn（または登録した証明書の ARN）。us-east-1 の ACM の証明書で、
 # ACM のコンソールの「証明書」に出るもの（「ACME 証明書」は CloudFront に付けられない）。
 # 空の間は、<prefix>-step2-cloudfront を合成しない。
 # 下の 2 つの値は、合成の結果を見るための架空の値（アカウント 111122223333 は AWS のドキュメントの例）。
-# 実際の環境では、ステップ 1 とステップ 2 の WAF の出力に置き換える
+# 実際の環境では、ステップ 1 とステップ 1.5 の出力に置き換える
 cloudfront_certificate_arn: arn:aws:acm:us-east-1:111122223333:certificate/00000000-0000-0000-0000-000000000000
-# <prefix>-step2-waf の出力 WebAclArn。空なら関連付けない（本番では空にしない）
-cloudfront_web_acl_arn: arn:aws:wafv2:us-east-1:111122223333:global/webacl/myapp-production-step2-waf/00000000-0000-0000-0000-000000000000
+# ステップ 1.5 の <prefix>-step1-5-waf の出力 WebAclArn。空なら関連付けない（WAF を使わない。本番では空にしない）
+cloudfront_web_acl_arn: arn:aws:wafv2:us-east-1:111122223333:global/webacl/myapp-production-step1-5-waf/00000000-0000-0000-0000-000000000000
 # origin_domain_name の A レコードも Route 53 に作るときに、2 つとも指定する（本番は空にして手で足す）
 origin_hosted_zone_id: ""
 origin_elastic_ip: ""
 
-# <prefix>-step2-waf で許可する国。
+# ステップ 1.5 の <prefix>-step1-5-waf で許可する国。
 # /.well-known/acme-challenge/ だけはどの国からも通す（EC2 の Let's Encrypt の HTTP-01 の更新のため）
 waf_allowed_countries: [JP]
 # 許可する国の外から通す IP（CIDR。例: 192.0.2.44/32）

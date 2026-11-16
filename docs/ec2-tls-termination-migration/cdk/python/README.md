@@ -1,6 +1,6 @@
 # CDK（Python）版の使い方と実行コマンド
 
-> 位置付け: `cdk/python/` の使い方。B. CloudFront → EC2 への移行の 3 つのステップのうち、**ステップ 2 は CDK で行う**。ステップ 1 は CloudFormation の YAML と CDK のどちらでもよく、手順書に両方を書いている。ステップ 3 はシェルスクリプト（[README の T9](../../README.md#決めたこと)）。定義の中身（ルール、YAML との違い）は [definitions.md](../../definitions.md) を正本とし、ここでは**手元での準備・合成・デプロイのコマンド**をまとめる。デプロイの仕方は 2 通りある（[CDK で直接反映する](#方法-1-cdk-で直接反映するcdk-deploy)・[CloudFormation のテンプレートを出して反映する](#方法-2-cloudformation-のテンプレートyamlを出して-aws-cli-で反映する)）。手順の全体は [README](../../README.md#3-つのステップ)。
+> 位置付け: `cdk/python/` の使い方。B. CloudFront → EC2 への移行の 3 つのステップのうち、**ステップ 2 は CDK で行う**。ステップ 1 は CloudFormation の YAML と CDK のどちらでもよく、手順書に両方を書いている。ステップ 3 はシェルスクリプト（[README の T9](../../README.md#決めたこと)）。定義の中身（ルール、YAML との違い）は [definitions.md](../../definitions.md) を正本とし、ここでは**手元での準備・合成・デプロイのコマンド**をまとめる。変更セットの作り方は 2 通りある（[CDK で作る](#方法-1-cdk-で変更セットを作るcdk-deploy---methodprepare-change-set)・[CloudFormation のテンプレートを出して AWS CLI で作る](#方法-2-cloudformation-のテンプレートyamlを出して-aws-cli-で変更セットを作る)）。どちらも、変更セットの実行は AWS のコンソールで行う。手順の全体は [README](../../README.md#3-つのステップ)。
 >
 > 状態: 合成（`app.py` の実行）は確かめた（2026-11-12。Node.js 26、`aws-cdk-lib` 2.275.0）。3 つのステップの形に組み替えた後も、合成したテンプレートは `cfn-lint` 1.60.0 を警告なしで通り、組み替える前とリソースの中身が同じだった（違いはスタック名から決まる名前と説明だけ）。`cdk` の CLI（`aws-cdk` 2.1148.1）を入れ、`cdk list` と `cdk synth` を確かめた（2026-11-13）。`cdk synth <スタック名>` が標準出力に出す YAML は、`app.py` を直接動かして出した JSON と中身が同じだった（本線の 3 つのスタック）。**AWS へのデプロイ（下の「デプロイ」のコマンド）と、AWS を読む `cdk diff`・`cdk deploy` は実行していない**（コマンドとオプションは AWS のドキュメントと `cdk deploy --help` で確かめた）。
 >
@@ -21,9 +21,10 @@
 
 ## 方針
 
-- デプロイは 2 通りのどちらかで行う。どちらも、**変更の中身を見てから反映する**
-  - [方法 1](#方法-1-cdk-で直接反映するcdk-deploy): `cdk deploy` で CDK から直接反映する
-  - [方法 2](#方法-2-cloudformation-のテンプレートyamlを出して-aws-cli-で反映する): CDK から CloudFormation のテンプレート（YAML）を出し、AWS CLI で変更セットを作って反映する
+- **端末で行うのは変更セットを作るところまで。変更セットの中身の確認と実行（とスタックの削除）は、AWS のコンソールで行う**（[変更セットをコンソールで実行する](../../definitions.md#変更セットをコンソールで実行する)。[README の T11](../../README.md#決めたこと)）
+- 変更セットは 2 通りのどちらかで作る
+  - [方法 1](#方法-1-cdk-で変更セットを作るcdk-deploy---methodprepare-change-set): `cdk deploy --method=prepare-change-set` で CDK から作る
+  - [方法 2](#方法-2-cloudformation-のテンプレートyamlを出して-aws-cli-で変更セットを作る): CDK から CloudFormation のテンプレート（YAML）を出し、AWS CLI（`aws cloudformation deploy --no-execute-changeset`）で作る
 - 1 つの環境では、どちらか一方に決めて使い続ける（同じテンプレートを同じスタック名で反映するので、混ぜても同じ結果になる見込みだが、確かめていない。パラメータの渡し方が違うので、混ぜると取り違えやすい）
 - `cdk bootstrap` はしない。AWS のドキュメントでは、ブートストラップしていない環境でも「アセットがなく、テンプレートが 51,200 バイト未満のスタック」はデプロイできる。この定義のスタックはアセットを持たず（ファイルや Docker イメージを参照しない。`cdk.out/*.assets.json` に載るのはテンプレート自身だけであることを、Route 53 のゾーンとオプションを指定した設定値でも合成して確かめた。2026-11-13）、本線のテンプレートはどれも 4 KB 未満（オプションの C で約 9 KB。2026-11-13）。ブートストラップのバージョンの確認もテンプレートに入れていない（`stacks/common.py` の `TerminationStack`）。方法 2 は CloudFormation を直接使うので、もともとブートストラップと関係がない
 - 合成は AWS を呼ばない（VPC などは ID で参照するだけで、検索しない）
@@ -39,7 +40,7 @@
 | ステップ | スタック名 | リージョン | 内容 | 合成する条件 | デプロイのときのパラメータ | 出力 |
 |---|---|---|---|---|---|---|
 | 1 | `<prefix>-step1-certificate` | `us-east-1` | CloudFront の証明書（ACM で作成）。ステップ 1 を CDK で行うときに使う（CloudFormation の YAML `cloudformation/step1-certificate.yml` で行うなら使わない） | いつも | なし | `CertificateArn` |
-| 2 | `<prefix>-step2-waf` | `us-east-1` | CloudFront 用の WAF の web ACL（国の絞り込みだけ。マネージドルールとログは[オプション](../../options/waf-managed-rules.md)） | いつも | なし | `WebAclArn` |
+| 1.5 | `<prefix>-step1-5-waf` | `us-east-1` | CloudFront 用の WAF の web ACL（国の絞り込みだけ。WAF を使わないなら省略できる。マネージドルールとログは[オプション](../../options/waf-managed-rules.md)） | いつも | なし | `WebAclArn` |
 | 2 | `<prefix>-step2-cloudfront` | `aws_region` | CloudFront、オリジン用のセキュリティグループ、オリジンの名前の Route 53 のレコード（任意） | `cloudfront_certificate_arn` がある | `OriginVerifyHeaderValue` | `DistributionDomainName`、`OriginSecurityGroupId` |
 
 `cloudfront_certificate_arn` が空の間は、`<prefix>-step2-cloudfront` を合成せず、標準エラーに次のように出す（終了コードは 0）。ステップ 1 の前は空のままでよい。
@@ -66,7 +67,7 @@
 | `config.example.yml` | 設定値の例（値はすべて架空）。ステップごとに区切って並べている |
 | `requirements.txt` | `aws-cdk-lib` 2.275.0、`constructs` 10.8.1、`PyYAML` |
 | `tls_termination_cdk/configuration.py` | 設定値の読み込みと検証 |
-| `tls_termination_cdk/stacks/` | スタックの定義（`step1_certificate.py`、`step2_waf.py`、`step2_cloudfront.py`、オプションは `options/`） |
+| `tls_termination_cdk/stacks/` | スタックの定義（`step1_certificate.py`、`step1_5_waf.py`、`step2_cloudfront.py`、オプションは `options/`） |
 
 ## 準備
 
@@ -110,9 +111,9 @@ cp config.example.yml config.yml   # 環境の値に直す（環境ごとに con
 | `origin_domain_name` | ○ | 2 | オリジンの名前。`domain_name` と同じにするとエラー |
 | `certificate_hosted_zone_id` | | 1 | ステップ 1 を CDK で行うときに、`domain_name` の Route 53 のホストゾーン ID を書く（ステージング）。空なら検証用の CNAME を手で足す（本番）。ステップ 1 を CloudFormation の YAML で行うなら空のままでよい |
 | `cloudfront_certificate_arn` | | 2 | ステップ 1（CloudFormation）の出力 `CertificateArn`（または登録した証明書の ARN）。空の間はステップ 2 の CloudFront のスタックを合成しない |
-| `cloudfront_web_acl_arn` | | 2 | `<prefix>-step2-waf` の出力 `WebAclArn`。空なら関連付けない（**本番では空にしない**） |
+| `cloudfront_web_acl_arn` | | 2 | ステップ 1.5 の `<prefix>-step1-5-waf` の出力 `WebAclArn`。空なら関連付けない（**本番では空にしない**） |
 | `origin_hosted_zone_id`、`origin_elastic_ip` | | 2 | オリジンの名前の A レコードも作るときに 2 つとも指定する（ステージング）。本番は空 |
-| `waf_allowed_countries` ほか `waf_*` | | 2 | WAF の設定（[definitions.md の WAF](../../definitions.md#ステップ-2-の-waf国の絞り込み)） |
+| `waf_allowed_countries` ほか `waf_*` | | 1.5 | WAF の設定（[definitions.md の WAF](../../definitions.md#ステップ-15-の-waf国の絞り込み)） |
 | `geo_restriction_countries` | | 2 | CloudFront の地理的制限。既定は空（使わない。使うと HTTP-01 の更新が止まる） |
 | `origin_read_timeout_seconds` ほか | | 2 | 既定値あり |
 | `option_stacks` | | オプション | 合成するオプションの構成（`alb-to-ec2`、`cloudfront-alb-to-ec2`）。既定は空 |
@@ -156,21 +157,22 @@ cfn-lint cdk.out/*.template.json   # 別にインストールが必要
 
 ## デプロイ
 
-2 通りある。どちらもスタックを 1 つずつ、**変更の中身を見てから**反映する。どちらを使うかは環境ごとに決める（[方針](#方針)）。
+変更セットの作り方は 2 通りある。どちらもスタックを 1 つずつ作り、**中身の確認と実行は AWS のコンソールで行う**（[変更セットをコンソールで実行する](../../definitions.md#変更セットをコンソールで実行する)）。どちらを使うかは環境ごとに決める（[方針](#方針)）。
 
-| | 方法 1: CDK で直接反映する | 方法 2: テンプレート（YAML）を出して AWS CLI で反映する |
+| | 方法 1: CDK で変更セットを作る | 方法 2: テンプレート（YAML）を出して AWS CLI で変更セットを作る |
 |---|---|---|
-| 使うコマンド | `cdk diff`・`cdk deploy` | `cdk synth` → `aws cloudformation deploy` |
+| 使うコマンド | `cdk diff`・`cdk deploy --method=prepare-change-set` | `cdk synth` → `aws cloudformation deploy --no-execute-changeset` |
 | 要るもの | `cdk` の CLI | `cdk` の CLI（JSON でよければ要らない）と AWS CLI |
 | 反映するテンプレートが手元に残るか | `cdk.out/` に JSON（合成のたびに上書き） | `templates/<スタック名>.template.yml`。差分を見る・`cfn-lint` にかける・人に渡すのに使える |
-| 変更の中身を見る | `cdk diff`（今のスタックとテンプレートを比べる）と、反映の前の確認の問い合わせ | 変更セット（`describe-change-set`） |
+| 変更の中身を見る | 端末の `cdk diff`（今のスタックとテンプレートを比べる）と、コンソールの変更セット | コンソールの変更セット |
+| 変更セットの名前 | 既定で `cdk-deploy-change-set`（`--change-set-name` で変えられる。同じ名前の古い変更セットは上書きされる） | `aws cloudformation deploy` の出力に出る |
 | 秘密のヘッダーの値の渡し方 | `--parameters <スタック名>:OriginVerifyHeaderValue=<値>` | `--parameter-overrides OriginVerifyHeaderValue=<値>` |
 | 2 回目以降の更新で、渡さなかったパラメータ | 前の値のまま（`--previous-parameters` の既定が `true`） | 前の値のまま（`aws cloudformation deploy` の `--parameter-overrides` の説明） |
 | ブートストラップ | しない（[方針](#方針)のとおり、この定義の大きさなら要らない見込み。確かめていない） | 関係がない |
 
 秘密のヘッダーの値は 32 文字以上（`openssl rand -hex 32`。[準備の 4](../../step0-preparation.md#4-秘密のヘッダーの値を作る)）。どちらの方法でもコマンドラインに値を書くので、シェルの履歴に残る。流した後に履歴から消すか、値を環境変数に読み込んでから渡す。
 
-### 方法 1: CDK で直接反映する（cdk deploy）
+### 方法 1: CDK で変更セットを作る（cdk deploy --method=prepare-change-set）
 
 ```bash
 source .venv/bin/activate
@@ -179,23 +181,26 @@ STACK=<スタック名>          # 例: myapp-production-step2-cloudfront
 # 1. 差分を見る（AWS の今のスタックと比べる。変更はしない）
 cdk diff -c config=config.yml "$STACK"
 
-# 2. 反映する。すべての変更で確認を求め、y で反映する（既定は権限やセキュリティグループを広げる変更だけ確認する）
-cdk deploy -c config=config.yml "$STACK" --require-approval any-change
+# 2. 変更セットを作る（反映はしない。名前の既定は cdk-deploy-change-set）
+cdk deploy -c config=config.yml "$STACK" --method=prepare-change-set
 #   <prefix>-step2-cloudfront（とオプションの C）の初回は次を足す
 #   --parameters "$STACK:OriginVerifyHeaderValue=<秘密のヘッダーの値>"
 
-# 3. 出力を見る（cdk deploy の最後にも出る。--outputs-file outputs.json でファイルにも書ける）
+# 3. コンソールで変更セットを確かめて実行する（../../definitions.md の「変更セットをコンソールで実行する」）
+
+# 4. 出力を見る（コンソールの「出力」のタブでもよい。読むだけ）
 aws cloudformation describe-stacks --region <リージョン> --stack-name "$STACK" \
   --query 'Stacks[0].Outputs' --output table
 ```
 
 - リージョンは、スタックの定義に書いてある（上の「出るスタック」の表）ので、`cdk deploy` には渡さない。アカウントは、使っている認証情報のものになる
-- 変更セットを人に見せてから反映したいときは、`--method=prepare-change-set`（変更セットを作るだけ。名前の既定は `cdk-deploy-change-set`）で作り、`aws cloudformation describe-change-set` で見て、`--method=execute-change-set` で反映する
+- 変更がなくても、空の変更セットが作られる（AWS のドキュメントの記述）。コンソールで中身が空なら、実行せずに削除する
+- `--method=execute-change-set`（端末から実行する）は使わない
 - スタックの名前はいつも渡す。`--all` は使わない（ステップの順と、設定値の書き足しの順を守るため）
 
-### 方法 2: CloudFormation のテンプレート（YAML）を出して AWS CLI で反映する
+### 方法 2: CloudFormation のテンプレート（YAML）を出して AWS CLI で変更セットを作る
 
-**テンプレートを出す → 変更セットを作る → 中身を見る → 反映する** の順に行う。
+**テンプレートを出す → 変更セットを作る（ここまで端末）→ 中身を見て実行する（コンソール）** の順に行う。
 
 ```bash
 source .venv/bin/activate
@@ -214,17 +219,9 @@ aws cloudformation deploy --region "$REGION" --no-execute-changeset \
 #   <prefix>-step2-cloudfront（とオプションの C）の初回は次を足す
 #   --parameter-overrides OriginVerifyHeaderValue=<秘密のヘッダーの値>
 
-# 3. 中身を見る（2 の出力にも describe-change-set のコマンドが出る）
-aws cloudformation list-change-sets --region "$REGION" --stack-name "$STACK"
-aws cloudformation describe-change-set --region "$REGION" \
-  --stack-name "$STACK" --change-set-name <変更セットの名前>
+# 3. コンソールで変更セットを確かめて実行する（../../definitions.md の「変更セットをコンソールで実行する」）
 
-# 4. 反映して、終わるまで待つ
-aws cloudformation execute-change-set --region "$REGION" \
-  --stack-name "$STACK" --change-set-name <変更セットの名前>
-aws cloudformation wait stack-create-complete --region "$REGION" --stack-name "$STACK"   # 更新なら stack-update-complete
-
-# 5. 出力を見る
+# 4. 出力を見る（コンソールの「出力」のタブでもよい。読むだけ）
 aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
   --query 'Stacks[0].Outputs' --output table
 ```
@@ -239,7 +236,8 @@ aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
 | # | ステップ | 行うこと | 確かめること |
 |---|---|---|---|
 | 1 | ステップ 1 | CloudFormation の YAML（`cloudformation/step1-certificate.yml`）か CDK のどちらか。CDK なら `<prefix>-step1-certificate` をデプロイする（`us-east-1`。ステージングは設定値 `certificate_hosted_zone_id` を書く）。出力の `CertificateArn` を設定値の `cloudfront_certificate_arn` に書く | [確認 1](../../step1-acm-certificate.md#確認-1ステップ-2-へ進む条件) |
-| 2 | ステップ 2 | 設定値ファイルを作って合成する（`cloudfront_web_acl_arn` は空のまま） → `<prefix>-step2-waf` をデプロイ（`us-east-1`） → 出力の `WebAclArn` を設定値に書いて合成し直す → `<prefix>-step2-cloudfront` をデプロイ（`aws_region`。`OriginVerifyHeaderValue` を渡す） → 出力 `OriginSecurityGroupId` を稼働サーバーに足す | [確認 2](../../step2-cloudfront.md#確認-2ステップ-3-へ進む条件) |
+| 1.5 | ステップ 1.5（省略できる） | 設定値ファイルを作って合成する（`cloudfront_web_acl_arn` は空のまま） → `<prefix>-step1-5-waf` の変更セットを作り、コンソールで実行（`us-east-1`） → 出力の `WebAclArn` を設定値の `cloudfront_web_acl_arn` に書く | [確認 1.5](../../step1-5-waf.md#確認-15ステップ-2-へ進む条件) |
+| 2 | ステップ 2 | `<prefix>-step2-cloudfront` の変更セットを作り（`OriginVerifyHeaderValue` を渡す）、コンソールで実行（`aws_region`） → 出力 `OriginSecurityGroupId` を稼働サーバーに足す | [確認 2](../../step2-cloudfront.md#確認-2ステップ-3-へ進む条件) |
 | 3 | ステップ 3 | **CDK は使わない**。シェルスクリプト `scripts/step3-dns-switch.sh` で向き先を変える | [確認 3](../../step3-dns-switch.md#確認-3片付けへ進む条件) |
 
 ### オプション（採用しなかった構成）
@@ -249,13 +247,7 @@ aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
 
 ## 撤去
 
-逆の順（ステップ 2 の CloudFront → ステップ 2 の WAF → ステップ 1）に消す。
-
-```bash
-# 方法 1・2 のどちらで入れたスタックも、CloudFormation のスタックなので同じコマンドで消せる
-aws cloudformation delete-stack --region <リージョン> --stack-name <スタック名>
-aws cloudformation wait stack-delete-complete --region <リージョン> --stack-name <スタック名>
-```
+逆の順（ステップ 2 の CloudFront → ステップ 1.5 の WAF → ステップ 1）に、AWS のコンソールで消す（CloudFormation のコンソールでリージョンを選び、スタックを選んで「削除」）。方法 1・2 のどちらで作ったスタックも同じ。
 
 - 先に稼働サーバーから `OriginSecurityGroupId` を外す（付けたままだと、グループを消せずに削除が失敗する）
 - WAF と証明書のスタックは、CloudFront のスタックを消した後でないと消せない（使われている間は消せない）

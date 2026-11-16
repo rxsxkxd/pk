@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="70 0 925 285" width="925" height="285" role="img" aria-labelledby="title desc">
+  <title id="title">設定のステップ</title>
+  <desc id="desc">CloudFront → EC2 への移行の設定のステップ。ステップ 1 で ACM の証明書を作り、ステップ 1.5 で WAF の web ACL を作る（省略できる）。どちらも us-east-1 に作り、ステップ 2 の CloudFront に渡す。ステップ 3 で DNS の向き先を CloudFront へ変える。</desc>
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif; }
+    .block-acm { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2; filter: url(#shadow); }
+    .block-waf { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; stroke-dasharray: 5 3; filter: url(#shadow); }
+    .block-cf  { fill: #f8fafc; stroke: #2563eb; stroke-width: 2; filter: url(#shadow); }
+    .block-dns { fill: #f8fafc; stroke: #475569; stroke-width: 2; filter: url(#shadow); }
+    .phase { font-size: 13px; font-weight: 700; fill: #64748b; }
+    .badge { font-size: 12px; font-weight: 700; fill: #16a34a; text-anchor: middle; }
+    .badge-opt { font-size: 12px; font-weight: 700; fill: #2563eb; text-anchor: middle; }
+    .name { font-size: 17px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+    .name-sm { font-size: 15px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+    .sub { font-size: 13px; fill: #475569; text-anchor: middle; }
+    .opt { font-size: 11px; font-weight: 700; fill: #2563eb; text-anchor: middle; }
+    .region { font-size: 11px; fill: #64748b; text-anchor: middle; }
+  </style>
+
+  <rect width="1000" height="285" fill="#ffffff"/>
+
+  <!-- ========== ステップ 1・1.5: CloudFront に渡すものを us-east-1 に用意する ========== -->
+  <text x="100" y="40" class="phase">ステップ 1・1.5：CloudFront に渡すもの（us-east-1）</text>
+
+  <!-- ステップ 1: ACM の証明書（L 字。下の突起が CloudFront を指す） -->
+  <g transform="translate(100, 60)">
+    <path d="M 6,0 L 132,0 L 132,88 L 275,88 L 305,144 L 275,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-acm"/>
+    <text x="66" y="28" class="badge">ステップ 1</text>
+    <text x="145" y="134" class="name">ACM の証明書</text>
+    <text x="145" y="160" class="sub">CloudFront の証明書を作成</text>
+    <text x="145" y="180" class="region">必須</text>
+  </g>
+
+  <!-- ステップ 1.5: WAF の web ACL（L 字の切り欠きに置く。点線で省略できることを示す） -->
+  <g transform="translate(245, 60)">
+    <path d="M 6,0 L 140,0 L 160,37.5 L 140,75 L 6,75 Q 0,75 0,69 L 0,6 Q 0,0 6,0 Z" class="block-waf"/>
+    <text x="72" y="20" class="badge-opt">ステップ 1.5</text>
+    <text x="72" y="42" class="name-sm">WAF の web ACL</text>
+    <text x="72" y="62" class="opt">国の絞り込み</text>
+  </g>
+
+  <!-- ========== ステップ 2: CloudFront ========== -->
+  <text x="440" y="40" class="phase">ステップ 2：配信の設定（ap-northeast-1）</text>
+  <g transform="translate(440, 60)">
+    <path d="M 6,0 L 201,0 L 255,100 L 201,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-cf"/>
+    <text x="118" y="84" class="name">CloudFront</text>
+    <text x="118" y="110" class="sub">ディストリビューション、</text>
+    <text x="118" y="128" class="sub">オリジン用の</text>
+    <text x="118" y="146" class="sub">セキュリティグループ</text>
+  </g>
+
+  <!-- ========== ステップ 3: DNS の向き先 ========== -->
+  <text x="730" y="40" class="phase">ステップ 3：名前の切り替え</text>
+  <g transform="translate(730, 60)">
+    <path d="M 6,0 L 201,0 L 255,100 L 201,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-dns"/>
+    <text x="118" y="84" class="name">DNS の向き先</text>
+    <text x="118" y="110" class="sub">app.example.com</text>
+    <text x="118" y="128" class="sub">→ CloudFront</text>
+    <text x="118" y="150" class="region">Route 53（本番は外部の DNS）</text>
+  </g>
+
+</svg>

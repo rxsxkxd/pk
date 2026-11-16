@@ -1,16 +1,17 @@
-# ステップ 2（step2-waf.yml の後）: CloudFront のディストリビューションと、オリジン用のセキュリティグループ。
+# ステップ 2（ステップ 1.5 の step1-5-waf.yml の後）: CloudFront のディストリビューションと、オリジン用のセキュリティグループ。
 # 利用者のドメイン名（app.example.com）は変えず、CloudFront が利用者の TLS を終端し、
 # 稼働サーバー（EC2 の httpd）の 443 番へ HTTPS で接続する。
 #
 # - 置くリージョン: 稼働サーバーの VPC があるリージョン（例 ap-northeast-1）。セキュリティグループを VPC に作るため
 # - スタック名の例: <prefix>-step2-cloudfront（例 myapp-production-step2-cloudfront）
-# - デプロイの例（秘密のヘッダーの値はテンプレートに書かず、ここで渡す）:
-#     aws cloudformation deploy --region ap-northeast-1 \
+# - 変更セットの作り方の例（秘密のヘッダーの値はテンプレートに書かず、ここで渡す。端末では変更セットを作るところまで。
+#   中身の確認と実行は AWS のコンソールで行う。手順は definitions.md の「変更セットをコンソールで実行する」）:
+#     aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
 #       --template-file cloudformation/step2-cloudfront.yml \
 #       --stack-name <prefix>-step2-cloudfront \
 #       --parameter-overrides VpcId=vpc-... CloudFrontPrefixListId=pl-... \
 #         DomainName=app.example.com OriginDomainName=origin.app.example.com \
-#         CloudFrontCertificateArn=<ステップ 1 の出力> CloudFrontWebAclArn=<step2-waf.yml の出力> \
+#         CloudFrontCertificateArn=<ステップ 1 の出力> CloudFrontWebAclArn=<step1-5-waf.yml の出力> \
 #         OriginVerifyHeaderValue=<openssl rand -hex 32 の値>
 # - 利用者のドメイン名の DNS のレコードは、ここでは作らない（ステップ 3 で scripts/step3-dns-switch.sh が切り替える）
 # - 稼働サーバーへのセキュリティグループの付け替えも、ここでは行わない（出力 OriginSecurityGroupId を手で足す）
@@ -101,14 +102,14 @@ Parameters:
 
   # CloudFront の地理的制限を使うか。
   # 値: none（既定。使わない）か whitelist（GeoRestrictionCountries の国だけを受ける）。
-  # 国の絞り込みは WAF（step2-waf.yml）で行うので none のままにする。地理的制限で止めた要求は WAF に届かず、
+  # 国の絞り込みは WAF（ステップ 1.5 の step1-5-waf.yml）で行うので none のままにする。地理的制限で止めた要求は WAF に届かず、
   # Let's Encrypt の確認のパスを例外にできないため、whitelist にするとオリジンの証明書の更新が止まる
   GeoRestrictionType:
     Type: String
     Default: none
     AllowedValues: [whitelist, none]
     Description: >-
-      none (default) leaves country filtering to the web ACL in CloudFrontWebAclArn (step2-waf.yml).
+      none (default) leaves country filtering to the web ACL in CloudFrontWebAclArn (step1-5-waf.yml).
       whitelist allows only GeoRestrictionCountries, but it also blocks the Let's Encrypt HTTP-01
       validation of the origin certificate, because blocked requests never reach AWS WAF.
 
@@ -120,13 +121,13 @@ Parameters:
     Description: ISO 3166-1 alpha-2 country codes allowed when GeoRestrictionType is whitelist.
 
   # CloudFront に関連付ける WAF の web ACL。
-  # 値: step2-waf.yml の出力 WebAclArn（arn:aws:wafv2:us-east-1:...:global/webacl/...）。
+  # 値: ステップ 1.5 の step1-5-waf.yml の出力 WebAclArn（arn:aws:wafv2:us-east-1:...:global/webacl/...）。
   # 空（既定）なら関連付けない（国で絞らない）。本番では空にしない
   CloudFrontWebAclArn:
     Type: String
     Default: ""
     Description: >-
-      AWS WAF web ACL created in us-east-1 (CLOUDFRONT scope), such as WebAclArn of step2-waf.yml.
+      AWS WAF web ACL created in us-east-1 (CLOUDFRONT scope), such as WebAclArn of step1-5-waf.yml.
       Empty means no web ACL.
 
   # オリジンの名前の A レコードを作る Route 53 のホストゾーン（任意）。
@@ -210,7 +211,7 @@ Resources:
         - Ref: OriginElasticIp
 
   # オリジン用のセキュリティグループ。CloudFront のオリジン向けのアドレスから、443 番だけを許可する。
-  # 稼働サーバーの今のグループは変えず、このグループを足して付ける（ステップ 2 の 2-4）。
+  # 稼働サーバーの今のグループは変えず、このグループを足して付ける（ステップ 2 の 2-3）。
   # プレフィックスリストはセキュリティグループの規則の上限で 55 件分に数えるので、既存のグループに足さず専用にしている
   OriginSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -311,7 +312,7 @@ Outputs:
     Description: Point DomainName to this name after checking the distribution.
     Value:
       Fn::GetAtt: [Distribution, DomainName]
-  # オリジン用のセキュリティグループの ID（sg-...）。ステップ 2 の 2-4 で稼働サーバーに足す
+  # オリジン用のセキュリティグループの ID（sg-...）。ステップ 2 の 2-3 で稼働サーバーに足す
   OriginSecurityGroupId:
     Description: Attach this security group to the instance before switching DNS.
     Value:

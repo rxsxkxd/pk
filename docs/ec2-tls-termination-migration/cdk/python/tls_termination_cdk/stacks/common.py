@@ -74,7 +74,7 @@ def define_origin_security_group(scope: Construct, configuration: Configuration)
     """CloudFront から EC2 の 443 番への接続を許可するセキュリティグループ。インスタンスには手で足す。
 
     稼働サーバーの今のセキュリティグループは変えない。このグループを「足す」ことで、CloudFront からの接続を許す
-    （ステップ 2 の 2-4）。今の 0.0.0.0/0 などの許可を消すのは、ステップ 3 の片付け。
+    （ステップ 2 の 2-3）。今の 0.0.0.0/0 などの許可を消すのは、ステップ 3 の片付け。
     """
     # 既存の VPC を ID で参照する（AWS を検索しない）。サブネットは本線では使わない（オプションの ALB で使う）
     vpc = ec2.Vpc.from_vpc_attributes(
@@ -140,7 +140,7 @@ def define_distribution(
         # IPv6 を無効にする。ステップ 3 で利用者のドメイン名に作るレコードを A だけにするため
         enable_ipv6=False,
         geo_restriction=geo_restriction,
-        # ステップ 2 の WAF の web ACL。空の間は関連付けない（本番では空にしない）
+        # ステップ 1.5 の WAF の web ACL。空の間は関連付けない（本番では空にしない）
         web_acl_id=configuration.cloudfront_web_acl_arn or None,
         default_behavior=cloudfront.BehaviorOptions(
             origin=origin,

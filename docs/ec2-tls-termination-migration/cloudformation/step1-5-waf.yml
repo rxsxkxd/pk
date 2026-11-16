@@ -1,22 +1,24 @@
-# ステップ 2（step2-cloudfront.yml より先）: CloudFront 用の AWS WAF の web ACL。国の絞り込みだけを行う。
+# ステップ 1.5（ステップ 2 の step2-cloudfront.yml より先）: CloudFront 用の AWS WAF の web ACL。国の絞り込みだけを行う。
+# WAF を使わないなら省略できる（step2-cloudfront.yml の CloudFrontWebAclArn を空にする）。ステップ 1 とは関係がないので、並べて行ってもよい。
 #
 # - 置くリージョン: us-east-1（CloudFront 用の web ACL、つまりスコープ CLOUDFRONT のものは us-east-1 に作る決まり）
-# - スタック名の例: <prefix>-step2-waf（例 myapp-production-step2-waf）。web ACL と IP セットの名前にも使う
-# - デプロイの例:
-#     aws cloudformation deploy --region us-east-1 \
-#       --template-file cloudformation/step2-waf.yml \
-#       --stack-name <prefix>-step2-waf \
+# - スタック名の例: <prefix>-step1-5-waf（例 myapp-production-step1-5-waf）。web ACL と IP セットの名前にも使う
+# - 変更セットの作り方の例（端末では変更セットを作るところまで。中身の確認と実行は AWS のコンソールで行う。
+#   手順は definitions.md の「変更セットをコンソールで実行する」）:
+#     aws cloudformation deploy --region us-east-1 --no-execute-changeset \
+#       --template-file cloudformation/step1-5-waf.yml \
+#       --stack-name <prefix>-step1-5-waf \
 #       [--parameter-overrides AllowedCountries=JP ExceptionIpv4Addresses=192.0.2.44/32]
 # - ルールは 2 つ。評価は優先順位（Priority）の小さい順で、どれにも当たらなければ通す（DefaultAction）
 #     0. AllowAcmeChallenge: Let's Encrypt の HTTP-01 の確認のパスは、どの国からも通す
 #     1. BlockOutsideAllowedCountries: 許可する国でなく、例外の IP でもない要求を止める（CloudFront が 403 を返す）
 # - AWS のマネージドルールとログは入れていない（入れ方は options/waf-managed-rules.md）
-# - 同じ内容の CDK の定義: cdk/python の <prefix>-step2-waf（手順のステップ 2 は CDK を使う）
+# - 同じ内容の CDK の定義: cdk/python の <prefix>-step1-5-waf（手順のステップ 1.5 は CDK を使う）
 #
 # Description（英語）は CloudFormation のスタックの説明として出る。日本語の説明はこのコメントだけに書く
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Step 2 of CloudFront -> EC2 (deploy before step2-cloudfront.yml): AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed countries
+  Step 1.5 of CloudFront -> EC2 (deploy before step2-cloudfront.yml; optional): AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed countries
   (with IP exceptions), except the Let's Encrypt HTTP-01 challenge path. Deploy this stack in us-east-1.
 
 # ---- パラメータ（デプロイのときに --parameter-overrides で渡す値） ----
@@ -110,7 +112,7 @@ Resources:
   WebAcl:
     Type: AWS::WAFv2::WebACL
     Properties:
-      # 名前: スタック名と同じ（例 myapp-production-step2-waf）
+      # 名前: スタック名と同じ（例 myapp-production-step1-5-waf）
       Name:
         Ref: AWS::StackName
       Scope: CLOUDFRONT

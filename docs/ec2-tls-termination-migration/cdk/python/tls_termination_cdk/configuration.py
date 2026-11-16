@@ -67,7 +67,7 @@ class Configuration:
 
     # ステップ 1 の出力 CertificateArn。空の間は、ステップ 2 の CloudFront のスタックを定義しない
     cloudfront_certificate_arn: str = ""
-    # ステップ 2 の WAF のスタックの出力 WebAclArn。空なら関連付けない（本番では空にしない）
+    # ステップ 1.5 の WAF のスタックの出力 WebAclArn。空なら関連付けない（本番では空にしない）
     cloudfront_web_acl_arn: str = ""
     # ステップ 1: domain_name の Route 53 のホストゾーン。指定すると ACM の検証用のレコードを自動で作る
     certificate_hosted_zone_id: str = ""
@@ -78,7 +78,7 @@ class Configuration:
     # 国の絞り込みは WAF（waf_allowed_countries）で行う。地理的制限で止めた要求は WAF に届かないので、
     # 地理的制限を使うと、EC2 の Let's Encrypt の証明書を HTTP-01 で更新できなくなる
     geo_restriction_countries: list[str] = field(default_factory=list)
-    # ステップ 2 の WAF の web ACL（<prefix>-step2-waf）で許可する国
+    # ステップ 1.5 の WAF の web ACL（<prefix>-step1-5-waf）で許可する国
     waf_allowed_countries: list[str] = field(default_factory=lambda: ["JP"])
     # 許可する国の外から通す IP（CIDR）。空のままでよい
     waf_exception_ipv4_addresses: list[str] = field(default_factory=list)

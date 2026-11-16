@@ -1,6 +1,6 @@
 # WAF のマネージドルールとログ（オプション）
 
-> 位置付け: **オプション**。採用した B. CloudFront → EC2 の、ステップ 2 の WAF（`<prefix>-step2-waf`）に足す選択肢。既定の WAF は国の絞り込みだけ（[definitions.md の WAF](../definitions.md#ステップ-2-の-waf国の絞り込み)）で、マネージドルールとログは入れていない（2026-11-13 に既定から外した。[README の T10](../README.md#決めたこと)）。ここには、入れるときの方法と、外す前の定義の設定値を残す。手順の全体は [README](../README.md#3-つのステップ)。
+> 位置付け: **オプション**。採用した B. CloudFront → EC2 の、ステップ 1.5 の WAF（`<prefix>-step1-5-waf`）に足す選択肢。既定の WAF は国の絞り込みだけ（[definitions.md の WAF](../definitions.md#ステップ-15-の-waf国の絞り込み)）で、マネージドルールとログは入れていない（2026-11-13 に既定から外した。[README の T10](../README.md#決めたこと)）。ここには、入れるときの方法と、外す前の定義の設定値を残す。手順の全体は [README](../README.md#3-つのステップ)。
 >
 > 確かめた範囲: AWS WAF の仕様と料金は AWS のドキュメントと照らし合わせた（2026-11-11、2026-11-13）。外す前の定義は `cfn-lint` と CDK の合成まで確かめた（2026-11-12）。**AWS へのデプロイと、実際の要求での誤検知の確認はしていない**。
 >
@@ -12,12 +12,12 @@
 
 | 用語 | 指すもの |
 |---|---|
-| 既定の WAF | 今の `<prefix>-step2-waf`。ルールは `AllowAcmeChallenge` と `BlockOutsideAllowedCountries` の 2 つだけ |
+| 既定の WAF | 今の `<prefix>-step1-5-waf`（ステップ 1.5）。ルールは `AllowAcmeChallenge` と `BlockOutsideAllowedCountries` の 2 つだけ |
 | マネージドルール | AWS が作って保守している WAF のルールの集まり（ルールグループ）。下の「マネージドルールとは」 |
 | Count（記録だけ） | ルールに当たった要求を、止めずに数えてラベルを付けるだけの動作。試験に使う |
 | ラベル | ルールに当たった要求に付く印（`awswaf:managed:aws:...`）。ログとメトリクスで、どのルールに当たったかが分かる |
 | WCU | web ACL のキャパシティの単位。web ACL に入れたルールの合計が上限（1,500）を超えられない |
-| 外す前の定義 | マネージドルールとログを入れていた版の定義。コミット `f282149` の `cloudformation/step2-waf.yml` と `cdk/python/tls_termination_cdk/stacks/step2_waf.py` |
+| 外す前の定義 | マネージドルールとログを入れていた版の定義。コミット `f282149` の `cloudformation/step2-waf.yml` と `cdk/python/tls_termination_cdk/stacks/step2_waf.py`（ステップ 1.5 に分ける前の名前。今の `step1-5-waf.yml`・`step1_5_waf.py` にあたる） |
 
 ## 既定の WAF との違い
 
@@ -30,7 +30,7 @@
 | WCU | 約 25 | 約 950（グループが 25・700・200） |
 | 誤検知 | 国の判定だけなので、起きにくい | 正しい要求を止めることがある。count で試してから block にする手間が要る |
 | 止めた要求の見方 | メトリクスとサンプルのリクエスト | 左に加えて、ログ（全件） |
-| 定義の量 | `step2_waf.py` 155 行（コメント込み）、`step2-waf.yml` 138 行 | 外す前は `step2_waf.py` 236 行、`step2-waf.yml` 265 行。量の大半は、Count に上書きするルールの名前の一覧 |
+| 定義の量 | `step1_5_waf.py` 155 行（コメント込み）、`step1-5-waf.yml` 138 行（コメントを足す前） | 外す前は `step2_waf.py` 236 行、`step2-waf.yml` 265 行。量の大半は、Count に上書きするルールの名前の一覧 |
 
 入れる判断の目安: 許可する国（日本）からの攻撃や、脆弱性を探る要求が稼働サーバーのログに目立つなら入れる。アプリが古い（Rails 4.2、Ruby 2.7）ので、既知の悪い入力のグループは効き目がある見込み。入れると、`SizeRestrictions_BODY`（本文 8 KB 超）のように、フォームの送信やファイルのアップロードで当たるルールの見極めが要る。
 
@@ -57,7 +57,7 @@ AWS が作って保守している WAF のルールの集まり（ルールグ�
 
 | # | 行うこと | 見ること |
 |---|---|---|
-| 1 | 定義に、マネージドルールのグループ 3 つとログを足す（下の「外す前の定義」）。`waf_managed_rules_mode: count` で `<prefix>-step2-waf` を更新する | 更新の変更セットに、web ACL の変更とロググループ・ログの設定の追加だけが出ること |
+| 1 | 定義に、マネージドルールのグループ 3 つとログを足す（下の「外す前の定義」）。`waf_managed_rules_mode: count` で `<prefix>-step1-5-waf` を更新する | 更新の変更セットに、web ACL の変更とロググループ・ログの設定の追加だけが出ること |
 | 2 | 利用者の要求を、ログとメトリクスで見る | Count になった要求のラベル（`awswaf:managed:aws:...`）と、その要求が正しい利用か |
 | 3 | 誤検知のあるルールを決める | 正しい利用で当たるルール（見込みが高いのは `SizeRestrictions_BODY`） |
 | 4 | `waf_managed_rules_mode: block` にして更新する。誤検知のあったルールだけは Count の上書きを残す（定義を、そのルールの名前だけを上書きする形に直す） | 止めた要求のログ。利用者からの問い合わせ |
@@ -93,7 +93,7 @@ AWS が作って保守している WAF のルールの集まり（ルールグ�
 
 ### ログ
 
-`us-east-1` の CloudWatch Logs のロググループ `aws-waf-logs-<スタック名>`（例 `aws-waf-logs-<prefix>-step2-waf`）に送り、30 日残す。名前は `aws-waf-logs-` で始め、web ACL と同じリージョンとアカウントに置く決まりである。ロググループの書き込みの許可（リソースポリシー）は、ログの設定を作るときに WAF が付ける。ログの設定（`AWS::WAFv2::LoggingConfiguration`）に渡すロググループの ARN は、`Fn::GetAtt` の `Arn` だと末尾に `:*` が付くので、付かない形を組み立てる。
+`us-east-1` の CloudWatch Logs のロググループ `aws-waf-logs-<スタック名>`（例 `aws-waf-logs-<prefix>-step1-5-waf`）に送り、30 日残す。名前は `aws-waf-logs-` で始め、web ACL と同じリージョンとアカウントに置く決まりである。ロググループの書き込みの許可（リソースポリシー）は、ログの設定を作るときに WAF が付ける。ログの設定（`AWS::WAFv2::LoggingConfiguration`）に渡すロググループの ARN は、`Fn::GetAtt` の `Arn` だと末尾に `:*` が付くので、付かない形を組み立てる。
 
 - ログには要求の見出し（ヘッダー）が入る見込みで、Cookie（セッション）が残るかもしれない。どの項目が残るかは、実際のログで確かめる。残したくない項目があれば、ログの設定の `RedactedFields` か、web ACL のデータ保護の設定で消す（AWS のドキュメントでは、`RedactedFields` で消せるのは `UriPath`、`QueryString`、`SingleHeader`、`Method` だけ）
 - ログを読める人を、CloudWatch Logs の権限で絞る
@@ -101,7 +101,7 @@ AWS が作って保守している WAF のルールの集まり（ルールグ�
 
 ### 外す前の定義（CloudFormation の YAML）
 
-既定の `cloudformation/step2-waf.yml` に足す部分。CDK は、コミット `f282149` の `stacks/step2_waf.py`（`MANAGED_RULE_GROUPS` と、それを組み立てる繰り返し、ログの部分）と、`configuration.py` の 2 つの設定値と検証を戻す。
+既定の `cloudformation/step1-5-waf.yml` に足す部分。CDK は、コミット `f282149` の `stacks/step2_waf.py`（今の `step1_5_waf.py`）（`MANAGED_RULE_GROUPS` と、それを組み立てる繰り返し、ログの部分）と、`configuration.py` の 2 つの設定値と検証を戻す。
 
 パラメータ（`Parameters:` に足す）:
 

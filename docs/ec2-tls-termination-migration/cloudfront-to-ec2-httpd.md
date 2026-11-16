@@ -141,7 +141,7 @@ Alias /old_app_a /home/ruby/old_app_a/public
 
 | 方法 | 内容 | 注意 |
 |---|---|---|
-| **A. HTTP-01 を CloudFront 経由で続ける（採用。2026-11-11）** | 下の設定を 443 番の VirtualHost に足す | 地理的制限を使うと、海外からの確認が止まる。WAF でこのパスを例外にする（`step2-waf.yml`） |
+| **A. HTTP-01 を CloudFront 経由で続ける（採用。2026-11-11）** | 下の設定を 443 番の VirtualHost に足す | 地理的制限を使うと、海外からの確認が止まる。WAF でこのパスを例外にする（ステップ 1.5 の `step1-5-waf.yml`） |
 | B. DNS-01（見送り） | CloudFront と無関係に更新できる | DNS の API の権限の持たせ方。[Let's Encrypt の自動化](../ec2/notes/ec2-operations/letsencrypt-automation.md) |
 | C. ACM の ACME 証明書またはエクスポートできる証明書（見送り） | EC2 で使える公開の証明書 | エクスポートできる証明書は有料で、有効期間は 198 日。配置は自分で行う。この用途で使えるかは試していない |
 

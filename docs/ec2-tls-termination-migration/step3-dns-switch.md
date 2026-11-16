@@ -162,7 +162,7 @@ scripts/step3-dns-switch.sh rollback --zone-id "$ZONE" --name app.example.com
 
 外部の DNS サービスでは、CNAME を消して、控えておいた A に戻す。
 
-戻した後も、ステップ 1・2 で作ったもの（証明書、WAF、CloudFront）は残る。やり直すなら、原因を直して確認 2 からもう一度行う（`switch` の前に、前の控えのファイルを片付ける）。全部をやめるなら、[ステップ 2 の元に戻す](./step2-cloudfront.md#元に戻す)、[ステップ 1 の元に戻す](./step1-acm-certificate.md#元に戻す)の順に消す。
+戻した後も、ステップ 1・1.5・2 で作ったもの（証明書、WAF、CloudFront）は残る。やり直すなら、原因を直して確認 2 からもう一度行う（`switch` の前に、前の控えのファイルを片付ける）。全部をやめるなら、[ステップ 2 の元に戻す](./step2-cloudfront.md#元に戻す)、[ステップ 1.5 の元に戻す](./step1-5-waf.md#元に戻す)、[ステップ 1 の元に戻す](./step1-acm-certificate.md#元に戻す)の順に消す。
 
 ## 参考
 

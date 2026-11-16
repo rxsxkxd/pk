@@ -2,8 +2,9 @@
 #
 # - 置くリージョン: us-east-1（CloudFront に付ける ACM の証明書は us-east-1 にある決まり）
 # - スタック名の例: <prefix>-step1-certificate（例 myapp-production-step1-certificate）
-# - デプロイの例:
-#     aws cloudformation deploy --region us-east-1 \
+# - 変更セットの作り方の例（端末では変更セットを作るところまで。中身の確認と実行は AWS のコンソールで行う。
+#   手順は definitions.md の「変更セットをコンソールで実行する」）:
+#     aws cloudformation deploy --region us-east-1 --no-execute-changeset \
 #       --template-file cloudformation/step1-certificate.yml \
 #       --stack-name <prefix>-step1-certificate \
 #       --parameter-overrides DomainName=app.example.com [HostedZoneId=<ホストゾーン ID>]

@@ -1,4 +1,7 @@
-"""ステップ 2（CloudFront のスタックより先）: CloudFront 用の AWS WAF の web ACL。
+"""ステップ 1.5（ステップ 2 の CloudFront のスタックより先）: CloudFront 用の AWS WAF の web ACL。
+
+WAF を使わないなら省略できる（設定値の cloudfront_web_acl_arn を空のままにして、ステップ 2 へ進む）。
+ステップ 1 の証明書とは関係がないので、ステップ 1 と並べて行ってもよい。
 
 CloudFront 用の web ACL（スコープ CLOUDFRONT）は us-east-1 に作る決まりなので、CloudFront のスタック
 （aws_region）とは別のスタックにする。
@@ -45,13 +48,13 @@ def _not(statement: wafv2.CfnWebACL.StatementProperty) -> wafv2.CfnWebACL.Statem
     )
 
 
-class Step2WafStack(TerminationStack):
+class Step15WafStack(TerminationStack):
     def __init__(self, scope: Construct, stack_name: str, configuration: Configuration) -> None:
         # 説明（英語）はテンプレートに出る。日本語のコメントはテンプレートに出ない
         super().__init__(
             scope,
             stack_name,
-            "Step 2 of CloudFront -> EC2: AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed "
+            "Step 1.5 of CloudFront -> EC2: AWS WAF web ACL for the CloudFront distribution. Blocks requests from outside the allowed "
             "countries (with IP exceptions), except the Let's Encrypt HTTP-01 challenge path. "
             "Deploy this stack in us-east-1.",
             configuration,

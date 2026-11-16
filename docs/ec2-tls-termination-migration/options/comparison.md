@@ -74,7 +74,7 @@ AWS WAF を関連付けられるのは **CloudFront と ALB** で、EC2 のイ�
 | 構成 | WAF を置く場所 | 備考 |
 |---|---|---|
 | A. ALB → EC2 | ALB | web ACL は ALB と同じリージョンに作る |
-| **B. CloudFront → EC2（採用）** | **CloudFront** | web ACL は `us-east-1`（Global (CloudFront)）に作る。定義は `step2-waf.yml` |
+| **B. CloudFront → EC2（採用）** | **CloudFront** | web ACL は `us-east-1`（Global (CloudFront)）に作る。定義は `step1-5-waf.yml`（ステップ 1.5） |
 | C. CloudFront → ALB → EC2 | CloudFront を勧める | ALB にも付けられるが、ALB から見た送り元は CloudFront になり、利用者の IP で判定するには追加の設定が要る |
 
 - CloudFront に関連付けた web ACL は、ALB など別の種類のリソースには関連付けられない。C で両方に置くなら、web ACL も 2 つになる

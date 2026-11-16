@@ -58,7 +58,7 @@ class Step2CloudFrontStack(TerminationStack):
             distribution.distribution_domain_name,
             "Step 3: point domain_name to this name after checking the distribution.",
         )
-        # ステップ 2 の 2-4 で、稼働サーバーに足すセキュリティグループ
+        # ステップ 2 の 2-3 で、稼働サーバーに足すセキュリティグループ
         self.output(
             "OriginSecurityGroupId",
             origin_security_group.security_group_id,

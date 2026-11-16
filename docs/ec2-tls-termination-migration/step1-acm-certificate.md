@@ -1,6 +1,6 @@
 # ステップ 1: ACM の証明書
 
-> 位置付け: B. CloudFront → EC2 への移行の 3 つのステップの 1 つ目。CloudFront の証明書（利用者と CloudFront の間で使う証明書）を、ACM の `us-east-1` に用意する。前は [準備](./step0-preparation.md)、次は [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)。全体は [README](./README.md#3-つのステップ)。
+> 位置付け: B. CloudFront → EC2 への移行の 3 つのステップの 1 つ目。CloudFront の証明書（利用者と CloudFront の間で使う証明書）を、ACM の `us-east-1` に用意する。前は [準備](./step0-preparation.md)、次は [ステップ 1.5: WAF の web ACL](./step1-5-waf.md)（WAF を使わないなら [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)）。全体は [README](./README.md#3-つのステップ)。
 >
 > 確かめた範囲: ACM・CloudFormation・CDK の CLI の仕様は AWS のドキュメントと照らし合わせた（2026-11-11〜2026-11-13）。定義は `cfn-lint` まで確かめた（2026-11-12）。**AWS のコマンドと `cdk` の CLI は実行しておらず、外部の DNS サービスでも試していない**。`app.example.com` は例で、`<...>` は環境に合わせて置き換える。
 >
@@ -55,20 +55,23 @@ CloudFront に付ける証明書は **`us-east-1`** に作る（CloudFront の�
 | 定義 | `cloudformation/step1-certificate.yml` | `cdk/python/` の `<prefix>-step1-certificate`（`stacks/step1_certificate.py`） |
 | 値の渡し方 | コマンドのパラメータ（`DomainName`、`HostedZoneId`） | 設定値ファイル（`domain_name`、`certificate_hosted_zone_id`） |
 | 要るもの | AWS CLI | CDK の準備（venv、`cdk` の CLI）と設定値ファイル。設定値ファイルにはステップ 2 の必須の項目（`vpc_id` など）も書く（書かないと合成が止まる） |
-| 向いているとき | ステップ 1 だけ先に済ませたい（CDK の準備がまだ） | ステップ 2 と同じ設定値ファイルで、値をまとめて管理したい |
+| 向いているとき | ステップ 1 だけ先に済ませたい（CDK の準備がまだ） | ステップ 1.5・2 と同じ設定値ファイルで、値をまとめて管理したい |
 
 - **1 つの環境では、決めた方を使い続ける**。YAML と CDK では論理 ID（テンプレートの中のリソースの名前）が違うので、YAML で作ったスタックを CDK のテンプレートで更新すると（逆も）、CloudFormation は証明書を作り直す（ARN が変わる。CloudFront に付けた後は、古い証明書を消せずに失敗する見込み）
-- CDK の準備と設定値ファイルは [ステップ 2 の 2-0](./step2-cloudfront.md#2-0-cdk-の準備と設定値ファイル)と同じ。デプロイの 2 通りの仕方（方法 1: `cdk deploy`、方法 2: CDK から YAML のテンプレートを出して AWS CLI で反映）は [cdk/python/README.md のデプロイ](./cdk/python/README.md#デプロイ)。CDK のコマンドは `cdk/python/` で、venv を有効にしてから流す
+- CDK の準備と設定値ファイルは [ステップ 1.5 の 1.5-0](./step1-5-waf.md#15-0-cdk-の準備と設定値ファイル)と同じ。変更セットの 2 通りの作り方（方法 1: `cdk deploy --method=prepare-change-set`、方法 2: CDK から YAML のテンプレートを出して AWS CLI で作る）は [cdk/python/README.md のデプロイ](./cdk/python/README.md#デプロイ)。CDK のコマンドは `cdk/python/` で、venv を有効にしてから流す
+- **どの書き方でも、端末で行うのは変更セットを作るところまで**。中身の確認と実行は AWS のコンソールで行う（[変更セットをコンソールで実行する](./definitions.md#変更セットをコンソールで実行する)。`us-east-1` を選ぶ）
 
 ### 1-A-1. Route 53（ステージング）
 
 **CloudFormation の YAML**:
 
 ```bash
-aws cloudformation deploy --region us-east-1 \
+# 変更セットを作る（反映はしない）
+aws cloudformation deploy --region us-east-1 --no-execute-changeset \
   --template-file cloudformation/step1-certificate.yml \
   --stack-name <prefix>-step1-certificate \
   --parameter-overrides DomainName=app.example.com HostedZoneId=<ホストゾーン ID>
+# この後、コンソールで変更セットを確かめて実行する
 ```
 
 **CDK**: 設定値ファイルに `domain_name: app.example.com` と `certificate_hosted_zone_id: <ホストゾーン ID>` を書いてから流す。
@@ -76,29 +79,30 @@ aws cloudformation deploy --region us-east-1 \
 ```bash
 cd cdk/python && source .venv/bin/activate
 
-# 方法 1: CDK で直接反映する
+# 方法 1: CDK で変更セットを作る
 cdk diff -c config=config.yml <prefix>-step1-certificate
-cdk deploy -c config=config.yml <prefix>-step1-certificate --require-approval any-change
+cdk deploy -c config=config.yml <prefix>-step1-certificate --method=prepare-change-set
 
-# 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で反映する
+# 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で変更セットを作る
 mkdir -p templates
 cdk synth -c config=config.yml <prefix>-step1-certificate > templates/<prefix>-step1-certificate.template.yml
 aws cloudformation deploy --region us-east-1 --no-execute-changeset \
   --template-file templates/<prefix>-step1-certificate.template.yml \
   --stack-name <prefix>-step1-certificate
-#   変更セットを確かめて反映する（cdk/python/README.md の方法 2 の 3・4）
+
+# どちらの方法でも、この後、コンソールで変更セットを確かめて実行する
 ```
 
 ### 1-A-2. 外部の DNS サービス（本番）
 
 **ACM が CNAME を示してから 72 時間以内に検証できないと、証明書は `Validation timed out` になり、申請し直しになる**（ACM のドキュメントの記述）。CNAME を足すのを人に頼むなら、72 時間以内に足してもらえる段取りを先に付けてから始める。
 
-1. ホストゾーンを空にしてスタックを作る。スタックは検証が済むまで戻ってこないので（`cdk deploy` も同じく待つ）、2 は別の端末で行う。
+1. ホストゾーンを空にして変更セットを作り、コンソールで実行する（[変更セットをコンソールで実行する](./definitions.md#変更セットをコンソールで実行する)）。実行した後、スタックは検証が済むまで `CREATE_IN_PROGRESS` のまま待つ（コンソールのイベントのタブで見られる）。待っている間に 2 へ進む。
 
    **CloudFormation の YAML**:
 
    ```bash
-   aws cloudformation deploy --region us-east-1 \
+   aws cloudformation deploy --region us-east-1 --no-execute-changeset \
      --template-file cloudformation/step1-certificate.yml \
      --stack-name <prefix>-step1-certificate \
      --parameter-overrides DomainName=app.example.com
@@ -109,13 +113,13 @@ aws cloudformation deploy --region us-east-1 --no-execute-changeset \
    ```bash
    cd cdk/python && source .venv/bin/activate
 
-   # 方法 1: CDK で直接反映する
-   cdk deploy -c config=config.yml <prefix>-step1-certificate --require-approval any-change
+   # 方法 1: CDK で変更セットを作る
+   cdk deploy -c config=config.yml <prefix>-step1-certificate --method=prepare-change-set
 
-   # 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で反映する
+   # 方法 2: CloudFormation のテンプレート（YAML）を出して、AWS CLI で変更セットを作る
    mkdir -p templates
    cdk synth -c config=config.yml <prefix>-step1-certificate > templates/<prefix>-step1-certificate.template.yml
-   aws cloudformation deploy --region us-east-1 \
+   aws cloudformation deploy --region us-east-1 --no-execute-changeset \
      --template-file templates/<prefix>-step1-certificate.template.yml \
      --stack-name <prefix>-step1-certificate
    ```
@@ -149,7 +153,7 @@ aws cloudformation deploy --region us-east-1 --no-execute-changeset \
    dig +short CNAME _<文字列>.app.example.com
    ```
 
-72 時間を過ぎて `Validation timed out` になったら、スタックを消して 1 からやり直す。
+72 時間を過ぎて `Validation timed out` になったら、コンソールでスタックを消して 1 からやり直す。
 
 ## 1-B. 既存の証明書を登録する（オプション）
 
@@ -203,11 +207,11 @@ aws cloudformation describe-stacks --region us-east-1 --stack-name <prefix>-step
 | 検証用の CNAME（1-A） | `dig +short CNAME _<文字列>.app.example.com` で引ける（残しておく） |
 | スタック（1-A） | `CREATE_COMPLETE` |
 
-ARN を控える。ステップ 2（CDK）の設定値の `cloudfront_certificate_arn` に書く（CDK の方法 1 なら、`cdk deploy` の最後に出る出力でもよい）。
+ARN を控える（コンソールのスタックの「出力」のタブでも見られる）。ステップ 2（CDK）の設定値の `cloudfront_certificate_arn` に書く。
 
 ## 元に戻す
 
-利用者への影響はない。1-A はスタックを消す（`aws cloudformation delete-stack --region us-east-1 --stack-name <prefix>-step1-certificate`。CDK で作ったスタックも同じ）。1-B は `aws acm delete-certificate --region us-east-1 --certificate-arn <ARN>`。どちらも、CloudFront に付けた後（ステップ 2 の後）は、先に CloudFront のスタックを消さないと消せない。外部の DNS サービスに足した検証用の CNAME は、作り直す見込みがなければ消す。
+利用者への影響はない。1-A はコンソールでスタックを消す（`us-east-1` の `<prefix>-step1-certificate` を選んで「削除」。CDK で作ったスタックも同じ）。1-B は `aws acm delete-certificate --region us-east-1 --certificate-arn <ARN>`。どちらも、CloudFront に付けた後（ステップ 2 の後）は、先に CloudFront のスタックを消さないと消せない。外部の DNS サービスに足した検証用の CNAME は、作り直す見込みがなければ消す。
 
 ## 参考
 
@@ -218,6 +222,7 @@ AWS のドキュメントと照らし合わせた（2026-11-11、2026-11-12）�
 - [Requirements for using SSL/TLS certificates with CloudFront（us-east-1）](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cnames-and-https-requirements.html)
 - [Import certificates into AWS Certificate Manager（登録した証明書は自動で更新されない、CloudFront は us-east-1、再インポートで ARN を保つ）](https://docs.aws.amazon.com/acm/latest/userguide/import-certificate.html)（2026-11-12）
 - [Prerequisites for importing ACM certificates（PEM、暗号化しない秘密鍵、CloudFront の鍵の種類、CloudFormation は登録に対応しない）](https://docs.aws.amazon.com/acm/latest/userguide/import-certificate-prerequisites.html)（2026-11-12）
+- [Execute a change set for a CloudFormation stack（コンソールでの実行の手順）](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-updating-stacks-changesets-execute.html)（2026-11-16）
 - [cdk deploy](https://docs.aws.amazon.com/cdk/v2/guide/ref-cli-cmd-deploy.html)・[cdk synth（スタックを 1 つ渡すと YAML を標準出力に出す）](https://docs.aws.amazon.com/cdk/v2/guide/ref-cli-cmd-synth.html)（2026-11-13）
 - [Managed certificate renewal（ACM が発行した証明書は、CloudFront などに付いていれば自動更新の対象。登録した証明書は対象外）](https://docs.aws.amazon.com/acm/latest/userguide/managed-renewal.html)（2026-11-16）
 - [CertificateDetail（Status、Type、InUseBy、RenewalEligibility の意味）](https://docs.aws.amazon.com/acm/latest/APIReference/API_CertificateDetail.html)（2026-11-16）

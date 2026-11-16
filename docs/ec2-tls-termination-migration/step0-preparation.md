@@ -1,6 +1,6 @@
 # 準備（ステップ 1 の前）
 
-> 位置付け: B. CloudFront → EC2 への移行の、ステップ 1 より前に行う準備。全体は [README](./README.md#3-つのステップ)。次は [ステップ 1: ACM の証明書](./step1-acm-certificate.md)。
+> 位置付け: B. CloudFront → EC2 への移行の、ステップ 1 より前に行う準備。全体は [README](./README.md#3-つのステップ)。次は [ステップ 1: ACM の証明書](./step1-acm-certificate.md)。その後、ステップ 1.5（WAF。省略できる）、ステップ 2、ステップ 3 と進む。
 >
 > 確かめた範囲: httpd の設定は、今の構成に近いコンテナで確かめた（2026-11-10。[検証の結果](./cloudfront-to-ec2-httpd.md#検証の結果)）。**AWS のコマンドと、本物の稼働サーバーでは試していない**。`app.example.com`・`origin.app.example.com` は例で、`<...>` は環境に合わせて置き換える。
 >

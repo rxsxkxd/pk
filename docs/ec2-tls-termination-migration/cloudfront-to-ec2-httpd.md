@@ -1,6 +1,6 @@
 # CloudFront → EC2 のときに httpd で行う設定
 
-> 位置付け: 参考。採用した B. CloudFront → EC2 で、稼働サーバー（オリジンの EC2）の httpd（Apache 2.4）で行う設定の下書き。いつ入れるかは、[準備](./step0-preparation.md#3-稼働サーバーの-httpd-の設定)（秘密のヘッダーの確認以外）と [ステップ 3 の片付け](./step3-dns-switch.md#3-5-片付け)（秘密のヘッダーの確認）。
+> 位置付け: 参考。採用した B. CloudFront → EC2 で、稼働サーバー（オリジンの EC2）の httpd（Apache 2.4）で行う設定の下書き。いつ入れるかは、[準備](./step0-preparation.md#3-稼働サーバーの-httpd-の設定)（秘密のヘッダーの確認以外）と [ステップ 4](./step4-origin-restriction.md#4-3-httpd-で秘密のヘッダーを確かめる)（秘密のヘッダーの確認）。
 >
 > 前提: CloudFront の Origin protocol は **HTTPS only**、オリジンリクエストポリシーは **`AllViewer`**（利用者の Host をそのまま渡す）。
 >
@@ -14,11 +14,10 @@
 |---|---|---|---|
 | 1 | SSL/TLS の設定を残す | 必須 | CloudFront はオリジンの証明書を検証する。自己署名の証明書は使えない |
 | 2 | `ServerName` を利用者のドメインにする | 必須 | `AllViewer` で利用者の Host が届く |
-| 3 | 秘密のヘッダーの確認 | **入れる**（ステップ 3 の片付け） | プレフィックスリストは CloudFront 全体の範囲で、**他人のディストリビューションからも届く** |
+| 3 | 秘密のヘッダーの確認 | **入れる**（ステップ 4） | プレフィックスリストは CloudFront 全体の範囲で、**他人のディストリビューションからも届く** |
 | 4 | 利用者の IP の復元 | **入れる**（準備） | 何もしないと、送り元がすべて CloudFront になる |
 | 5 | `KeepAliveTimeout` | **入れる**（準備） | 再利用の競合による 502 を避ける |
-| 6 | `old_app_a` を 443 番へ移す | **必須**（[README の T3](./README.md#決めたこと)） | CloudFront は 443 番にだけ接続するため |
-| 7 | 証明書の更新の経路 | **入れる**（準備。確認のパスの設定） | 今の HTTP-01 の経路が変わる |
+| 6 | 証明書の更新の経路 | **入れる**（準備。確認のパスの設定） | 今の HTTP-01 の経路が変わる |
 
 ## 設定の全体
 
@@ -70,7 +69,7 @@
 
 ## 2. `ServerName`
 
-`ServerName` を利用者のドメインにする。オリジンの名前（`origin.app.example.com`）では受けない。
+`ServerName` を利用者のドメインにする。オリジンの名前（EC2 のパブリック DNS 名）では受けない。
 
 Host を渡さない構成（`AllViewer` を使わない）にすると、Rails がリダイレクト先などにオリジンの名前を使い、利用者が CloudFront を通らなくなる。そのため `AllViewer` を前提にしている。
 
@@ -90,7 +89,7 @@ CloudFront の Add custom header に設定した値を、httpd で確認する�
 |---|---|
 | AMI | このファイルは AMI に入る。AMI の共有の範囲に注意する |
 | 値の入れ替え | CloudFront と httpd で両方の値を受ける期間を作ってから入れ替える |
-| 順番 | DNS の切り替えが行き渡ってから有効にする（[ステップ 3 の片付け](./step3-dns-switch.md#3-5-片付け)）。先に入れると、まだ EC2 へ直接来ている利用者が 403 になる |
+| 順番 | DNS の切り替えが行き渡ってから有効にする（[ステップ 4 の 4-3](./step4-origin-restriction.md#4-3-httpd-で秘密のヘッダーを確かめる)）。先に入れると、まだ EC2 へ直接来ている利用者が 403 になる |
 
 ## 4. 利用者の IP を復元する
 
@@ -116,24 +115,6 @@ curl -s https://ip-ranges.amazonaws.com/ip-ranges.json \
 ## 5. `KeepAliveTimeout`
 
 CloudFront の Keep-alive timeout（既定 5 秒）より長くする。短いと、CloudFront が再利用しようとした接続を httpd が閉じて、エラーになることがある。Keep-alive timeout を延ばしたときは、こちらも合わせて延ばす。
-
-## 6. `old_app_a` を 443 番へ移す
-
-CloudFront が HTTPS Only で接続すると、今の `*:80` の `old_app_a` には届かない。`*:443` の VirtualHost の中に足す。`Alias` のパスは実際の配置に合わせる。
-
-```apache
-Alias /old_app_a /home/ruby/old_app_a/public
-<Location /old_app_a>
-   PassengerBaseURI /old_app_a
-   PassengerAppRoot /home/ruby/old_app_a
-</Location>
-<Directory /home/ruby/old_app_a/public>
-   Options -MultiViews
-   Require all granted
-</Directory>
-```
-
-`old_app_a` を平文のまま残す必要があるなら、CloudFront に HTTP only のオリジンを足し、`/old_app_a*` のビヘイビアで振り分ける方法もある。ただし、CloudFront から EC2 までインターネットを平文で通る。
 
 ## 証明書の更新
 
@@ -178,7 +159,6 @@ Alias /.well-known/acme-challenge /var/www/html/.well-known/acme-challenge
 | 偽の `X-Forwarded-For`・`Client-IP` | 効かない。`RequestHeader unset` を外すと、Rails 4.2 の `remote_ip` は偽の値を選ぶ |
 | Rails の HTTPS の認識 | `X-Forwarded-Proto` なしで HTTPS と扱われる |
 | `PassengerEnabled off` | `/.well-known/acme-challenge` のファイルが Rails を通らずに返る |
-| `old_app_a` | `Alias` と `<Location>` の形で動き、URL に `/old_app_a` が付く |
 | TLS の接続名（SNI）と Host が違う場合 | SNI が別の名前でも、SNI がなくても 200 |
 | `KeepAliveTimeout 10` | 無通信で 10 秒後に閉じる |
 
@@ -187,7 +167,6 @@ Alias /.well-known/acme-challenge /var/www/html/.well-known/acme-challenge
 | 項目 | 内容 |
 |---|---|
 | 実際の CloudFront | Host の受け渡しと証明書の確認が、ドキュメントどおりに動くこと |
-| `old_app_a` の配置 | 本物の配置（`/var/www/html` の下のシンボリックリンクなど）に合わせること |
 | Let's Encrypt | 今の `AL2` の certbot の設定（webroot のパス）で `--dry-run` が通ること |
 
 ## 参考

@@ -1,6 +1,6 @@
 # ステップ 1: ACM の証明書
 
-> 位置付け: B. CloudFront → EC2 への移行の 3 つのステップの 1 つ目。CloudFront の証明書（利用者と CloudFront の間で使う証明書）を、ACM の `us-east-1` に用意する。前は [準備](./step0-preparation.md)、次は [ステップ 1.5: WAF の web ACL](./step1-5-waf.md)（WAF を使わないなら [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)）。全体は [README](./README.md#3-つのステップ)。
+> 位置付け: B. CloudFront → EC2 への移行の 3 つのステップの 1 つ目。CloudFront の証明書（利用者と CloudFront の間で使う証明書）を、ACM の `us-east-1` に用意する。前は [準備](./step0-preparation.md)、次は [ステップ 1.5: WAF の web ACL](./step1-5-waf.md)（WAF を使わないなら [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)）。全体は [README](./README.md#ステップの流れ)。
 >
 > 確かめた範囲: ACM・CloudFormation・CDK の CLI の仕様は AWS のドキュメントと照らし合わせた（2026-11-11〜2026-11-13）。定義は `cfn-lint` まで確かめた（2026-11-12）。**AWS のコマンドと `cdk` の CLI は実行しておらず、外部の DNS サービスでも試していない**。`app.example.com` は例で、`<...>` は環境に合わせて置き換える。
 >

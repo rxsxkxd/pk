@@ -1,6 +1,6 @@
 # CDK（Python）版の使い方と実行コマンド
 
-> 位置付け: `cdk/python/` の使い方。B. CloudFront → EC2 への移行の 3 つのステップのうち、**ステップ 2 は CDK で行う**。ステップ 1 は CloudFormation の YAML と CDK のどちらでもよく、手順書に両方を書いている。ステップ 3 はシェルスクリプト（[README の T9](../../README.md#決めたこと)）。定義の中身（ルール、YAML との違い）は [definitions.md](../../definitions.md) を正本とし、ここでは**手元での準備・合成・デプロイのコマンド**をまとめる。変更セットの作り方は 2 通りある（[CDK で作る](#方法-1-cdk-で変更セットを作るcdk-deploy---methodprepare-change-set)・[CloudFormation のテンプレートを出して AWS CLI で作る](#方法-2-cloudformation-のテンプレートyamlを出して-aws-cli-で変更セットを作る)）。どちらも、変更セットの実行は AWS のコンソールで行う。手順の全体は [README](../../README.md#3-つのステップ)。
+> 位置付け: `cdk/python/` の使い方。B. CloudFront → EC2 への移行の 3 つのステップのうち、**ステップ 2 は CDK で行う**。ステップ 1 は CloudFormation の YAML と CDK のどちらでもよく、手順書に両方を書いている。ステップ 3 はシェルスクリプト（[README の T9](../../README.md#決めたこと)）。定義の中身（ルール、YAML との違い）は [definitions.md](../../definitions.md) を正本とし、ここでは**手元での準備・合成・デプロイのコマンド**をまとめる。変更セットの作り方は 2 通りある（[CDK で作る](#方法-1-cdk-で変更セットを作るcdk-deploy---methodprepare-change-set)・[CloudFormation のテンプレートを出して AWS CLI で作る](#方法-2-cloudformation-のテンプレートyamlを出して-aws-cli-で変更セットを作る)）。どちらも、変更セットの実行は AWS のコンソールで行う。手順の全体は [README](../../README.md#ステップの流れ)。
 >
 > 状態: 合成（`app.py` の実行）は確かめた（2026-11-12。Node.js 26、`aws-cdk-lib` 2.275.0）。3 つのステップの形に組み替えた後も、合成したテンプレートは `cfn-lint` 1.60.0 を警告なしで通り、組み替える前とリソースの中身が同じだった（違いはスタック名から決まる名前と説明だけ）。`cdk` の CLI（`aws-cdk` 2.1148.1）を入れ、`cdk list` と `cdk synth` を確かめた（2026-11-13）。`cdk synth <スタック名>` が標準出力に出す YAML は、`app.py` を直接動かして出した JSON と中身が同じだった（本線の 3 つのスタック）。**AWS へのデプロイ（下の「デプロイ」のコマンド）と、AWS を読む `cdk diff`・`cdk deploy` は実行していない**（コマンドとオプションは AWS のドキュメントと `cdk deploy --help` で確かめた）。
 >
@@ -16,7 +16,7 @@
 | 合成 | `app.py` を動かして、CloudFormation のテンプレート（JSON）を `cdk.out/` に出すこと（`cdk synth` と同じ） |
 | `cdk` の CLI | npm のパッケージ `aws-cdk` のコマンド `cdk`。`cdk deploy` と、テンプレートを YAML で出す `cdk synth` に要る。Python の `aws-cdk-lib` とは別に入れる |
 | ブートストラップ | `cdk bootstrap` で、アカウントとリージョンごとに CDK 用の S3 のバケット・ECR・IAM ロール（スタック `CDKToolkit`）を作ること |
-| 本線のスタック | 採用した B. CloudFront → EC2 のステップ 1・2 のスタック（3 つ） |
+| 本線のスタック | 採用した B. CloudFront → EC2 のステップ 1・1.5・2・4 のスタック（4 つ） |
 | オプションのスタック | 採用しなかった ALB を使う構成のスタック。設定値の `option_stacks` で指定したときだけ合成する |
 
 ## 方針
@@ -41,7 +41,8 @@
 |---|---|---|---|---|---|---|
 | 1 | `<prefix>-step1-certificate` | `us-east-1` | CloudFront の証明書（ACM で作成）。ステップ 1 を CDK で行うときに使う（CloudFormation の YAML `cloudformation/step1-certificate.yml` で行うなら使わない） | いつも | なし | `CertificateArn` |
 | 1.5 | `<prefix>-step1-5-waf` | `us-east-1` | CloudFront 用の WAF の web ACL（国の絞り込みだけ。WAF を使わないなら省略できる。マネージドルールとログは[オプション](../../options/waf-managed-rules.md)） | いつも | なし | `WebAclArn` |
-| 2 | `<prefix>-step2-cloudfront` | `aws_region` | CloudFront、オリジン用のセキュリティグループ、オリジンの名前の Route 53 のレコード（任意） | `cloudfront_certificate_arn` がある | `OriginVerifyHeaderValue` | `DistributionDomainName`、`OriginSecurityGroupId` |
+| 2 | `<prefix>-step2-cloudfront` | `aws_region` | CloudFront（オリジンは EC2 のパブリック DNS 名）。自分のドメインのオリジンの名前を使うときだけ、その Route 53 のレコード（任意） | `cloudfront_certificate_arn` がある | `OriginVerifyHeaderValue` | `DistributionDomainName` |
+| 4 | `<prefix>-step4-origin-sg` | `aws_region` | オリジン用のセキュリティグループ（CloudFront のプレフィックスリストから 443 番） | いつも | なし | `OriginSecurityGroupId` |
 
 `cloudfront_certificate_arn` が空の間は、`<prefix>-step2-cloudfront` を合成せず、標準エラーに次のように出す（終了コードは 0）。ステップ 1 の前は空のままでよい。
 
@@ -105,14 +106,14 @@ cp config.example.yml config.yml   # 環境の値に直す（環境ごとに con
 |---|---|---|---|
 | `stack_name_prefix` | ○ | すべて | スタック名の頭（例 `myapp-production`） |
 | `aws_region` | ○ | 2 | CloudFront のスタックを置くリージョン（例 `ap-northeast-1`）。ステップ 1 と WAF のスタックはいつも `us-east-1` |
-| `vpc_id`、`availability_zones` | ○ | 2 | 稼働サーバーの VPC と、その AZ |
-| `cloudfront_prefix_list_id` | ○ | 2 | `com.amazonaws.global.cloudfront.origin-facing` の ID（下のコマンドで調べる） |
+| `vpc_id`、`availability_zones` | ○ | 4 | 稼働サーバーの VPC と、その AZ |
+| `cloudfront_prefix_list_id` | ○ | 4 | `com.amazonaws.global.cloudfront.origin-facing` の ID（下のコマンドで調べる） |
 | `domain_name` | ○ | 1・2 | 利用者のドメイン名（例 `app.example.com`） |
-| `origin_domain_name` | ○ | 2 | オリジンの名前。`domain_name` と同じにするとエラー |
+| `origin_domain_name` | ○ | 2 | オリジンの名前。稼働サーバーの EC2 のパブリック DNS 名（[ステップ 2 の 2-1](../../step2-cloudfront.md#2-1-オリジンの名前)）。`domain_name` と同じにするとエラー |
 | `certificate_hosted_zone_id` | | 1 | ステップ 1 を CDK で行うときに、`domain_name` の Route 53 のホストゾーン ID を書く（ステージング）。空なら検証用の CNAME を手で足す（本番）。ステップ 1 を CloudFormation の YAML で行うなら空のままでよい |
 | `cloudfront_certificate_arn` | | 2 | ステップ 1（CloudFormation）の出力 `CertificateArn`（または登録した証明書の ARN）。空の間はステップ 2 の CloudFront のスタックを合成しない |
 | `cloudfront_web_acl_arn` | | 2 | ステップ 1.5 の `<prefix>-step1-5-waf` の出力 `WebAclArn`。空なら関連付けない（**本番では空にしない**） |
-| `origin_hosted_zone_id`、`origin_elastic_ip` | | 2 | オリジンの名前の A レコードも作るときに 2 つとも指定する（ステージング）。本番は空 |
+| `origin_hosted_zone_id`、`origin_elastic_ip` | | 2 | 自分のドメインのオリジンの名前を使い、その A レコードも作るときだけ 2 つとも指定する。手順では空 |
 | `waf_allowed_countries` ほか `waf_*` | | 1.5 | WAF の設定（[definitions.md の WAF](../../definitions.md#ステップ-15-の-waf国の絞り込み)） |
 | `geo_restriction_countries` | | 2 | CloudFront の地理的制限。既定は空（使わない。使うと HTTP-01 の更新が止まる） |
 | `origin_read_timeout_seconds` ほか | | 2 | 既定値あり |
@@ -237,8 +238,9 @@ aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
 |---|---|---|---|
 | 1 | ステップ 1 | CloudFormation の YAML（`cloudformation/step1-certificate.yml`）か CDK のどちらか。CDK なら `<prefix>-step1-certificate` をデプロイする（`us-east-1`。ステージングは設定値 `certificate_hosted_zone_id` を書く）。出力の `CertificateArn` を設定値の `cloudfront_certificate_arn` に書く | [確認 1](../../step1-acm-certificate.md#確認-1ステップ-2-へ進む条件) |
 | 1.5 | ステップ 1.5（省略できる） | 設定値ファイルを作って合成する（`cloudfront_web_acl_arn` は空のまま） → `<prefix>-step1-5-waf` の変更セットを作り、コンソールで実行（`us-east-1`） → 出力の `WebAclArn` を設定値の `cloudfront_web_acl_arn` に書く | [確認 1.5](../../step1-5-waf.md#確認-15ステップ-2-へ進む条件) |
-| 2 | ステップ 2 | `<prefix>-step2-cloudfront` の変更セットを作り（`OriginVerifyHeaderValue` を渡す）、コンソールで実行（`aws_region`） → 出力 `OriginSecurityGroupId` を稼働サーバーに足す | [確認 2](../../step2-cloudfront.md#確認-2ステップ-3-へ進む条件) |
-| 3 | ステップ 3 | **CDK は使わない**。シェルスクリプト `scripts/step3-dns-switch.sh` で向き先を変える | [確認 3](../../step3-dns-switch.md#確認-3片付けへ進む条件) |
+| 2 | ステップ 2 | `origin_domain_name` にパブリック DNS 名を書く → `<prefix>-step2-cloudfront` の変更セットを作り（`OriginVerifyHeaderValue` を渡す）、コンソールで実行（`aws_region`） | [確認 2](../../step2-cloudfront.md#確認-2ステップ-3-へ進む条件) |
+| 3 | ステップ 3 | **CDK は使わない**。シェルスクリプト `scripts/step3-dns-switch.sh` で向き先を変える | [確認 3](../../step3-dns-switch.md#確認-3ステップ-4-へ進む条件) |
+| 4 | ステップ 4 | `<prefix>-step4-origin-sg` の変更セットを作り、コンソールで実行（`aws_region`） → 出力 `OriginSecurityGroupId` を稼働サーバーに足す（AWS CLI） | [確認 4](../../step4-origin-restriction.md#確認-4片付けへ進む条件) |
 
 ### オプション（採用しなかった構成）
 
@@ -247,9 +249,9 @@ aws cloudformation describe-stacks --region "$REGION" --stack-name "$STACK" \
 
 ## 撤去
 
-逆の順（ステップ 2 の CloudFront → ステップ 1.5 の WAF → ステップ 1）に、AWS のコンソールで消す（CloudFormation のコンソールでリージョンを選び、スタックを選んで「削除」）。方法 1・2 のどちらで作ったスタックも同じ。
+逆の順（ステップ 4 のセキュリティグループ → ステップ 2 の CloudFront → ステップ 1.5 の WAF → ステップ 1）に、AWS のコンソールで消す（CloudFormation のコンソールでリージョンを選び、スタックを選んで「削除」）。方法 1・2 のどちらで作ったスタックも同じ。
 
-- 先に稼働サーバーから `OriginSecurityGroupId` を外す（付けたままだと、グループを消せずに削除が失敗する）
+- ステップ 4 のスタックを消す前に、稼働サーバーから `OriginSecurityGroupId` を外す（付けたままだと、グループを消せずに削除が失敗する）。全公開の許可を消していたなら、先に足し直す
 - WAF と証明書のスタックは、CloudFront のスタックを消した後でないと消せない（使われている間は消せない）
 - ステップ 3 の後なら、先に DNS を元に戻す（[ステップ 3 の元に戻す](../../step3-dns-switch.md#元に戻す)）
 - オプションの A・C で既存のインスタンスのセキュリティグループに足した許可は、スタックと一緒に消える

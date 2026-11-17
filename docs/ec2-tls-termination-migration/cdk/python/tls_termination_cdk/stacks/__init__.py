@@ -4,7 +4,8 @@
 
     ステップ 1    <prefix>-step1-certificate   us-east-1   ACM の証明書（作成する場合）
     ステップ 1.5  <prefix>-step1-5-waf         us-east-1   CloudFront 用の WAF の web ACL（使わないなら省略できる）
-    ステップ 2    <prefix>-step2-cloudfront    aws_region  CloudFront、オリジン用のセキュリティグループ
+    ステップ 2    <prefix>-step2-cloudfront    aws_region  CloudFront（オリジンは EC2 のパブリック DNS 名）
+    ステップ 4    <prefix>-step4-origin-sg     aws_region  オリジン用のセキュリティグループ（接続の制限。後付け）
 
 オプションの構成（ALB を使う構成）は、設定値の option_stacks で指定したときだけ定義する。
 """
@@ -19,6 +20,7 @@ from .options.cloudfront_alb_to_ec2 import CloudFrontAlbToEc2Stack
 from .step1_certificate import Step1CertificateStack
 from .step1_5_waf import Step15WafStack
 from .step2_cloudfront import Step2CloudFrontStack
+from .step4_origin_sg import Step4OriginSecurityGroupStack
 
 # option_stacks に書く名前と、そのスタックのクラス。名前は configuration.py の OPTION_REQUIRED_KEYS と同じにする
 OPTION_STACKS = {
@@ -44,6 +46,9 @@ def define_stacks(scope: Construct, configuration: Configuration) -> list[str]:
         Step2CloudFrontStack(scope, f"{prefix}-step2-cloudfront", configuration)
     else:
         skipped.append(f"{prefix}-step2-cloudfront（cloudfront_certificate_arn が空。ステップ 1 の後に書く）")
+
+    # ステップ 4 は、ほかのスタックの出力を使わないので、いつも定義する（作るのはステップ 3 の後）
+    Step4OriginSecurityGroupStack(scope, f"{prefix}-step4-origin-sg", configuration)
 
     # オプションの構成は、書かれたものだけを定義する（名前の誤りは configuration.py で止めている）
     for option in configuration.option_stacks:

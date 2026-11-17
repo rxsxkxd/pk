@@ -1,10 +1,10 @@
 # CloudFront → EC2 のドメイン名・証明書・通信の流れ
 
-> 位置付け: 参考。採用した B. CloudFront → EC2（利用者のドメイン名を変えない形）で使うドメイン名・DNS のレコード・証明書の役割と、通信の流れをまとめる。作業の順番は [README の 3 つのステップ](./README.md#3-つのステップ)。
+> 位置付け: 参考。採用した B. CloudFront → EC2（利用者のドメイン名を変えない形）で使うドメイン名・DNS のレコード・証明書の役割と、通信の流れをまとめる。作業の順番は [README の 3 つのステップ](./README.md#ステップの流れ)。
 >
 > 確かめた範囲: AWS の仕様は AWS のドキュメントと照らし合わせた（2026-11-09〜2026-11-10）。httpd の側は、今の構成に近いコンテナで確かめた（2026-11-10）。**実際の CloudFront・ACM・Route 53 では試していない**。
 >
-> `app.example.com`・`origin.app.example.com` は例である。
+> `app.example.com`・`ec2-203-0-113-10.ap-northeast-1.compute.amazonaws.com`（EC2 のパブリック DNS 名）は例である。
 >
 > 作成日: 2026-11-11（`cloudfront-to-ec2-same-domain.md` の通信の流れと確かめたことを統合した: 2026-11-12）
 
@@ -13,7 +13,7 @@
 | 用語 | 指すもの |
 |---|---|
 | 利用者のドメイン名 | 利用者が使う名前（`app.example.com`）。移行の前後で変わらない |
-| オリジンの名前 | CloudFront が EC2 へ接続するためだけに使う名前（`origin.app.example.com`） |
+| オリジンの名前 | CloudFront が EC2 へ接続するときに引く名前。稼働サーバーの EC2 のパブリック DNS 名（`ec2-203-0-113-10.ap-northeast-1.compute.amazonaws.com`。[README の T13](./README.md#決めたこと)） |
 | 稼働サーバー | CloudFront の接続先の EC2（httpd） |
 | CloudFront の証明書 | 利用者と CloudFront の間で使う証明書。ACM で管理する（ACM のコンソールの「証明書」。「ACME 証明書」ではない） |
 | オリジンの証明書 | CloudFront と稼働サーバーの間で使う証明書。今の Let's Encrypt の証明書 |
@@ -27,7 +27,7 @@ flowchart TD
   CF["CloudFront<br/>CloudFront の証明書: ACM（us-east-1）の app.example.com"]
   EC2["稼働サーバー（httpd）<br/>オリジンの証明書: Let's Encrypt の app.example.com"]
   D1["DNS: app.example.com → CloudFront"]
-  D2["DNS: origin.app.example.com → Elastic IP"]
+  D2["DNS: EC2 のパブリック DNS 名 → Elastic IP（AWS が付ける名前）"]
 
   U -- "名前を引く" --> D1
   U -- "HTTPS。Host: app.example.com" --> CF
@@ -42,7 +42,7 @@ flowchart TD
 | レコード | 今 | 移行後 | 作り方 |
 |---|---|---|---|
 | `app.example.com` | 稼働サーバーの Elastic IP | CloudFront（Route 53 ならエイリアスの A レコード。IPv6 を有効にしたら AAAA も） | [ステップ 3](./step3-dns-switch.md) で AWS CLI で変える。定義には含めない。外部の DNS サービスなら CNAME |
-| `origin.app.example.com` | なし | 稼働サーバーの Elastic IP（A レコード） | [ステップ 2](./step2-cloudfront.md#2-1-オリジンの名前) で新しく作る。Route 53 なら `step2-cloudfront.yml` で作れる（`OriginHostedZoneId`）。外部の DNS サービスなら手で足す |
+| オリジンの名前（EC2 のパブリック DNS 名） | Elastic IP を返す（AWS が付けている） | 同じ | **作らない**。[ステップ 2 の 2-1](./step2-cloudfront.md#2-1-オリジンの名前) で調べて設定値に書く。自分のドメインの名前（例 `origin.app.example.com`）を使う形も定義には残している（Route 53 なら `OriginHostedZoneId`） |
 | ACM の検証用の CNAME（`_<文字列>.app.example.com`） | なし | ACM が示す値 | [ステップ 1](./step1-acm-certificate.md#1-a-acm-で作成する採用) の証明書のスタックの作成中に足す。Route 53 なら自動で作られる（`HostedZoneId`）。外部の DNS サービスなら手で足す。**ACM が自動で更新するために残しておく** |
 
 | 注意 | 内容 |
@@ -71,13 +71,13 @@ flowchart TD
 | 接続 | 接続先 | 返る証明書 | 確かめること |
 |---|---|---|---|
 | 利用者 → CloudFront | `app.example.com`（CloudFront） | CloudFront の証明書 | 信頼された CA の証明書で、`app.example.com` に一致すること |
-| CloudFront → 稼働サーバー | `origin.app.example.com` の IP | オリジンの証明書 | 信頼された CA の証明書で、期限内で、中間証明書がそろい、**Host の `app.example.com` に一致すること** |
+| CloudFront → 稼働サーバー | オリジンの名前（EC2 のパブリック DNS 名）の IP | オリジンの証明書 | 信頼された CA の証明書で、期限内で、中間証明書がそろい、**Host の `app.example.com` に一致すること** |
 
-CloudFront がオリジンの証明書で確かめる名前は、「オリジンの名前」か「Host を渡しているならその Host の名前」のどちらかである。この構成は `AllViewer` で Host を渡すので、オリジンの証明書は `app.example.com` に一致すればよく、`origin.app.example.com` を含める必要はない。
+CloudFront がオリジンの証明書で確かめる名前は、「オリジンの名前」か「Host を渡しているならその Host の名前」のどちらかである。この構成は `AllViewer` で Host を渡すので、オリジンの証明書は `app.example.com` に一致すればよく、オリジンの名前（EC2 のパブリック DNS 名）を含める必要はない（そもそも `compute.amazonaws.com` の名前の証明書は取れない）。
 
 | 崩れると | 結果 |
 |---|---|
-| `AllViewer` をやめて Host を渡さない | オリジンの証明書が `origin.app.example.com` に一致する必要があり、一致しなければ 502 になる |
+| `AllViewer` をやめて Host を渡さない | オリジンの証明書がオリジンの名前（EC2 のパブリック DNS 名）に一致する必要があり、一致しないので 502 になる |
 | オリジンの証明書が自己署名、期限切れ、中間証明書の不足・順序の誤り | CloudFront が接続を切り、502 になる |
 
 CloudFront がオリジンへの TLS で送る名前（SNI）は、AWS のドキュメントでは確かめられなかった。コンテナの httpd は、SNI が別の名前でも、SNI がなくても 200 を返した。
@@ -88,9 +88,9 @@ CloudFront がオリジンへの TLS で送る名前（SNI）は、AWS のドキ
 |---|---|---|
 | 1 | 利用者が `app.example.com` を DNS で引き、CloudFront のアドレスを得る | |
 | 2 | 利用者が CloudFront に HTTPS で接続する | CloudFront の証明書が `app.example.com` に一致すること |
-| 3 | CloudFront が、オリジンの設定の `origin.app.example.com` を DNS で引き、稼働サーバーの Elastic IP を得る | |
+| 3 | CloudFront が、オリジンの設定の EC2 のパブリック DNS 名を DNS で引き、稼働サーバーの Elastic IP を得る | |
 | 4 | CloudFront が稼働サーバーに HTTPS で接続する。`AllViewer` により Host は `app.example.com` のまま | オリジンの証明書が信頼された CA のもので、Host の `app.example.com` に一致すること |
-| 5 | httpd が Host を見て、`ServerName app.example.com` の VirtualHost で処理する | CloudFront が付けた秘密のヘッダー（ステップ 3 の片付けの後） |
+| 5 | httpd が Host を見て、`ServerName app.example.com` の VirtualHost で処理する | CloudFront が付けた秘密のヘッダー（[ステップ 4](./step4-origin-restriction.md) の後） |
 | 6 | Rails が応答を生成する。Host が同じなので、リダイレクト先の URL は `https://app.example.com/...` になる | |
 
 ## 前提が崩れたときに起きること
@@ -98,7 +98,7 @@ CloudFront がオリジンへの TLS で送る名前（SNI）は、AWS のドキ
 | 状況 | 結果 |
 |---|---|
 | オリジンに `app.example.com` を指定する | CloudFront が自分自身のアドレスを引くことになり、稼働サーバーへ届かない |
-| `AllViewer` をやめて Host を渡さない | Host がオリジンの名前になる。オリジンの証明書が `origin.app.example.com` に一致する必要があり、一致しなければ 502 になる。Rails のリダイレクト先もオリジンの名前になる |
+| `AllViewer` をやめて Host を渡さない | Host がオリジンの名前になる。オリジンの証明書がオリジンの名前に一致する必要があり、一致しないので 502 になる。Rails のリダイレクト先もオリジンの名前になる |
 | オリジンの証明書が切れる | すべての利用者に 502 が返る |
 | 稼働サーバーが中間証明書を返さない、順序が違う | CloudFront が接続を切り、502 になる |
 | DNS の切り替えが行き渡る前に秘密のヘッダーの確認を入れる | まだ稼働サーバーへ直接来ている利用者が 403 になる |
@@ -111,7 +111,7 @@ CloudFront がオリジンへの TLS で送る名前（SNI）は、AWS のドキ
 
 | 方法 | 内容 | 注意 |
 |---|---|---|
-| **地理的制限の代わりに WAF を使う（採用）** | 国で絞りつつ、`/.well-known/acme-challenge/` だけを例外にできる | WAF の料金（web ACL とルール 5 つで月 $10 の見込みと、100 万リクエストごとに $0.60。ほかにログの料金）。httpd の 443 番に確認のパスの設定が要る（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
+| **地理的制限の代わりに WAF を使う（採用）** | 国で絞りつつ、`/.well-known/acme-challenge/` だけを例外にできる | WAF の料金（既定の国の絞り込みだけなら、web ACL とルール 2 つで月 $7 と、100 万リクエストごとに $0.60。単価は 2026-11-09 確認。[definitions.md の WAF](./definitions.md#ステップ-15-の-waf国の絞り込み)）。httpd の 443 番に確認のパスの設定が要る（[証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)） |
 | DNS-01 に変える（見送り） | CloudFront の設定に左右されない | DNS の API の権限の持たせ方を決める |
 | オリジンの証明書を ACM のものにする（見送り） | ACM の ACME かエクスポートできる証明書 | この用途では試していない。エクスポートできる証明書は有料 |
 
@@ -142,7 +142,7 @@ CloudFront の証明書（ACM）は、どの方法でも影響を受けない。
 |---|---|
 | CloudFront の実際の動作 | 実際のディストリビューションで、`AllViewer` の Host の受け渡しと証明書の確認が、ドキュメントどおりに動くこと（[ステップ 2 の確認 2](./step2-cloudfront.md#確認-2ステップ-3-へ進む条件)） |
 | CloudFront が TLS で送る名前（SNI） | `AllViewer` のときに利用者のドメイン名を送るかは、AWS のドキュメントで確かめられなかった |
-| Let's Encrypt の更新 | CloudFront と WAF を経た HTTP-01 が通ること（[ステップ 3 の片付け](./step3-dns-switch.md#3-5-片付け)の 3） |
+| Let's Encrypt の更新 | CloudFront と WAF を経た HTTP-01 が通ること（[ステップ 4 の確認 4](./step4-origin-restriction.md#確認-4片付けへ進む条件)） |
 | 本物のアプリ | Cookie、CSRF のトークン、ファイルのアップロードなど |
 
 本番の前に、ステージングで 3 つのステップを 1 度通して確かめる。
@@ -152,7 +152,7 @@ CloudFront の証明書（ACM）は、どの方法でも影響を受けない。
 | # | 論点 |
 |---|---|
 | C1 | オリジンの証明書の更新の方法 → **WAF で確認のパスを例外にし、HTTP-01 を続ける**（2026-11-11 に決めた） |
-| C2 | `app.example.com` の DNS が Route 53 か → **ステージングは Route 53、本番は別のサービス**（2026-11-11）。ステージングは `HostedZoneId`・`OriginHostedZoneId` を指定して定義で作る。本番は空にして、ACM の検証の CNAME と `origin.app.example.com` を、その DNS のサービスに手で足す（各ステップの外部の DNS サービスの節） |
+| C2 | `app.example.com` の DNS が Route 53 か → **ステージングは Route 53、本番は別のサービス**（2026-11-11）。ステージングは `HostedZoneId`・`OriginHostedZoneId` を指定して定義で作る。本番は空にして、ACM の検証の CNAME と `origin.app.example.com` を、その DNS のサービスに手で足す（各ステップの外部の DNS サービスの節）。後に、オリジンの名前は EC2 のパブリック DNS 名にした（2026-11-17。README の T13）ので、`origin.app.example.com` は作らない |
 | C3 | ドメインに CAA レコードがあるか。あれば ACM の発行を許可する必要がある（AWS のドキュメントでは確かめられなかった）。確かめ方は [準備の 1](./step0-preparation.md#1-事前の確認) |
 
 ## 参考

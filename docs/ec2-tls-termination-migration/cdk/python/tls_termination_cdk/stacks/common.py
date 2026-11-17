@@ -3,7 +3,7 @@
 本線（ステップ 1・2）とオプションの構成で共用する部品を置く。
   TerminationStack                スタックの土台（ブートストラップを前提にしない設定）
   origin_verify_header_value      秘密のヘッダーの値を受け取るパラメータ
-  define_origin_security_group    CloudFront から稼働サーバーの 443 番への接続を許可するセキュリティグループ
+  define_origin_security_group    CloudFront から稼働サーバーの 443 番への接続を許可するセキュリティグループ（ステップ 4）
   define_distribution             CloudFront のディストリビューション（キャッシュしない設定）
 """
 
@@ -73,8 +73,8 @@ def origin_verify_header_value(stack: cdk.Stack) -> str:
 def define_origin_security_group(scope: Construct, configuration: Configuration) -> ec2.SecurityGroup:
     """CloudFront から EC2 の 443 番への接続を許可するセキュリティグループ。インスタンスには手で足す。
 
-    稼働サーバーの今のセキュリティグループは変えない。このグループを「足す」ことで、CloudFront からの接続を許す
-    （ステップ 2 の 2-3）。今の 0.0.0.0/0 などの許可を消すのは、ステップ 3 の片付け。
+    稼働サーバーの今のセキュリティグループは変えない。このグループを「足して」から、今のグループの 0.0.0.0/0 などの
+    許可を消す（どちらもステップ 4。AWS CLI）。
     """
     # 既存の VPC を ID で参照する（AWS を検索しない）。サブネットは本線では使わない（オプションの ALB で使う）
     vpc = ec2.Vpc.from_vpc_attributes(

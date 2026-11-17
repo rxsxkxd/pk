@@ -1,6 +1,6 @@
 # 定義（CloudFormation の YAML と CDK）
 
-> 位置付け: B. CloudFront → EC2 への移行の 3 つのステップのうち、ステップ 1・2 で使う定義の中身。同じ内容を CloudFormation の YAML（`cloudformation/`）と CDK（Python。`cdk/python/`）の 2 通りで置いている。**手順で使うのは、ステップ 1 が CloudFormation の YAML か CDK（手順書に両方を書いた）、ステップ 2 が CDK**（[README の T9](./README.md#決めたこと)）。ステップ 3 はシェルスクリプト `scripts/step3-dns-switch.sh`。CDK のコマンドは [cdk/python/README.md](./cdk/python/README.md)。手順の全体は [README](./README.md#3-つのステップ)。
+> 位置付け: B. CloudFront → EC2 への移行のステップのうち、ステップ 1・1.5・2・4 で使う定義の中身。同じ内容を CloudFormation の YAML（`cloudformation/`）と CDK（Python。`cdk/python/`）の 2 通りで置いている。**手順で使うのは、ステップ 1 が CloudFormation の YAML か CDK（手順書に両方を書いた）、ステップ 1.5・2・4 が CDK**（[README の T9](./README.md#決めたこと)）。ステップ 3 はシェルスクリプト `scripts/step3-dns-switch.sh`。CDK のコマンドは [cdk/python/README.md](./cdk/python/README.md)。手順の全体は [README](./README.md#ステップの流れ)。
 >
 > 状態: **骨組み（AWS へのデプロイはしていない）**。YAML と CDK の出力は `cfn-lint` 1.60.0 を警告なしで通した（2026-11-12）。CDK は `aws-cdk-lib` 2.275.0 で合成し、3 つのステップの形に組み替える前と後で、リソースの中身が同じであることを確かめた（違いはスタック名から決まる名前と説明だけ。2026-11-12）。合成の結果は YAML と内容を突き合わせた（下の「YAML と CDK の違い」）。
 >
@@ -12,25 +12,27 @@
 
 ## ステップと定義の対応
 
-![設定のステップの概略。ステップ 1 で ACM の証明書、ステップ 1.5 で WAF の web ACL（省略できる）を us-east-1 に用意し、ステップ 2 で CloudFront、ステップ 3 で DNS の向き先を変える](./setup-steps.svg)
+![設定のステップの概略。ステップ 1 で ACM の証明書、ステップ 1.5 で WAF の web ACL（省略できる）を us-east-1 に用意し、ステップ 2 で CloudFront、ステップ 3 で DNS の向き先を変え、ステップ 4 で稼働サーバーへの接続を CloudFront だけに絞る](./setup-steps.svg)
 
 | ステップ | 定義（CloudFormation） | CDK のスタック | 手順で使う | リージョン | 作るもの |
 |---|---|---|---|---|---|
 | 1 | `cloudformation/step1-certificate.yml` | `<prefix>-step1-certificate` | **CloudFormation か CDK**（どちらか一方） | `us-east-1` | CloudFront の証明書（ACM で作成する場合。登録する場合は使わない） |
 | 1.5 | `cloudformation/step1-5-waf.yml` | `<prefix>-step1-5-waf` | **CDK**（WAF を使わないなら省略） | `us-east-1` | CloudFront 用の WAF の web ACL（国の絞り込み）、例外の IP の一覧 |
-| 2 | `cloudformation/step2-cloudfront.yml` | `<prefix>-step2-cloudfront` | **CDK** | `ap-northeast-1` | CloudFront、オリジン用のセキュリティグループ、オリジンの名前の Route 53 のレコード（任意） |
+| 2 | `cloudformation/step2-cloudfront.yml` | `<prefix>-step2-cloudfront` | **CDK** | `ap-northeast-1` | CloudFront（オリジンは EC2 のパブリック DNS 名）。自分のドメインのオリジンの名前を使うときだけ、その Route 53 のレコード（任意） |
 | 3 | なし | なし | **シェルスクリプト** `scripts/step3-dns-switch.sh`（[比べた表](./step3-dns-switch.md#シェルスクリプトにした理由)） | — | 利用者のドメイン名の A レコードの置き換え（Route 53） |
+| 4 | `cloudformation/step4-origin-sg.yml` | `<prefix>-step4-origin-sg` | **CDK** | `ap-northeast-1` | オリジン用のセキュリティグループ（CloudFront のプレフィックスリストから 443 番）。稼働サーバーへの付け替えと全公開の許可の削除は AWS CLI |
 
-ステップの順にデプロイする。後のステップは、前のステップの出力（ARN）を受け取る（ステップ 1 の `CertificateArn` は CDK の設定値 `cloudfront_certificate_arn` に書く。スタックの Export は使わない）。ステップ 1 とステップ 1.5 は互いの出力を使わないので、どちらを先にしてもよい。どちらもステップ 2 の CloudFront より前に作る。手順で使わない書き方（ステップ 1.5・2 の YAML）も、同じ内容として残している。
+ステップの順にデプロイする。後のステップは、前のステップの出力（ARN）を受け取る（ステップ 1 の `CertificateArn` は CDK の設定値 `cloudfront_certificate_arn` に書く。スタックの Export は使わない）。ステップ 1 とステップ 1.5 は互いの出力を使わないので、どちらを先にしてもよい。どちらもステップ 2 の CloudFront より前に作る。ステップ 4 のスタックは、ほかのスタックの出力を使わない（ルーティングができた後に作る）。手順で使わない書き方（ステップ 1.5・2・4 の YAML）も、同じ内容として残している。
 
 ```mermaid
 %%{init: {"themeVariables": {"fontSize": "16px"}}}%%
 flowchart TD
   S1["ステップ 1: step1-certificate.yml か （prefix）-step1-certificate（CloudFormation か CDK。us-east-1）<br/>出力 CertificateArn"]
   W["ステップ 1.5: （prefix）-step1-5-waf（CDK。us-east-1。省略できる）<br/>出力 WebAclArn"]
-  CF["ステップ 2: （prefix）-step2-cloudfront（CDK。ap-northeast-1）<br/>出力 DistributionDomainName、OriginSecurityGroupId"]
+  CF["ステップ 2: （prefix）-step2-cloudfront（CDK。ap-northeast-1）<br/>出力 DistributionDomainName"]
   S3["ステップ 3（scripts/step3-dns-switch.sh）<br/>app.example.com → DistributionDomainName"]
-  S1 --> W --> CF --> S3
+  S4["ステップ 4: （prefix）-step4-origin-sg（CDK。ap-northeast-1）<br/>出力 OriginSecurityGroupId（稼働サーバーに足す）"]
+  S1 --> W --> CF --> S3 --> S4
   S1 -. "WAF を使わないなら 1.5 を飛ばす" .-> CF
   S1 -. "CertificateArn を設定値 cloudfront_certificate_arn に書く" .-> CF
   W -. "WebAclArn を設定値 cloudfront_web_acl_arn に書く" .-> CF
@@ -55,6 +57,7 @@ cloudformation/
   step1-certificate.yml        ステップ 1（CloudFormation で行うとき）
   step1-5-waf.yml              ステップ 1.5 の YAML 版（手順では CDK を使う）
   step2-cloudfront.yml         ステップ 2 の YAML 版（同上）
+  step4-origin-sg.yml          ステップ 4 の YAML 版（同上）
   options/                     オプション（A・C）
 scripts/
   step3-dns-switch.sh          ステップ 3（Route 53 の A レコードの置き換えと戻し）
@@ -70,6 +73,7 @@ cdk/python/
       step1_certificate.py     ステップ 1（CDK で行うとき）
       step1_5_waf.py           ステップ 1.5
       step2_cloudfront.py      ステップ 2
+      step4_origin_sg.py       ステップ 4
       options/                 オプション（A・C と、2 つで共用する ALB の部分 alb.py）
 ```
 
@@ -81,11 +85,12 @@ CDK は L2 で書いているので、論理 ID は CloudFormation の YAML と�
 |---|---|---|
 | CloudFront の証明書 | ステップ 1 に含める | ACM で作成する場合だけ。既存の証明書の登録は CloudFormation が対応していないので、AWS CLI で行う（[ステップ 1 の 1-B](./step1-acm-certificate.md#1-b-既存の証明書を登録するオプション)） |
 | WAF の web ACL | ステップ 1.5 に含める | 国の絞り込み、例外の IP（下の「ステップ 1.5 の WAF」）。マネージドルールとログは既定では含めない（[オプション](./options/waf-managed-rules.md)） |
-| CloudFront | ステップ 2 に含める | HTTPS only、`CachingDisabled`、`AllViewer`、秘密のヘッダー。地理的制限の設定も持つが、既定は使わない |
-| オリジン用のセキュリティグループ | ステップ 2 に含める | CloudFront のプレフィックスリストから 443 番を許可する |
-| オリジンの名前の DNS のレコード | ステップ 2 に任意で含める | Route 53（ステージング）なら `OriginHostedZoneId`・`OriginElasticIp` で作る。外部の DNS サービス（本番）なら空にして手で足す |
+| CloudFront | ステップ 2 に含める | 公開のオリジン（EC2 のパブリック DNS 名）、HTTPS only、`CachingDisabled`、`AllViewer`、秘密のヘッダー。地理的制限の設定も持つが、既定は使わない |
+| オリジン用のセキュリティグループ | **ステップ 4 に含める**（ステップ 2 から分けた。[README の T15](./README.md#決めたこと)） | CloudFront のプレフィックスリストから 443 番を許可する。今は 80・443 番が全公開なので、ステップ 2・3 の間は要らない |
+| オリジンの名前の DNS のレコード | ステップ 2 に任意で含める（**手順では使わない**） | オリジンの名前は EC2 のパブリック DNS 名を使うので、レコードは要らない（[README の T13](./README.md#決めたこと)）。自分のドメインの名前を使うときだけ、Route 53 なら `OriginHostedZoneId`・`OriginElasticIp` で作る |
 | 利用者のドメイン名の DNS のレコード | **含めない** | 今もあるレコードで、ステップ 3 で AWS CLI で変える（[README の T8](./README.md#決めたこと)） |
-| 稼働サーバーへのセキュリティグループの付け替え | **含めない** | 出力 `OriginSecurityGroupId` を、既存のグループに**足して**付ける（[ステップ 2 の 2-3](./step2-cloudfront.md#2-3-オリジン用のセキュリティグループを稼働サーバーに足す)） |
+| 稼働サーバーへのセキュリティグループの付け替え | **含めない** | ステップ 4 の出力 `OriginSecurityGroupId` を、既存のグループに**足して**付ける（[ステップ 4 の 4-2](./step4-origin-restriction.md#4-2-オリジン用のセキュリティグループを稼働サーバーに足す)） |
+| VPC オリジン | **含めない** | 公開のオリジンで進める（[README の T14](./README.md#決めたこと)、[options/vpc-origin.md](./options/vpc-origin.md)） |
 | 静的なファイルのキャッシュ | 含めない | 使うと決まってから足す |
 
 ## ステップ 1 の証明書
@@ -139,18 +144,16 @@ CloudFront → EC2 では、WAF で国を絞る（2026-11-11 に決めた）。�
 
 | パラメータ（CloudFormation） | CDK の設定値 | 内容 |
 |---|---|---|
-| `VpcId` | `vpc_id` | オリジン用のセキュリティグループを作る VPC（稼働サーバーの VPC） |
-| `CloudFrontPrefixListId` | `cloudfront_prefix_list_id` | `com.amazonaws.global.cloudfront.origin-facing` の ID（リージョンごとに違う） |
 | `DomainName` | `domain_name` | 利用者のドメイン名。代替ドメイン名になる |
-| `OriginDomainName` | `origin_domain_name` | オリジンの名前。`DomainName` と同じだとデプロイのとき（CDK は合成のとき）に止まる |
+| `OriginDomainName` | `origin_domain_name` | オリジンの名前。**稼働サーバーの EC2 のパブリック DNS 名**（[README の T13](./README.md#決めたこと)）。`DomainName` と同じだとデプロイのとき（CDK は合成のとき）に止まる |
 | `CloudFrontCertificateArn` | `cloudfront_certificate_arn` | ステップ 1 の `CertificateArn`。CDK は空の間このスタックを合成しない |
 | `CloudFrontWebAclArn` | `cloudfront_web_acl_arn` | ステップ 1.5 の WAF の `WebAclArn`（省略したなら空） |
 | `OriginVerifyHeaderValue` | なし（デプロイのときのパラメータ） | 秘密のヘッダーの値（32 文字以上。下の「秘密のヘッダーの値」） |
-| `OriginHostedZoneId`、`OriginElasticIp` | `origin_hosted_zone_id`、`origin_elastic_ip` | オリジンの名前の A レコードも作るときに 2 つとも指定する（ステージング）。本番は空 |
+| `OriginHostedZoneId`、`OriginElasticIp` | `origin_hosted_zone_id`、`origin_elastic_ip` | 自分のドメインのオリジンの名前（例 `origin.app.example.com`）を使い、その A レコードも Route 53 に作るときだけ 2 つとも指定する。**手順では空**（パブリック DNS 名を使うので、レコードを作らない） |
 | `OriginReadTimeoutSeconds`、`OriginKeepaliveTimeoutSeconds` | `origin_read_timeout_seconds`、`origin_keepalive_timeout_seconds` | 既定 30 秒・5 秒 |
 | `GeoRestrictionType`、`GeoRestrictionCountries` | `geo_restriction_countries` | 地理的制限。**既定は使わない**（上の WAF の節） |
 
-出力は `DistributionDomainName`（ステップ 2 の確認とステップ 3 で使う）と `OriginSecurityGroupId`（稼働サーバーに足す）。設定の一覧と理由は [ステップ 2 の 2-2](./step2-cloudfront.md#2-2-cloudfront-とオリジン用のセキュリティグループ)。
+出力は `DistributionDomainName`（ステップ 2 の確認とステップ 3 で使う）。オリジン用のセキュリティグループはステップ 4 に分けた（下の「ステップ 4 のオリジン用のセキュリティグループ」）。設定の一覧と理由は [ステップ 2 の 2-2](./step2-cloudfront.md#2-2-cloudfront-を作る)。
 
 ### 秘密のヘッダーの値
 
@@ -159,6 +162,17 @@ CloudFront → EC2 では、WAF で国を絞る（2026-11-11 に決めた）。�
 ```bash
 openssl rand -hex 32
 ```
+
+## ステップ 4 のオリジン用のセキュリティグループ
+
+CloudFront のオリジン向けのアドレスの一覧（AWS が管理するプレフィックスリスト）から、443 番だけを許可するグループを作る。ステップ 2 のスタックから分けた（[README の T15](./README.md#決めたこと)）。稼働サーバーへの付け替えと、今のグループの全公開の許可の削除は、定義に含めず AWS CLI で行う（[ステップ 4](./step4-origin-restriction.md)）。
+
+| パラメータ（CloudFormation） | CDK の設定値 | 内容 |
+|---|---|---|
+| `VpcId` | `vpc_id` | グループを作る VPC（稼働サーバーの VPC） |
+| `CloudFrontPrefixListId` | `cloudfront_prefix_list_id` | `com.amazonaws.global.cloudfront.origin-facing` の ID（リージョンごとに違う） |
+
+出力は `OriginSecurityGroupId`（稼働サーバーに足す）。プレフィックスリストはセキュリティグループの規則の上限で 55 件分に数えるので、既存のグループに足さず専用のグループにしている。
 
 ## 使い方
 
@@ -197,21 +211,22 @@ AWS のドキュメントの手順（2026-11-16 確認）に沿って行う。
 |---|---|---|
 | 1 | CloudFormation か CDK | [ステップ 1 の 1-A](./step1-acm-certificate.md#1-a-acm-で作成する採用) |
 | 1.5（WAF） | CDK | [ステップ 1.5 の 1.5-1](./step1-5-waf.md#15-1-waf-の-web-acl) |
-| 2（CloudFront） | CDK | [ステップ 2 の 2-2](./step2-cloudfront.md#2-2-cloudfront-とオリジン用のセキュリティグループ) |
+| 2（CloudFront） | CDK | [ステップ 2 の 2-2](./step2-cloudfront.md#2-2-cloudfront-を作る) |
 | 3 | シェルスクリプト | [ステップ 3 の 3-1・3-2](./step3-dns-switch.md#3-1-流す変更を確かめる) |
+| 4（セキュリティグループ） | CDK | [ステップ 4 の 4-1](./step4-origin-restriction.md#4-1-オリジン用のセキュリティグループを作る) |
 
 ## YAML と CDK の違い
 
 合成の結果を YAML と項目ごとに比べた（セキュリティグループ、ディストリビューション、証明書、WAF。オプションはターゲットグループ、リスナー、ルールも）。違いは次のとおりで、動作は同じ見込み。
 
-本線の 3 つ（ステップ 1・2）は、2026-11-16 に次の形で比べ直した。`config.example.yml`（`cloudfront_certificate_arn`・`cloudfront_web_acl_arn` に架空の ARN を入れた）から `cdk synth <スタック名>` で YAML を出し、`cloudformation/step*-*.yml` のパラメータに同じ値を当てはめて条件（`Fn::If`）を解き、リソースの型ごとにプロパティを比べた。Route 53 のホストゾーン、Elastic IP、例外の IP、地理的制限を書いた設定値でも比べ、条件で作るもの（オリジンの名前のレコード、ステップ 1 の自動検証、例外の IP の一覧、地理的制限の国）も一致した。WAF の web ACL と IP セットは、違いがなかった。
+本線の 4 つ（ステップ 1・1.5・2・4）は、2026-11-16 に次の形で比べ直した（ステップ 4 を分けた後の 2026-11-17 にも比べ直し、違いは同じだった）。`config.example.yml`（`cloudfront_certificate_arn`・`cloudfront_web_acl_arn` に架空の ARN を入れた）から `cdk synth <スタック名>` で YAML を出し、`cloudformation/step*-*.yml` のパラメータに同じ値を当てはめて条件（`Fn::If`）を解き、リソースの型ごとにプロパティを比べた。Route 53 のホストゾーン、Elastic IP、例外の IP、地理的制限を書いた設定値でも比べ、条件で作るもの（オリジンの名前のレコード、ステップ 1 の自動検証、例外の IP の一覧、地理的制限の国）も一致した。WAF の web ACL と IP セットは、違いがなかった。
 
 | 項目 | YAML | CDK の出力 |
 |---|---|---|
-| 値の渡し方 | パラメータ（ステップ 1 は 2 つ、WAF は 3 つ、CloudFront は 14） | 設定値ファイルの値を埋め込む。パラメータは秘密のヘッダーの値（`OriginVerifyHeaderValue`）だけ |
-| 規則（`Rules`） | `us-east-1` の確認（ステップ 1・WAF）、オリジンの名前と利用者のドメイン名が違うことの確認、Elastic IP の確認 | なし。名前と Elastic IP の確認は合成のときに `configuration.py` が行い、リージョンはスタックの定義で決まる（`cdk deploy` ならそのリージョンに入る）。**CDK から出したテンプレートを AWS CLI で反映するとき（方法 2）は、`--region` を誤っても止まらない**（ステップ 1 と WAF は `us-east-1`） |
-| プレフィックスリストからの許可 | セキュリティグループの中に書く | 別のリソース（`AWS::EC2::SecurityGroupIngress`） |
-| オリジン用のグループの外向き | 省略（既定の全許可） | 全許可を明示 |
+| 値の渡し方 | パラメータ（ステップ 1 は 2 つ、1.5 は 3 つ、2 は 12、4 は 2 つ） | 設定値ファイルの値を埋め込む。パラメータは秘密のヘッダーの値（`OriginVerifyHeaderValue`）だけ |
+| 規則（`Rules`） | `us-east-1` の確認（ステップ 1・1.5）、オリジンの名前と利用者のドメイン名が違うことの確認、Elastic IP の確認（ステップ 2） | なし。名前と Elastic IP の確認は合成のときに `configuration.py` が行い、リージョンはスタックの定義で決まる（`cdk deploy` ならそのリージョンに入る）。**CDK から出したテンプレートを AWS CLI で反映するとき（方法 2）は、`--region` を誤っても止まらない**（ステップ 1 と WAF は `us-east-1`） |
+| プレフィックスリストからの許可（ステップ 4） | セキュリティグループの中に書く | 別のリソース（`AWS::EC2::SecurityGroupIngress`） |
+| オリジン用のグループの外向き（ステップ 4） | 省略（既定の全許可） | 全許可を明示 |
 | オリジンの `HTTPSPort` | `443` を明示 | 省略（既定の 443） |
 | オリジンの `Id`（`TargetOriginId` も） | `ec2-origin` | CDK が生成する名前 |
 | 地理的制限を使わないときの `Restrictions` | `RestrictionType: none` を明示 | 省略（既定の制限なし） |

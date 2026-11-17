@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="70 0 925 285" width="925" height="285" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="70 0 1215 285" width="1215" height="285" role="img" aria-labelledby="title desc">
   <title id="title">設定のステップ</title>
-  <desc id="desc">CloudFront → EC2 への移行の設定のステップ。ステップ 1 で ACM の証明書を作り、ステップ 1.5 で WAF の web ACL を作る（省略できる）。どちらも us-east-1 に作り、ステップ 2 の CloudFront に渡す。ステップ 3 で DNS の向き先を CloudFront へ変える。</desc>
+  <desc id="desc">CloudFront → EC2 への移行の設定のステップ。ステップ 1 で ACM の証明書を作り、ステップ 1.5 で WAF の web ACL を作る（省略できる）。どちらも us-east-1 に作り、ステップ 2 の CloudFront に渡す。ステップ 3 で DNS の向き先を CloudFront へ変える。ステップ 4 で、稼働サーバーへの接続を CloudFront だけに絞る（後付け）。</desc>
   <defs>
     <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
       <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
@@ -12,6 +12,7 @@
     .block-waf { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; stroke-dasharray: 5 3; filter: url(#shadow); }
     .block-cf  { fill: #f8fafc; stroke: #2563eb; stroke-width: 2; filter: url(#shadow); }
     .block-dns { fill: #f8fafc; stroke: #475569; stroke-width: 2; filter: url(#shadow); }
+    .block-sg  { fill: #fffbeb; stroke: #d97706; stroke-width: 2; filter: url(#shadow); }
     .phase { font-size: 13px; font-weight: 700; fill: #64748b; }
     .badge { font-size: 12px; font-weight: 700; fill: #16a34a; text-anchor: middle; }
     .badge-opt { font-size: 12px; font-weight: 700; fill: #2563eb; text-anchor: middle; }
@@ -22,7 +23,7 @@
     .region { font-size: 11px; fill: #64748b; text-anchor: middle; }
   </style>
 
-  <rect width="1000" height="285" fill="#ffffff"/>
+  <rect width="1300" height="285" fill="#ffffff"/>
 
   <!-- ========== ステップ 1・1.5: CloudFront に渡すものを us-east-1 に用意する ========== -->
   <text x="100" y="40" class="phase">ステップ 1・1.5：CloudFront に渡すもの（us-east-1）</text>
@@ -49,9 +50,9 @@
   <g transform="translate(440, 60)">
     <path d="M 6,0 L 201,0 L 255,100 L 201,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-cf"/>
     <text x="118" y="84" class="name">CloudFront</text>
-    <text x="118" y="110" class="sub">ディストリビューション、</text>
-    <text x="118" y="128" class="sub">オリジン用の</text>
-    <text x="118" y="146" class="sub">セキュリティグループ</text>
+    <text x="118" y="110" class="sub">ディストリビューション</text>
+    <text x="118" y="132" class="region">オリジン: EC2 の</text>
+    <text x="118" y="148" class="region">パブリック DNS 名</text>
   </g>
 
   <!-- ========== ステップ 3: DNS の向き先 ========== -->
@@ -64,4 +65,14 @@
     <text x="118" y="150" class="region">Route 53（本番は外部の DNS）</text>
   </g>
 
+  <!-- ========== ステップ 4: オリジンへの接続の制限（後付け） ========== -->
+  <text x="1020" y="40" class="phase">ステップ 4：接続の制限（後付け）</text>
+  <g transform="translate(1020, 60)">
+    <path d="M 6,0 L 201,0 L 255,100 L 201,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-sg"/>
+    <text x="118" y="76" class="name">接続の制限</text>
+    <text x="118" y="102" class="sub">稼働サーバーへの接続を</text>
+    <text x="118" y="120" class="sub">CloudFront だけに絞る</text>
+    <text x="118" y="144" class="region">セキュリティグループ、</text>
+    <text x="118" y="160" class="region">秘密のヘッダーの確認</text>
+  </g>
 </svg>

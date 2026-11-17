@@ -1,0 +1,67 @@
+# ステップ 4（ステップ 3 の後に付ける）: オリジン用のセキュリティグループ。
+# CloudFront のオリジン向けのアドレスの一覧（AWS が管理するプレフィックスリスト）から、稼働サーバーの 443 番だけを許可する。
+#
+# - 置くリージョン: 稼働サーバーの VPC があるリージョン（例 ap-northeast-1）
+# - スタック名の例: <prefix>-step4-origin-sg（例 myapp-production-step4-origin-sg）
+# - 変更セットの作り方の例（端末では変更セットを作るところまで。中身の確認と実行は AWS のコンソールで行う。
+#   手順は definitions.md の「変更セットをコンソールで実行する」）:
+#     aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
+#       --template-file cloudformation/step4-origin-sg.yml \
+#       --stack-name <prefix>-step4-origin-sg \
+#       --parameter-overrides VpcId=vpc-... CloudFrontPrefixListId=pl-...
+# - 稼働サーバーへの付け替え（今のグループに足す）と、今のグループの全公開の許可の削除は、ここでは行わない（AWS CLI。
+#   step4-origin-restriction.md）
+# - ほかのスタックの出力は使わない。今の稼働サーバーは 80・443 番を全公開しているので、このグループがなくても CloudFront から
+#   届く。ルーティングを先に作るため、ステップ 2 から分けて後から付ける
+# - 同じ内容の CDK の定義: cdk/python の <prefix>-step4-origin-sg（手順のステップ 4 は CDK を使う）
+#
+# Description（英語）は CloudFormation のスタックの説明として出る。日本語の説明はこのコメントだけに書く
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Step 4 of CloudFront -> EC2: security group that allows HTTPS only from CloudFront origin-facing servers.
+  Add it to the instance, then remove the public 80/443 rules from the existing security group.
+
+# ---- パラメータ（デプロイのときに --parameter-overrides で渡す値） ----
+Parameters:
+  # 稼働サーバーの VPC。オリジン用のセキュリティグループをこの VPC に作る。
+  # 値: VPC の ID（例 vpc-0123456789abcdef0）
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+
+  # CloudFront のオリジン向けのアドレスの一覧（AWS が管理するプレフィックスリスト）の ID。
+  # セキュリティグループで「CloudFront からの接続だけ」を許可するのに使う。
+  # 値: com.amazonaws.global.cloudfront.origin-facing の ID（pl-...）。リージョンごとに違うので、次で調べる:
+  #   aws ec2 describe-managed-prefix-lists --region <リージョン> \
+  #     --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing \
+  #     --query 'PrefixLists[0].PrefixListId' --output text
+  CloudFrontPrefixListId:
+    Type: String
+    Description: Prefix list ID of com.amazonaws.global.cloudfront.origin-facing in this Region.
+    AllowedPattern: "^pl-[0-9a-f]+$"
+
+# ---- リソース ----
+Resources:
+  # オリジン用のセキュリティグループ。CloudFront のオリジン向けのアドレスから、443 番だけを許可する。
+  # 稼働サーバーの今のグループは変えず、このグループを足して付ける（ステップ 4 の 4-2）。その後、今のグループの全公開の許可を消す。
+  # プレフィックスリストはセキュリティグループの規則の上限で 55 件分に数えるので、既存のグループに足さず専用にしている
+  OriginSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTPS from CloudFront origin-facing servers. Attach it to the instance.
+      VpcId:
+        Ref: VpcId
+      # 外向きの規則は書かない（既定の全許可のまま。外向きは稼働サーバーの今のグループの設定に従う）
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourcePrefixListId:
+            Ref: CloudFrontPrefixListId
+
+# ---- 出力（次の作業に渡す値） ----
+Outputs:
+  # オリジン用のセキュリティグループの ID（sg-...）。ステップ 4 の 4-2 で稼働サーバーに足す
+  OriginSecurityGroupId:
+    Description: Add this security group to the instance (step 4), then remove the public 80/443 rules.
+    Value:
+      Fn::GetAtt: [OriginSecurityGroup, GroupId]

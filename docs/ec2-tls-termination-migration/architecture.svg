@@ -116,13 +116,13 @@
   <text class="label" x="240" y="516">インターネット</text>
   <text class="label" x="240" y="532" style="font-size: 10px">app.example.com</text>
   <line class="line-https" x1="450" y1="496" x2="808" y2="496"/>
-  <text class="label" x="630" y="470">接続先 origin.app.example.com（Elastic IP）</text>
+  <text class="label" x="630" y="470">接続先 EC2 のパブリック DNS 名（Elastic IP）</text>
   <text class="label https" x="630" y="488">HTTPS</text>
-  <text class="label" x="630" y="516">インターネット</text>
+  <text class="label" x="630" y="516">インターネット（公開のオリジン）</text>
   <text class="label" x="630" y="532">Host: app.example.com（証明書はこの名前で確認）</text>
 
   <text class="legend" x="30" y="564"><tspan font-weight="700">名前:</tspan> 利用者は app.example.com へ接続する（DNS は CloudFront を指す）。</text>
-  <text class="legend" x="30" y="584">CloudFront は origin.app.example.com（DNS は EC2 の Elastic IP を指す）へ接続し、Host は app.example.com のまま渡す。</text>
+  <text class="legend" x="30" y="584">CloudFront は EC2 のパブリック DNS 名（ec2-…compute.amazonaws.com。Elastic IP を返す）へ接続し、Host は app.example.com のまま渡す。</text>
   <text class="legend" x="30" y="604"><tspan font-weight="700">証明書:</tspan> CloudFront は ACM（us-east-1）、EC2 は Let's Encrypt。どちらも app.example.com の証明書（ドメイン名は同じ）。</text>
   <text class="legend" x="30" y="630">EC2 の証明書が残る。CloudFront からの接続先になるので、EC2 は公開の DNS 名を持つ。</text>
 

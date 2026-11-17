@@ -55,14 +55,14 @@ class Configuration:
     stack_name_prefix: str
     # ステップ 2 の CloudFront のスタックを置くリージョン（ステップ 1 と WAF はいつも us-east-1）
     aws_region: str
-    # 稼働サーバーの VPC と AZ。オリジン用のセキュリティグループを作るのに使う（VPC は ID で参照するだけで、AWS を検索しない）
+    # 稼働サーバーの VPC と AZ。ステップ 4 のオリジン用のセキュリティグループを作るのに使う（VPC は ID で参照するだけで、AWS を検索しない）
     vpc_id: str
     availability_zones: list[str]
     # com.amazonaws.global.cloudfront.origin-facing のプレフィックスリストの ID（リージョンごとに違う）
     cloudfront_prefix_list_id: str
     # 利用者のドメイン名（例 app.example.com）。CloudFront の代替ドメイン名と、証明書の名前になる
     domain_name: str
-    # オリジンの名前（例 origin.app.example.com）。CloudFront が稼働サーバーへ接続するときの名前
+    # オリジンの名前。稼働サーバーの EC2 のパブリック DNS 名（例 ec2-203-0-113-10.ap-northeast-1.compute.amazonaws.com）
     origin_domain_name: str
 
     # ステップ 1 の出力 CertificateArn。空の間は、ステップ 2 の CloudFront のスタックを定義しない
@@ -71,7 +71,7 @@ class Configuration:
     cloudfront_web_acl_arn: str = ""
     # ステップ 1: domain_name の Route 53 のホストゾーン。指定すると ACM の検証用のレコードを自動で作る
     certificate_hosted_zone_id: str = ""
-    # ステップ 2: origin_domain_name の A レコードも作るときに、2 つとも指定する
+    # ステップ 2: 自分のドメインのオリジンの名前を使い、その A レコードも作るときだけ 2 つとも指定する（手順では空）
     origin_hosted_zone_id: str = ""
     origin_elastic_ip: str = ""
     # CloudFront の地理的制限で許可する国（ISO 3166-1 alpha-2）。既定は空で、制限しない。

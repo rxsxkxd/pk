@@ -46,7 +46,7 @@ flowchart TD
 | 置いておくだけの費用 | ALB の時間課金 | **なし**（従量課金の場合） | ALB の時間課金 |
 | httpd の変更 | 中（HTTP の VirtualHost、利用者の IP） | **中**（秘密のヘッダー、利用者の IP、更新の経路） | 中（A と同じ。信頼する中継が増える） |
 | アプリの応答の上限 | ALB のアイドルタイムアウト（既定 60 秒、最大 4000 秒） | **オリジンの応答タイムアウト**（既定 30 秒、1〜120 秒。それより長くは申請） | 両方の短い方 |
-| 手順 | [alb-to-ec2.md](./alb-to-ec2.md) | [README の 3 つのステップ](../README.md#3-つのステップ) | [cloudfront-alb-to-ec2.md](./cloudfront-alb-to-ec2.md) |
+| 手順 | [alb-to-ec2.md](./alb-to-ec2.md) | [README の 3 つのステップ](../README.md#ステップの流れ) | [cloudfront-alb-to-ec2.md](./cloudfront-alb-to-ec2.md) |
 
 ALB の料金は、AWS の料金のページの計算例では `us-east-1` で 1 時間 $0.0225、1 LCU あたり 1 時間 $0.008 である（2026-11-09 確認）。東京リージョンの金額はページに載っていなかったので、[料金計算ツール](https://calculator.aws/)で確かめる。
 
@@ -91,7 +91,7 @@ AWS WAF を関連付けられるのは **CloudFront と ALB** で、EC2 のイ�
 | `*:80` | `old_app_a`（`/old_app_a` の下） | なし（平文） |
 | `*:443` | `new_app_b`（ルート） | httpd が終端 |
 
-ALB を使う構成（A・C）で、ALB から EC2 の 80 番へ単純に流すと、`new_app_b` ではなく `old_app_a` の VirtualHost に届く。B では、CloudFront は 443 番にだけ接続するので、`old_app_a` を [443 番へ移す](../cloudfront-to-ec2-httpd.md#6-old_app_a-を-443-番へ移す)（[README の T3](../README.md#決めたこと)）。
+ALB を使う構成（A・C）で、ALB から EC2 の 80 番へ単純に流すと、`new_app_b` ではなく `old_app_a` の VirtualHost に届く。B では、`old_app_a` は考えなくてよい（[README の T3](../README.md#決めたこと)。80 番は `/.well-known/acme-challenge` 以外を HTTPS へリダイレクトしているだけで、前の版の `old_app_a` は別のアプリの事例が混じったもの。2026-11-17）。
 
 ## 参考
 

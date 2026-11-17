@@ -1,6 +1,6 @@
 # ステップ 1.5: WAF の web ACL
 
-> 位置付け: B. CloudFront → EC2 への移行の、ステップ 1 とステップ 2 の間に置くステップ。CloudFront に付ける AWS WAF の web ACL（国の絞り込み）を、`us-east-1` に用意する。**ステップ 2 の CloudFront より前に作る**（CloudFront の作成のときに web ACL の ARN を渡すため）。**WAF を使わないなら省略できる**（[省略する場合](#省略する場合)）。前は [ステップ 1: ACM の証明書](./step1-acm-certificate.md)、次は [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)。全体は [README](./README.md#3-つのステップ)。
+> 位置付け: B. CloudFront → EC2 への移行の、ステップ 1 とステップ 2 の間に置くステップ。CloudFront に付ける AWS WAF の web ACL（国の絞り込み）を、`us-east-1` に用意する。**ステップ 2 の CloudFront より前に作る**（CloudFront の作成のときに web ACL の ARN を渡すため）。**WAF を使わないなら省略できる**（[省略する場合](#省略する場合)）。前は [ステップ 1: ACM の証明書](./step1-acm-certificate.md)、次は [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)。全体は [README](./README.md#ステップの流れ)。
 >
 > 確かめた範囲: AWS WAF の仕様は AWS のドキュメントと照らし合わせた（2026-11-11、2026-11-13）。定義は CDK の合成と `cfn-lint` まで確かめた（2026-11-16）。**AWS のコマンドと `cdk deploy` は実行しておらず、実際の WAF では試していない**。`<...>` は環境に合わせて置き換える。
 >
@@ -54,7 +54,7 @@ cp config.example.yml config.yml
 | 設定値 | 値 |
 |---|---|
 | `stack_name_prefix`、`aws_region`、`vpc_id`、`availability_zones`、`cloudfront_prefix_list_id` | 環境の値（プレフィックスリストの ID は下のコマンドで調べる） |
-| `domain_name`、`origin_domain_name` | `app.example.com`、`origin.app.example.com` |
+| `domain_name`、`origin_domain_name` | `app.example.com`、稼働サーバーの EC2 のパブリック DNS 名（[ステップ 2 の 2-1](./step2-cloudfront.md#2-1-オリジンの名前)で調べる） |
 | `cloudfront_certificate_arn` | **ステップ 1 の `CertificateArn`** |
 | `cloudfront_web_acl_arn` | 1.5-1 の後に書く（それまでは空。WAF を使わないなら空のまま） |
 | `origin_hosted_zone_id`、`origin_elastic_ip` | ステージングだけ（[ステップ 2 の 2-1](./step2-cloudfront.md#2-1-オリジンの名前)） |

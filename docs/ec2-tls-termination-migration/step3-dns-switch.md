@@ -1,10 +1,10 @@
 # ステップ 3: 向き先の変更
 
-> 位置付け: B. CloudFront → EC2 への移行の 3 つのステップの 3 つ目。利用者のドメイン名（`app.example.com`）の DNS の向き先を、稼働サーバーの Elastic IP から CloudFront へ変え、落ち着いたら片付ける。**Route 53（ステージング）を本線**にし、シェルスクリプト `scripts/step3-dns-switch.sh` で行う。外部の DNS サービス（本番）は[別の節](#3-3-外部の-dns-サービス本番)に書いた。前は [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)。全体は [README](./README.md#3-つのステップ)。
+> 位置付け: B. CloudFront → EC2 への移行の 3 つのステップの 3 つ目。利用者のドメイン名（`app.example.com`）の DNS の向き先を、稼働サーバーの Elastic IP から CloudFront へ変える。稼働サーバーへの直接の接続を止めるのは、次のステップ 4。**Route 53（ステージング）を本線**にし、シェルスクリプト `scripts/step3-dns-switch.sh` で行う。外部の DNS サービス（本番）は[別の節](#3-3-外部の-dns-サービス本番)に書いた。前は [ステップ 2: CloudFront のルーティング](./step2-cloudfront.md)、次は [ステップ 4: オリジンへの接続の制限](./step4-origin-restriction.md)。全体は [README](./README.md#ステップの流れ)。
 >
 > 確かめた範囲: Route 53 の仕様は AWS のドキュメントと照らし合わせた（2026-11-09、2026-11-12）。スクリプトは構文の確認（`bash -n`）と、使い方の誤りで止まることだけを確かめた（2026-11-12。macOS の bash 3.2）。**AWS を呼ぶ部分は動かしておらず、実際の Route 53・外部の DNS サービスでは試していない**。`app.example.com`・`dxxxx.cloudfront.net`・`192.0.2.10` は例で、`<...>` は環境に合わせて置き換える。
 >
-> 作成日: 2026-11-12（`cloudfront-to-ec2.md`・`cloudfront-to-ec2-same-domain.md`・`external-dns-certificate.md` から集めた。シェルスクリプトにした: 2026-11-12）
+> 作成日: 2026-11-12（`cloudfront-to-ec2.md`・`cloudfront-to-ec2-same-domain.md`・`external-dns-certificate.md` から集めた。シェルスクリプトにした: 2026-11-12。直接の接続を止める片付けをステップ 4 に移した: 2026-11-17）
 
 ## 用語
 
@@ -16,12 +16,17 @@
 | エイリアスのレコード | Route 53 の独自の A レコード。値の代わりに CloudFront のディストリビューションを指す |
 | 変更バッチ | Route 53 の `change-resource-record-sets` に渡す変更の並び。**全部が行われるか、何も行われないか**のどちらか（AWS のドキュメントの記述） |
 | 控えのファイル | スクリプトが切り替えの前に書き出す、今のレコードの JSON（既定 `before-app.example.com-A.json`）。元に戻すときに使う |
-| 片付け | 切り替えが行き渡った後に、直接の接続を止める作業（秘密のヘッダーの確認、古い許可の削除など） |
 
 ## このステップの結果
 
 - `app.example.com` が CloudFront を指し、利用者の接続がすべて CloudFront と WAF を通る
-- 片付けの後は、稼働サーバーへの直接の接続が止まる（セキュリティグループと秘密のヘッダーの確認）
+- 稼働サーバーへの直接の接続は、まだ止めない（今の 80・443 番の全公開の許可が残る。止めるのは [ステップ 4](./step4-origin-restriction.md)）
+
+## 始める前に（ステップ 3 へ進む前の条件）
+
+**稼働サーバーの httpd の 443 番に、`/.well-known/acme-challenge` を入れておく**（[準備の 3](./step0-preparation.md#3-稼働サーバーの-httpd-の設定)。設定は [証明書の更新](./cloudfront-to-ec2-httpd.md#証明書の更新)）。切り替えの後、Let's Encrypt の確認は `http://app.example.com/.well-known/acme-challenge/...` → CloudFront が https へリダイレクト → Let's Encrypt がたどって 443 番で取りに来る（Let's Encrypt は 80・443 番へのリダイレクトをたどる。Let's Encrypt のドキュメント。2026-11-17 確認）→ CloudFront が稼働サーバーの 443 番へ渡す、の順に届く。certbot は期限の 30 日前から更新を試みるので、切り替えた直後に更新が走ることもある。
+
+確かめ方は [確認 2](./step2-cloudfront.md#確認-2ステップ-3-へ進む条件) の WAF の表の 2 行目（海外から `/.well-known/acme-challenge/test` が httpd の 404）。
 
 ## シェルスクリプトにした理由
 
@@ -41,8 +46,7 @@ CloudFormation（ステップ 1 の形）とシェルスクリプトを比べ、
 | 3-2 | 向き先を CloudFront へ変える（`switch`。Route 53） | 順次 CloudFront 経由になる |
 | 3-3 | （本番）外部の DNS サービスで向き先を変える | 同上 |
 | 確認 3 | 利用者のドメイン名で CloudFront を通っていることを確かめる | なし |
-| 3-4 | 元の TTL より長く待つ | なし |
-| 3-5 | 片付け | 直接の接続が止まる |
+| 3-4 | 元の TTL より長く待つ（その後、ステップ 4 へ） | なし |
 
 ## スクリプト
 
@@ -108,7 +112,7 @@ scripts/step3-dns-switch.sh switch --zone-id "$ZONE" --name app.example.com --di
 - `app.example.com` は名前の頭に `app.` が付いているので、CNAME にできる。**`example.com` そのもの（ゾーンの頂点）は、DNS の決まりで CNAME にできない**。頂点を向けるなら、外部の DNS サービスに ALIAS・ANAME・CNAME flattening などの機能があるかで決まる
 - 変える前の A の値と TTL を控えておく（元に戻すため）
 
-## 確認 3（片付けへ進む条件）
+## 確認 3（ステップ 4 へ進む条件）
 
 ```bash
 # 権威のある DNS サーバーと、手元のリゾルバーの両方で見る
@@ -132,27 +136,14 @@ curl -sI https://app.example.com/
 
 ## 3-4. 待つ
 
-元の TTL（準備の 2 で短くする前の値）より長く待つ。その間は、古い名前の解決を持っている利用者が、まだ稼働サーバーへ直接来る。直接の接続を止める片付けは、待ってから行う。
-
-## 3-5. 片付け
-
-| 順番 | 作業 | 確かめ方 |
-|---|---|---|
-| 1 | 稼働サーバーの httpd の[秘密のヘッダーの確認](./cloudfront-to-ec2-httpd.md#3-秘密のヘッダーを確認する)を有効にする（準備の 4 で作った値） | `curl -sI https://origin.app.example.com/` が 403、`curl -sI https://app.example.com/` がアプリの応答 |
-| 2 | 稼働サーバーのセキュリティグループから、`0.0.0.0/0` などの 80・443 番の許可を消す（ステップ 2 の `OriginSecurityGroupId` と、踏み台サーバーからの 443 番の許可は残す） | 手元から稼働サーバーの Elastic IP へ直接つなぐと届かない |
-| 3 | オリジンの証明書の更新が新しい経路で成功することを確かめる | `sudo certbot renew --dry-run` |
-| 4 | 証明書の残り日数の監視を入れる。**オリジンの証明書が切れると、すべての利用者に 502 が返る** | [残り日数の確かめ方](./cloudfront-to-ec2-domains-certificates.md#残り日数の確かめ方) |
-| 5 | 本番の CNAME の TTL を元に戻す（Route 53 のエイリアスのレコードは TTL を持たない） | `dig app.example.com` |
-| 6 | （オプションの WAF のマネージドルールを入れるときだけ）count で入れて誤検知を確かめてから `block` にする。既定の WAF には入れていない | [options/waf-managed-rules.md の入れ方](./options/waf-managed-rules.md#入れ方方法論) |
-| 7 | 控えのファイルを片付ける（戻す見込みがなくなってから） | |
+元の TTL（準備の 2 で短くする前の値）より長く待つ。その間は、古い名前の解決を持っている利用者が、まだ稼働サーバーへ直接来る。直接の接続を止める [ステップ 4](./step4-origin-restriction.md) は、待ってから行う。
 
 ## 元に戻す
 
 | 時点 | 戻し方 |
 |---|---|
-| 3-2・3-3 の後、片付けの前 | DNS を今のレコードに戻すだけでよい |
-| 片付けの 1 の後 | **先に httpd の秘密のヘッダーの確認を外してから** DNS を戻す（外さないと、直接来る利用者が 403 になる） |
-| 片付けの 2 の後 | 消した許可を先に戻してから DNS を戻す |
+| 3-2・3-3 の後、ステップ 4 の前 | DNS を今のレコードに戻すだけでよい |
+| ステップ 4 の後 | **先に [ステップ 4 を元に戻して](./step4-origin-restriction.md#元に戻す)から**（消した許可を足し直し、httpd の秘密のヘッダーの確認を外す）DNS を戻す。戻さないと、直接来る利用者が止まる |
 
 Route 53 では、`switch` で書いた控えのファイルを使う。
 

@@ -1,46 +1,31 @@
-# ステップ 2（ステップ 1.5 の step1-5-waf.yml の後）: CloudFront のディストリビューションと、オリジン用のセキュリティグループ。
+# ステップ 2（ステップ 1.5 の step1-5-waf.yml の後）: CloudFront のディストリビューション。
 # 利用者のドメイン名（app.example.com）は変えず、CloudFront が利用者の TLS を終端し、
 # 稼働サーバー（EC2 の httpd）の 443 番へ HTTPS で接続する。
 #
-# - 置くリージョン: 稼働サーバーの VPC があるリージョン（例 ap-northeast-1）。セキュリティグループを VPC に作るため
+# - 置くリージョン: 稼働サーバーのあるリージョン（例 ap-northeast-1）。CloudFront 自体はリージョンを持たない
 # - スタック名の例: <prefix>-step2-cloudfront（例 myapp-production-step2-cloudfront）
 # - 変更セットの作り方の例（秘密のヘッダーの値はテンプレートに書かず、ここで渡す。端末では変更セットを作るところまで。
 #   中身の確認と実行は AWS のコンソールで行う。手順は definitions.md の「変更セットをコンソールで実行する」）:
 #     aws cloudformation deploy --region ap-northeast-1 --no-execute-changeset \
 #       --template-file cloudformation/step2-cloudfront.yml \
 #       --stack-name <prefix>-step2-cloudfront \
-#       --parameter-overrides VpcId=vpc-... CloudFrontPrefixListId=pl-... \
-#         DomainName=app.example.com OriginDomainName=origin.app.example.com \
+#       --parameter-overrides \
+#         DomainName=app.example.com OriginDomainName=<稼働サーバーの EC2 のパブリック DNS 名> \
 #         CloudFrontCertificateArn=<ステップ 1 の出力> CloudFrontWebAclArn=<step1-5-waf.yml の出力> \
 #         OriginVerifyHeaderValue=<openssl rand -hex 32 の値>
 # - 利用者のドメイン名の DNS のレコードは、ここでは作らない（ステップ 3 で scripts/step3-dns-switch.sh が切り替える）
-# - 稼働サーバーへのセキュリティグループの付け替えも、ここでは行わない（出力 OriginSecurityGroupId を手で足す）
+# - オリジンは公開のオリジン（EC2 のパブリック DNS 名へ、インターネット経由の HTTPS）。VPC オリジンは使わない（options/vpc-origin.md）
+# - 稼働サーバーのセキュリティグループは変えない。CloudFront だけに絞るのはステップ 4（step4-origin-sg.yml と AWS CLI）
 # - 同じ内容の CDK の定義: cdk/python の <prefix>-step2-cloudfront（手順のステップ 2 は CDK を使う）
 #
 # Description（英語）は CloudFormation のスタックの説明として出る。日本語の説明はこのコメントだけに書く
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Step 2 of CloudFront -> EC2 with the viewer domain name unchanged. CloudFront terminates viewer TLS and connects
-  to httpd over HTTPS through a separate origin DNS name, keeping the viewer Host header.
+  to httpd over HTTPS through the origin DNS name (the public DNS name of the instance), keeping the viewer Host header.
 
 # ---- パラメータ（デプロイのときに --parameter-overrides で渡す値） ----
 Parameters:
-  # 稼働サーバーの VPC。オリジン用のセキュリティグループをこの VPC に作る。
-  # 値: VPC の ID（例 vpc-0123456789abcdef0）
-  VpcId:
-    Type: AWS::EC2::VPC::Id
-
-  # CloudFront のオリジン向けのアドレスの一覧（AWS が管理するプレフィックスリスト）の ID。
-  # セキュリティグループで「CloudFront からの接続だけ」を許可するのに使う。
-  # 値: com.amazonaws.global.cloudfront.origin-facing の ID（pl-...）。リージョンごとに違うので、次で調べる:
-  #   aws ec2 describe-managed-prefix-lists --region <リージョン> \
-  #     --filters Name=prefix-list-name,Values=com.amazonaws.global.cloudfront.origin-facing \
-  #     --query 'PrefixLists[0].PrefixListId' --output text
-  CloudFrontPrefixListId:
-    Type: String
-    Description: Prefix list ID of com.amazonaws.global.cloudfront.origin-facing in this Region.
-    AllowedPattern: "^pl-[0-9a-f]+$"
-
   # 利用者のドメイン名。CloudFront の代替ドメイン名（Aliases）になる。
   # 値: 今の利用者の名前のまま（例 app.example.com）。ステップ 1 の証明書に入っている名前と同じにする
   DomainName:
@@ -50,10 +35,10 @@ Parameters:
   # オリジンの名前。CloudFront が稼働サーバーへ接続するときに引く名前（IP アドレスは指定できない）。
   # 値: 稼働サーバーの Elastic IP を返す、公開の DNS で引ける名前。DomainName とは別の名前にする
   #   （ステップ 3 の後、DomainName は CloudFront を指すので、同じにすると CloudFront が自分自身に接続する。下の Rules で止める）。
-  #   例 1（手順の想定）: origin.app.example.com（自分のドメインに A レコードを作る。下の OriginHostedZoneId か手で作る）
-  #   例 2: EC2 のパブリック DNS 名（ec2-203-0-113-10.ap-northeast-1.compute.amazonaws.com のような名前）。
+  #   例 1（手順で使う）: EC2 のパブリック DNS 名（ec2-203-0-113-10.ap-northeast-1.compute.amazonaws.com のような名前）。
   #     DNS のレコードを作らずに済む。VPC の DNS ホスト名（enableDnsHostnames）と DNS 解決（enableDnsSupport）が
   #     有効で、Elastic IP が付いている間は変わらない。Elastic IP を付け替えると名前が変わり、このパラメータの更新が要る
+  #   例 2: origin.app.example.com（自分のドメインに A レコードを作る。下の OriginHostedZoneId か手で作る）
   # どちらでも、稼働サーバーの証明書（Let's Encrypt の app.example.com）のままでよい。CloudFront は、オリジンの証明書が
   # 「オリジンの名前」か「オリジンへ渡す Host ヘッダーの名前」のどちらかを含めば受け入れる。この定義は Host ヘッダーに
   # 利用者のドメイン名を渡す（下の AllViewer）ので、app.example.com の証明書で通る
@@ -131,8 +116,8 @@ Parameters:
       Empty means no web ACL.
 
   # オリジンの名前の A レコードを作る Route 53 のホストゾーン（任意）。
-  # 値: ホストゾーン ID（ステージング。Route 53）か、空（既定。本番。外部の DNS サービスに手で足す）。
-  # OriginDomainName に EC2 のパブリック DNS 名を使うときは、レコードが要らないので空にする
+  # 値: 空（既定。手順では空。OriginDomainName に EC2 のパブリック DNS 名を使い、レコードが要らないため）。
+  # 自分のドメインの名前を使い、その A レコードを Route 53 に作るときだけ、ホストゾーン ID を指定する
   OriginHostedZoneId:
     Type: String
     Default: ""
@@ -209,23 +194,6 @@ Resources:
       TTL: "300"
       ResourceRecords:
         - Ref: OriginElasticIp
-
-  # オリジン用のセキュリティグループ。CloudFront のオリジン向けのアドレスから、443 番だけを許可する。
-  # 稼働サーバーの今のグループは変えず、このグループを足して付ける（ステップ 2 の 2-3）。
-  # プレフィックスリストはセキュリティグループの規則の上限で 55 件分に数えるので、既存のグループに足さず専用にしている
-  OriginSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: HTTPS from CloudFront origin-facing servers. Attach it to the instance.
-      VpcId:
-        Ref: VpcId
-      # 外向きの規則は書かない（既定の全許可のまま。外向きは稼働サーバーの今のグループの設定に従う）
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          SourcePrefixListId:
-            Ref: CloudFrontPrefixListId
 
   # CloudFront のディストリビューション。キャッシュせず、利用者の要求をそのまま稼働サーバーへ渡す
   Distribution:
@@ -312,8 +280,3 @@ Outputs:
     Description: Point DomainName to this name after checking the distribution.
     Value:
       Fn::GetAtt: [Distribution, DomainName]
-  # オリジン用のセキュリティグループの ID（sg-...）。ステップ 2 の 2-3 で稼働サーバーに足す
-  OriginSecurityGroupId:
-    Description: Attach this security group to the instance before switching DNS.
-    Value:
-      Fn::GetAtt: [OriginSecurityGroup, GroupId]

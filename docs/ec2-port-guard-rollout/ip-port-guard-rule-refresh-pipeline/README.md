@@ -1,10 +1,12 @@
 # ip-port-guard-rule-refresh-pipeline — ipset 入れ替えスクリプトを作って S3 に上げる（ローカル・踏み台サーバー・CI で同じコマンド）
 
-> 状態（2026-11-16）: **オプションとして用意だけしたもの**。今の一覧の更新は、踏み台サーバーから各サーバーへ SSH で流す形（[手順の「一覧を新しくするとき」](../bastion-install-commands.md#一覧を新しくするとき日本の範囲aws-の範囲許可する-ip-アドレス)）が本体。
+> 状態（2026-11-16）: **オプションとして用意だけしたもの**。今の一覧の更新は、踏み台サーバーから各サーバーへ SSH で流す形が本体。
 >
-> 2026-11-16 に作りを変えた（フォルダ名も `list-refresh-pipeline` から変えた）。変えた点は 2 つ。**個別許可の IP の一覧の正本を、S3 からリポジトリ（[`allow-lists/<環境>/`](../allow-lists/README.md)）に移した**。**ローカル・踏み台サーバー・CI のどこでも、同じ 2 つのコマンド（`build-rules.sh`・`deploy-rules.sh`）で流せるようにした**。
+> 2026-11-16 に作りを変えた（フォルダ名も `list-refresh-pipeline` から変えた）。変えた点は 2 つ。**個別許可の IP の一覧の正本を、S3 からリポジトリ（[`allow-lists/<環境>/`](allow-lists/README.md)）に移した**。**ローカル・踏み台サーバー・CI のどこでも、同じ 2 つのコマンド（`build-rules.sh`・`deploy-rules.sh`）で流せるようにした**。
 >
-> 確かめたのは、スクリプトの `bash -n`（構文）だけ。**実際には流していない**（公開元の IP の一覧の取得も、S3 への読み書きもしていない）。[CodePipeline の定義](#codepipeline-の定義2026-11-14-の作りのまま作り直しが要る)（CloudFormation 版・CDK 版）は 2026-11-14 の作りのままで、今のスクリプトとは合っていない。各サーバーが S3 から取って入れ替える側は、まだ作っていない。
+> 2026-11-17 に、**このフォルダだけで完結する形**にした（`allow-lists/` と `command/` をこのフォルダの中に置いた。このフォルダだけを写せば、写した先で作る・上げるが通る）。公開バケットは、アカウントのリージョナル名前空間で `ip-port-guard-rules` を名前の先頭部分として作成済み。入口のスクリプトに `PORT_GUARD_S3_URI` を渡さなくてよくした。環境の取り違えなどの確認は、入口のスクリプトから外した（人が確かめる。CI にしたら要らない）。
+>
+> 確認済み（2026-11-17）: `bash -n` による構文確認と、このフォルダだけを別の場所へコピーした状態でのビルド・デプロイ。公開元の取得と AWS CLI を模擬し、3 環境・初回と再実行・空白を含むパス・リージョンと宛先の指定・照合の値を最後に送る順番を確認した。**実際の公開元の取得と S3 への読み書きはしていない**。[CodePipeline の定義](#codepipeline-の定義2026-11-14-の作りのまま作り直しが要る)（CloudFormation 版・CDK 版）は 2026-11-14 の作りのままで、今のスクリプトとは合っていない。各サーバーが S3 から取って入れ替える側は、まだ作っていない。
 
 ## 方針
 
@@ -14,6 +16,8 @@ iptables ＋ ipset の許可 IP の一覧は、**リポジトリにあるもの�
 |---|---|
 | 正本はリポジトリ | スクリプトと個別許可の IP の一覧は、リポジトリにあるものが正本。踏み台サーバーや S3 にあるものは、リポジトリから写したもの |
 | リポジトリの外から取るもの | 公開元の IP の一覧（APNIC・AWS）と、前回分の IP の一覧（S3 の公開場所）だけ（[どこにあるものを使うか](#どこにあるものを使うか)） |
+| このフォルダだけで完結 | 入口のスクリプト・部品のスクリプト・個別許可の IP の一覧は、すべてこのフォルダの中にある。このフォルダの外のファイルは使わない。このフォルダだけを写した先でも、同じコマンドが通る |
+| 入口のスクリプトは簡素に | 余計な確認を入れない。内容が正しいかは、人が表示を見て確かめる |
 | どこでも同じコマンド | 実行場所（ローカル・踏み台サーバー・CI）で、流すコマンドも順番も変えない。実行場所ごとの違いは、AWS の認証情報の持ち方だけ |
 | 人の確認 | 作る（`build-rules.sh`）と上げる（`deploy-rules.sh`）を分け、間で人が件数と増減を確かめる |
 
@@ -27,14 +31,14 @@ iptables ＋ ipset の許可 IP の一覧は、**リポジトリにあるもの�
 | ipset に入れる IP の一覧 | 各サーバーの ipset の集合に入れる IP の範囲を、1 行 1 件（1 列目が CIDR）で書いたファイル。次の 3 種類で、それぞれ IPv4 と IPv6 がある |
 | 　日本の IP の一覧 | `jp-ipv4.txt`・`jp-ipv6.txt`。公開元の IP の一覧（APNIC）から `make-jp-lists.sh` が作る |
 | 　AWS の IP の一覧 | `aws-ipv4.txt`・`aws-ipv6.txt`。公開元の IP の一覧（`ip-ranges.json`）から `make-aws-lists.sh` が、東京（`ap-northeast-1`）と大阪（`ap-northeast-3`）のリージョンの分だけを取り出して作る（区分は `AMAZON`。台北のローカルゾーン `ap-northeast-1-tpe-1` は除く） |
-| 　個別許可の IP の一覧 | `allow-ipv4.txt`・`allow-ipv6.txt`。VPC の範囲や海外の拠点など、日本の範囲の外でも許可する相手。**人が書く。正本はリポジトリの [`allow-lists/<環境>/`](../allow-lists/README.md)** |
+| 　個別許可の IP の一覧 | `allow-ipv4.txt`・`allow-ipv6.txt`。VPC の範囲や海外の拠点など、日本の範囲の外でも許可する相手。**人が書く。正本はこのフォルダの [`allow-lists/<環境>/`](allow-lists/README.md)** |
 | 前回分の IP の一覧 | `port_guard_whitelists/last-refresh/*.txt`。前回 S3 に上げた ipset に入れる IP の一覧の、CIDR だけの写し。`make-refresh.sh` が今回の一覧との増減を比べる基準にし、終わりに今回の分で更新する。S3 の公開場所にあるものを使う |
 | ipset 入れ替えスクリプト | 各サーバーで流し、ipset の集合の中身を入れ替えるシェルスクリプト `command/port_guard/refresh-ipv4.sh`・`refresh-ipv6.sh`。`make-refresh.sh` が作り、ipset に入れる IP の一覧が中に書き込まれている。一時の集合に入れて件数を確かめてから `ipset swap` で入れ替えるので、**集合が空になる時間はない**。フォルダ名と図の「ルール（rule）」は、これを指す |
 | 照合の値 | `SHA256SUMS`。S3 に上げたファイルそれぞれの SHA-256。最後に上げる |
-| S3 の公開場所 | `s3://<公開バケット>/port-guard/<環境>/current/`。環境ごとに分ける。コマンドには環境変数 `PORT_GUARD_S3_URI`（末尾の `/` なし）で渡す |
-| 公開バケット | S3 の公開場所があるバケット |
+| S3 の公開場所 | `s3://ip-port-guard-rules-<アカウント ID>-<リージョン>-an/port-guard/<環境>/current/`。環境ごとに分ける。入口のスクリプトが決めるので、渡さなくてよい（別の場所にするときだけ、環境変数 `PORT_GUARD_S3_URI`（末尾の `/` なし）で渡す） |
+| 公開バケット | S3 の公開場所があるバケット。コンソールに入力した名前は `ip-port-guard-rules`、実際の名前は `ip-port-guard-rules-<アカウント ID>-<リージョン>-an`（2026-11-17 に作成済み。パブリックアクセスはすべてブロック）。「公開」はルールの配布先という意味で、読み書きは AWS CLI の認証情報と権限を使う |
 | 入口のスクリプト | このフォルダの `build-rules.sh`（作る）と `deploy-rules.sh`（S3 に上げる）。どの実行場所でも、この 2 つを流す |
-| 部品のスクリプト | 入口のスクリプトが中で流す、`../command/` の 5 つ。`make-jp-lists.sh`・`make-aws-lists.sh`・`fetch-last-lists.sh`・`make-refresh.sh`・`publish-refresh-scripts.sh` |
+| 部品のスクリプト | このフォルダの `command/`。宛先を決める `set-s3-uri.sh` と、入口のスクリプトが流す `make-jp-lists.sh`・`make-aws-lists.sh`・`fetch-last-lists.sh`・`make-refresh.sh`・`publish-refresh-scripts.sh` |
 | 作業フォルダ | 入口のスクリプトが、取ったもの・作ったものを置くフォルダ。既定はこのフォルダの `work/<環境>/`（Git の管理から外している）。環境変数 `PORT_GUARD_WORK_DIR` で変えられる |
 | 各サーバー | port-guard（iptables ＋ ipset の絞り込み）を入れてある稼働中のサーバー。ipset の集合を持っていて、ipset 入れ替えスクリプトを流す相手。[全体の流れ](#全体の流れ)の図では「ipset 対象サーバー」と書いている |
 
@@ -50,7 +54,7 @@ ipset 入れ替えスクリプトを作って S3 の公開場所に上げ、各�
 |---|---|---|
 | CodePipeline「ルールのビルド」 | `build-rules.sh`。公開元の IP の一覧を取り、ipset に入れる IP の一覧を作り、件数と前回分の IP の一覧との増減を確かめて、ipset 入れ替えスクリプトを作る | スクリプトは用意した（流していない）。CodePipeline の定義は作り直しが要る |
 | 矢印「ルールのデプロイ」 | 人が確かめた後の `deploy-rules.sh`。S3 の公開場所に上げる（照合の値を最後） | 同上 |
-| S3「ルールの管理」 | S3 の公開場所。ipset 入れ替えスクリプト・個別許可の IP の一覧の写し・前回分の IP の一覧・照合の値を置く（[S3 の公開場所に置かれるもの](#s3-の公開場所に置かれるもの)） | 公開バケットを新しく作るか既存のものを使うかは決まっていない |
+| S3「ルールの管理」 | S3 の公開場所。ipset 入れ替えスクリプト・個別許可の IP の一覧の写し・前回分の IP の一覧・照合の値を置く（[S3 の公開場所に置かれるもの](#s3-の公開場所に置かれるもの)） | 公開バケットは作成済み（2026-11-17） |
 | 矢印「SSM」「ルール取得」 | 各サーバーが、S3 の公開場所から ipset 入れ替えスクリプトと照合の値を取る。そのきっかけになるコマンドを、SSM で各サーバーに流す | **まだ作っていない** |
 | ipset 対象サーバー「IP制限の有効化」 | 各サーバー。取ったものを照合の値と照合してから ipset 入れ替えスクリプトを流し、ipset の集合の中身を新しい一覧に入れ替える | **まだ作っていない**（ipset 入れ替えスクリプトそのものは、踏み台サーバーから SSH で流す今の手順で使っているものと同じ） |
 
@@ -59,7 +63,7 @@ ipset 入れ替えスクリプトを作って S3 の公開場所に上げ、各�
 - **図の「ルール」は、iptables のルールのことではない**。ipset に入れる IP の一覧と、それを中に書き込んだ ipset 入れ替えスクリプトを指す。ipset 入れ替えスクリプトは ipset の集合の中身だけを入れ替え、iptables のルールには触らない
 - **図の「IP制限の有効化」は、port-guard を有効にする操作（`enable`）のことではない**。port-guard がすでに入っている各サーバーで、80・443 番の絞り込みが新しい一覧で効くようになることを指す。ipset 入れ替えスクリプトは、最初に ipset の集合があることを確かめ、なければ止まる
 - **右の矢印は、取りに行く向き**（各サーバー → S3）で描いている。ファイルは S3 の公開場所から各サーバーへ渡る。S3 や CodePipeline の側から各サーバーへ送り込む形ではない
-- 図は、SSM で各サーバーにコマンドを流して取らせる形（[補足の B-2](../bastion-install-supplement.md#b-2-定期の実行-2-つの案環境を見て決める) の案 2 に当たる）で描いている。各サーバーの cron で動かす案（案 1）も残っていて、どちらにするか、S3 を読む権限をどう持たせるかは、[決まっていないこと](#決まっていないこと)のまま
+- 図は、SSM で各サーバーにコマンドを流して取らせる形で描いている。各サーバーの cron で動かす案も残っていて、どちらにするか、S3 を読む権限をどう持たせるかは、[決まっていないこと](#決まっていないこと)のまま
 - 図にないもの: 人の確認（`build-rules.sh` と `deploy-rules.sh` の間）、照合の値での照合
 
 図は手で書いた SVG（[`images/list-refresh-flow.svg`](images/list-refresh-flow.svg)）で、作り直すスクリプトはない。構成を変えたら、図とこの節をそろえて直す。
@@ -69,29 +73,26 @@ ipset 入れ替えスクリプトを作って S3 の公開場所に上げ、各�
 | 順 | すること | 流すもの | 中で流す部品のスクリプト |
 |---|---|---|---|
 | 1 | 公開元の IP の一覧（APNIC・AWS）を取り、日本の IP の一覧と AWS の IP の一覧（東京・大阪）を作る | `build-rules.sh <環境>` | `make-jp-lists.sh`・`make-aws-lists.sh`（どちらも、取ることと作ることを続けて行う） |
-| 2 | 個別許可の IP の一覧を、リポジトリの `allow-lists/<環境>/` から作業フォルダに写す | 同上 | —（`cp`） |
+| 2 | 個別許可の IP の一覧を、このフォルダの `allow-lists/<環境>/` から作業フォルダに写す | 同上 | —（`cp`） |
 | 3 | 前回分の IP の一覧を、S3 の公開場所から取る（初回は何もないので、何も取らない） | 同上 | `fetch-last-lists.sh` |
 | 4 | 件数と前回分との増減を確かめ、ipset 入れ替えスクリプトを作る（下限割れ・増減 5% 超で止まる。確かめて進めるときは `FORCE=1`） | 同上 | `make-refresh.sh` |
 | 5 | **人が確かめる**。4 の表示（件数・増 / 減の件数）を見る。必要なら、作業フォルダの ipset 入れ替えスクリプトを 1 台に流して結果を見る | — | — |
 | 6 | S3 の公開場所に上げる（ipset 入れ替えスクリプト・個別許可の IP の一覧の写し・前回分の IP の一覧を上げ、最後に照合の値を上げる） | `deploy-rules.sh <環境>` | `publish-refresh-scripts.sh` |
 
-リポジトリの `ec2-port-guard-rollout/` で流す（別の場所からでも流せる。入口のスクリプトは、自分の置き場所から `../command/` と `../allow-lists/` を探す）。
+このフォルダで流す（別の場所からでも流せる。入口のスクリプトは、自分の置き場所にある `command/` と `allow-lists/` を使う）。環境は `development`・`staging`・`production`。
 
 ```bash
-export PORT_GUARD_S3_URI=s3://<公開バケット>/port-guard/staging/current
-
 # 1〜4. 作る（S3 には何も上げない）
-bash ip-port-guard-rule-refresh-pipeline/build-rules.sh staging
+bash build-rules.sh staging
 # 5. 表示を見て確かめる
 # 6. S3 の公開場所に上げる
-bash ip-port-guard-rule-refresh-pipeline/deploy-rules.sh staging
+bash deploy-rules.sh staging
 ```
 
 | 点 | 内容 |
 |---|---|
-| 許可する相手を変えるとき | リポジトリの `allow-lists/<環境>/allow-ipv4.txt`（と `allow-ipv6.txt`）を書き直してコミットし、1 から流す |
+| 許可する相手を変えるとき | このフォルダの `allow-lists/<環境>/allow-ipv4.txt`（と `allow-ipv6.txt`）を書き直してコミットし、1 から流す |
 | 初回 | S3 の公開場所に何もなくても流せる。前回分の IP の一覧がないので、4 の増減の確認は行われず（「前回の記録なし」と出る）、件数の下限だけを確かめる |
-| 環境の取り違えを防ぐ確認 | 入口のスクリプトは、`PORT_GUARD_S3_URI` が `/<環境>/current` で終わっていなければ止まる。`deploy-rules.sh` は、`build-rules.sh` の後にリポジトリの個別許可の IP の一覧が変わっていれば止まる |
 | 5 で上げないと決めたとき | 何も上げずに終える。作業フォルダの前回分の IP の一覧は 4 で進んでいるが、次の回の 3 で S3 の公開場所のものに戻る |
 | 作業フォルダにできるもの | `port_guard_whitelists/`（公開元の IP の一覧、ipset に入れる IP の一覧、前回分の IP の一覧）、`command/port_guard/refresh-ipv4.sh`・`refresh-ipv6.sh`、`SHA256SUMS`（6 の後） |
 | 踏み台サーバーから各サーバーへ SSH で流す今の手順と合わせるとき | 踏み台サーバーのカレントのフォルダ（`command/` と `port_guard_whitelists/` があるところ）で `PORT_GUARD_WORK_DIR="$PWD"` を付けて流すと、ipset 入れ替えスクリプトが今の手順と同じ `command/port_guard/` にできる |
@@ -100,8 +101,8 @@ bash ip-port-guard-rule-refresh-pipeline/deploy-rules.sh staging
 
 | もの | 正本のある場所 | 備考 |
 |---|---|---|
-| 入口のスクリプト・部品のスクリプト | リポジトリ（このフォルダと `../command/`） | — |
-| 個別許可の IP の一覧 | リポジトリ（[`../allow-lists/<環境>/`](../allow-lists/README.md)） | **3 つの環境（`allow-lists/development/`・`staging/`・`production/`）に、空の仮置きだけを置いた（2026-11-16）。実際の一覧は、まだ入れていない**。空のまま S3 に上げない（[allow-lists の README](../allow-lists/README.md#今置いてあるもの仮置き)） |
+| 入口のスクリプト・部品のスクリプト | リポジトリ（このフォルダ） | このフォルダの `command/` を使う |
+| 個別許可の IP の一覧 | リポジトリ（このフォルダの [`allow-lists/<環境>/`](allow-lists/README.md)） | **3 つの環境（`allow-lists/development/`・`staging/`・`production/`）に、空の仮置きだけを置いた（2026-11-16）。実際の一覧は、まだ入れていない**。空のまま S3 に上げない（[allow-lists の README](allow-lists/README.md#今置いてあるもの仮置き)） |
 | 公開元の IP の一覧 | リポジトリの外（APNIC・AWS が公開している） | 流すたびに取る |
 | 前回分の IP の一覧 | リポジトリの外（S3 の公開場所） | 人が書くものではなく、前回上げた結果の記録。リポジトリには置かない（上げるたびにコミットが要ることになるため）。初回はなくてよい |
 
@@ -109,10 +110,16 @@ bash ip-port-guard-rule-refresh-pipeline/deploy-rules.sh staging
 
 どの実行場所でも要るもの: bash・curl・awk・AWS CLI、`ftp.apnic.net` と `ip-ranges.amazonaws.com` への HTTPS、S3 の公開場所を読む権限（`build-rules.sh`）と書く権限（`deploy-rules.sh`）。
 
+AWS CLI は、バケットを作ったアカウントの認証情報とリージョンで使う。リージョンは `AWS_REGION`、`AWS_DEFAULT_REGION`、`aws configure get region` の順に使い、アカウント ID は `aws sts get-caller-identity` で取得する。プロファイルを使う場合は、通常どおり `AWS_PROFILE` で選ぶ。
+
+**パブリックアクセスはすべてブロックしたままでよい**。ログインしているユーザーまたはロールに、ビルドでは `s3:ListBucket`（バケット）と `s3:GetObject`（前回分の一覧）、デプロイでは `s3:PutObject`（`port-guard/<環境>/current/` 配下）の権限があれば読み書きできる。ログインだけでこれらの権限が付くわけではない。スクリプトは AWS CLI の認証をそのまま使い、公開 ACL は付けない。
+
+名前空間・パブリックアクセスのブロック・操作ごとの権限は、AWS のドキュメントと照らし合わせた（2026-11-17）: [名前空間とバケット名](https://docs.aws.amazon.com/AmazonS3/latest/userguide/gpbucketnamespaces.html)、[パブリックアクセスのブロック](https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html)、[S3 操作に必要な権限](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html)。
+
 | 実行場所 | リポジトリの中身の持ち方 | AWS の認証情報 |
 |---|---|---|
-| ローカル | リポジトリを取ったもの | 作業者の認証情報（AWS CLI のプロファイルなど） |
-| 踏み台サーバー | リポジトリを取るか、`ec2-port-guard-rollout/` の下の `command/`・`allow-lists/`・`ip-port-guard-rule-refresh-pipeline/` を、並びを変えずに写す | 決まっていない（[決まっていないこと](#決まっていないこと)） |
+| ローカル | リポジトリを取ったもの、またはこのフォルダだけを写したもの | 作業者の認証情報（AWS CLI のプロファイルなど） |
+| 踏み台サーバー | このフォルダだけを写す | AWS CLI でログインしている人の権限 |
 | CI | CI がリポジトリから取る | CI のロール。作るところと上げるところでロールを分けられる（今の CodePipeline の定義は分けている） |
 
 ## S3 の公開場所に置かれるもの
@@ -120,7 +127,7 @@ bash ip-port-guard-rule-refresh-pipeline/deploy-rules.sh staging
 フォルダの形は作業フォルダと同じ。
 
 ```text
-s3://<公開バケット>/port-guard/<環境>/current/
+s3://ip-port-guard-rules-<アカウント ID>-<リージョン>-an/port-guard/<環境>/current/
   command/port_guard/refresh-ipv4.sh           # ipset 入れ替えスクリプト（各サーバーが取って流すもの）
   command/port_guard/refresh-ipv6.sh
   port_guard_whitelists/allow-ipv4.txt         # 個別許可の IP の一覧の写し（上げたときに使った内容の記録。正本はリポジトリ）
@@ -134,7 +141,6 @@ s3://<公開バケット>/port-guard/<環境>/current/
 - 同じ環境に、2 つの実行場所から同時に流さない。両方が同じ S3 の公開場所に上げるので、後から上げた方が残り、比較の基準もずれる
 - **個別許可の IP の一覧が空のまま（今の 3 つの環境の仮置き）上げない**。入口のスクリプトは、空であることでは止まらない。空の一覧で作った ipset 入れ替えスクリプトを各サーバーで流すと、VPC の中から来る 80・443 番への通信も捨てられる
 - `deploy-rules.sh` は、コミットしていない個別許可の IP の一覧でも上げられる（今は確かめていない）。上げる前にコミットする
-- 既存のバケットを公開バケットにするときは、バケットのポリシーで書き込みを絞っていないかを確かめる
 - `make-refresh.sh` の下限の件数・増減の基準（5%）は、スクリプトの中の値がそのまま使われる
 
 ## CodePipeline の定義（2026-11-14 の作りのまま。作り直しが要る）
@@ -145,8 +151,8 @@ s3://<公開バケット>/port-guard/<環境>/current/
 
 | 今のスクリプトと合っていない点 | 作り直すときにすること |
 |---|---|
-| ビルドが `command/fetch-allow-and-last-lists.sh` を流す（2026-11-16 に `fetch-last-lists.sh` に変え、個別許可の IP の一覧を S3 から取るのをやめた） | 部品のスクリプトを 1 つずつ並べず、`build-rules.sh <環境>` と `deploy-rules.sh <環境>` を流す |
-| 個別許可の IP の一覧を S3 の公開場所から取る前提で、リポジトリの `allow-lists/` を受け取る口がない | パイプラインのソースを、リポジトリの `ec2-port-guard-rollout/` の中身にする |
+| ビルドが `command/fetch-allow-and-last-lists.sh` を流す（2026-11-16 に `fetch-last-lists.sh` に変え、個別許可の IP の一覧を S3 から取るのをやめた） | 部品のスクリプトを 1 つずつ並べず、`build-rules.sh <環境>` と `deploy-rules.sh <環境>` を流す。公開バケットもアカウントのリージョナル名前空間で作成済みのものに合わせる |
+| 個別許可の IP の一覧を S3 の公開場所から取る前提で、リポジトリの `allow-lists/` を受け取る口がない | パイプラインのソースを、このフォルダの中身にする |
 | 部品のスクリプトを、人がパイプライン用バケットに上げ直す（リポジトリとつながっていない） | 同上（`source/fetch-bastion-scripts.sh` と、使った版の記録は要らなくなる） |
 
 作り直しても残す決めごと:
@@ -173,6 +179,5 @@ s3://<公開バケット>/port-guard/<環境>/current/
 | 使うかどうか | 今は見送りの扱い。無人で回す必要が出たとき、または AMI から台を増やす運用になったときに検討する |
 | CI の形（2026-11-16 に「後で決める」とした） | 案 1: CodePipeline のソースを Git のリポジトリにする（AWS の側に Git ホストへの接続を作る）。案 2: リポジトリの一式を圧縮して S3 に上げ、それを CodePipeline のソースにする（Git の接続は足さないが、変えるたびに上げ直す）。案 3: CodePipeline をやめ、Git ホストの CI で同じ入口のスクリプトを流す。どの案でも、流すのは `build-rules.sh` と `deploy-rules.sh` |
 | 環境ごとの個別許可の IP の一覧 | 3 つの環境（`allow-lists/development/`・`staging/`・`production/`）に、空の仮置きだけを置いた（2026-11-16）。実際の一覧は、まだ入れていない |
-| 公開バケット | 新しく作るか、既存のものを使うか。ローカル・踏み台サーバーから読み書きする権限を、どの認証情報で持つか |
-| 各サーバーが取得・照合して入れ替える側 | S3 の公開場所から ipset 入れ替えスクリプトと照合の値を取り、照合してから流す仕組み。定期の実行（cron か State Manager か）と、S3 を読む権限（補足の B-3 の案 X か Y か）。S3 から取ったスクリプトを root で流すので、S3 の公開場所に書ける人・ロールを絞ることが前提になる |
+| 各サーバーが取得・照合して入れ替える側 | S3 の公開場所から ipset 入れ替えスクリプトと照合の値を取り、照合してから流す仕組み。定期の実行（cron か State Manager か）と、S3 を読む認証情報の持たせ方。S3 から取ったスクリプトを root で流すので、S3 の公開場所に書ける人・ロールを絞ることが前提になる |
 | 定期の実行（作る側） | 要るなら、CI の予定の実行を足す（今はない）。人の確認を挟むと、無人では最後まで進まない |

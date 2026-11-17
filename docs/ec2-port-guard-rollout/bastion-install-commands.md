@@ -169,7 +169,7 @@ echo "APNIC の版: ${VERSION}、IPv4: $(grep -vc '^#' port_guard_whitelists/jp-
 
 ### 0-2. 作業者が、許可する IP アドレスの一覧を書く
 
-踏み台サーバーに `port_guard_whitelists/allow-ipv4.txt`（と、IPv6 も絞るなら `port_guard_whitelists/allow-ipv6.txt`）を手で置く。**正本はリポジトリの [`allow-lists/<環境>/`](./allow-lists/README.md)**（2026-11-16 に決めた。環境は `development`・`staging`・`production`。今あるのは空の仮置きだけで、実際の一覧はまだ入れていない）。リポジトリにあればそれを写し、新しく書いた・書き直したときは、リポジトリにも同じ内容を入れる。1 行 1 件、CIDR でもよい、`#` から後はコメント、空の行は無視される。ここに書いた送り元は、日本の範囲に入っていなくても 80・443 番を受け付ける。
+踏み台サーバーに `port_guard_whitelists/allow-ipv4.txt`（と、IPv6 も絞るなら `port_guard_whitelists/allow-ipv6.txt`）を手で置く。**正本はリポジトリの [`ip-port-guard-rule-refresh-pipeline/allow-lists/<環境>/`](./ip-port-guard-rule-refresh-pipeline/allow-lists/README.md)**（2026-11-16 に決めた。環境は `development`・`staging`・`production`。今あるのは空の仮置きだけで、実際の一覧はまだ入れていない）。リポジトリにあればそれを写し、新しく書いた・書き直したときは、リポジトリにも同じ内容を入れる。1 行 1 件、CIDR でもよい、`#` から後はコメント、空の行は無視される。ここに書いた送り元は、日本の範囲に入っていなくても 80・443 番を受け付ける。
 
 書くもの:
 

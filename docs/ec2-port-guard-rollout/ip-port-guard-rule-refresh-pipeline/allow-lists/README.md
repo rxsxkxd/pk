@@ -7,12 +7,12 @@
 | 名前 | 指すもの |
 |---|---|
 | 個別許可の IP の一覧 | `allow-lists/<環境>/allow-ipv4.txt`・`allow-ipv6.txt`。人が書く。各サーバーの ipset の集合 `port_guard_allow`・`port_guard_allow6` に入る |
-| 環境 | 1 つの VPC。`development`・`staging`・`production` の 3 つ（2026-11-16 に決めた）。この名前をフォルダの名前にする。S3 の公開場所 `s3://<公開バケット>/port-guard/<環境>/current/` の `<環境>` と同じ名前にする |
+| 環境 | 1 つの VPC。`development`・`staging`・`production` の 3 つ（2026-11-16 に決めた）。この名前をフォルダの名前と、S3 の公開場所の `port-guard/<環境>/current/` に使う |
 
 ## 置き方
 
 ```text
-allow-lists/
+ip-port-guard-rule-refresh-pipeline/allow-lists/
   <環境>/
     allow-ipv4.txt
     allow-ipv6.txt     # IPv6 を絞らない環境でも、空のファイルを置く（ないと build-rules.sh と make-refresh.sh が止まる）
@@ -21,20 +21,20 @@ allow-lists/
 1 行 1 件（1 列目が IP アドレスか CIDR）。`#` から後はコメント、空の行は無視される。
 
 ```text
-# 稼働サーバーの VPC（command/port_guard/00-vpc-cidr.sh の結果）
+# 稼働サーバーの VPC（実際の範囲に置き換える）
 10.0.0.0/16
 # 海外の拠点
 203.0.113.10
 ```
 
-何を書くか（VPC の範囲は必ず書く、など）は、[踏み台サーバーの手順のステップ 0-2](../bastion-install-commands.md#0-2-作業者が許可する-ip-アドレスの一覧を書く)にある。
+稼働サーバーが入っている VPC の IPv4 の範囲は、`allow-ipv4.txt` に必ず書く。同じ VPC のサーバーからの呼び出し・監視などはプライベートのアドレスで来るため、日本や AWS の公開 IP の一覧では許可されない。IPv6 を絞る場合は、VPC の IPv6 の範囲も `allow-ipv6.txt` に書く。そのほか、日本・AWS の東京と大阪の範囲に入らない海外の拠点など、許可する送り元を追加する。
 
 ## 使われ方
 
 | 使う場面 | 使い方 |
 |---|---|
-| ipset 入れ替えスクリプトを作って S3 に上げる（[ip-port-guard-rule-refresh-pipeline](../ip-port-guard-rule-refresh-pipeline/README.md)） | `build-rules.sh <環境>` が、このフォルダの `<環境>/` から作業フォルダに写して使う |
-| 踏み台サーバーから SSH で入れる手順（[bastion-install-commands.md](../bastion-install-commands.md)） | 踏み台サーバーのカレントのフォルダの `port_guard_whitelists/` に、このフォルダの `<環境>/` の 2 つのファイルを写して使う |
+| ipset 入れ替えスクリプトを作って S3 に上げる（[ip-port-guard-rule-refresh-pipeline](../README.md)） | `build-rules.sh <環境>` が、このフォルダの `<環境>/` から作業フォルダに写して使う |
+| 踏み台サーバーから SSH で入れる既存の手順 | 踏み台サーバーのカレントのフォルダの `port_guard_whitelists/` に、このフォルダの `<環境>/` の 2 つのファイルを写して使う |
 
 ## 今置いてあるもの（仮置き）
 

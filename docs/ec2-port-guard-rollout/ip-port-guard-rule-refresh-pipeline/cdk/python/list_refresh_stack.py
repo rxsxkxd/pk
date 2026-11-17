@@ -1,412 +1,125 @@
-"""人の作業フローを同じスクリプト・同じ順番で流す、一覧更新パイプライン。
+"""現行の入口スクリプトを実行するパイプライン。バケットは別スタック。"""  # パイプライン用スタックの役割を示す。
 
-CloudFormation 版とパラメータ・条件・論理 ID・出力をそろえるため、L1 の構成要素で定義する。
-既存の YAML は読み込まない。権限を自動で追加する grant や、スクリプトの自動アップロードも使わない。
-"""
+import aws_cdk as cdk  # スタック・パラメータ・条件などの CDK 共通機能を使う。
+from aws_cdk import aws_codebuild as build, aws_codepipeline as pipeline  # CodeBuild と CodePipeline を L2 の構成要素で定義する。
+from aws_cdk import aws_codepipeline_actions as actions, aws_iam as iam  # パイプラインのアクションと IAM の権限を定義する。
+from aws_cdk import aws_logs as logs, aws_s3 as s3  # ログの作成と既存 S3 バケットの参照に使う。
+from constructs import Construct  # CDK の構成要素の親を表す型を使う。
 
-from __future__ import annotations
-
-import json
-
-import aws_cdk as cdk
-from aws_cdk import aws_codebuild as codebuild
-from aws_cdk import aws_codepipeline as codepipeline
-from aws_cdk import aws_iam as iam
-from aws_cdk import aws_logs as logs
-from aws_cdk import aws_s3 as s3
-from constructs import Construct
-
-
-CODEBUILD_IMAGE = "aws/codebuild/amazonlinux-x86_64-standard:5.0"
-
-MAKE_BUILDSPEC = {
-    "version": 0.2,
-    "env": {"shell": "bash"},
-    "phases": {
-        "build": {
-            "commands": [
-                "bash fetch-bastion-scripts.sh",
-                "bash command/fetch-allow-and-last-lists.sh",
-                "bash command/make-jp-lists.sh",
-                "bash command/make-aws-lists.sh",
-                'FORCE="${FORCE}" bash command/make-refresh.sh',
-            ]
-        }
-    },
-    "artifacts": {
-        "files": [
-            "bastion-scripts-versions.txt",
-            "command/publish-refresh-scripts.sh",
-            "command/port_guard/refresh-ipv4.sh",
-            "command/port_guard/refresh-ipv6.sh",
-            "port_guard_whitelists/allow-ipv4.txt",
-            "port_guard_whitelists/allow-ipv6.txt",
-            "port_guard_whitelists/last-refresh/*.txt",
-        ]
-    },
-}
-
-PUBLISH_BUILDSPEC = {
-    "version": 0.2,
-    "env": {"shell": "bash"},
-    "phases": {
-        "build": {
-            "commands": [
-                "cat bastion-scripts-versions.txt",
-                "bash command/publish-refresh-scripts.sh",
-            ]
-        }
-    },
-}
+MAKE_BUILDSPEC = {  # 一覧を作る CodeBuild の buildspec を定義する。
+    "version": 0.2,  # コマンド間で作業ディレクトリを維持する buildspec 0.2 を使う。
+    "env": {"shell": "bash"},  # 子スクリプトへ関数を引き継げる bash で実行する。
+    "phases": {"build": {"commands": [  # ビルド段階で実行するコマンドの一覧を始める。
+        'cd "$CODEBUILD_SRC_DIR/$SOURCE_DIRECTORY"',  # 取得したリポジトリ内のプロジェクトへ移動する。
+        'bash build-rules.sh "$ENVIRONMENT_NAME"',  # ローカルと共通の入口で、指定環境のルールを作る。
+    ]}},  # ビルド段階のコマンド一覧を閉じる。
+    "artifacts": {  # 承認後のデプロイに渡す成果物を定義する。
+        "base-directory": "$SOURCE_DIRECTORY",  # プロジェクトの場所を基準に成果物を集める。
+        "files": [  # 成果物に含めるファイルの一覧を始める。
+            "deploy-rules.sh", "command/aws-cli.sh", "command/set-s3-uri.sh",  # デプロイの入口と AWS CLI 設定・S3 宛先の部品を渡す。
+            "command/publish-refresh-scripts.sh",  # チェックサムを作って S3 へ送る部品も渡す。
+            "work/*/command/port_guard/refresh-*.sh",  # ビルドが作った IPv4・IPv6 の ipset 入れ替えスクリプトを渡す。
+            "work/*/port_guard_whitelists/allow-*.txt",  # 今回のビルドで使用した個別許可の一覧を渡す。
+            "work/*/port_guard_whitelists/last-refresh/*.txt",  # 次回の増減比較に使う、今回の一覧の記録を渡す。
+        ],  # 成果物に含めるファイルの一覧を閉じる。
+    },  # 成果物の設定を閉じる。
+}  # 一覧を作る buildspec の定義を閉じる。
+PUBLISH_BUILDSPEC = {  # S3 へ上げる CodeBuild の buildspec を定義する。
+    "version": 0.2,  # デプロイ側も buildspec 0.2 を使う。
+    "env": {"shell": "bash"},  # デプロイ側のコマンドも bash で実行する。
+    "phases": {"build": {"commands": ['bash deploy-rules.sh "$ENVIRONMENT_NAME"']}},  # 承認済みの成果物にある入口で、指定環境のファイルを上げる。
+}  # S3 へ上げる buildspec の定義を閉じる。
 
 
-def statement(sid: str, actions: str | list[str], resources, **extra) -> dict:
-    """IAM の許可。Action の範囲と Resource の範囲は呼び出す側で明示する。"""
-    return {"Sid": sid, "Effect": "Allow", "Action": actions, "Resource": resources, **extra}
+class ListRefreshPipelineStack(cdk.Stack):  # バケットを作らず、更新処理だけを持つスタックを定義する。
+    def __init__(self, scope: Construct, stack_name: str) -> None:  # 親の構成要素とスタック名を受け取る。
+        super().__init__(scope, stack_name, stack_name=stack_name,  # CloudFormation のスタックを指定した名前で初期化する。
+                         synthesizer=cdk.BootstraplessSynthesizer(), analytics_reporting=False)  # アセット用バケットと bootstrap を不要にし、利用状況メタデータを付けない。
+        environment = cdk.CfnParameter(self, "EnvironmentName", type="String",  # デプロイ時に環境名を受け取るパラメータを作る。
+                                       allowed_values=["development", "staging", "production"]).value_as_string  # 環境名は既存の一覧がある3環境から選び、文字列として使う。
+        artifact_name = cdk.CfnParameter(self, "PipelineBucketName", type="String").value_as_string  # 別スタックが出力した中間成果物用バケットの完全名を受け取る。
+        rule_name = cdk.CfnParameter(self, "PublishBucketName", type="String").value_as_string  # ルールの配布先となるバケットの完全名を受け取る。
+        connection = cdk.CfnParameter(self, "ConnectionArn", type="String").value_as_string  # 事前に認可した CodeConnections 接続の ARN を受け取る。
+        repository = cdk.CfnParameter(self, "FullRepositoryId", type="String").value_as_string  # ソースの所有者とリポジトリ名を受け取る。
+        branch = cdk.CfnParameter(self, "BranchName", type="String", default="main").value_as_string  # 取得するブランチを受け取り、省略時は main にする。
+        directory = cdk.CfnParameter(self, "SourceDirectory", type="String", default=".").value_as_string  # リポジトリ内のプロジェクトの場所を受け取り、省略時は直下にする。
+        approval = cdk.CfnParameter(self, "RequireApproval", type="String", default="true",  # 人の承認を入れるかを受け取り、省略時は入れる。
+                                   allowed_values=["true", "false"])  # 承認の指定は文字列の true または false に限定する。
+        retention = cdk.CfnParameter(self, "LogRetentionInDays", type="Number", default=90)  # ビルドログの保存日数を受け取り、省略時は90日にする。
+        use_approval = cdk.CfnCondition(self, "UseApproval",  # 承認ステージを残すかを決める CloudFormation 条件を作る。
+                                      expression=cdk.Fn.condition_equals(approval.value_as_string, "true"))  # RequireApproval が true の場合に、その条件を成立させる。
+        artifacts = s3.Bucket.from_bucket_name(self, "Artifacts", artifact_name)  # 中間成果物用バケットを名前で参照し、このスタックでは作らない。
+        rules = s3.Bucket.from_bucket_name(self, "Rules", rule_name)  # ルール用バケットも名前で参照し、このスタックでは作らない。
+        prefix = f"port-guard/{environment}/current"  # 指定環境のルールを置く S3 キーの共通部分を作る。
+        uri = f"s3://{rule_name}/{prefix}"  # ビルドとデプロイに渡す S3 URI を組み立てる。
+        log_group = logs.LogGroup(self, "BuildLogs",  # 2つの CodeBuild が使う CloudWatch Logs のグループを作る。
+                                 log_group_name=f"/aws/codebuild/port-guard-list-refresh-{environment}",  # 環境ごとに分けたロググループ名を指定する。
+                                 retention=logs.RetentionDays.THREE_MONTHS,  # L2 の初期値として90日の保存期間を指定する。
+                                 removal_policy=cdk.RemovalPolicy.DESTROY)  # パイプライン用スタックを削除した場合はロググループも削除する。
+        log_group.node.default_child.retention_in_days = retention.value_as_number  # 保存日数をデプロイ時のパラメータで選べるよう、L1 の値に置き換える。
 
+        def project(name, suffix, spec, timeout, extra=None):  # ビルド用とデプロイ用に共通する CodeBuild の設定をまとめる。
+            variables = {"ENVIRONMENT_NAME": environment, "PORT_GUARD_S3_URI": uri, **(extra or {})}  # 両方に環境名と S3 URI を渡し、必要なら呼び出し側の変数を加える。
+            return build.PipelineProject(  # 入出力を CodePipeline から受け渡す CodeBuild を作る。
+                self, name, project_name=f"port-guard-list-refresh-{environment}-{suffix}",  # 構成要素の名前と、環境・役割が分かるプロジェクト名を付ける。
+                build_spec=build.BuildSpec.from_object(spec), timeout=cdk.Duration.minutes(timeout),  # 辞書の buildspec と、役割に応じた実行時間の上限を指定する。
+                grant_report_group_permissions=False,  # 使わないテストレポートの作成権限は自動で付けない。
+                environment=build.BuildEnvironment(  # CodeBuild の実行環境を指定する。
+                    build_image=build.LinuxBuildImage.from_code_build_image_id(  # AWS が提供する CodeBuild イメージを名前で参照する。
+                        "aws/codebuild/amazonlinux-x86_64-standard:5.0"),  # Amazon Linux の標準ビルドイメージ 5.0 を使う。
+                    compute_type=build.ComputeType.SMALL),  # 小さいコンピューティングタイプを使う。
+                environment_variables={k: build.BuildEnvironmentVariable(value=v) for k, v in variables.items()},  # 環境変数を CodeBuild の環境変数オブジェクトに変換する。
+                logging=build.LoggingOptions(cloud_watch=build.CloudWatchLoggingOptions(  # ビルドログを CloudWatch Logs に出す設定を始める。
+                    log_group=log_group, prefix=suffix)),  # 共通ロググループ内で、make と publish のログを分ける。
+            )  # 作成した CodeBuild プロジェクトを呼び出し側へ返す。
 
-class ListRefreshPipelineStack(cdk.Stack):
-    def __init__(self, scope: Construct, stack_name: str) -> None:
-        super().__init__(
-            scope,
-            stack_name,
-            stack_name=stack_name,
-            description=(
-                "port-guard list refresh pipeline (optional, CDK Python). "
-                "Automates the human workflow on the bastion server with the same scripts. "
-                "One stack per environment (VPC). Started manually only."
-            ),
-            synthesizer=cdk.DefaultStackSynthesizer(generate_bootstrap_version_rule=False),
-            analytics_reporting=False,
-        )
+        make = project("MakeProject", "make", MAKE_BUILDSPEC, 15,  # 一覧を作るプロジェクトを、実行上限15分で作る。
+                       {"SOURCE_DIRECTORY": directory, "FORCE": "0"})  # 一覧を作る側だけにソースの場所と FORCE の既定値を渡す。
+        publish = project("PublishProject", "publish", PUBLISH_BUILDSPEC, 10)  # S3 へ上げるプロジェクトを、実行上限10分で作る。
+        # 配布先の権限は明記する。make は読むだけ、publish はこの環境への PutObject だけ。
+        make.add_to_role_policy(iam.PolicyStatement(  # 一覧を作るロールに、配布先から取得する権限を追加する。
+            actions=["s3:GetObject"], resources=[rules.arn_for_objects(f"{prefix}/*")]))  # 取得できるオブジェクトを、この環境の current 配下だけにする。
+        make.add_to_role_policy(iam.PolicyStatement(  # 前回分のファイル名を列挙するための権限を追加する。
+            actions=["s3:ListBucket"], resources=[rules.bucket_arn],  # 対象をルール用バケットの一覧取得に限定する。
+            conditions={"StringLike": {"s3:prefix": f"{prefix}/*"}}))  # 列挙できるキーの範囲を、この環境の current 配下に絞る。
+        publish.add_to_role_policy(iam.PolicyStatement(  # S3 へ上げるロールに、配布先への書き込み権限を追加する。
+            actions=["s3:PutObject"], resources=[rules.arn_for_objects(f"{prefix}/*")]))  # 書き込める場所を、この環境の current 配下だけにする。
 
-        cdk.CfnParameter(
-            self,
-            "EnvironmentName",
-            type="String",
-            allowed_pattern="^[a-z0-9][a-z0-9-]{0,30}$",
-            description="Environment (VPC) name. Used in resource names and in the S3 publish location.",
-        )
-        existing_bucket = cdk.CfnParameter(
-            self,
-            "PublishBucketName",
-            type="String",
-            default="",
-            description=(
-                "Existing bucket of the S3 publish location (the same bucket the human workflow uses). "
-                "Leave empty to create a new bucket in this stack (versioning enabled). "
-                "An existing bucket must use SSE-S3 (not SSE-KMS) encryption."
-            ),
-        )
-        cdk.CfnParameter(
-            self,
-            "PublishKeyPrefix",
-            type="String",
-            default="port-guard",
-            allowed_pattern="^[A-Za-z0-9][A-Za-z0-9/_.-]*[A-Za-z0-9]$",
-            description="The S3 publish location is s3://<bucket>/<PublishKeyPrefix>/<EnvironmentName>/current.",
-        )
-        require_approval = cdk.CfnParameter(
-            self,
-            "RequireApproval",
-            type="String",
-            default="true",
-            allowed_values=["true", "false"],
-            description="Insert a manual approval stage (the human check) between making and publishing.",
-        )
-        retention = cdk.CfnParameter(self, "LogRetentionInDays", type="Number", default=90)
-        create_bucket = cdk.CfnCondition(
-            self, "CreatePublishBucket", expression=cdk.Fn.condition_equals(existing_bucket.value_as_string, "")
-        )
-        use_approval = cdk.CfnCondition(
-            self, "UseApproval", expression=cdk.Fn.condition_equals(require_approval.value_as_string, "true")
-        )
-
-        pipeline_bucket = self._bucket("PipelineBucket", expire_old_versions=True)
-        publish_bucket = self._bucket("PublishBucket")
-        publish_bucket.cfn_options.condition = create_bucket
-        publish_bucket.apply_removal_policy(cdk.RemovalPolicy.RETAIN)
-        bucket_name = cdk.Fn.condition_if(
-            create_bucket.logical_id, publish_bucket.ref, existing_bucket.value_as_string
-        ).to_string()
-
-        def publish_sub(template: str) -> str:
-            return cdk.Fn.sub(template, {"Bucket": bucket_name})
-
-        publish_uri = publish_sub("s3://${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current")
-        publish_arn = publish_sub("arn:${AWS::Partition}:s3:::${Bucket}")
-        publish_objects = publish_sub(
-            "arn:${AWS::Partition}:s3:::${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current/*"
-        )
-        pipeline_objects = cdk.Fn.sub("${PipelineBucket.Arn}/*")
-        log_group = logs.CfnLogGroup(
-            self,
-            "BuildLogGroup",
-            log_group_name=cdk.Fn.sub("/aws/codebuild/port-guard-list-refresh-${EnvironmentName}"),
-            retention_in_days=retention.value_as_number,
-        )
-        write_logs = statement("WriteLogs", ["logs:CreateLogStream", "logs:PutLogEvents"], log_group.attr_arn)
-
-        # 承認の前に動くビルドは、S3 の公開場所を読む権限だけを持つ。
-        make_role = self._role(
-            "MakeRole",
-            "codebuild.amazonaws.com",
-            "CodeBuild that makes the port-guard IP lists and ipset replacement scripts (reads the S3 publish location only)",
-            "port-guard-list-refresh-make",
-            [
-                write_logs,
-                statement(
-                    "PipelineBucketObjects", ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"], pipeline_objects
-                ),
-                statement("ReadPublishLocation", "s3:GetObject", publish_objects),
-                statement(
-                    "ListPublishLocation",
-                    "s3:ListBucket",
-                    publish_arn,
-                    Condition={
-                        "StringLike": {"s3:prefix": cdk.Fn.sub("${PublishKeyPrefix}/${EnvironmentName}/current/*")}
-                    },
-                ),
-            ],
-        )
-        publish_role = self._role(
-            "PublishRole",
-            "codebuild.amazonaws.com",
-            "CodeBuild that publishes the ipset replacement scripts to the S3 publish location (after approval)",
-            "port-guard-list-refresh-publish",
-            [
-                write_logs,
-                statement("ReadPipelineArtifacts", ["s3:GetObject", "s3:GetObjectVersion"], pipeline_objects),
-                # [変更] この環境の current/ の下だけに書ける。
-                statement("WritePublishLocation", "s3:PutObject", publish_objects),
-            ],
-        )
-
-        make_project = self._project(
-            "MakeProject",
-            "make",
-            "Make the port-guard IP lists and the ipset replacement scripts (same steps as the human workflow)",
-            make_role,
-            log_group,
-            15,
-            [
-                {"name": "BASTION_SCRIPTS_BUCKET", "value": pipeline_bucket.ref},
-                {"name": "BASTION_SCRIPTS_PREFIX", "value": "bastion-scripts"},
-                {"name": "PORT_GUARD_S3_URI", "value": publish_uri},
-                {"name": "FORCE", "value": "0"},
-            ],
-            MAKE_BUILDSPEC,
-        )
-        publish_project = self._project(
-            "PublishProject",
-            "publish",
-            "Publish the ipset replacement scripts to the S3 publish location (same script as the human workflow)",
-            publish_role,
-            log_group,
-            10,
-            [{"name": "PORT_GUARD_S3_URI", "value": publish_uri}],
-            PUBLISH_BUILDSPEC,
-        )
-        pipeline_role = self._role(
-            "PipelineRole",
-            "codepipeline.amazonaws.com",
-            "CodePipeline of the port-guard list refresh pipeline",
-            "port-guard-list-refresh-pipeline",
-            [
-                statement(
-                    "PipelineBucketObjects", ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"], pipeline_objects
-                ),
-                statement(
-                    "PipelineBucket",
-                    ["s3:GetBucketVersioning", "s3:GetBucketLocation", "s3:ListBucket"],
-                    pipeline_bucket.attr_arn,
-                ),
-                statement(
-                    "RunBuilds",
-                    ["codebuild:StartBuild", "codebuild:BatchGetBuilds"],
-                    [make_project.attr_arn, publish_project.attr_arn],
-                ),
-            ],
-        )
-
-        # Fn::If の内側は CloudFormation のプロパティ名（大文字）で書く。
-        approval_stage = cdk.Fn.condition_if(
-            use_approval.logical_id,
-            {
-                "Name": "Check",
-                "Actions": [
-                    {
-                        "Name": "HumanCheck",
-                        "ActionTypeId": {"Category": "Approval", "Owner": "AWS", "Provider": "Manual", "Version": "1"},
-                        "Configuration": {
-                            "CustomData": (
-                                "Check the make build log (bastion script versions, allow lists fetched, counts, added and "
-                                "removed per list) as in the human workflow before approving."
-                            )
-                        },
-                    }
-                ],
-            },
-            cdk.Aws.NO_VALUE,
-        )
-        pipeline = codepipeline.CfnPipeline(
-            self,
-            "Pipeline",
-            name=cdk.Fn.sub("port-guard-list-refresh-${EnvironmentName}"),
-            pipeline_type="V2",
-            execution_mode="QUEUED",
-            role_arn=pipeline_role.attr_arn,
-            artifact_store=codepipeline.CfnPipeline.ArtifactStoreProperty(type="S3", location=pipeline_bucket.ref),
-            variables=[codepipeline.CfnPipeline.VariableDeclarationProperty(
-                name="FORCE",
-                default_value="0",
-                description="Set 1 to proceed when a list changed by more than 5% from the last published one (make-refresh.sh FORCE=1)",
-            )],
-            stages=[
-                codepipeline.CfnPipeline.StageDeclarationProperty(
-                    name="Source",
-                    actions=[codepipeline.CfnPipeline.ActionDeclarationProperty(
-                        name="FetchBastionScripts",
-                        action_type_id=codepipeline.CfnPipeline.ActionTypeIdProperty(
-                            category="Source", owner="AWS", provider="S3", version="1"
-                        ),
-                        configuration={
-                            "S3Bucket": pipeline_bucket.ref,
-                            "S3ObjectKey": "source/fetch-bastion-scripts.zip",
-                            "PollForSourceChanges": "false",
-                        },
-                        output_artifacts=[codepipeline.CfnPipeline.OutputArtifactProperty(name="FetchScript")],
-                    )],
-                ),
-                codepipeline.CfnPipeline.StageDeclarationProperty(
-                    name="Make",
-                    actions=[codepipeline.CfnPipeline.ActionDeclarationProperty(
-                        name="MakeListsAndRefreshScripts",
-                        action_type_id=codepipeline.CfnPipeline.ActionTypeIdProperty(
-                            category="Build", owner="AWS", provider="CodeBuild", version="1"
-                        ),
-                        configuration={
-                            "ProjectName": make_project.ref,
-                            "EnvironmentVariables": '[{"name":"FORCE","value":"#{variables.FORCE}","type":"PLAINTEXT"}]',
-                        },
-                        input_artifacts=[codepipeline.CfnPipeline.InputArtifactProperty(name="FetchScript")],
-                        output_artifacts=[codepipeline.CfnPipeline.OutputArtifactProperty(name="MadeFiles")],
-                    )],
-                ),
-                approval_stage,
-                codepipeline.CfnPipeline.StageDeclarationProperty(
-                    name="Publish",
-                    actions=[codepipeline.CfnPipeline.ActionDeclarationProperty(
-                        name="PublishRefreshScripts",
-                        action_type_id=codepipeline.CfnPipeline.ActionTypeIdProperty(
-                            category="Build", owner="AWS", provider="CodeBuild", version="1"
-                        ),
-                        configuration={"ProjectName": publish_project.ref},
-                        input_artifacts=[codepipeline.CfnPipeline.InputArtifactProperty(name="MadeFiles")],
-                    )],
-                ),
-            ],
-        )
-        cdk.CfnOutput(self, "PipelineName", value=pipeline.ref)
-        cdk.CfnOutput(self, "PipelineBucketName", value=pipeline_bucket.ref)
-        cdk.CfnOutput(
-            self,
-            "BastionScriptsUri",
-            description="Upload the five bastion scripts (uncompressed) here",
-            value=cdk.Fn.sub("s3://${PipelineBucket}/bastion-scripts/command/"),
-        )
-        cdk.CfnOutput(
-            self,
-            "FetchScriptZipUri",
-            description="Upload fetch-bastion-scripts.zip (only fetch-bastion-scripts.sh) here",
-            value=cdk.Fn.sub("s3://${PipelineBucket}/source/fetch-bastion-scripts.zip"),
-        )
-        cdk.CfnOutput(
-            self,
-            "PublishLocation",
-            description="PORT_GUARD_S3_URI for the human workflow and the pipeline",
-            value=publish_uri,
-        )
-
-    def _bucket(self, logical_id: str, expire_old_versions: bool = False) -> s3.CfnBucket:
-        return s3.CfnBucket(
-            self,
-            logical_id,
-            versioning_configuration=s3.CfnBucket.VersioningConfigurationProperty(status="Enabled"),
-            bucket_encryption=s3.CfnBucket.BucketEncryptionProperty(
-                server_side_encryption_configuration=[s3.CfnBucket.ServerSideEncryptionRuleProperty(
-                    server_side_encryption_by_default=s3.CfnBucket.ServerSideEncryptionByDefaultProperty(
-                        sse_algorithm="AES256"
-                    )
-                )]
-            ),
-            public_access_block_configuration=s3.CfnBucket.PublicAccessBlockConfigurationProperty(
-                block_public_acls=True,
-                block_public_policy=True,
-                ignore_public_acls=True,
-                restrict_public_buckets=True,
-            ),
-            ownership_controls=s3.CfnBucket.OwnershipControlsProperty(
-                rules=[s3.CfnBucket.OwnershipControlsRuleProperty(object_ownership="BucketOwnerEnforced")]
-            ),
-            lifecycle_configuration=s3.CfnBucket.LifecycleConfigurationProperty(
-                rules=[s3.CfnBucket.RuleProperty(
-                    id="expire-noncurrent-versions",
-                    status="Enabled",
-                    noncurrent_version_expiration=s3.CfnBucket.NoncurrentVersionExpirationProperty(noncurrent_days=90),
-                )]
-            ) if expire_old_versions else None,
-        )
-
-    def _role(self, logical_id: str, service: str, description: str, policy_name: str, statements: list[dict]) -> iam.CfnRole:
-        return iam.CfnRole(
-            self,
-            logical_id,
-            description=description,
-            assume_role_policy_document={
-                "Version": "2012-10-17",
-                "Statement": [{
-                    "Effect": "Allow",
-                    "Principal": {"Service": service},
-                    "Action": "sts:AssumeRole",
-                }],
-            },
-            policies=[iam.CfnRole.PolicyProperty(
-                policy_name=policy_name,
-                policy_document={"Version": "2012-10-17", "Statement": statements},
-            )],
-        )
-
-    def _project(
-        self,
-        logical_id: str,
-        suffix: str,
-        description: str,
-        role: iam.CfnRole,
-        log_group: logs.CfnLogGroup,
-        timeout: int,
-        variables: list[dict],
-        buildspec: dict,
-    ) -> codebuild.CfnProject:
-        return codebuild.CfnProject(
-            self,
-            logical_id,
-            name=cdk.Fn.sub(f"port-guard-list-refresh-${{EnvironmentName}}-{suffix}"),
-            description=description,
-            service_role=role.attr_arn,
-            timeout_in_minutes=timeout,
-            artifacts=codebuild.CfnProject.ArtifactsProperty(type="CODEPIPELINE"),
-            logs_config=codebuild.CfnProject.LogsConfigProperty(
-                cloud_watch_logs=codebuild.CfnProject.CloudWatchLogsConfigProperty(
-                    status="ENABLED", group_name=log_group.ref, stream_name=suffix
-                )
-            ),
-            environment=codebuild.CfnProject.EnvironmentProperty(
-                type="LINUX_CONTAINER",
-                compute_type="BUILD_GENERAL1_SMALL",
-                image=CODEBUILD_IMAGE,
-                environment_variables=[codebuild.CfnProject.EnvironmentVariableProperty(**variable) for variable in variables],
-            ),
-            # JSON も YAML として読めるので、追加の YAML ライブラリなしで buildspec を埋め込める。
-            source=codebuild.CfnProject.SourceProperty(type="CODEPIPELINE", build_spec=json.dumps(buildspec)),
-        )
+        force = pipeline.Variable(variable_name="FORCE", default_value="0",  # パイプライン開始時に選べる FORCE 変数を作り、通常は0にする。
+                                  description="Set 1 after reviewing a change above 5 percent.")  # 増減が5%を超えた場合に、確認後に1を指定する変数だと説明する。
+        flow = pipeline.Pipeline(  # 更新処理をつなぐ CodePipeline を L2 で作る。
+            self, "Pipeline", pipeline_name=f"port-guard-list-refresh-{environment}",  # 環境名が分かるパイプライン名を付ける。
+            artifact_bucket=artifacts, cross_account_keys=False,  # 別スタックの成果物用バケットを使い、専用 KMS キーは作らない。
+            pipeline_type=pipeline.PipelineType.V2, execution_mode=pipeline.ExecutionMode.QUEUED,  # V2 パイプラインを使い、同時実行の要求は順番待ちにする。
+            restart_execution_on_update=False, use_pipeline_role_for_actions=True, variables=[force],  # 更新時の再実行を無効にし、共通ロールと FORCE 変数を使う。
+        )  # パイプライン本体の設定を閉じる。
+        source_files, made_files = pipeline.Artifact("SourceFiles"), pipeline.Artifact("MadeFiles")  # Git の取得結果と、ビルド後の成果物を区別する入れ物を作る。
+        repo_parts = cdk.Fn.split("/", repository)  # L2 の所有者・リポジトリの引数に渡すため、リポジトリ指定を分ける。
+        flow.add_stage(stage_name="Source", actions=[actions.CodeStarConnectionsSourceAction(  # Git からソースを取得するステージを追加する。
+            action_name="Repository", connection_arn=connection,  # 取得アクション名と、使う CodeConnections 接続を指定する。
+            owner=cdk.Fn.select(0, repo_parts), repo=cdk.Fn.select(1, repo_parts),  # 所有者とリポジトリをパラメータから取り出して L2 に渡す。
+            branch=branch, output=source_files, trigger_on_push=False,  # ブランチと出力成果物を指定し、push による自動実行を止める。
+        )])  # ソース取得のアクションとステージを閉じる。
+        flow.add_to_role_policy(iam.PolicyStatement(  # パイプラインのロールに、接続を利用する権限を加える。
+            actions=["codeconnections:UseConnection", "codestar-connections:UseConnection"],  # AWS の現行仕様に合わせ、新旧両方のサービス名で UseConnection を許可する。
+            resources=[connection]))  # 接続の利用先を、指定した1つの ARN だけにする。
+        flow.add_stage(stage_name="Make", actions=[actions.CodeBuildAction(  # 取得したソースから一覧を作るステージを追加する。
+            action_name="BuildRules", project=make, input=source_files, outputs=[made_files],  # 一覧用 CodeBuild にソースを渡し、できた結果を別の成果物に保存する。
+            environment_variables={"FORCE": build.BuildEnvironmentVariable(value=force.reference())},  # 開始時の FORCE 変数を、この実行の CodeBuild に渡す。
+        )])  # 一覧を作るアクションとステージを閉じる。
+        flow.add_stage(stage_name="Check", actions=[actions.ManualApprovalAction(action_name="HumanCheck")])  # 人が件数と増減を確かめて承認するステージを追加する。
+        flow.add_stage(stage_name="Publish", actions=[actions.CodeBuildAction(  # 承認済みの成果物を S3 に上げるステージを追加する。
+            action_name="DeployRules", project=publish, input=made_files,  # S3 用 CodeBuild に、一覧を作ったときの成果物を渡す。
+        )])  # デプロイのアクションとステージを閉じる。
+        # デプロイ時に承認の有無を選ぶため、このステージだけ L1 の条件にする。
+        flow.node.default_child.add_property_override("Stages.2", cdk.Fn.condition_if(  # 3番目の承認ステージを、CloudFormation の条件付き定義に置き換える。
+            use_approval.logical_id,  # 承認を使うかを決める条件の論理 ID を指定する。
+            {"Name": "Check", "Actions": [{  # 条件が成立したときに残す Check ステージの定義を始める。
+                "Name": "HumanCheck",  # 人が操作する承認アクション名を指定する。
+                "ActionTypeId": {"Category": "Approval", "Owner": "AWS", "Provider": "Manual", "Version": "1"},  # AWS 標準の Manual 承認アクションとして定義する。
+                "Configuration": {"CustomData": "Review counts and changes in the make build log before publishing."},  # 承認する人に、ビルドログの件数と増減を確認するよう表示する。
+            }]}, cdk.Aws.NO_VALUE))  # 承認不要なら AWS::NoValue によりステージごと省略する。
+        # グループ階層を含むリポジトリ名も、入力した値をそのまま渡す。
+        flow.node.default_child.add_property_override("Stages.0.Actions.0.Configuration.FullRepositoryId", repository)  # L2 で分割した値ではなく、入力されたリポジトリ名全体を最終設定に戻す。
+        cdk.CfnOutput(self, "PipelineName", value=flow.pipeline_name)  # 作成したパイプライン名をスタックの出力に載せる。
+        cdk.CfnOutput(self, "PublishLocation", value=uri)  # ルールを配布する S3 URI をスタックの出力に載せる。

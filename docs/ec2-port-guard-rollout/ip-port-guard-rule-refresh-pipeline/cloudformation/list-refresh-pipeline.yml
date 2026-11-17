@@ -1,446 +1,391 @@
-AWSTemplateFormatVersion: "2010-09-09"
-Description: >-
-  port-guard list refresh pipeline (optional). Automates the human workflow on the bastion server as it is:
-  fetch-allow-and-last-lists.sh -> make-jp-lists.sh -> make-aws-lists.sh -> make-refresh.sh -> human check
-  (manual approval) -> publish-refresh-scripts.sh. The same bastion scripts are stored uncompressed under
-  bastion-scripts/command/ in the pipeline bucket and fetched in the build by fetch-bastion-scripts.sh (the
-  pipeline source, fetch-bastion-scripts.zip). The ipset replacement scripts are published to the S3 publish
-  location. One stack per environment (VPC). Started manually only.
+# パイプライン用スタック。ソース取得 → ビルド → 承認（省略可）→ S3 へのデプロイ。
+# バケットは別スタックのものを使い、このスタックでは作成しない。
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Port-guard rule refresh. Git source, make, optional approval, publish. No buckets.
 
+# スタック作成・更新時に外から指定する値。
 Parameters:
+  # 個別許可の一覧、S3 の保存先、リソース名に使う環境名。
   EnvironmentName:
     Type: String
-    AllowedPattern: "^[a-z0-9][a-z0-9-]{0,30}$"
-    Description: Environment (VPC) name. Used in resource names and in the S3 publish location.
+    AllowedValues: [development, staging, production]
+  # バケット用スタックが出力する、中間成果物用バケットの完全名。
+  PipelineBucketName:
+    Type: String
+    Description: PipelineBucketName output of the bucket stack (same account and region).
+  # バケット用スタックが出力する、ルール配布先バケットの完全名。
   PublishBucketName:
     Type: String
-    Default: ""
-    Description: >-
-      Existing bucket of the S3 publish location (the same bucket the human workflow uses). Leave empty to create
-      a new bucket in this stack (versioning enabled). An existing bucket must use SSE-S3 (not SSE-KMS) encryption.
-  PublishKeyPrefix:
+    Description: PublishBucketName output of the bucket stack (SSE-S3).
+  # 認可済みで利用可能な、同じリージョンの CodeConnections 接続 ARN。
+  ConnectionArn:
     Type: String
-    Default: port-guard
-    AllowedPattern: "^[A-Za-z0-9][A-Za-z0-9/_.-]*[A-Za-z0-9]$"
-    Description: The S3 publish location is s3://<bucket>/<PublishKeyPrefix>/<EnvironmentName>/current.
+    Description: Existing AVAILABLE CodeConnections connection ARN in this region.
+  # ソースを取得する所有者とリポジトリ名。実際の大文字・小文字に合わせる。
+  FullRepositoryId:
+    Type: String
+    Description: Repository owner/name, with the original case.
+  # 取得するブランチ。省略時は main。
+  BranchName:
+    Type: String
+    Default: main
+  # リポジトリ内のプロジェクトの相対パス。リポジトリ直下なら「.」。
+  SourceDirectory:
+    Type: String
+    Default: '.'
+    Description: Project directory relative to the repository root.
+  # true ならビルド後に人の確認を挟み、false ならそのままデプロイへ進む。
   RequireApproval:
     Type: String
-    Default: "true"
-    AllowedValues: ["true", "false"]
-    Description: Insert a manual approval stage (the human check) between making and publishing.
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+  # ビルドとデプロイの実行ログを保存する日数。
   LogRetentionInDays:
     Type: Number
     Default: 90
 
+# 承認ステージを入れるかを、デプロイ時のパラメータで切り替える。
 Conditions:
-  CreatePublishBucket:
-    Fn::Equals: [Ref: PublishBucketName, ""]
-  UseApproval:
-    Fn::Equals: [Ref: RequireApproval, "true"]
+  UseApproval: !Equals [!Ref RequireApproval, 'true']
 
+# このスタックが作成・管理する AWS リソース。バケットは別スタックを参照する。
 Resources:
-  # パイプライン用バケット。置くもの:
-  #   source/fetch-bastion-scripts.zip   踏み台サーバーの手順のスクリプトの取得スクリプトの圧縮ファイル（パイプラインのソース。中身は fetch-bastion-scripts.sh だけ）
-  #   bastion-scripts/command/*.sh       踏み台サーバーの手順のスクリプト 5 つ（圧縮しない。踏み台サーバーの command/ と同じもの）
-  #   パイプラインの中間の成果物（CodePipeline が置く）
-  # S3 のソースアクションはバージョニングが必要。踏み台サーバーの手順のスクリプトの前の版を取り出せるようにするためにも使う
-  PipelineBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      OwnershipControls:
-        Rules:
-          - ObjectOwnership: BucketOwnerEnforced
-      LifecycleConfiguration:
-        Rules:
-          - Id: expire-noncurrent-versions
-            Status: Enabled
-            NoncurrentVersionExpiration:
-              NoncurrentDays: 90
-
-  # 公開バケット: PublishBucketName が空のときだけ作る。誤ったものを上げたときに前の版へ戻せるよう、バージョニングを有効にする
-  PublishBucket:
-    Type: AWS::S3::Bucket
-    Condition: CreatePublishBucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      OwnershipControls:
-        Rules:
-          - ObjectOwnership: BucketOwnerEnforced
-
+  # 2つの CodeBuild が共用するロググループ。ストリームは make と publish で分ける。
   BuildLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName:
-        Fn::Sub: /aws/codebuild/port-guard-list-refresh-${EnvironmentName}
-      RetentionInDays:
-        Ref: LogRetentionInDays
+      # 環境ごとにロググループを分ける。
+      LogGroupName: !Sub /aws/codebuild/port-guard-list-refresh-${EnvironmentName}
+      # 指定した日数を超えたログを削除する。
+      RetentionInDays: !Ref LogRetentionInDays
 
-  # 一覧を作るビルドのロール: S3 の公開場所は読むだけ
+  # 一覧を作る CodeBuild のロール。中間成果物には書けるが、ルール配布先には書けない。
   MakeRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: CodeBuild that makes the port-guard IP lists and ipset replacement scripts (reads the S3 publish location only)
+      # このロールを引き受けられるサービスを指定する信頼ポリシー。
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal:
-              Service: codebuild.amazonaws.com
+            # CodeBuild サービスが、以下の権限で処理を実行する。
+            Principal: {Service: codebuild.amazonaws.com}
             Action: sts:AssumeRole
+      # 実行できる AWS 操作と対象リソースを、ロールに直接付けるポリシーで定義する。
       Policies:
-        - PolicyName: port-guard-list-refresh-make
+        - PolicyName: make
+          # Action は許可する操作、Resource はその操作を許可する範囲。
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
-              - Sid: WriteLogs
-                Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  Fn::GetAtt: BuildLogGroup.Arn
-              # パイプラインの中間の成果物の読み書きと、踏み台サーバーの手順のスクリプトの取得（版を指定して取る）
-              - Sid: PipelineBucketObjects
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                  - s3:PutObject
-                Resource:
-                  Fn::Sub: ${PipelineBucket.Arn}/*
-              # fetch-allow-and-last-lists.sh: 個別許可の IP の一覧と前回分の IP の一覧を、S3 の公開場所から取る
-              - Sid: ReadPublishLocation
-                Effect: Allow
+              # この環境のロググループへ実行ログを書き込む。
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt BuildLogGroup.Arn
+              # CodeBuild が成果物用バケットのリージョンと所有権設定を確認する。
+              - Effect: Allow
+                Action: [s3:GetBucketLocation, s3:GetBucketAcl]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}
+              # ソースを読み取り、ビルド結果を次へ渡す中間成果物として保存する。
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}/*
+              # ルールの配布先は読むだけ。書けるのは PublishRole。
+              # 配布先から前回分の一覧を取得する。書き込みは許可しない。
+              - Effect: Allow
                 Action: s3:GetObject
-                Resource:
-                  Fn::Sub:
-                    - arn:${AWS::Partition}:s3:::${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current/*
-                    - Bucket:
-                        Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
-              - Sid: ListPublishLocation
-                Effect: Allow
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PublishBucketName}/port-guard/${EnvironmentName}/current/*
+              # 前回分のファイル名を列挙する。権限はバケットに付け、下の条件でキーを絞る。
+              - Effect: Allow
                 Action: s3:ListBucket
-                Resource:
-                  Fn::Sub:
-                    - arn:${AWS::Partition}:s3:::${Bucket}
-                    - Bucket:
-                        Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PublishBucketName}
                 Condition:
                   StringLike:
-                    s3:prefix:
-                      Fn::Sub: ${PublishKeyPrefix}/${EnvironmentName}/current/*
+                    # 一覧の列挙範囲を、この環境の current 配下だけに絞る。
+                    s3:prefix: !Sub port-guard/${EnvironmentName}/current/*
 
-  # S3 に上げるビルドのロール: 承認の後にだけ動く。S3 の公開場所に書けるのはこのロールだけ
+  # S3 へ上げる CodeBuild のロール。この環境の配布先への書き込みを許可する。
   PublishRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: CodeBuild that publishes the ipset replacement scripts to the S3 publish location (after approval)
+      # このロールを引き受けられるサービスを指定する信頼ポリシー。
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal:
-              Service: codebuild.amazonaws.com
+            # CodeBuild サービスが、以下の権限で処理を実行する。
+            Principal: {Service: codebuild.amazonaws.com}
             Action: sts:AssumeRole
+      # 実行できる AWS 操作と対象リソースを、ロールに直接付けるポリシーで定義する。
       Policies:
-        - PolicyName: port-guard-list-refresh-publish
+        - PolicyName: publish
+          # Action は許可する操作、Resource はその操作を許可する範囲。
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
-              - Sid: WriteLogs
-                Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  Fn::GetAtt: BuildLogGroup.Arn
-              # 一覧を作るビルドの成果物（中間の成果物）を読む
-              - Sid: ReadPipelineArtifacts
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                Resource:
-                  Fn::Sub: ${PipelineBucket.Arn}/*
-              # [変更] publish-refresh-scripts.sh: S3 の公開場所に上げる。この環境の current/ の下だけ
-              - Sid: WritePublishLocation
-                Effect: Allow
+              # この環境のロググループへ実行ログを書き込む。
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt BuildLogGroup.Arn
+              # CodeBuild が成果物用バケットのリージョンと所有権設定を確認する。
+              - Effect: Allow
+                Action: [s3:GetBucketLocation, s3:GetBucketAcl]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}
+              # 承認されたビルドの成果物を読む。中間成果物への書き込みは不要。
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}/*
+              # ルールと照合用ファイルを、この環境の current 配下だけにアップロードする。
+              - Effect: Allow
                 Action: s3:PutObject
-                Resource:
-                  Fn::Sub:
-                    - arn:${AWS::Partition}:s3:::${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current/*
-                    - Bucket:
-                        Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PublishBucketName}/port-guard/${EnvironmentName}/current/*
 
-  # 一覧を作るビルド: 人の作業フローの 1〜4（S3 から取る → 一覧を作る → make-refresh.sh）
+  # 公開元の一覧を取得し、ローカルと同じ build-rules.sh でルールを作る CodeBuild。
   MakeProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name:
-        Fn::Sub: port-guard-list-refresh-${EnvironmentName}-make
-      Description: Make the port-guard IP lists and the ipset replacement scripts (same steps as the human workflow)
-      ServiceRole:
-        Fn::GetAtt: MakeRole.Arn
+      Name: !Sub port-guard-list-refresh-${EnvironmentName}-make
+      # 配布先に書き込めないビルド用ロールで AWS 操作を実行する。
+      ServiceRole: !GetAtt MakeRole.Arn
+      # 一覧取得やビルドが終わらない場合の実行時間の上限は15分。
       TimeoutInMinutes: 15
-      Artifacts:
-        Type: CODEPIPELINE
+      # 成果物の保存と受け渡しは CodePipeline が管理する。
+      Artifacts: {Type: CODEPIPELINE}
+      # 実行ログを共通の CloudWatch Logs グループへ出す。
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
-          GroupName:
-            Ref: BuildLogGroup
+          GroupName: !Ref BuildLogGroup
+          # ビルド用ログのストリーム名の先頭を make にする。
           StreamName: make
+      # bash・curl・awk・AWS CLI を動かすための CodeBuild 実行環境。
       Environment:
+        # Linux のコンテナでシェルスクリプトを実行する。
         Type: LINUX_CONTAINER
+        # 小さいコンピューティングタイプを使う。
         ComputeType: BUILD_GENERAL1_SMALL
+        # Amazon Linux の標準ビルドイメージ 5.0 を使う。
         Image: aws/codebuild/amazonlinux-x86_64-standard:5.0
+        # スクリプトに渡す値。AWS の認証には CodeBuild のロールを使い、profile は指定しない。
         EnvironmentVariables:
-          - Name: BASTION_SCRIPTS_BUCKET
-            Value:
-              Ref: PipelineBucket
-          - Name: BASTION_SCRIPTS_PREFIX
-            Value: bastion-scripts
+          # allow-lists/<環境>/ と work/<環境>/ に使う環境名。
+          - {Name: ENVIRONMENT_NAME, Value: !Ref EnvironmentName}
+          # リポジトリの中で、このプロジェクトが置かれている相対パス。
+          - {Name: SOURCE_DIRECTORY, Value: !Ref SourceDirectory}
+          # スタックに指定された配布先を直接渡し、バケット名の自動取得を省く。
           - Name: PORT_GUARD_S3_URI
-            Value:
-              Fn::Sub:
-                - s3://${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current
-                - Bucket:
-                    Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
-          - Name: FORCE
-            Value: "0"
+            Value: !Sub s3://${PublishBucketName}/port-guard/${EnvironmentName}/current
+          # 通常は増減 5% の判定で止める。開始時のパイプライン変数で1に上書きできる。
+          - {Name: FORCE, Value: '0'}
+      # 入力は Source ステージが Git から取得したソースの成果物。
       Source:
         Type: CODEPIPELINE
-        # 入力（パイプラインのソース）は、踏み台サーバーの手順のスクリプトの取得スクリプトの圧縮ファイル（中身は fetch-bastion-scripts.sh だけ）
+        # CodeBuild の実行手順。ここから下は、別の YAML 文書として解釈される。
         BuildSpec: |
+          # コマンド間で同じシェルの状態を引き継ぐ buildspec 0.2 を使う。
           version: 0.2
           env:
+            # ローカルの入口スクリプトと同じ bash で実行する。
             shell: bash
+          # CodeBuild が順に実行する処理。今回は build フェーズにまとめる。
           phases:
             build:
+              # 上から順に実行するシェルコマンド。
               commands:
-                # 0. 踏み台サーバーの手順のスクリプト 5 つを command/ に取る（使った版を bastion-scripts-versions.txt に書く）
-                - bash fetch-bastion-scripts.sh
-                # 1. S3 の公開場所から、個別許可の IP の一覧と前回分の IP の一覧を取る
-                - bash command/fetch-allow-and-last-lists.sh
-                # 2・3. 公開元の IP の一覧を取り、日本・AWS の IP の一覧を作る
-                - bash command/make-jp-lists.sh
-                - bash command/make-aws-lists.sh
-                # 4. 件数・前回分との増減を確かめ、ipset 入れ替えスクリプトを作る（前回分の IP の一覧も今回の分に更新される）
-                - FORCE="${FORCE}" bash command/make-refresh.sh
-          # 承認の後の S3 に上げるビルドに渡すもの（上げる処理の publish-refresh-scripts.sh も、ここで取った版を渡す）
+                # プロジェクトがリポジトリの一部でも、入口のある場所へ移動して実行する。
+                - cd "$CODEBUILD_SRC_DIR/$SOURCE_DIRECTORY"
+                # 一覧と入れ替えスクリプトを作る。この段階では配布先 S3 に何も上げない。
+                - bash build-rules.sh "$ENVIRONMENT_NAME"
+          # 確認したビルド結果を後段へ渡す。デプロイ側で Git のソースを取り直さない。
           artifacts:
+            # 成果物のルートをプロジェクト直下にそろえ、元の親フォルダは含めない。
+            base-directory: "$SOURCE_DIRECTORY"
+            # デプロイの入口・部品・作成済みファイルだけを成果物に含める。
             files:
-              - bastion-scripts-versions.txt
+              # ローカルと共通のデプロイの入口。
+              - deploy-rules.sh
+              # リージョン・プロファイルを AWS CLI に引き継ぐ部品。
+              - command/aws-cli.sh
+              # 配布先 URI を設定する部品。パイプラインでは渡された URI をそのまま使う。
+              - command/set-s3-uri.sh
+              # ファイルを上げ、最後に照合用の SHA256SUMS を上げる部品。
               - command/publish-refresh-scripts.sh
-              - command/port_guard/refresh-ipv4.sh
-              - command/port_guard/refresh-ipv6.sh
-              - port_guard_whitelists/allow-ipv4.txt
-              - port_guard_whitelists/allow-ipv6.txt
-              - port_guard_whitelists/last-refresh/*.txt
+              # 今回作った IPv4・IPv6 の ipset 入れ替えスクリプト。
+              - work/*/command/port_guard/refresh-*.sh
+              # 今回のビルドで使用した個別許可の一覧の写し。
+              - work/*/port_guard_whitelists/allow-*.txt
+              # 次回の増減比較に使う、今回の一覧の記録。
+              - work/*/port_guard_whitelists/last-refresh/*.txt
 
-  # S3 に上げるビルド: 人の作業フローの 6（publish-refresh-scripts.sh）
+  # ビルドの成果物だけを受け取り、deploy-rules.sh で配布先 S3 に上げる CodeBuild。
   PublishProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name:
-        Fn::Sub: port-guard-list-refresh-${EnvironmentName}-publish
-      Description: Publish the ipset replacement scripts to the S3 publish location (same script as the human workflow)
-      ServiceRole:
-        Fn::GetAtt: PublishRole.Arn
+      Name: !Sub port-guard-list-refresh-${EnvironmentName}-publish
+      # 配布先への書き込みを許可したデプロイ用ロールを使う。
+      ServiceRole: !GetAtt PublishRole.Arn
+      # デプロイ処理の実行時間の上限は10分。
       TimeoutInMinutes: 10
-      Artifacts:
-        Type: CODEPIPELINE
+      # 成果物の保存と受け渡しは CodePipeline が管理する。
+      Artifacts: {Type: CODEPIPELINE}
+      # 実行ログを共通の CloudWatch Logs グループへ出す。
       LogsConfig:
         CloudWatchLogs:
           Status: ENABLED
-          GroupName:
-            Ref: BuildLogGroup
+          GroupName: !Ref BuildLogGroup
+          # デプロイ用ログのストリーム名の先頭を publish にする。
           StreamName: publish
+      # bash・curl・awk・AWS CLI を動かすための CodeBuild 実行環境。
       Environment:
+        # Linux のコンテナでシェルスクリプトを実行する。
         Type: LINUX_CONTAINER
+        # 小さいコンピューティングタイプを使う。
         ComputeType: BUILD_GENERAL1_SMALL
+        # Amazon Linux の標準ビルドイメージ 5.0 を使う。
         Image: aws/codebuild/amazonlinux-x86_64-standard:5.0
+        # スクリプトに渡す値。AWS の認証には CodeBuild のロールを使い、profile は指定しない。
         EnvironmentVariables:
+          # allow-lists/<環境>/ と work/<環境>/ に使う環境名。
+          - {Name: ENVIRONMENT_NAME, Value: !Ref EnvironmentName}
+          # スタックに指定された配布先を直接渡し、バケット名の自動取得を省く。
           - Name: PORT_GUARD_S3_URI
-            Value:
-              Fn::Sub:
-                - s3://${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current
-                - Bucket:
-                    Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
+            Value: !Sub s3://${PublishBucketName}/port-guard/${EnvironmentName}/current
+      # 入力は Git のソースではなく、Make ステージが作った成果物。
       Source:
         Type: CODEPIPELINE
+        # CodeBuild の実行手順。ここから下は、別の YAML 文書として解釈される。
         BuildSpec: |
+          # コマンド間で同じシェルの状態を引き継ぐ buildspec 0.2 を使う。
           version: 0.2
           env:
+            # ローカルの入口スクリプトと同じ bash で実行する。
             shell: bash
+          # CodeBuild が順に実行する処理。今回は build フェーズにまとめる。
           phases:
             build:
+              # 上から順に実行するシェルコマンド。
               commands:
-                - cat bastion-scripts-versions.txt
-                # 6. ipset 入れ替えスクリプト・個別許可の IP の一覧・前回分の IP の一覧を上げ、最後に SHA256SUMS を上げる
-                - bash command/publish-refresh-scripts.sh
+                # 確認済みの work/<環境>/ を S3 に上げる。ルールは作り直さない。
+                - bash deploy-rules.sh "$ENVIRONMENT_NAME"
 
+  # ステージを進める CodePipeline 自身のロール。ルール配布先に直接書く権限は持たない。
   PipelineRole:
     Type: AWS::IAM::Role
     Properties:
-      Description: CodePipeline of the port-guard list refresh pipeline
+      # このロールを引き受けられるサービスを指定する信頼ポリシー。
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal:
-              Service: codepipeline.amazonaws.com
+            # CodePipeline サービスが、ステージを進めるために使う。
+            Principal: {Service: codepipeline.amazonaws.com}
             Action: sts:AssumeRole
+      # 実行できる AWS 操作と対象リソースを、ロールに直接付けるポリシーで定義する。
       Policies:
-        - PolicyName: port-guard-list-refresh-pipeline
+        - PolicyName: pipeline
+          # Action は許可する操作、Resource はその操作を許可する範囲。
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
-              - Sid: PipelineBucketObjects
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                  - s3:PutObject
-                Resource:
-                  Fn::Sub: ${PipelineBucket.Arn}/*
-              - Sid: PipelineBucket
-                Effect: Allow
-                Action:
-                  - s3:GetBucketVersioning
-                  - s3:GetBucketLocation
-                  - s3:ListBucket
-                Resource:
-                  Fn::GetAtt: PipelineBucket.Arn
-              - Sid: RunBuilds
-                Effect: Allow
-                Action:
-                  - codebuild:StartBuild
-                  - codebuild:BatchGetBuilds
-                Resource:
-                  - Fn::GetAtt: MakeProject.Arn
-                  - Fn::GetAtt: PublishProject.Arn
+              # ステージ間の成果物を読み書きする。ACL の操作も成果物用バケット内だけ。
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject, s3:PutObjectAcl]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}/*
+              # 成果物用バケットの世代管理・リージョン・所有権設定などを確認する。
+              - Effect: Allow
+                Action: [s3:GetBucketVersioning, s3:GetBucketLocation, s3:GetBucketAcl, s3:ListBucket]
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}
+              # このスタックの2つの CodeBuild だけを起動し、進行状況を取得する。
+              - Effect: Allow
+                Action: [codebuild:StartBuild, codebuild:BatchGetBuilds]
+                Resource: [!GetAtt MakeProject.Arn, !GetAtt PublishProject.Arn]
+              # 指定した Git 接続だけを利用する。新旧両方のサービス名の権限を許可する。
+              - Effect: Allow
+                Action: [codeconnections:UseConnection, codestar-connections:UseConnection]
+                Resource: !Ref ConnectionArn
 
+  # 実行の全体をつなぐ本体。各ステージの入力と出力を成果物名で結ぶ。
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
-      Name:
-        Fn::Sub: port-guard-list-refresh-${EnvironmentName}
+      Name: !Sub port-guard-list-refresh-${EnvironmentName}
+      # 開始時の変数と QUEUED の実行方式を使うため、V2 を指定する。
       PipelineType: V2
+      # 同じパイプラインの同時実行は順番待ち。ローカル実行との排他ではない。
       ExecutionMode: QUEUED
-      RoleArn:
-        Fn::GetAtt: PipelineRole.Arn
-      ArtifactStore:
-        Type: S3
-        Location:
-          Ref: PipelineBucket
+      # 定義の更新では再実行しない。初回作成時の実行とは別の設定。
+      RestartExecutionOnUpdate: false
+      # Git 接続・成果物・CodeBuild の操作に使う、CodePipeline 自身のロール。
+      RoleArn: !GetAtt PipelineRole.Arn
+      # 中間成果物は別スタックの成果物用バケットへ保存する。
+      ArtifactStore: {Type: S3, Location: !Ref PipelineBucketName}
+      # パイプライン開始時に指定できる値。CodeBuild の環境変数へ渡す。
       Variables:
+        # 増減 5% 超を確認して進めるときだけ1にする。通常は0。
         - Name: FORCE
-          DefaultValue: "0"
-          Description: Set 1 to proceed when a list changed by more than 5% from the last published one (make-refresh.sh FORCE=1)
+          DefaultValue: '0'
+          Description: Set 1 after reviewing a change above 5 percent.
+      # ソース取得 → ビルド → 承認（省略可）→ デプロイの順に実行する。
       Stages:
+        # 1. 指定した Git リポジトリ・ブランチから、同じ版のソース一式を取得する。
         - Name: Source
           Actions:
-            - Name: FetchBastionScripts
-              ActionTypeId:
-                Category: Source
-                Owner: AWS
-                Provider: S3
-                Version: "1"
+            - Name: Repository
+              ActionTypeId: {Category: Source, Owner: AWS, Provider: CodeStarSourceConnection, Version: '1'}
               Configuration:
-                S3Bucket:
-                  Ref: PipelineBucket
-                S3ObjectKey: source/fetch-bastion-scripts.zip
-                PollForSourceChanges: "false"
-              OutputArtifacts:
-                - Name: FetchScript
+                # 事前に認可した CodeConnections 接続を使う。
+                ConnectionArn: !Ref ConnectionArn
+                # 取得先の所有者とリポジトリ名を、大文字・小文字も含めて指定する。
+                FullRepositoryId: !Ref FullRepositoryId
+                # このブランチのソースを取得する。
+                BranchName: !Ref BranchName
+                # push による自動開始を無効にし、運用者が手動で開始する。
+                DetectChanges: 'false'
+                # ソースの圧縮と受け渡しはサービスに任せる。独自のパッケージ作成は不要。
+                OutputArtifactFormat: CODE_ZIP
+              # 取得したソースを SourceFiles という成果物名で Make へ渡す。
+              OutputArtifacts: [{Name: SourceFiles}]
+        # 2. build-rules.sh を実行し、確認するルールとデプロイ用の部品を作る。
         - Name: Make
           Actions:
-            - Name: MakeListsAndRefreshScripts
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: "1"
+            - Name: BuildRules
+              ActionTypeId: {Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1'}
               Configuration:
-                ProjectName:
-                  Ref: MakeProject
+                # 一覧を作る側の CodeBuild を起動する。
+                ProjectName: !Ref MakeProject
+                # 開始時に指定した FORCE を、今回の CodeBuild の環境変数として渡す。
                 EnvironmentVariables: '[{"name":"FORCE","value":"#{variables.FORCE}","type":"PLAINTEXT"}]'
-              InputArtifacts:
-                - Name: FetchScript
-              OutputArtifacts:
-                - Name: MadeFiles
-        - Fn::If:
-            - UseApproval
-            - Name: Check
-              Actions:
-                - Name: HumanCheck
-                  ActionTypeId:
-                    Category: Approval
-                    Owner: AWS
-                    Provider: Manual
-                    Version: "1"
-                  Configuration:
-                    CustomData: >-
-                      Check the make build log (bastion script versions, allow lists fetched, counts, added and
-                      removed per list) as in the human workflow before approving.
-            - Ref: AWS::NoValue
+              # Source ステージが取得したソース一式を入力にする。
+              InputArtifacts: [{Name: SourceFiles}]
+              # 作成したファイルを MadeFiles として保存し、承認後の Publish へ渡す。
+              OutputArtifacts: [{Name: MadeFiles}]
+        # 3. RequireApproval=true のときだけ、以下の Check ステージを挟む。
+        - !If
+          - UseApproval
+          - Name: Check
+            Actions:
+              - Name: HumanCheck
+                ActionTypeId: {Category: Approval, Owner: AWS, Provider: Manual, Version: '1'}
+                Configuration:
+                  # 承認画面に、ビルドログの件数と増減を確認するよう案内を表示する。
+                  CustomData: Review counts and changes in the make build log before publishing.
+          # 承認不要なら、Check ステージの定義ごと取り除く。
+          - !Ref AWS::NoValue
+        # 4. Make が作った成果物を、そのまま deploy-rules.sh で S3 に上げる。
         - Name: Publish
           Actions:
-            - Name: PublishRefreshScripts
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: "1"
-              Configuration:
-                ProjectName:
-                  Ref: PublishProject
-              InputArtifacts:
-                - Name: MadeFiles
+            - Name: DeployRules
+              ActionTypeId: {Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1'}
+              # 配布先への書き込み権限を持つデプロイ用 CodeBuild を使う。
+              Configuration: {ProjectName: !Ref PublishProject}
+              # 承認前に作成した結果を使う。Git からの再取得やルールの作り直しはしない。
+              InputArtifacts: [{Name: MadeFiles}]
 
+# 作成後に運用者が確認・実行に使う値。
 Outputs:
+  # 手動開始や実行状況の確認に使うパイプライン名。
   PipelineName:
-    Value:
-      Ref: Pipeline
-  PipelineBucketName:
-    Value:
-      Ref: PipelineBucket
-  BastionScriptsUri:
-    Description: Upload the five bastion scripts (uncompressed) here
-    Value:
-      Fn::Sub: s3://${PipelineBucket}/bastion-scripts/command/
-  FetchScriptZipUri:
-    Description: Upload fetch-bastion-scripts.zip (only fetch-bastion-scripts.sh) here
-    Value:
-      Fn::Sub: s3://${PipelineBucket}/source/fetch-bastion-scripts.zip
+    Value: !Ref Pipeline
+  # この環境の配布先 S3 URI。ローカル実行で同じ場所を使うときにも参照できる。
   PublishLocation:
-    Description: PORT_GUARD_S3_URI for the human workflow and the pipeline
-    Value:
-      Fn::Sub:
-        - s3://${Bucket}/${PublishKeyPrefix}/${EnvironmentName}/current
-        - Bucket:
-            Fn::If: [CreatePublishBucket, Ref: PublishBucket, Ref: PublishBucketName]
+    Value: !Sub s3://${PublishBucketName}/port-guard/${EnvironmentName}/current

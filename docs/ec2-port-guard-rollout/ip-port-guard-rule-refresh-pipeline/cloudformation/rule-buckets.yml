@@ -1,0 +1,119 @@
+# バケット用スタック。環境ごとのパイプラインから共用する。
+# 作成済みのルール用バケットは既定では参照するだけで、設定を変更しない。
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Port-guard buckets, shared by environment pipelines. Existing rule bucket is used by default.
+
+# スタック作成・更新時に外から指定する値。
+Parameters:
+  # 中間成果物用バケット名の先頭部分。アカウント ID・リージョンの接尾辞は自動で付く。
+  PipelineBucketNamePrefix:
+    Type: String
+    Default: ip-port-guard-pipeline
+  # ルール用バケットも新規作成するときだけ true。今の作成済みバケットを使う場合は false。
+  CreatePublishBucket:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Keep false for the rule bucket already created manually.
+  # 既存ルール用バケットの完全名。空なら ip-port-guard-rules に接尾辞を付けた名前を使う。
+  # CreatePublishBucket=true の場合、この指定は使わず下の PublishBucket を作る。
+  PublishBucketName:
+    Type: String
+    Default: ''
+    Description: Existing full bucket name. Empty uses ip-port-guard-rules-<account>-<region>-an.
+
+# パラメータに応じて、ルール用バケットの作成と出力名の選択を切り替える。
+Conditions:
+  # true の場合にだけ、Resources の PublishBucket を実際に作る。
+  CreatePublishBucket: !Equals [!Ref CreatePublishBucket, 'true']
+  # 既存バケットの完全名が省略された場合は、規定の名前を組み立てる。
+  UseDefaultPublishBucket: !Equals [!Ref PublishBucketName, '']
+
+# このスタックが作成・管理する AWS リソース。
+Resources:
+  # Git から取得したソースと、ビルドからデプロイへ渡す中間成果物を置く。
+  # 各サーバーへ配布するルールの保存先とは分ける。
+  PipelineBucket:
+    Type: AWS::S3::Bucket
+    # スタックを削除してもバケットと中身を残す。
+    DeletionPolicy: Retain
+    # 名前の変更などで置き換えが必要になっても、元のバケットを残す。
+    UpdateReplacePolicy: Retain
+    Properties:
+      # このアカウント・リージョン専用の名前空間で作成する。
+      BucketNamespace: account-regional
+      # 実際の名前は <指定した先頭部分>-<アカウント ID>-<リージョン>-an となる。
+      BucketNamePrefix: !Ref PipelineBucketNamePrefix
+      # 同じキーを上書きしても、以前の版を保持する。
+      VersioningConfiguration: {Status: Enabled}
+      # S3 が管理するキーで暗号化する。専用 KMS キーは作らない。
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      # パブリックアクセスの設定をすべてブロックし、IAM の認証・権限で利用する。
+      PublicAccessBlockConfiguration:
+        # パブリックアクセスを許可する ACL の設定を拒否する。
+        BlockPublicAcls: true
+        # パブリックアクセスを許可するバケットポリシーの設定を拒否する。
+        BlockPublicPolicy: true
+        # パブリックアクセスを許可する既存 ACL があっても無視する。
+        IgnorePublicAcls: true
+        # 公開ポリシーがある場合のアクセスも、バケット所有アカウントなどに制限する。
+        RestrictPublicBuckets: true
+      # オブジェクトの所有者をバケット所有者に統一し、ACL を無効にする。
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      # 中間成果物の古い版が増え続けないようにする。
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-noncurrent-versions
+            Status: Enabled
+            # 最新版は対象外。現行ではなくなってから90日経過した版を削除する。
+            NoncurrentVersionExpiration: {NoncurrentDays: 90}
+
+  # 各サーバーへ配布するルールの保存先。新しいアカウントなどで必要なときだけ作る。
+  PublishBucket:
+    Type: AWS::S3::Bucket
+    # false の場合は作成せず、Outputs に既存バケット名を出す。
+    Condition: CreatePublishBucket
+    # 配布済みルールを失わないよう、削除・置き換え時も元のバケットを残す。
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      # ローカルの入口スクリプトが組み立てる名前と同じ名前空間を使う。
+      BucketNamespace: account-regional
+      # 実際の名前は ip-port-guard-rules-<アカウント ID>-<リージョン>-an となる。
+      BucketNamePrefix: ip-port-guard-rules
+      # 上書き前のルールを保持する。中間成果物と違い、古い版の自動削除は設定しない。
+      VersioningConfiguration: {Status: Enabled}
+      # ルール用も SSE-S3 で暗号化する。
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      # 「配布先」はインターネットへの公開を意味しない。パブリックアクセスはすべてブロック。
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      # ルール用も ACL を無効にし、IAM の権限で読み書きを制御する。
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+
+# パイプライン用スタックのパラメータに渡す、実際のバケット名。
+Outputs:
+  # このスタックが作った中間成果物用バケットの完全名。
+  PipelineBucketName:
+    Value: !Ref PipelineBucket
+  # 新規作成・既存参照のどちらでも、配布先バケットの完全名を同じ出力名で返す。
+  PublishBucketName:
+    Value: !If
+      # 新規作成する場合は、そのバケットを参照する。
+      - CreatePublishBucket
+      - !Ref PublishBucket
+      - !If
+        # 既存名の指定が空なら、デプロイ先のアカウント ID とリージョンで組み立てる。
+        - UseDefaultPublishBucket
+        - !Sub ip-port-guard-rules-${AWS::AccountId}-${AWS::Region}-an
+        # 完全名が指定されていれば、その名前を使う。
+        - !Ref PublishBucketName

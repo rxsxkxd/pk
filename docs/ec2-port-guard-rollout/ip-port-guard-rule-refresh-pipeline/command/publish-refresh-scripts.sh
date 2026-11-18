@@ -1,11 +1,11 @@
 #!/bin/bash
 # ローカル・踏み台サーバー・CI のどこでも実行できる。make-refresh.sh の後、人が確かめてから流す
-# S3 の公開場所に、ipset 入れ替えスクリプト（refresh-ipv4.sh・refresh-ipv6.sh）、今回使った個別許可の IP の一覧の写し
+# ルールのデプロイ先に、ipset 入れ替えスクリプト（refresh-ipv4.sh・refresh-ipv6.sh）、今回使った個別許可の IP の一覧の写し
 # （正本はリポジトリの allow-lists/<環境>/。S3 のものは、上げたときに使った内容の記録）、
 # 前回分の IP の一覧（make-refresh.sh が今回の一覧で更新したもの。次の回の比較の基準）を上げ、最後に照合の値（SHA256SUMS）を上げる
-# 使い方: PORT_GUARD_S3_URI=s3://<バケット>/port-guard/<環境>/current bash command/publish-refresh-scripts.sh
+# 使い方: PORT_GUARD_S3_URI=s3://<ルールのデプロイ先バケット>/port-guard/<環境>/current bash command/publish-refresh-scripts.sh
 set -euo pipefail
-: "${PORT_GUARD_S3_URI:?PORT_GUARD_S3_URI（例: s3://<バケット>/port-guard/<環境>/current）を指定する}"
+: "${PORT_GUARD_S3_URI:?PORT_GUARD_S3_URI（例: s3://<ルールのデプロイ先バケット>/port-guard/<環境>/current）を指定する}"
 LISTS=port_guard_whitelists
 
 files=(

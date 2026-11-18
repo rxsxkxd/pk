@@ -18,7 +18,7 @@ bash "$HERE/command/make-jp-lists.sh"
 bash "$HERE/command/make-aws-lists.sh"
 # 2. 個別許可の IP の一覧を、allow-lists/<環境>/ から写す
 cp "$HERE/allow-lists/$ENVIRONMENT/allow-ipv4.txt" "$HERE/allow-lists/$ENVIRONMENT/allow-ipv6.txt" port_guard_whitelists/
-# 3. 前回分の IP の一覧（増減の比較の基準）を、S3 の公開場所から取る
+# 3. 前回分の IP の一覧（増減の比較の基準）を、ルールのデプロイ先から取る
 bash "$HERE/command/fetch-last-lists.sh"
 # 4. 件数と前回分との増減を確かめ、ipset 入れ替えスクリプトを作る
 FORCE="${FORCE:-0}" bash "$HERE/command/make-refresh.sh"

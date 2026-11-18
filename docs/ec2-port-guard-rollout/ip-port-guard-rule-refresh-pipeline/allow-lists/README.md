@@ -7,7 +7,7 @@
 | 名前 | 指すもの |
 |---|---|
 | 個別許可の IP の一覧 | `allow-lists/<環境>/allow-ipv4.txt`・`allow-ipv6.txt`。人が書く。各サーバーの ipset の集合 `port_guard_allow`・`port_guard_allow6` に入る |
-| 環境 | 1 つの VPC。`development`・`staging`・`production` の 3 つ（2026-11-16 に決めた）。この名前をフォルダの名前と、S3 の公開場所の `port-guard/<環境>/current/` に使う |
+| 環境 | 1 つの VPC。`development`・`staging`・`production` の 3 つ（2026-11-16 に決めた）。この名前をフォルダの名前と、ルールのデプロイ先 `port-guard/<環境>/current/` に使う |
 
 ## 置き方
 

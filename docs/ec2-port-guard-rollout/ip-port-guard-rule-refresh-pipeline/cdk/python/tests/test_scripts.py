@@ -120,14 +120,16 @@ class ScriptsTest(unittest.TestCase):
                 self.assertFalse((self.root / 's3' / 'rules' / 'port-guard' / name).exists())
                 artifact = self.root / ('artifact-' + name)
                 artifact.mkdir()
-                self.assertEqual(make['artifacts']['base-directory'], '$SOURCE_DIRECTORY')
-                for pattern in make['artifacts']['files']:
-                    matches = list(project.glob(pattern))
-                    self.assertTrue(matches, pattern)
-                    for path in matches:
-                        target = artifact / path.relative_to(project)
+                # 成果物は決まった名前のフォルダ handoff/ の中身。SourceDirectory に関係なく、CODEBUILD_SRC_DIR の直下にある
+                self.assertEqual(make['artifacts'], {'base-directory': 'handoff', 'files': ['**/*']})
+                handoff = repo / 'handoff'
+                for path in handoff.rglob('*'):
+                    if path.is_file():
+                        target = artifact / path.relative_to(handoff)
                         target.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copyfile(path, target)
+                self.assertTrue((artifact / 'deploy-rules.sh').is_file())
+                self.assertTrue((artifact / 'work' / name / 'command' / 'port_guard' / 'refresh-ipv4.sh').is_file())
                 repo.rename(self.root / ('finished-' + name))
                 self.run_shell('\n'.join(publish['phases']['build']['commands']), artifact,
                                {'ENVIRONMENT_NAME': name, 'PORT_GUARD_S3_URI': uri, 'AWS_DEFAULT_REGION': 'ap-northeast-1'})

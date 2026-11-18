@@ -1,7 +1,14 @@
 # パイプライン用スタック。ソース取得 → ビルド → 承認（省略可）→ S3 へのデプロイ。
-# バケットは別スタックのものを使い、このスタックでは作成しない。
+# パイプラインの受け渡しバケットはこのスタックで作る。ルールのデプロイ先バケットは手で作ったものを参照し、作らない。
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Port-guard rule refresh. Git source, make, optional approval, publish. No buckets.
+Description: Port-guard rule refresh. GitHub or CodeCommit source, make, optional approval, publish. Creates its own handoff bucket; the rule deploy bucket is created by hand.
+
+# 使わない方のホストのパラメータ（ConnectionArn・CodeCommitRepositoryName）は既定で空。空のまま使われる組み合わせは
+# Rules で作成前に止めるので、空の既定値を ARN として検査する cfn-lint の警告（W1030・W1031）だけを外す。
+Metadata:
+  cfn-lint:
+    config:
+      ignore_checks: [W1030, W1031]
 
 # スタック作成・更新時に外から指定する値。
 Parameters:
@@ -9,23 +16,33 @@ Parameters:
   EnvironmentName:
     Type: String
     AllowedValues: [development, staging, production]
-  # バケット用スタックが出力する、中間成果物用バケットの完全名。
-  PipelineBucketName:
+  # 手で作ったルールのデプロイ先バケットの名前の先頭部分。アカウントのリージョナル名前空間で作ってあるので、
+  # 実際の名前は <先頭部分>-<アカウント ID>-<リージョン>-an になる（ローカルの入口スクリプトと同じ組み立て方）。
+  RuleDeployBucketNamePrefix:
     Type: String
-    Description: PipelineBucketName output of the bucket stack (same account and region).
-  # バケット用スタックが出力する、ルール配布先バケットの完全名。
-  PublishBucketName:
+    Default: ip-port-guard-rules
+    Description: Name prefix of the rule deploy bucket created by hand in the account-regional namespace (SSE-S3).
+  # ルールジェネレーターのリポジトリのホスト。GitHub は CodeConnections、CodeCommit は直接取得する。
+  SourceProvider:
     Type: String
-    Description: PublishBucketName output of the bucket stack (SSE-S3).
-  # 認可済みで利用可能な、同じリージョンの CodeConnections 接続 ARN。
+    Default: GitHub
+    AllowedValues: [GitHub, CodeCommit]
+  # GitHub のときだけ使う。認可済みで利用可能な、同じリージョンの CodeConnections 接続 ARN。
   ConnectionArn:
     Type: String
-    Description: Existing AVAILABLE CodeConnections connection ARN in this region.
-  # ソースを取得する所有者とリポジトリ名。実際の大文字・小文字に合わせる。
+    Default: ''
+    Description: GitHub only. Existing AVAILABLE CodeConnections connection ARN in this region.
+  # GitHub のときだけ使う。所有者とリポジトリ名。実際の大文字・小文字に合わせる。
   FullRepositoryId:
     Type: String
-    Description: Repository owner/name, with the original case.
-  # 取得するブランチ。省略時は main。
+    Default: ''
+    Description: GitHub only. Repository owner/name, with the original case.
+  # CodeCommit のときだけ使う。同じアカウント・リージョンのリポジトリ名。
+  CodeCommitRepositoryName:
+    Type: String
+    Default: ''
+    Description: CodeCommit only. Repository name in this account and region.
+  # 取得するブランチ。GitHub・CodeCommit の両方で使う。省略時は main。
   BranchName:
     Type: String
     Default: main
@@ -44,12 +61,69 @@ Parameters:
     Type: Number
     Default: 90
 
-# 承認ステージを入れるかを、デプロイ時のパラメータで切り替える。
+# 選んだホストに要るパラメータが空なら、スタックを作る前に止める。
+Rules:
+  GitHubSource:
+    RuleCondition: !Equals [!Ref SourceProvider, GitHub]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref ConnectionArn, '']]
+        AssertDescription: SourceProvider=GitHub needs ConnectionArn.
+      - Assert: !Not [!Equals [!Ref FullRepositoryId, '']]
+        AssertDescription: SourceProvider=GitHub needs FullRepositoryId.
+  CodeCommitSource:
+    RuleCondition: !Equals [!Ref SourceProvider, CodeCommit]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref CodeCommitRepositoryName, '']]
+        AssertDescription: SourceProvider=CodeCommit needs CodeCommitRepositoryName.
+
+# 承認ステージの有無と、ルールジェネレーターのリポジトリのホストを、デプロイ時のパラメータで切り替える。
 Conditions:
   UseApproval: !Equals [!Ref RequireApproval, 'true']
+  UseGitHub: !Equals [!Ref SourceProvider, GitHub]
 
-# このスタックが作成・管理する AWS リソース。バケットは別スタックを参照する。
+# このスタックが作成・管理する AWS リソース。ルールのデプロイ先バケットは手で作ったものを参照する。
 Resources:
+  # パイプラインの受け渡しバケット。ルールジェネレーターのリポジトリから取ったその回のソースと、ビルドからデプロイへ渡すファイルを置く。
+  # このパイプラインからしか使わないので、このスタックで環境ごとに作る。ルールのデプロイ先バケットとは分ける。
+  PipelineHandoffBucket:
+    Type: AWS::S3::Bucket
+    # スタックを削除してもバケットと中身を残す。
+    DeletionPolicy: Retain
+    # 名前の変更などで置き換えが必要になっても、元のバケットを残す。
+    UpdateReplacePolicy: Retain
+    Properties:
+      # このアカウント・リージョン専用の名前空間で作成する。
+      BucketNamespace: account-regional
+      # 実際の名前は port-guard-handoff-<環境>-<アカウント ID>-<リージョン>-an となる。
+      # 後ろに付く部分（31 文字）も含めて 63 文字までなので、先頭部分は 32 文字に収める（最長の development で 30 文字）。
+      BucketNamePrefix: !Sub port-guard-handoff-${EnvironmentName}
+      # 同じキーを上書きしても、以前の版を保持する。
+      VersioningConfiguration: {Status: Enabled}
+      # S3 が管理するキーで暗号化する。専用 KMS キーは作らない。
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      # パブリックアクセスの設定をすべてブロックし、IAM の認証・権限で利用する。
+      PublicAccessBlockConfiguration:
+        # パブリックアクセスを許可する ACL の設定を拒否する。
+        BlockPublicAcls: true
+        # パブリックアクセスを許可するバケットポリシーの設定を拒否する。
+        BlockPublicPolicy: true
+        # パブリックアクセスを許可する既存 ACL があっても無視する。
+        IgnorePublicAcls: true
+        # 公開ポリシーがある場合のアクセスも、バケット所有アカウントなどに制限する。
+        RestrictPublicBuckets: true
+      # オブジェクトの所有者をバケット所有者に統一し、ACL を無効にする。
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      # パイプラインの受け渡しバケットのファイルの古い版が増え続けないようにする。
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-noncurrent-versions
+            Status: Enabled
+            # 最新版は対象外。現行ではなくなってから90日経過した版を削除する。
+            NoncurrentVersionExpiration: {NoncurrentDays: 90}
+
   # 2つの CodeBuild が共用するロググループ。ストリームは make と publish で分ける。
   BuildLogGroup:
     Type: AWS::Logs::LogGroup
@@ -59,7 +133,7 @@ Resources:
       # 指定した日数を超えたログを削除する。
       RetentionInDays: !Ref LogRetentionInDays
 
-  # 一覧を作る CodeBuild のロール。中間成果物には書けるが、ルール配布先には書けない。
+  # 一覧を作る CodeBuild のロール。パイプラインの受け渡しバケットのファイルには書けるが、ルールのデプロイ先には書けない。
   MakeRole:
     Type: AWS::IAM::Role
     Properties:
@@ -82,29 +156,29 @@ Resources:
               - Effect: Allow
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !GetAtt BuildLogGroup.Arn
-              # CodeBuild が成果物用バケットのリージョンと所有権設定を確認する。
+              # CodeBuild がパイプラインの受け渡しバケットのリージョンと所有権設定を確認する。
               - Effect: Allow
                 Action: [s3:GetBucketLocation, s3:GetBucketAcl]
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}
-              # ソースを読み取り、ビルド結果を次へ渡す中間成果物として保存する。
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineHandoffBucket}
+              # ソースを読み取り、ビルド結果を次へ渡すパイプラインの受け渡しバケットのファイルとして保存する。
               - Effect: Allow
                 Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject]
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}/*
-              # ルールの配布先は読むだけ。書けるのは PublishRole。
-              # 配布先から前回分の一覧を取得する。書き込みは許可しない。
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineHandoffBucket}/*
+              # ルールのデプロイ先は読むだけ。書けるのは PublishRole。
+              # ルールのデプロイ先から前回分の一覧を取得する。書き込みは許可しない。
               - Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PublishBucketName}/port-guard/${EnvironmentName}/current/*
+                Resource: !Sub arn:${AWS::Partition}:s3:::${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current/*
               # 前回分のファイル名を列挙する。権限はバケットに付け、下の条件でキーを絞る。
               - Effect: Allow
                 Action: s3:ListBucket
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PublishBucketName}
+                Resource: !Sub arn:${AWS::Partition}:s3:::${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an
                 Condition:
                   StringLike:
                     # 一覧の列挙範囲を、この環境の current 配下だけに絞る。
                     s3:prefix: !Sub port-guard/${EnvironmentName}/current/*
 
-  # S3 へ上げる CodeBuild のロール。この環境の配布先への書き込みを許可する。
+  # S3 へ上げる CodeBuild のロール。この環境のルールのデプロイ先への書き込みを許可する。
   PublishRole:
     Type: AWS::IAM::Role
     Properties:
@@ -127,25 +201,25 @@ Resources:
               - Effect: Allow
                 Action: [logs:CreateLogStream, logs:PutLogEvents]
                 Resource: !GetAtt BuildLogGroup.Arn
-              # CodeBuild が成果物用バケットのリージョンと所有権設定を確認する。
+              # CodeBuild がパイプラインの受け渡しバケットのリージョンと所有権設定を確認する。
               - Effect: Allow
                 Action: [s3:GetBucketLocation, s3:GetBucketAcl]
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}
-              # 承認されたビルドの成果物を読む。中間成果物への書き込みは不要。
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineHandoffBucket}
+              # 承認されたビルドの成果物を読む。パイプラインの受け渡しバケットのファイルへの書き込みは不要。
               - Effect: Allow
                 Action: [s3:GetObject, s3:GetObjectVersion]
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}/*
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineHandoffBucket}/*
               # ルールと照合用ファイルを、この環境の current 配下だけにアップロードする。
               - Effect: Allow
                 Action: s3:PutObject
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PublishBucketName}/port-guard/${EnvironmentName}/current/*
+                Resource: !Sub arn:${AWS::Partition}:s3:::${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current/*
 
   # 公開元の一覧を取得し、ローカルと同じ build-rules.sh でルールを作る CodeBuild。
   MakeProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: !Sub port-guard-list-refresh-${EnvironmentName}-make
-      # 配布先に書き込めないビルド用ロールで AWS 操作を実行する。
+      # ルールのデプロイ先に書き込めないビルド用ロールで AWS 操作を実行する。
       ServiceRole: !GetAtt MakeRole.Arn
       # 一覧取得やビルドが終わらない場合の実行時間の上限は15分。
       TimeoutInMinutes: 15
@@ -172,9 +246,9 @@ Resources:
           - {Name: ENVIRONMENT_NAME, Value: !Ref EnvironmentName}
           # リポジトリの中で、このプロジェクトが置かれている相対パス。
           - {Name: SOURCE_DIRECTORY, Value: !Ref SourceDirectory}
-          # スタックに指定された配布先を直接渡し、バケット名の自動取得を省く。
+          # スタックに指定されたルールのデプロイ先を直接渡し、バケット名の自動取得を省く。
           - Name: PORT_GUARD_S3_URI
-            Value: !Sub s3://${PublishBucketName}/port-guard/${EnvironmentName}/current
+            Value: !Sub s3://${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current
           # 通常は増減 5% の判定で止める。開始時のパイプライン変数で1に上書きできる。
           - {Name: FORCE, Value: '0'}
       # 入力は Source ステージが Git から取得したソースの成果物。
@@ -194,35 +268,31 @@ Resources:
               commands:
                 # プロジェクトがリポジトリの一部でも、入口のある場所へ移動して実行する。
                 - cd "$CODEBUILD_SRC_DIR/$SOURCE_DIRECTORY"
-                # 一覧と入れ替えスクリプトを作る。この段階では配布先 S3 に何も上げない。
+                # 一覧と入れ替えスクリプトを作る。この段階ではルールのデプロイ先に何も上げない。
                 - bash build-rules.sh "$ENVIRONMENT_NAME"
+                # Publish に渡すものだけを、プロジェクトの中の並びのまま、決まった名前のフォルダ handoff/ に写す。
+                # 渡すもの: デプロイの入口、AWS CLI の設定とルールのデプロイ先の URI を決める部品、上げる部品、
+                # 今回作った ipset 入れ替えスクリプト、今回使った個別許可の一覧の写し、次回の増減比較に使う今回の一覧の記録。
+                # （artifacts の base-directory で環境変数が展開されるとはドキュメントに書かれていないので、SourceDirectory の値に頼らない）
+                - mkdir -p "$CODEBUILD_SRC_DIR/handoff"
+                - >-
+                  tar -cf - deploy-rules.sh command/aws-cli.sh command/set-s3-uri.sh command/publish-refresh-scripts.sh
+                  work/*/command/port_guard/refresh-*.sh work/*/port_guard_whitelists/allow-*.txt
+                  work/*/port_guard_whitelists/last-refresh/*.txt
+                  | tar -xf - -C "$CODEBUILD_SRC_DIR/handoff"
           # 確認したビルド結果を後段へ渡す。デプロイ側で Git のソースを取り直さない。
           artifacts:
-            # 成果物のルートをプロジェクト直下にそろえ、元の親フォルダは含めない。
-            base-directory: "$SOURCE_DIRECTORY"
-            # デプロイの入口・部品・作成済みファイルだけを成果物に含める。
+            # handoff/ の中身を成果物のルートにする（handoff/ 自体は含まれない）。
+            base-directory: handoff
             files:
-              # ローカルと共通のデプロイの入口。
-              - deploy-rules.sh
-              # リージョン・プロファイルを AWS CLI に引き継ぐ部品。
-              - command/aws-cli.sh
-              # 配布先 URI を設定する部品。パイプラインでは渡された URI をそのまま使う。
-              - command/set-s3-uri.sh
-              # ファイルを上げ、最後に照合用の SHA256SUMS を上げる部品。
-              - command/publish-refresh-scripts.sh
-              # 今回作った IPv4・IPv6 の ipset 入れ替えスクリプト。
-              - work/*/command/port_guard/refresh-*.sh
-              # 今回のビルドで使用した個別許可の一覧の写し。
-              - work/*/port_guard_whitelists/allow-*.txt
-              # 次回の増減比較に使う、今回の一覧の記録。
-              - work/*/port_guard_whitelists/last-refresh/*.txt
+              - '**/*'
 
-  # ビルドの成果物だけを受け取り、deploy-rules.sh で配布先 S3 に上げる CodeBuild。
+  # ビルドの成果物だけを受け取り、deploy-rules.sh でルールのデプロイ先に上げる CodeBuild。
   PublishProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Name: !Sub port-guard-list-refresh-${EnvironmentName}-publish
-      # 配布先への書き込みを許可したデプロイ用ロールを使う。
+      # ルールのデプロイ先への書き込みを許可したデプロイ用ロールを使う。
       ServiceRole: !GetAtt PublishRole.Arn
       # デプロイ処理の実行時間の上限は10分。
       TimeoutInMinutes: 10
@@ -247,9 +317,9 @@ Resources:
         EnvironmentVariables:
           # allow-lists/<環境>/ と work/<環境>/ に使う環境名。
           - {Name: ENVIRONMENT_NAME, Value: !Ref EnvironmentName}
-          # スタックに指定された配布先を直接渡し、バケット名の自動取得を省く。
+          # スタックに指定されたルールのデプロイ先を直接渡し、バケット名の自動取得を省く。
           - Name: PORT_GUARD_S3_URI
-            Value: !Sub s3://${PublishBucketName}/port-guard/${EnvironmentName}/current
+            Value: !Sub s3://${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current
       # 入力は Git のソースではなく、Make ステージが作った成果物。
       Source:
         Type: CODEPIPELINE
@@ -268,7 +338,7 @@ Resources:
                 # 確認済みの work/<環境>/ を S3 に上げる。ルールは作り直さない。
                 - bash deploy-rules.sh "$ENVIRONMENT_NAME"
 
-  # ステージを進める CodePipeline 自身のロール。ルール配布先に直接書く権限は持たない。
+  # ステージを進める CodePipeline 自身のロール。ルールのデプロイ先に直接書く権限は持たない。
   PipelineRole:
     Type: AWS::IAM::Role
     Properties:
@@ -287,22 +357,30 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              # ステージ間の成果物を読み書きする。ACL の操作も成果物用バケット内だけ。
+              # ステージ間の成果物を読み書きする。ACL の操作もパイプラインの受け渡しバケット内だけ。
               - Effect: Allow
                 Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject, s3:PutObjectAcl]
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}/*
-              # 成果物用バケットの世代管理・リージョン・所有権設定などを確認する。
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineHandoffBucket}/*
+              # パイプラインの受け渡しバケットの世代管理・リージョン・所有権設定などを確認する。
               - Effect: Allow
                 Action: [s3:GetBucketVersioning, s3:GetBucketLocation, s3:GetBucketAcl, s3:ListBucket]
-                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineBucketName}
+                Resource: !Sub arn:${AWS::Partition}:s3:::${PipelineHandoffBucket}
               # このスタックの2つの CodeBuild だけを起動し、進行状況を取得する。
               - Effect: Allow
                 Action: [codebuild:StartBuild, codebuild:BatchGetBuilds]
                 Resource: [!GetAtt MakeProject.Arn, !GetAtt PublishProject.Arn]
-              # 指定した Git 接続だけを利用する。新旧両方のサービス名の権限を許可する。
-              - Effect: Allow
-                Action: [codeconnections:UseConnection, codestar-connections:UseConnection]
-                Resource: !Ref ConnectionArn
+              # ルールジェネレーターのリポジトリから取る権限。選んだホストの分だけを付ける。
+              - !If
+                - UseGitHub
+                # GitHub: 指定した接続だけを利用する。新旧両方のサービス名の権限を許可する。
+                - Effect: Allow
+                  Action: [codeconnections:UseConnection, codestar-connections:UseConnection]
+                  Resource: !Ref ConnectionArn
+                # CodeCommit: 指定したリポジトリから、ソースの zip を作って取る。
+                - Effect: Allow
+                  Action: [codecommit:GetBranch, codecommit:GetCommit, codecommit:GetRepository,
+                           codecommit:UploadArchive, codecommit:GetUploadArchiveStatus, codecommit:CancelUploadArchive]
+                  Resource: !Sub arn:${AWS::Partition}:codecommit:${AWS::Region}:${AWS::AccountId}:${CodeCommitRepositoryName}
 
   # 実行の全体をつなぐ本体。各ステージの入力と出力を成果物名で結ぶ。
   Pipeline:
@@ -317,8 +395,8 @@ Resources:
       RestartExecutionOnUpdate: false
       # Git 接続・成果物・CodeBuild の操作に使う、CodePipeline 自身のロール。
       RoleArn: !GetAtt PipelineRole.Arn
-      # 中間成果物は別スタックの成果物用バケットへ保存する。
-      ArtifactStore: {Type: S3, Location: !Ref PipelineBucketName}
+      # パイプラインの受け渡しバケットのファイルは別スタックのパイプラインの受け渡しバケットへ保存する。
+      ArtifactStore: {Type: S3, Location: !Ref PipelineHandoffBucket}
       # パイプライン開始時に指定できる値。CodeBuild の環境変数へ渡す。
       Variables:
         # 増減 5% 超を確認して進めるときだけ1にする。通常は0。
@@ -327,24 +405,35 @@ Resources:
           Description: Set 1 after reviewing a change above 5 percent.
       # ソース取得 → ビルド → 承認（省略可）→ デプロイの順に実行する。
       Stages:
-        # 1. 指定した Git リポジトリ・ブランチから、同じ版のソース一式を取得する。
+        # 1. ルールジェネレーターのリポジトリ・ブランチから、同じ版のソース一式を取得する。
+        #    GitHub と CodeCommit でアクションだけが違い、どちらも SourceFiles を Make へ渡す。
         - Name: Source
           Actions:
-            - Name: Repository
-              ActionTypeId: {Category: Source, Owner: AWS, Provider: CodeStarSourceConnection, Version: '1'}
-              Configuration:
-                # 事前に認可した CodeConnections 接続を使う。
-                ConnectionArn: !Ref ConnectionArn
-                # 取得先の所有者とリポジトリ名を、大文字・小文字も含めて指定する。
-                FullRepositoryId: !Ref FullRepositoryId
-                # このブランチのソースを取得する。
-                BranchName: !Ref BranchName
-                # push による自動開始を無効にし、運用者が手動で開始する。
-                DetectChanges: 'false'
-                # ソースの圧縮と受け渡しはサービスに任せる。独自のパッケージ作成は不要。
-                OutputArtifactFormat: CODE_ZIP
-              # 取得したソースを SourceFiles という成果物名で Make へ渡す。
-              OutputArtifacts: [{Name: SourceFiles}]
+            - !If
+              - UseGitHub
+              # GitHub: 事前に認可した CodeConnections 接続で取る。
+              - Name: Repository
+                ActionTypeId: {Category: Source, Owner: AWS, Provider: CodeStarSourceConnection, Version: '1'}
+                Configuration:
+                  ConnectionArn: !Ref ConnectionArn
+                  # 取得先の所有者とリポジトリ名を、大文字・小文字も含めて指定する。
+                  FullRepositoryId: !Ref FullRepositoryId
+                  BranchName: !Ref BranchName
+                  # push による自動開始を無効にし、運用者が手動で開始する。
+                  DetectChanges: 'false'
+                  # ソースの圧縮と受け渡しはサービスに任せる。独自のパッケージ作成は不要。
+                  OutputArtifactFormat: CODE_ZIP
+                OutputArtifacts: [{Name: SourceFiles}]
+              # CodeCommit: 同じアカウント・リージョンのリポジトリから直接取る。接続は使わない。
+              - Name: Repository
+                ActionTypeId: {Category: Source, Owner: AWS, Provider: CodeCommit, Version: '1'}
+                Configuration:
+                  RepositoryName: !Ref CodeCommitRepositoryName
+                  BranchName: !Ref BranchName
+                  # ポーリングによる自動開始を無効にする。EventBridge の規則も作らず、手動で開始する。
+                  PollForSourceChanges: 'false'
+                  OutputArtifactFormat: CODE_ZIP
+                OutputArtifacts: [{Name: SourceFiles}]
         # 2. build-rules.sh を実行し、確認するルールとデプロイ用の部品を作る。
         - Name: Make
           Actions:
@@ -376,7 +465,7 @@ Resources:
           Actions:
             - Name: DeployRules
               ActionTypeId: {Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1'}
-              # 配布先への書き込み権限を持つデプロイ用 CodeBuild を使う。
+              # ルールのデプロイ先への書き込み権限を持つデプロイ用 CodeBuild を使う。
               Configuration: {ProjectName: !Ref PublishProject}
               # 承認前に作成した結果を使う。Git からの再取得やルールの作り直しはしない。
               InputArtifacts: [{Name: MadeFiles}]
@@ -386,6 +475,9 @@ Outputs:
   # 手動開始や実行状況の確認に使うパイプライン名。
   PipelineName:
     Value: !Ref Pipeline
-  # この環境の配布先 S3 URI。ローカル実行で同じ場所を使うときにも参照できる。
-  PublishLocation:
-    Value: !Sub s3://${PublishBucketName}/port-guard/${EnvironmentName}/current
+  # このスタックが作ったパイプラインの受け渡しバケットの完全名。
+  PipelineHandoffBucketName:
+    Value: !Ref PipelineHandoffBucket
+  # この環境のルールのデプロイ先 URI。ローカル実行で同じ場所を使うときにも参照できる。
+  RuleDeployLocation:
+    Value: !Sub s3://${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current

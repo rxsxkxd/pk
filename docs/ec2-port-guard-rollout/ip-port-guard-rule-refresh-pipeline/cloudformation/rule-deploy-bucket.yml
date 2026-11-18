@@ -1,0 +1,51 @@
+# ルールのデプロイ先バケットの定義。作り方の記録として残す。
+# このアカウントでは 2026-11-17 に手で作成済みなので、このテンプレートは流さない。
+# 別のアカウント・リージョンで作るとき、または作り直すときに使う。パイプライン用スタックとは独立していて、
+# ローカル・踏み台サーバーのコマンドからも、パイプラインからも、このバケットを名前で参照する。
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Port-guard rule deploy bucket (record of how it is created). Shared by all environments and by local runs.
+
+# スタック作成時に外から指定する値。
+Parameters:
+  # バケット名の先頭部分。パイプライン用スタックの RuleDeployBucketNamePrefix と、ローカルの入口スクリプトが組み立てる名前に合わせる。
+  RuleDeployBucketNamePrefix:
+    Type: String
+    Default: ip-port-guard-rules
+
+# このスタックが作成する AWS リソース。
+Resources:
+  # 各サーバーが取りに行くルールと前回分の一覧を、環境ごとの port-guard/<環境>/current/ に置く。
+  RuleDeployBucket:
+    Type: AWS::S3::Bucket
+    # デプロイ済みのルールを失わないよう、スタックを削除・置き換えしてもバケットを残す。
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      # このアカウント・リージョン専用の名前空間で作成する。
+      BucketNamespace: account-regional
+      # 実際の名前は <先頭部分>-<アカウント ID>-<リージョン>-an となる（既定では ip-port-guard-rules-<アカウント ID>-<リージョン>-an）。
+      BucketNamePrefix: !Ref RuleDeployBucketNamePrefix
+      # 上書き前のルールを保持する。パイプラインの受け渡しバケットと違い、古い版の自動削除は設定しない。
+      VersioningConfiguration: {Status: Enabled}
+      # S3 が管理するキーで暗号化する。専用 KMS キーは作らない。
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      # 「デプロイ先」はインターネットへの公開を意味しない。パブリックアクセスはすべてブロックし、IAM の認証・権限で読み書きする。
+      PublicAccessBlockConfiguration:
+        # パブリックアクセスを許可する ACL の設定を拒否する。
+        BlockPublicAcls: true
+        # パブリックアクセスを許可するバケットポリシーの設定を拒否する。
+        BlockPublicPolicy: true
+        # パブリックアクセスを許可する既存 ACL があっても無視する。
+        IgnorePublicAcls: true
+        # 公開ポリシーがある場合のアクセスも、バケット所有アカウントなどに制限する。
+        RestrictPublicBuckets: true
+      # オブジェクトの所有者をバケット所有者に統一し、ACL を無効にする。
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+
+# 作成したバケットの完全名。
+Outputs:
+  RuleDeployBucketName:
+    Value: !Ref RuleDeployBucket

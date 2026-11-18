@@ -46,10 +46,10 @@ ip-port-guard-rule-refresh-pipeline の設計で決めたことと、その理�
 
 | | 内容 |
 |---|---|
-| 決めたこと | **週 1 回**。パイプライン用スタックに EventBridge の予定の規則を足す。予定はパラメータ `ScheduleExpression` で渡し、既定は `cron(0 0 ? * MON *)`（毎週月曜の UTC 0:00 ＝ 日本時間 9:00）。空にすると定期実行しない |
+| 決めたこと | **週 2 回（毎週月曜・木曜の日本時間 9:00）**（2026-11-18 に週 1 回から変えた）。パイプライン用スタックに EventBridge の予定の規則を足す。予定はパラメータ `ScheduleExpression` で渡し、既定は `cron(0 0 ? * MON,THU *)`（毎週月曜・木曜の UTC 0:00 ＝ 日本時間 9:00）。空にすると定期実行しない。各サーバーがルールを取得する定期適用（[rule-apply-via-ssm の設計](rule-apply-via-ssm/scheduled-apply-design.md)。月曜・木曜の日本時間 11:00）の 2 時間前に上げる |
 | 仕組み | 予定の規則が、スタックが作るロール（`codepipeline:StartPipelineExecution`。このパイプラインだけ）でパイプラインを開始する。`FORCE` は既定の `0` |
 | 理由 | 1 回あたりの増減が小さくなり、5% の確認に当たりにくい。APNIC の一覧の変化は月に数件〜数十件 |
-| 気を付けること | `RequireApproval=true`（既定）のままだと、毎週の実行が承認のステージで止まって人を待つ。自動で上げるなら `RequireApproval=false`（2-1） |
+| 気を付けること | `RequireApproval=true`（既定）のままだと、定期実行のたびに承認のステージで止まって人を待つ（11:00 の定期適用までに承認しないと、その回は前のルールが入り直す）。自動で上げるなら `RequireApproval=false`（2-1） |
 
 ### 2-3. 増減の確認で止まったときの通知（2026-11-18 に決めた）
 

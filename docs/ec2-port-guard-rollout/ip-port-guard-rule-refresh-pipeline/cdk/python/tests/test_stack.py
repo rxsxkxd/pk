@@ -253,12 +253,12 @@ class StacksTest(unittest.TestCase):
         for provider in ("GitHub", "CodeCommit"):
             for template in (self.yaml_pipeline, self.cdk_pipelines[provider]):
                 parameters = self.source_parameters[provider]
-                # 既定は毎週月曜の UTC 0:00
+                # 既定は毎週月曜・木曜の UTC 0:00
                 resources, _ = evaluate(template, parameters)
                 rules = list(of_type(resources, "AWS::Events::Rule").values())
                 self.assertEqual(len(rules), 1)
                 rule = rules[0]["Properties"]
-                self.assertEqual(rule["ScheduleExpression"], "cron(0 0 ? * MON *)")
+                self.assertEqual(rule["ScheduleExpression"], "cron(0 0 ? * MON,THU *)")
                 self.assertEqual(rule["State"], "ENABLED")
                 pipeline_arn = "arn:aws:codepipeline:ap-northeast-1:111122223333:port-guard-list-refresh-staging"
                 self.assertEqual([t["Arn"] for t in rule["Targets"]], [pipeline_arn])

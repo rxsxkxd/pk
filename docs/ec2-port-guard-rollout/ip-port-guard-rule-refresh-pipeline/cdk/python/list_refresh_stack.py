@@ -107,7 +107,7 @@ class ListRefreshPipelineStack(cdk.Stack):
         self.source_directory = parameter("SourceDirectory", default=".").value_as_string
         approval = parameter("RequireApproval", default="true", allowed_values=["true", "false"]).value_as_string
         self.log_retention = parameter("LogRetentionInDays", type="Number", default=90).value_as_number
-        self.schedule = parameter("ScheduleExpression", default="cron(0 0 ? * MON *)").value_as_string
+        self.schedule = parameter("ScheduleExpression", default="cron(0 0 ? * MON,THU *)").value_as_string
         self.topic = parameter("NotificationTopicArn", default="").value_as_string
 
         self.use_approval = cdk.CfnCondition(self, "UseApproval", expression=cdk.Fn.condition_equals(approval, "true"))

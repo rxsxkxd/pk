@@ -60,10 +60,10 @@ Parameters:
   LogRetentionInDays:
     Type: Number
     Default: 90
-  # 定期実行の予定（EventBridge の予定の式。時刻は UTC）。既定は毎週月曜の UTC 0:00（日本時間 9:00）。空なら定期実行しない。
+  # 定期実行の予定（EventBridge の予定の式。時刻は UTC）。既定は毎週月曜・木曜の UTC 0:00（日本時間 9:00。各サーバーのルールの取得 11:00 の 2 時間前）。空なら定期実行しない。
   ScheduleExpression:
     Type: String
-    Default: cron(0 0 ? * MON *)
+    Default: cron(0 0 ? * MON,THU *)
   # Make のビルドが失敗したとき（増減の確認で止まったときを含む）に、止まった理由と増減を送る既存の SNS のトピックの ARN。空なら送らない。
   NotificationTopicArn:
     Type: String

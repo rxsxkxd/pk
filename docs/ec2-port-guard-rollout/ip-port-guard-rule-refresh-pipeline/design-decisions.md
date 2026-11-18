@@ -127,7 +127,7 @@ aws codepipeline start-pipeline-execution --name port-guard-list-refresh-staging
 | 通知に使うトピック | 2-3。どの既存のトピックか（ARN）。KMS で暗号化されているか |
 | ルールジェネレーターのリポジトリ | GitHub か CodeCommit か。リポジトリとブランチ。GitHub なら CodeConnections の接続 |
 | 個別許可の一覧の中身 | `allow-lists/<環境>/` は空の仮置き。少なくとも、稼働サーバーの VPC の範囲を書く |
-| 各サーバーがルールを取って入れ替える側 | SSM の Run Command で人が流す形の骨組みを [rule-apply-via-ssm](rule-apply-via-ssm/README.md) に用意した（2026-11-18。AWS では流していない）。環境のタグの実際のキーと値、定期に流すかは決まっていない |
+| 各サーバーがルールを取って入れ替える側 | SSM で流す形を [rule-apply-via-ssm](rule-apply-via-ssm/README.md) に用意した（2026-11-19。人が流す手動の適用と、月曜・木曜 11:00 の定期適用（State Manager の関連付け）。手順は [instance-setup.md](rule-apply-via-ssm/instance-setup.md)。AWS では流していない）。環境のタグの実際のキーと値は決まっていない |
 
 ## 4. 確かめたこと・確かめていないこと
 

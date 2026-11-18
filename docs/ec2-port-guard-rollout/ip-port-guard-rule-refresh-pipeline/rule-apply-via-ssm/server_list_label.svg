@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 320" width="850" height="320" font-family="&#39;Helvetica Neue&#39;, Arial, &#39;Hiragino Kaku Gothic ProN&#39;, &#39;Hiragino Sans&#39;, Meiryo, sans-serif">
+  <defs>
+    <!-- 矢印のマーカー定義 -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 10 5 L 0 8.5 z" fill="#475569" />
+    </marker>
+    <!-- カードのドロップシャドウ -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0f172a" flood-opacity="0.08" />
+    </filter>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="850" height="320" fill="#f8fafc" rx="12" />
+
+  <!-- ==================== 1. EC2 ==================== -->
+  <g transform="translate(40, 50)" filter="url(#shadow)">
+    <rect width="210" height="220" rx="8" fill="#ffffff" stroke="#f97316" stroke-width="2" />
+    <path d="M 0 8 Q 0 0 8 0 L 202 0 Q 210 0 210 8 L 210 42 L 0 42 Z" fill="#fff7ed" />
+    <line x1="0" y1="42" x2="210" y2="42" stroke="#fed7aa" stroke-width="1.5" />
+    <text x="105" y="27" text-anchor="middle" font-size="16" font-weight="bold" fill="#c2410c">EC2</text>
+
+    <!-- 項目1: インスタンスID -->
+    <rect x="16" y="56" width="178" height="34" rx="5" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1" />
+    <text x="105" y="78" text-anchor="middle" font-size="13" fill="#334155">インスタンスID</text>
+
+    <!-- 項目2: タグ -->
+    <rect x="16" y="98" width="178" height="34" rx="5" fill="#f8fafc" stroke="#fed7aa" stroke-width="1" />
+    <text x="105" y="120" text-anchor="middle" font-size="13" fill="#9a3412">タグ (分類)</text>
+
+    <!-- 項目3: IP -->
+    <rect x="16" y="140" width="178" height="34" rx="5" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5" />
+    <text x="105" y="162" text-anchor="middle" font-size="13" font-weight="bold" fill="#9a3412">IP</text>
+  </g>
+
+  <!-- ==================== 2. Route 53 ==================== -->
+  <g transform="translate(320, 70)" filter="url(#shadow)">
+    <rect width="200" height="180" rx="8" fill="#ffffff" stroke="#8b5cf6" stroke-width="2" />
+    <path d="M 0 8 Q 0 0 8 0 L 192 0 Q 200 0 200 8 L 200 42 L 0 42 Z" fill="#f5f3ff" />
+    <line x1="0" y1="42" x2="200" y2="42" stroke="#ddd6fe" stroke-width="1.5" />
+    <text x="100" y="27" text-anchor="middle" font-size="16" font-weight="bold" fill="#5b21b6">Route 53</text>
+
+    <!-- 項目1: IP -->
+    <rect x="16" y="58" width="168" height="38" rx="5" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5" />
+    <text x="100" y="82" text-anchor="middle" font-size="14" font-weight="bold" fill="#5b21b6">IP</text>
+
+    <!-- 項目2: 名前 -->
+    <rect x="16" y="110" width="168" height="38" rx="5" fill="#f5f3ff" stroke="#c4b5fd" stroke-width="1.5" />
+    <text x="100" y="134" text-anchor="middle" font-size="14" font-weight="bold" fill="#5b21b6">名前</text>
+  </g>
+
+  <!-- ==================== 3. DB (サーバーリスト) ==================== -->
+  <g transform="translate(590, 50)" filter="url(#shadow)">
+    <rect width="220" height="220" rx="8" fill="#ffffff" stroke="#3b82f6" stroke-width="2" />
+    <path d="M 0 8 Q 0 0 8 0 L 212 0 Q 220 0 220 8 L 220 58 L 0 58 Z" fill="#eff6ff" />
+    <line x1="0" y1="58" x2="220" y2="58" stroke="#bfdbfe" stroke-width="1.5" />
+    <text x="110" y="25" text-anchor="middle" font-size="16" font-weight="bold" fill="#1d4ed8">DB</text>
+    <text x="110" y="46" text-anchor="middle" font-size="12" fill="#3b82f6">サーバーリスト</text>
+
+    <!-- 項目1: (名前) -->
+    <rect x="16" y="70" width="188" height="34" rx="5" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1" />
+    <text x="110" y="92" text-anchor="middle" font-size="13" fill="#64748b">(名前)</text>
+
+    <!-- 項目2: サーバータイプ -->
+    <rect x="16" y="112" width="188" height="34" rx="5" fill="#f8fafc" stroke="#93c5fd" stroke-width="1" />
+    <text x="110" y="134" text-anchor="middle" font-size="13" fill="#1e40af">サーバータイプ (分類)</text>
+
+    <!-- 項目3: ホスト名前 -->
+    <rect x="16" y="154" width="188" height="34" rx="5" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5" />
+    <text x="110" y="176" text-anchor="middle" font-size="13" font-weight="bold" fill="#1e40af">ホスト名前</text>
+  </g>
+
+  <!-- ==================== 接続矢印 ==================== -->
+  <!-- EC2 (IP) -> Route 53 (IP) -->
+  <path d="M 250 210 C 285 210, 285 128, 320 128" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)" />
+
+  <!-- Route 53 (名前) -> DB (ホスト名前) -->
+  <path d="M 520 204 C 555 204, 555 224, 590 224" fill="none" stroke="#475569" stroke-width="2" marker-end="url(#arrow)" />
+</svg>

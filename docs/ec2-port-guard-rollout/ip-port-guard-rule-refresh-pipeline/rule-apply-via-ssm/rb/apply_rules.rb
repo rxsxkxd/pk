@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
-# インスタンスの一覧ファイルの台に、SSM の Run Command（AWS-RunShellScript）でルールの適用スクリプト（remote/apply-rules.sh）を流す。
+# インスタンスの一覧ファイルの台に、SSM の Run Command でルールの適用ドキュメント（cloudformation/rule-apply-document.yml で作る
+# port-guard-apply-rules）を流す。定期適用（cloudformation/scheduled-apply.yml）と同じドキュメントを使う。
 # ルールのデプロイ先から照合の値と ipset 入れ替えスクリプトを取り、照合してから ipset を入れ替える。
 # 1 台ずつ流し（--max-concurrency 1）、1 台でも失敗したら残りは流さない（--max-errors 0）。
 #
-#   ruby rb/apply_rules.rb --env staging [--list FILE] [--ipv6] [--s3-uri URI] [--profile NAME] [--region NAME]
+#   ruby rb/apply_rules.rb --env staging [--list FILE] [--ipv6] [--s3-uri URI] [--document-name NAME]
+#                          [--profile NAME] [--region NAME]
 #
 # 終了コード: 0 全台が Success / 1 失敗した台がある / 2 使い方・前提の誤り・確かめて止めた / 3 AWS のエラー
 require_relative 'lib/cli'
@@ -12,14 +14,14 @@ require_relative 'lib/cli'
 TERMINAL = %w[Success Cancelled TimedOut Failed].freeze
 POLL_SECONDS = 5
 PROGRESS_SECONDS = 30
-REMOTE_SCRIPT = File.join(Cli::BASE_DIR, 'remote', 'apply-rules.sh')
 
-options = Cli.parse_options do |parser, opts|
+options = Cli.parse_options(document_name: 'port-guard-apply-rules') do |parser, opts|
   parser.banner = 'usage: ruby rb/apply_rules.rb --env <環境> [options]'
   parser.on('--env NAME', Cli::ENVIRONMENTS, "環境（#{Cli::ENVIRONMENTS.join('・')}）") { |value| opts[:env] = value }
   parser.on('--list FILE', 'インスタンスの一覧ファイル（既定 instance-lists/<環境>.tsv）') { |value| opts[:list] = value }
   parser.on('--ipv6', 'refresh-ipv6.sh も流す（IPv6 も絞っている台）') { opts[:ipv6] = true }
   parser.on('--s3-uri URI', 'ルールのデプロイ先（既定は名前の決まりから組み立てる。末尾の / なし）') { |value| opts[:s3_uri] = value }
+  parser.on('--document-name NAME', 'ルールの適用ドキュメントの名前（既定 port-guard-apply-rules）') { |value| opts[:document_name] = value }
 end
 Cli.usage_error('--env を指定する') unless options[:env]
 Cli.require_aws_cli
@@ -44,6 +46,7 @@ begin
 
   # 3. 対象と取得元を表示して確かめる
   puts "環境: #{options[:env]}"
+  puts "流すドキュメント: #{options[:document_name]}"
   puts "取得元（ルールのデプロイ先）: #{s3_uri}"
   puts "流す ipset 入れ替えスクリプト: refresh-ipv4.sh#{options[:ipv6] ? '・refresh-ipv6.sh' : ''}"
   puts "対象（#{ids.size} 台。1 台ずつ流し、1 台でも失敗したら残りは流さない）:"
@@ -54,16 +57,15 @@ begin
     exit 2
   end
 
-  # 4. Run Command を送る（ルールの適用スクリプトの前に、渡す値を付ける）
-  script = ["export PG_S3_URI='#{s3_uri}'", "export PG_REGION='#{region}'",
-            "export PG_APPLY_IPV6='#{options[:ipv6] ? 1 : 0}'"] + File.readlines(REMOTE_SCRIPT, chomp: true)
+  # 4. Run Command を送る（ルールの適用ドキュメントに、環境ごとの値をパラメータで渡す）
+  parameters = { 'S3Uri' => [s3_uri], 'Region' => [region], 'ApplyIpv6' => [options[:ipv6] ? '1' : '0'] }
   command = AwsCli.run('ssm', 'send-command',
-                       '--document-name', 'AWS-RunShellScript',
+                       '--document-name', options[:document_name],
                        '--instance-ids', *ids,
                        '--max-concurrency', '1', '--max-errors', '0',
                        '--timeout-seconds', '600',
                        '--comment', "port-guard apply rules #{options[:env]}",
-                       '--parameters', JSON.generate('commands' => script, 'executionTimeout' => ['600']))['Command']
+                       '--parameters', JSON.generate(parameters))['Command']
   command_id = command['CommandId']
   puts "Run Command を送った: #{command_id}"
 

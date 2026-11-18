@@ -1,0 +1,34 @@
+# ルールの読み取りポリシー。適用対象サーバーの IAM ロールに付け、その環境のルールのデプロイ先からルールを読めるようにする。
+# 環境ごとに 1 つのスタック。ロールへの付与は、このスタックでは行わず、aws iam attach-role-policy で行う（ロールは既存のもの）。
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Port-guard rule read policy for the servers of one environment (attach it to the instance roles).
+
+Parameters:
+  # 環境の名前。ルールのデプロイ先 port-guard/<環境>/current/ とポリシーの名前に使う。
+  EnvironmentName:
+    Type: String
+    AllowedValues: [development, staging, production]
+  # ルールのデプロイ先バケットの名前の先頭部分。親フォルダの rule-deploy-bucket.yml・パイプライン用スタック・command/set-s3-uri.sh に合わせる。
+  RuleDeployBucketNamePrefix:
+    Type: String
+    Default: ip-port-guard-rules
+
+Resources:
+  # その環境のルールのデプロイ先の読み取りだけを許す。一覧の取得（s3:ListBucket）は要らない（取るファイルの名前は決まっている）。
+  RuleReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub port-guard-rule-read-${EnvironmentName}
+      Description: !Sub Read the port-guard rules of ${EnvironmentName} from the rule deploy bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ReadRules
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub arn:${AWS::Partition}:s3:::${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current/*
+
+Outputs:
+  # aws iam attach-role-policy --policy-arn に渡す。
+  RuleReadPolicyArn:
+    Value: !Ref RuleReadPolicy

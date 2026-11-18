@@ -84,6 +84,7 @@ flowchart TD
 | [step3-dns-switch.md](./step3-dns-switch.md) | ステップ 3: 利用者のドメイン名の向き先の変更（`scripts/step3-dns-switch.sh`）、確認 3、元に戻す手順 |
 | [step4-origin-restriction.md](./step4-origin-restriction.md) | ステップ 4: オリジンへの接続の制限（後付け）、確認 4、片付け |
 | [cloudfront-to-ec2-httpd.md](./cloudfront-to-ec2-httpd.md) | 参考: 稼働サーバーの httpd で行う設定の詳細と、コンテナでの検証の結果 |
+| [client-ip-restoration.md](./client-ip-restoration.md) | 参考: 利用者の IP の復元（なぜ要るか、いつ入れるか、`mod_remoteip` を使えない古い Apache のときの軽い選択肢） |
 | [cloudfront-to-ec2-domains-certificates.md](./cloudfront-to-ec2-domains-certificates.md) | 参考: ドメイン名・DNS のレコード・証明書の役割と、通信の流れ |
 | [definitions.md](./definitions.md) | 定義（`cloudformation/` の YAML と `cdk/python/` の CDK）の中身と、ステップごとにどちらを使うか |
 | `scripts/step3-dns-switch.sh` | ステップ 3 のシェルスクリプト（Route 53 の A レコードの置き換えと戻し） |

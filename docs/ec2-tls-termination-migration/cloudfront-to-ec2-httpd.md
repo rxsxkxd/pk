@@ -93,6 +93,8 @@ CloudFront の Add custom header に設定した値を、httpd で確認する�
 
 ## 4. 利用者の IP を復元する
 
+なぜ要るか、いつ入れるか、`mod_remoteip` を使えない古い Apache のときの選択肢は [client-ip-restoration.md](./client-ip-restoration.md)。
+
 CloudFront は `X-Forwarded-For` の**末尾**に利用者の IP を足す。`mod_remoteip` は右から順に処理して、信頼できないアドレスで止まるので、直前の中継（CloudFront の接続元）を信頼すれば、利用者の IP が残る。
 
 信頼する範囲のファイルを作る。`conf.d` の外に置いて、VirtualHost の中から `Include` で読み込む。

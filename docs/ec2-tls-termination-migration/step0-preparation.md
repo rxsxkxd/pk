@@ -68,7 +68,7 @@ Route 53 では、今のレコードの値を変えずに TTL だけを変える
 | 注意 | 内容 |
 |---|---|
 | **`X-Forwarded-For` を消すことの影響** | `RequestHeader unset X-Forwarded-For`（[4](./cloudfront-to-ec2-httpd.md#4-利用者の-ip-を復元する)）は、直接来ている要求からも `X-Forwarded-For` を消すので、アプリに届かなくなる。Rails 4.2 の `request.remote_ip` は、`X-Forwarded-For` があるとその値を優先して使うことがある（コンテナで確かめたとき、利用者が偽って付けた値を選んだ）。そのため、会社の proxy などを経由して `X-Forwarded-For` が付いている利用者は、入れた後、`remote_ip` がヘッダーの値から接続の相手の IP（proxy の IP）に変わる。偽れない値になるので正しくなる方向の変化だが、**アプリが `remote_ip` で IP を許可・制限しているなら、該当の利用者で結果が変わる**ことがある |
-| 入れる前に確かめること | アプリのコードで `remote_ip`・`request.ip`・`REMOTE_ADDR` を使っている箇所と、その使い道（ログだけか、許可・制限などの判定か）。判定に使っていなければ、影響はない |
+| 入れる前に確かめること | アプリのコードで `remote_ip`・`request.ip`・`REMOTE_ADDR` を使っている箇所と、その使い道（ログだけか、許可・制限などの判定か）。判定に使っていなければ、影響はない。稼働サーバーの Apache に `mod_remoteip` がない場合の選択肢は [client-ip-restoration.md](./client-ip-restoration.md#古い-apache-で-mod_remoteip-を使えないときの選択肢) |
 
 ## 4. 秘密のヘッダーの値を作る
 

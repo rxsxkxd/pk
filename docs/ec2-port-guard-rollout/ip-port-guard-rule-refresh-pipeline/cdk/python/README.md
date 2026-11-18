@@ -1,6 +1,6 @@
 # CDK（Python）のパイプライン用スタックと YAML 版との比較
 
-[パイプライン用](list_refresh_stack.py)を、[app.py](app.py)で合成する。**この2ファイルのコードの各行に日本語コメントを付けた**。スタックはパイプライン用の 1 種類だけで、パイプラインの受け渡しバケットもこの中で作る。ルールのデプロイ先バケットは先に手で作ったものを名前で参照し、作らない（2026-11-18 に、バケット用スタックを無くした）。
+[パイプライン用](list_refresh_stack.py)と[ルールのデプロイ先バケット用](rule_deploy_bucket_stack.py)（作り方の記録。このアカウントでは流さない）を、[app.py](app.py)で合成する。2 つのスタックの間に依存はない。コードは部品ごとのメソッドに分け、説明は各部品の頭のコメントにまとめた（2026-11-18 に、行ごとの末尾のコメントをやめた）。スタックはパイプライン用の 1 種類だけで、パイプラインの受け渡しバケットもこの中で作る。ルールのデプロイ先バケットは先に手で作ったものを名前で参照し、作らない（2026-11-18 に、バケット用スタックを無くした）。
 
 既存 YAML を読み込む実装ではない。`Bucket`・`PipelineProject`・`Pipeline` とアクションの L2 を使い、共通設定やリソース間の接続をまとめる。デプロイ時のパラメータ、スクリプト、成果物、承認の有無は [YAML 版](../../cloudformation/README.md)とそろえている。
 
@@ -49,7 +49,7 @@ python -m pip install -r requirements-dev.txt
 cdk synth port-guard-list-refresh-staging --no-lookups
 ```
 
-`cdk.out/port-guard-list-refresh-staging.template.json` に出る。
+`cdk.out/port-guard-list-refresh-staging.template.json`（パイプライン用）と `cdk.out/port-guard-rule-deploy-bucket.template.json`（ルールのデプロイ先バケット用。流さない）に出る。
 
 アセットの登録、AWS の情報の検索、bootstrap は使わない。`SourceDirectory` はパイプラインが取得するリポジトリ内の場所であり、CDK を実行するマシンのローカルパスではない。
 
@@ -114,7 +114,7 @@ cfn-lint ../../cloudformation/list-refresh-pipeline.yml ../../cloudformation/rul
 cfn-lint cdk.out/*.template.json --ignore-checks W3005
 ```
 
-テストで、ルールのデプロイ先バケットの作成と参照・保持設定、承認の有無、両版のビルド仕様、ルールのデプロイ先の権限分離を確かめる。ルールジェネレーターのリポジトリは GitHub と CodeCommit の両方で、YAML 版（`SourceProvider` で切り替え）と CDK 版（合成時に切り替え）の Source のステージ・パイプラインのロールの権限・パラメータを照合する（2026-11-18 に追加し、10 件すべて通った）。シェルのテストでは AWS CLI と curl を模擬し、リージョンとプロファイルの伝達、3環境、前回分の取得、チェックサム、別ディレクトリに渡したビルド成果物だけでのデプロイを実行する。
+テストで、ルールのデプロイ先バケットの作成と参照・保持設定、承認の有無、両版のビルド仕様、ルールのデプロイ先の権限分離を確かめる。ルールジェネレーターのリポジトリは GitHub と CodeCommit の両方で、YAML 版（`SourceProvider` で切り替え）と CDK 版（合成時に切り替え）の Source のステージ・パイプラインのロールの権限・パラメータを照合する（2026-11-18 に追加。定期実行・通知・ルールのデプロイ先バケットの照合も含めて 14 件すべて通った）。シェルのテストでは AWS CLI と curl を模擬し、リージョンとプロファイルの伝達、3環境、前回分の取得、チェックサム、別ディレクトリに渡したビルド成果物だけでのデプロイを実行する。
 
 CDK 合成結果の `W3005` は、CDK が自動付与した `DependsOn` と `GetAtt` の依存が重複している警告なので、この検査では除外する。
 

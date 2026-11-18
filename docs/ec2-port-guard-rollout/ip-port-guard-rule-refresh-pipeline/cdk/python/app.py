@@ -1,9 +1,20 @@
-"""パイプライン用スタックを合成する。アセット・AWS 接続・ブートストラップは使わない。"""  # このアプリで合成するスタックの範囲を示す。
+"""CDK のスタックを合成する。アセット・AWS 接続・ブートストラップは使わない。
 
-import aws_cdk as cdk  # CDK アプリの作成と、実行時のコンテキスト取得に使う。
-from list_refresh_stack import ListRefreshPipelineStack  # パイプライン用スタックの定義を読み込む。
+- パイプライン用スタック（環境ごと）: 既定の名前は port-guard-list-refresh-staging。-c stackName=... で変え、
+  ルールジェネレーターのリポジトリのホストを -c sourceProvider=GitHub|CodeCommit で選ぶ（既定は GitHub）
+- ルールのデプロイ先バケットのスタック: 作り方の記録。このアカウントでは流さない（手で作成済み）。
+  既定の名前は port-guard-rule-deploy-bucket。-c ruleDeployBucketStackName=... で変える
+2 つのスタックの間に依存はない。
+"""
 
-app = cdk.App()  # スタックをまとめる CDK アプリを作る。
-ListRefreshPipelineStack(app, app.node.try_get_context("stackName") or "port-guard-list-refresh-staging",  # パイプライン用スタックを作り、必要ならコンテキストで名前を変える。
-                         app.node.try_get_context("sourceProvider") or "GitHub")  # ルールジェネレーターのリポジトリのホストを、合成時のコンテキストで選ぶ（既定は GitHub）。
-app.synth()  # 定義から CloudFormation テンプレートをローカルで合成する。
+import aws_cdk as cdk
+
+from list_refresh_stack import ListRefreshPipelineStack
+from rule_deploy_bucket_stack import RuleDeployBucketStack
+
+app = cdk.App()
+context = app.node.try_get_context
+ListRefreshPipelineStack(app, context("stackName") or "port-guard-list-refresh-staging",
+                         context("sourceProvider") or "GitHub")
+RuleDeployBucketStack(app, context("ruleDeployBucketStackName") or "port-guard-rule-deploy-bucket")
+app.synth()

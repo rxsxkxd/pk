@@ -60,6 +60,14 @@ Parameters:
   LogRetentionInDays:
     Type: Number
     Default: 90
+  # 定期実行の予定（EventBridge の予定の式。時刻は UTC）。既定は毎週月曜の UTC 0:00（日本時間 9:00）。空なら定期実行しない。
+  ScheduleExpression:
+    Type: String
+    Default: cron(0 0 ? * MON *)
+  # Make のビルドが失敗したとき（増減の確認で止まったときを含む）に、止まった理由と増減を送る既存の SNS のトピックの ARN。空なら送らない。
+  NotificationTopicArn:
+    Type: String
+    Default: ''
 
 # 選んだホストに要るパラメータが空なら、スタックを作る前に止める。
 Rules:
@@ -80,6 +88,8 @@ Rules:
 Conditions:
   UseApproval: !Equals [!Ref RequireApproval, 'true']
   UseGitHub: !Equals [!Ref SourceProvider, GitHub]
+  UseSchedule: !Not [!Equals [!Ref ScheduleExpression, '']]
+  UseNotification: !Not [!Equals [!Ref NotificationTopicArn, '']]
 
 # このスタックが作成・管理する AWS リソース。ルールのデプロイ先バケットは手で作ったものを参照する。
 Resources:
@@ -177,6 +187,13 @@ Resources:
                   StringLike:
                     # 一覧の列挙範囲を、この環境の current 配下だけに絞る。
                     s3:prefix: !Sub port-guard/${EnvironmentName}/current/*
+              # 通知のトピックが指定されたときだけ、そのトピックへ送る権限を付ける。
+              - !If
+                - UseNotification
+                - Effect: Allow
+                  Action: sns:Publish
+                  Resource: !Ref NotificationTopicArn
+                - !Ref AWS::NoValue
 
   # S3 へ上げる CodeBuild のロール。この環境のルールのデプロイ先への書き込みを許可する。
   PublishRole:
@@ -251,6 +268,11 @@ Resources:
             Value: !Sub s3://${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current
           # 通常は増減 5% の判定で止める。開始時のパイプライン変数で1に上書きできる。
           - {Name: FORCE, Value: '0'}
+          # 通知のトピック。指定されたときだけ渡す（空なら notify-make-failure.sh は何もしない）。
+          - !If
+            - UseNotification
+            - {Name: NOTIFICATION_TOPIC_ARN, Value: !Ref NotificationTopicArn}
+            - !Ref AWS::NoValue
       # 入力は Source ステージが Git から取得したソースの成果物。
       Source:
         Type: CODEPIPELINE
@@ -269,7 +291,11 @@ Resources:
                 # プロジェクトがリポジトリの一部でも、入口のある場所へ移動して実行する。
                 - cd "$CODEBUILD_SRC_DIR/$SOURCE_DIRECTORY"
                 # 一覧と入れ替えスクリプトを作る。この段階ではルールのデプロイ先に何も上げない。
-                - bash build-rules.sh "$ENVIRONMENT_NAME"
+                # 表示を build-rules.log にも残す。失敗したら（増減の確認で止まったときを含む）、止まった理由と増減を SNS へ送ってから失敗で終える。
+                - >-
+                  set -o pipefail;
+                  bash build-rules.sh "$ENVIRONMENT_NAME" 2>&1 | tee "$CODEBUILD_SRC_DIR/build-rules.log"
+                  || { bash command/notify-make-failure.sh "$CODEBUILD_SRC_DIR/build-rules.log"; exit 1; }
                 # Publish に渡すものだけを、プロジェクトの中の並びのまま、決まった名前のフォルダ handoff/ に写す。
                 # 渡すもの: デプロイの入口、AWS CLI の設定とルールのデプロイ先の URI を決める部品、上げる部品、
                 # 今回作った ipset 入れ替えスクリプト、今回使った個別許可の一覧の写し、次回の増減比較に使う今回の一覧の記録。
@@ -337,6 +363,40 @@ Resources:
               commands:
                 # 確認済みの work/<環境>/ を S3 に上げる。ルールは作り直さない。
                 - bash deploy-rules.sh "$ENVIRONMENT_NAME"
+
+  # 定期実行で、EventBridge がこのパイプラインを開始するときに使うロール。
+  ScheduleRole:
+    Type: AWS::IAM::Role
+    Condition: UseSchedule
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: events.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: start-pipeline
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # このパイプラインの開始だけを許可する。
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+
+  # 定期実行。予定の時刻に、このパイプラインを開始する（FORCE は既定の 0）。
+  ScheduleRule:
+    Type: AWS::Events::Rule
+    Condition: UseSchedule
+    Properties:
+      Description: !Sub Scheduled start of port-guard-list-refresh-${EnvironmentName}
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      Targets:
+        - Id: pipeline
+          Arn: !Sub arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+          RoleArn: !GetAtt ScheduleRole.Arn
 
   # ステージを進める CodePipeline 自身のロール。ルールのデプロイ先に直接書く権限は持たない。
   PipelineRole:

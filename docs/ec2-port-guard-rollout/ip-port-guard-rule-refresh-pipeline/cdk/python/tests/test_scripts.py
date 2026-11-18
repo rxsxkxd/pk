@@ -43,6 +43,7 @@ elif args[:2] == ['s3api', 'list-objects-v2']:
     prefix = args[args.index('--prefix') + 1]
     keys = sorted(str(p.relative_to(base)) for p in base.rglob('*') if p.is_file() and str(p.relative_to(base)).startswith(prefix)) if base.exists() else []
     print('\t'.join(keys) if keys else 'None')
+elif args[:2] == ['sns', 'publish']: pass
 elif args[:2] == ['s3', 'cp']:
     src, dst = [a for a in args[2:] if a != '--only-show-errors']
     src = s3 / src[5:] if src.startswith('s3://') else Path(src)
@@ -140,6 +141,42 @@ class ScriptsTest(unittest.TestCase):
                                         {'PORT_GUARD_S3_URI': uri, 'AWS_REGION': 'ap-northeast-1'})
                 self.assertIn('前回分の IP の一覧: 6 件のファイルを取った', output)
                 self.assertIn('増 0 件、減 0 件', output)
+
+    def test_make_failure_is_notified_with_reason_and_changes(self):
+        template = load_template('list-refresh-pipeline.yml')
+        make = yaml.safe_load(template['Resources']['MakeProject']['Properties']['Source']['BuildSpec'])
+        topic = 'arn:aws:sns:ap-northeast-1:111122223333:port-guard-alerts'
+        uri = 's3://rules/port-guard/staging/current'
+        for given in (topic, ''):
+            with self.subTest(topic=given):
+                repo = self.root / ('repo-notify-' + str(bool(given)))
+                self.copy_project(repo)
+                # 前回分の一覧を、今回と大きく違うものにしておく（5% の確認に当たる）
+                last = self.root / 's3/rules/port-guard/staging/current/port_guard_whitelists/last-refresh'
+                last.mkdir(parents=True, exist_ok=True)
+                (last / 'jp-ipv4.txt').write_text(''.join(f'172.16.{i % 256}.{i // 256}/32\n' for i in range(1000)))
+                environment = {'CODEBUILD_SRC_DIR': str(repo), 'SOURCE_DIRECTORY': '.', 'ENVIRONMENT_NAME': 'staging',
+                               'PORT_GUARD_S3_URI': uri, 'AWS_REGION': 'ap-northeast-1'}
+                if given:
+                    environment['NOTIFICATION_TOPIC_ARN'] = given
+                result = subprocess.run(['bash', '-euo', 'pipefail', '-c', '\n'.join(make['phases']['build']['commands'])],
+                                        cwd=repo, env=self.environment | environment, capture_output=True, text=True)
+                # ビルドは失敗で終わり、ルールのデプロイ先には何も上げない
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertFalse((self.root / 's3/rules/port-guard/staging/current/SHA256SUMS').exists())
+                published = [c for c in self.calls() if c[:2] == ['sns', 'publish']]
+                if not given:
+                    self.assertEqual(published, [])
+                    continue
+                self.assertEqual(len(published), 1)
+                call = published[0]
+                self.assertEqual(call[call.index('--topic-arn') + 1], topic)
+                self.assertIn('増減の確認でルールの作成が止まった', call[call.index('--subject') + 1])
+                message = call[call.index('--message') + 1]
+                self.assertIn('jp-ipv4: 1000 件（前回 1000 件、増 1000 件、減 1000 件）', message)
+                self.assertIn('増減が大きい一覧があるので止める', message)
+                self.assertIn('--variables name=FORCE,value=1', message)
+                (self.root / 'aws.jsonl').unlink()
 
     def test_default_profile_and_region(self):
         project = self.copy_project(self.root / 'default project')

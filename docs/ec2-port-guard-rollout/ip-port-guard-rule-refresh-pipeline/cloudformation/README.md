@@ -67,7 +67,9 @@ aws --region "$AWS_REGION" --profile "$AWS_PROFILE" cloudformation deploy \
 | `CodeCommitRepositoryName` | `CodeCommit` のとき必須。リポジトリの名前。`GitHub` のときは空 |
 | `BranchName` | `main`。両方で使う |
 | `SourceDirectory` | `.`。リポジトリ直下を基準としたプロジェクトの場所 |
-| `RequireApproval` | `true`。`false` なら承認ステージを省略 |
+| `RequireApproval` | `true`。`false` なら承認ステージを省略（自動で上げるときは `false`） |
+| `ScheduleExpression` | `cron(0 0 ? * MON *)`（毎週月曜の UTC 0:00 ＝ 日本時間 9:00）。定期実行の予定。空なら定期実行しない |
+| `NotificationTopicArn` | 空。Make のビルドが失敗したとき（増減の確認で止まったときを含む）に、止まった理由と増減を送る既存の SNS のトピックの ARN。空なら送らない。KMS で暗号化されたトピックは、今は使えない（ロールにキーの権限がない） |
 | `LogRetentionInDays` | `90` |
 
 ルールのデプロイ先バケットには SSE-S3 を想定している。SSE-KMS のバケットを使う場合は、使用するキーへの権限とキーポリシーの追加が別途必要になる。

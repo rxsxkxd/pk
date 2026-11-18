@@ -22,7 +22,9 @@
 
 テンプレート・コードの名前との対応: ルールのデプロイ先バケットはパラメータ `RuleDeployBucketNamePrefix`（名前の先頭部分。既定 `ip-port-guard-rules`。実際の名前は `<先頭部分>-<アカウント ID>-<リージョン>-an`）、パイプラインの受け渡しバケットはリソース `PipelineHandoffBucket` と出力 `PipelineHandoffBucketName`。出力のルールのデプロイ先の URI は `RuleDeployLocation`。2026-11-18 に、呼び名に合わせて `PublishBucketName`・`PublishBucket`・`CreatePublishBucket`・`PublishLocation`・`PipelineBucketName`・`PipelineBucket`・`PipelineBucketNamePrefix` から変えた。同じ日に、バケット用スタックを無くした（ルールのデプロイ先バケットの定義は、作り方の記録として `rule-deploy-bucket.yml` に分けて残した）。あわせて、完全名を渡す `RuleDeployBucketName` を、名前の先頭部分を渡す `RuleDeployBucketNamePrefix` に変えた（パイプラインの受け渡しバケットはパイプライン用スタックへ移し、ルールのデプロイ先バケットを作る選択肢 `CreatePublishBucket` はやめた）。パイプラインの受け渡しバケットの実際の名前の先頭部分も、`ip-port-guard-pipeline` から変え、最後に `port-guard-handoff-<環境>` にした（環境を足した `ip-port-guard-pipeline-handoff-<環境>` は 63 文字の上限を超えるため。まだ AWS に作っていないので、作り直しは要らない）。`PublishProject`・`PublishRole`・`Publish` のステージは、バケットではなく S3 に上げる段階の名前なので変えていない。
 
-状態（2026-11-18）: 入口スクリプトと、パイプライン用スタック（環境ごと）を用意した。2026-11-18 に、ルールジェネレーターのリポジトリを GitHub と CodeCommit のどちらでも取れるようにした（両版とも、GitHub・CodeCommit それぞれの `cfn-lint`、CDK の合成、10 件の自動テストまで確認した）。CloudFormation YAML と CDK（Python）の両版がある。構文・定義の検査、CDK の合成、AWS CLI と公開元の取得を模擬したビルド・デプロイまで確認した。実際の AWS へのスタック作成とアップロードは行っていない。各サーバーが S3 から取得・照合して ipset を入れ替える側は、まだ用意していない。
+状態（2026-11-18）: 入口スクリプトと、パイプライン用スタック（環境ごと）を用意した。2026-11-18 に、ルールジェネレーターのリポジトリを GitHub と CodeCommit のどちらでも取れるようにした（両版とも、GitHub・CodeCommit それぞれの `cfn-lint`、CDK の合成、14 件の自動テストまで確認した）。CloudFormation YAML と CDK（Python）の両版がある。構文・定義の検査、CDK の合成、AWS CLI と公開元の取得を模擬したビルド・デプロイまで確認した。実際の AWS へのスタック作成とアップロードは行っていない。各サーバーがルールのデプロイ先から取得・照合して ipset を入れ替える側は、SSM の Run Command で流す形の骨組みを [rule-apply-via-ssm](rule-apply-via-ssm/README.md) に用意した（2026-11-18。AWS では流していない）。
+
+設計で決めたこと・決まっていないこと・確かめたことは、[設計判断のまとめ](design-decisions.md)（リリース判定の資料）にある。
 
 ## 構築と実行の流れ
 
@@ -54,7 +56,7 @@ flowchart TD
 | 0（1 回だけ） | ルールのデプロイ先バケットを作る（このアカウントでは手で作成済み。作り方の記録は [rule-deploy-bucket.yml](cloudformation/rule-deploy-bucket.yml)） | 同じ（同じバケットを使う） |
 | 1（変えるたび） | `allow-lists/<環境>/` の個別許可の一覧を書き、ルールジェネレーターのリポジトリにコミットする（スクリプトは手元の作業コピーを使うので、コミットしていない一覧でも上がってしまう。上げる前にコミットする） | 同じ。CodePipeline は、開始したときのブランチの内容（コミット済みのもの）を使う |
 | 2（構築・1 回だけ） | なし | CI パイプラインを構築する。GitHub なら先に CodeConnections の接続を作って認可する。パイプライン用スタックを環境ごとに作る（パイプラインの受け渡しバケットも一緒にできる）（[CloudFormation の手順](cloudformation/README.md)）。**構築した直後に、CodePipeline が自動で 1 回動く**（止められない）。承認のステージで止まるので、**この 1 回目は却下する** |
-| 3（更新のたび） | `build-rules.sh <環境>` → 人が確かめる → `deploy-rules.sh <環境>` | CI パイプラインを開始する。Make（`build-rules.sh`）→ Check（人が承認）→ Publish（`deploy-rules.sh`）の順に進む |
+| 3（更新のたび） | `build-rules.sh <環境>` → 人が確かめる → `deploy-rules.sh <環境>` | CI パイプラインが**週 1 回、自動で開始する**（定期実行。人が開始してもよい）。Make（`build-rules.sh`）→ Check（人が承認）→ Publish（`deploy-rules.sh`）の順に進む。増減の確認で止まったら、止まった理由と増減が SNS のトピックからメールで届く（[問題が起きたときの扱い](design-decisions.md#2-4-ルールを作るときに問題が起きたときの扱い)） |
 | 要る権限 | 流す人の AWS CLI の認証情報で、ルールのデプロイ先を読み書きする（[権限](#ルールのデプロイ先バケットと権限)） | CodeBuild のロール（スタックが作る）。構築する人は CloudFormation と IAM を作る権限が要る |
 
 同じ環境に、手動と CI から同時に上げない（後から上げた方が残り、増減を比べる基準の前回分の一覧もずれる）。
@@ -152,8 +154,8 @@ flowchart LR
 
 | スタック | CloudFormation YAML | CDK Python | 管理するもの |
 |---|---|---|---|
-| パイプライン用・環境ごと | [list-refresh-pipeline.yml](cloudformation/list-refresh-pipeline.yml) | [list_refresh_stack.py](cdk/python/list_refresh_stack.py) | CodePipeline、パイプラインの受け渡しバケット、2つの CodeBuild、IAM ロール、ログ |
-| ルールのデプロイ先バケット用・環境間で共用（作り方の記録。このアカウントでは流さない） | [rule-deploy-bucket.yml](cloudformation/rule-deploy-bucket.yml) | — | ルールのデプロイ先バケット |
+| パイプライン用・環境ごと | [list-refresh-pipeline.yml](cloudformation/list-refresh-pipeline.yml) | [list_refresh_stack.py](cdk/python/list_refresh_stack.py) | CodePipeline、パイプラインの受け渡しバケット、2つの CodeBuild、IAM ロール、ログ、定期実行の規則、通知の権限 |
+| ルールのデプロイ先バケット用・環境間で共用（作り方の記録。このアカウントでは流さない） | [rule-deploy-bucket.yml](cloudformation/rule-deploy-bucket.yml) | [rule_deploy_bucket_stack.py](cdk/python/rule_deploy_bucket_stack.py) | ルールのデプロイ先バケット |
 
 流すのはパイプライン用スタックだけ。パイプラインの受け渡しバケットは、そのパイプラインからしか使わないので、パイプラインと同じスタックで作る（スタックを消してもバケットは残す）。ルールのデプロイ先バケットは、先に手で作り、ローカル・踏み台サーバーのコマンドからも使っているので、パイプライン用スタックでは作らない。作り方は [rule-deploy-bucket.yml](cloudformation/rule-deploy-bucket.yml) に記録として残している（別のアカウント・リージョンで作るとき、作り直すときに使う）。パイプライン用スタックはパラメータ `RuleDeployBucketNamePrefix` で名前の先頭部分（既定 `ip-port-guard-rules`）を受け取り、ローカルの入口スクリプトと同じく `<先頭部分>-<アカウント ID>-<リージョン>-an` を参照するだけで、設定は変えない。
 
@@ -170,17 +172,18 @@ flowchart LR
 選ばなかった方のパラメータは空のままでよい。`BranchName`（既定 `main`）と `SourceDirectory` は両方で使う。このフォルダがリポジトリの一部なら `SourceDirectory` にその相対パスを指定し、リポジトリ直下に置くなら `.` を使う。リポジトリと接続はまだ決めていないので、構築するときに渡す。
 
 - ソースはルールジェネレーターのリポジトリから直接取得する。独自の圧縮・パッケージング作業は加えない。
-- 変更のたびには自動実行せず、手動で開始する。スタックを初めて作成した際の初回実行は別に発生し得る。
+- ソースの変更では自動で開始しない。開始は、人が手動で行うか、定期実行（パラメータ `ScheduleExpression`。既定は毎週月曜の日本時間 9:00 `cron(0 0 ? * MON *)`。空なら定期実行しない）で行う。スタックを初めて作成した際の初回実行は別に発生する。
+- Make のビルドが失敗したら（増減の確認で止まったときを含む）、止まった理由と一覧ごとの増減を、パラメータ `NotificationTopicArn` で渡した既存の SNS のトピックへ送る（空なら送らない）。
 - 同じパイプラインの実行は `QUEUED` で直列にする。ローカルからの同時デプロイまでは制御しない。
 - ビルド用ロールはルールのデプロイ先を読むだけ。デプロイ用ロールは、その環境のルールのデプロイ先に書ける。どちらもパイプラインの受け渡しバケットは読み書きする。
-- `RequireApproval=false` で承認を省略できる。増減 5% の判定を通す場合は、実行時のパイプライン変数 `FORCE=1` を渡す。
+- `RequireApproval=false` で承認を省略できる（自動で上げるときはこれにする。既定の `true` のままだと、定期実行のたびに承認で止まる）。増減 5% の判定を通す場合は、実行時のパイプライン変数 `FORCE=1` を渡す。
 
 構築手順は [CloudFormation の README](cloudformation/README.md) と [CDK の README・比較](cdk/python/README.md) にある。いずれか一方の実装を選んで使う。
 
 ## 確認したことと未実施のこと
 
-`bash -n`、両版のテンプレート検査、CDK のパイプライン用スタックの合成（GitHub・CodeCommit の両方）、自動テストを実施した（2026-11-18）。テストでは定義間のビルド仕様・承認条件・パイプラインの受け渡しバケットの設定と保持・ルールのデプロイ先バケットの参照・ルールのデプロイ先の権限を照合した。模擬実行では、単独コピー・3環境・リージョンとプロファイルの引き継ぎ・前回分の取得・チェックサム・ビルド成果物だけでのデプロイを確認した。
+`bash -n`、両版のテンプレート検査、CDK のパイプライン用スタックの合成（GitHub・CodeCommit の両方）、14 件の自動テストを実施した（2026-11-18）。テストでは定義間のビルド仕様・承認条件・パイプラインの受け渡しバケットの設定と保持・ルールのデプロイ先バケットの参照・ルールのデプロイ先の権限を照合した。模擬実行では、単独コピー・3環境・リージョンとプロファイルの引き継ぎ・前回分の取得・チェックサム・ビルド成果物だけでのデプロイを確認した。
 
-実際の CodeConnections 接続・CodeCommit からの取得・CodeBuild 実行・AWS へのデプロイは未実施。各サーバーへ取得や適用を指示する SSM の処理や、定期実行はパイプライン用スタックには含めていない。
+実際の CodeConnections 接続・CodeCommit からの取得・CodeBuild 実行・AWS へのデプロイは未実施。各サーバーへ取得や適用を指示する SSM の処理はパイプライン用スタックには含めず、[rule-apply-via-ssm](rule-apply-via-ssm/README.md) で人が流す（骨組み）。
 
 AWS の仕様は公式ドキュメントと照合した（2026-11-17）: [CLI の環境変数と優先順位](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html)、[S3 の名前空間](https://docs.aws.amazon.com/AmazonS3/latest/userguide/gpbucketnamespaces.html)、[パブリックアクセスのブロック](https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html)、[S3 操作の権限](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html)、[CodeConnections のソースアクション](https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-CodestarConnectionSource.html)。2026-11-18 に追加で照合した: [CodeCommit のソースアクション](https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-CodeCommit.html)。

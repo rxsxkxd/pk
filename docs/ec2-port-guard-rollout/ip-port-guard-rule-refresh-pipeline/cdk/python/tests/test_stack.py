@@ -10,6 +10,7 @@ import aws_cdk as cdk
 import yaml
 
 from list_refresh_stack import ListRefreshPipelineStack
+from rule_deploy_bucket_stack import RuleDeployBucketStack
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -56,6 +57,8 @@ def evaluate(template, supplied=None):
             if resource["Type"] == "AWS::S3::Bucket":
                 return resolve(props["BucketNamePrefix"]) + "-111122223333-ap-northeast-1-an"
             return resolve(props.get("Name", props.get("LogGroupName", key)))
+        if "Fn::Not" in value:
+            return not resolve(value["Fn::Not"][0])
         if "Fn::Equals" in value:
             a, b = value["Fn::Equals"]
             return resolve(a) == resolve(b)
@@ -97,7 +100,9 @@ class StacksTest(unittest.TestCase):
         app = cdk.App(outdir=cls.output.name)
         pipelines = {provider: ListRefreshPipelineStack(app, f"test-pipeline-{provider.lower()}", provider)
                      for provider in ("GitHub", "CodeCommit")}
+        bucket_stack = RuleDeployBucketStack(app, "test-rule-deploy-bucket")
         assembly = app.synth()
+        cls.cdk_rule_deploy_bucket = assembly.get_stack_by_name(bucket_stack.stack_name).template
         # CDK 版はリポジトリのホストを合成時に選ぶので、ホストごとにテンプレートがある
         cls.cdk_pipelines = {provider: assembly.get_stack_by_name(stack.stack_name).template
                              for provider, stack in pipelines.items()}
@@ -147,6 +152,17 @@ class StacksTest(unittest.TestCase):
         rule_prefix = load_template("rule-deploy-bucket.yml")["Parameters"]["RuleDeployBucketNamePrefix"]["Default"]
         self.assertLessEqual(len(rule_prefix + suffix), 63)
 
+    def test_rule_deploy_bucket_yaml_and_cdk_match(self):
+        yaml_resources, yaml_outputs = evaluate(load_template("rule-deploy-bucket.yml"))
+        cdk_resources, cdk_outputs = evaluate(self.cdk_rule_deploy_bucket)
+        self.assertEqual(set(yaml_resources), {"RuleDeployBucket"})
+        self.assertEqual(set(cdk_resources), {"RuleDeployBucket"})
+        for key in ("DeletionPolicy", "UpdateReplacePolicy"):
+            self.assertEqual(yaml_resources["RuleDeployBucket"][key], cdk_resources["RuleDeployBucket"][key])
+        self.assertEqual(yaml_resources["RuleDeployBucket"]["Properties"], cdk_resources["RuleDeployBucket"]["Properties"])
+        self.assertEqual(yaml_outputs["RuleDeployBucketName"]["Value"], cdk_outputs["RuleDeployBucketName"]["Value"])
+        self.assertEqual(set(load_template("rule-deploy-bucket.yml")["Parameters"]), set(self.cdk_rule_deploy_bucket["Parameters"]))
+
     def test_rule_deploy_bucket_record_matches_pipeline(self):
         # 作り方の記録のテンプレートが作るバケットの名前を、パイプライン用スタックが参照する名前と合わせる
         template = load_template("rule-deploy-bucket.yml")
@@ -189,8 +205,9 @@ class StacksTest(unittest.TestCase):
                     self.assertEqual(action["ActionTypeId"]["Provider"], "CodeCommit")
                     self.assertIn(source["PollForSourceChanges"], (False, "false"))
                     self.assertEqual(source["RepositoryName"], "rule-generator")
-                    # 自動の開始をしないので、EventBridge の規則は作らない
-                    self.assertFalse(of_type(resources, "AWS::Events::Rule"))
+                    # ソースの変更では自動で開始しないので、変更を拾う EventBridge の規則は作らない（あるのは定期実行の規則だけ）
+                    self.assertFalse([r for r in of_type(resources, "AWS::Events::Rule").values()
+                                      if "EventPattern" in r["Properties"]])
                 self.assertEqual(stages[-1]["Actions"][0]["InputArtifacts"], [{"Name": "MadeFiles"}])
                 force = json.loads(stages[1]["Actions"][0]["Configuration"]["EnvironmentVariables"])
                 self.assertEqual(force[0]["value"], "#{variables.FORCE}")
@@ -232,6 +249,53 @@ class StacksTest(unittest.TestCase):
                     for s in repository:
                         self.assertEqual(s["Resource"], "arn:aws:codecommit:ap-northeast-1:111122223333:rule-generator")
 
+    def test_schedule_starts_only_this_pipeline(self):
+        for provider in ("GitHub", "CodeCommit"):
+            for template in (self.yaml_pipeline, self.cdk_pipelines[provider]):
+                parameters = self.source_parameters[provider]
+                # 既定は毎週月曜の UTC 0:00
+                resources, _ = evaluate(template, parameters)
+                rules = list(of_type(resources, "AWS::Events::Rule").values())
+                self.assertEqual(len(rules), 1)
+                rule = rules[0]["Properties"]
+                self.assertEqual(rule["ScheduleExpression"], "cron(0 0 ? * MON *)")
+                self.assertEqual(rule["State"], "ENABLED")
+                pipeline_arn = "arn:aws:codepipeline:ap-northeast-1:111122223333:port-guard-list-refresh-staging"
+                self.assertEqual([t["Arn"] for t in rule["Targets"]], [pipeline_arn])
+                schedule_statements = [s for key, found in self.policies(resources) if "Schedule" in key for s in found]
+                self.assertEqual([(s["Action"], s["Resource"]) for s in schedule_statements],
+                                 [("codepipeline:StartPipelineExecution", pipeline_arn)])
+                # 空なら定期実行の規則もロールも作らない
+                resources, _ = evaluate(template, parameters | {"ScheduleExpression": ""})
+                self.assertFalse(of_type(resources, "AWS::Events::Rule"))
+                self.assertFalse([k for k in resources if "Schedule" in k])
+
+    def test_notification_only_when_topic_is_given(self):
+        topic = "arn:aws:sns:ap-northeast-1:111122223333:port-guard-alerts"
+        for provider in ("GitHub", "CodeCommit"):
+            for template in (self.yaml_pipeline, self.cdk_pipelines[provider]):
+                for given in ("", topic):
+                    resources, _ = evaluate(template, self.source_parameters[provider] | {"NotificationTopicArn": given})
+                    publishers = {("Make" if "Make" in key else key) for key, found in self.policies(resources)
+                                  for s in found if "sns:Publish" in self.as_list(s["Action"])}
+                    variables = {}
+                    for project in of_type(resources, "AWS::CodeBuild::Project").values():
+                        props = project["Properties"]
+                        variables[props["Name"]] = {v["Name"]: v["Value"] for v in props["Environment"]["EnvironmentVariables"]}
+                    make = variables["port-guard-list-refresh-staging-make"]
+                    if given:
+                        # Make のロールだけが、そのトピックへ送れる
+                        self.assertEqual(publishers, {"Make"})
+                        for key, found in self.policies(resources):
+                            for s in found:
+                                if "sns:Publish" in self.as_list(s["Action"]):
+                                    self.assertEqual(s["Resource"], topic)
+                        self.assertEqual(make["NOTIFICATION_TOPIC_ARN"], topic)
+                    else:
+                        self.assertEqual(publishers, set())
+                        self.assertNotIn("NOTIFICATION_TOPIC_ARN", make)
+                    self.assertNotIn("NOTIFICATION_TOPIC_ARN", variables["port-guard-list-refresh-staging-publish"])
+
     def test_rule_bucket_permissions_are_separated(self):
         for provider in ("GitHub", "CodeCommit"):
             for template in (self.yaml_pipeline, self.cdk_pipelines[provider]):
@@ -239,9 +303,14 @@ class StacksTest(unittest.TestCase):
                 self.check_rule_bucket_permissions(self.policies(resources))
 
     def check_rule_bucket_permissions(self, policies):
-        for role, statements in policies:
+        # CDK 版は 1 つのロールの権限が複数のポリシーに分かれるので、ロールの種類（Make・Publish・ほか）ごとにまとめて見る
+        grouped = {}
+        for key, statements in policies:
+            role = "Make" if "Make" in key else "Publish" if "Publish" in key else key
+            grouped.setdefault(role, []).extend(statements)
+        for role, statements in grouped.items():
             rule_statements = [s for s in statements if "rule-bucket" in json.dumps(s.get("Resource"))]
-            if "Make" in role:
+            if role == "Make":
                 self.assertEqual({a for s in rule_statements for a in self.as_list(s["Action"])},
                                  {"s3:GetObject", "s3:ListBucket"})
                 listing = next(s for s in rule_statements if s["Action"] == "s3:ListBucket")

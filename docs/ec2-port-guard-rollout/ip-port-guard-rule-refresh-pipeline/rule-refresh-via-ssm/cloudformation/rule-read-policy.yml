@@ -18,7 +18,8 @@ Resources:
   RuleReadPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: !Sub port-guard-rule-read-${EnvironmentName}
+      # 名前は、読む相手のルールのデプロイ先バケットの名前の先頭部分に -read-<環境> を付けたもの（既定 ip-port-guard-rules-read-<環境>）。
+      ManagedPolicyName: !Sub ${RuleDeployBucketNamePrefix}-read-${EnvironmentName}
       Description: !Sub Read the port-guard rules of ${EnvironmentName} from the rule deploy bucket
       PolicyDocument:
         Version: '2012-10-17'

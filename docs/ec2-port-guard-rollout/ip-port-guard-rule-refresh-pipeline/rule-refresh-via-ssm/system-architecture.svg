@@ -106,7 +106,7 @@
   <text x="915" y="214" class="kind" fill="#ca8a04">環境のタグ・用途タグ（対象の台の元）</text>
   <text x="915" y="238" class="name">更新対象サーバー（EC2）</text>
   <rect x="758" y="256" width="314" height="34" rx="5" class="row"/>
-  <text x="772" y="278" class="rowtext">IAM ロール ＋ port-guard-rule-read-&lt;環境&gt;</text>
+  <text x="772" y="278" class="rowtext">IAM ロール ＋ ip-port-guard-rules-read-&lt;環境&gt;</text>
   <rect x="758" y="298" width="314" height="34" rx="5" class="row"/>
   <text x="772" y="320" class="rowtext">SSM Agent（Run Command を受ける）</text>
   <rect x="758" y="340" width="314" height="34" rx="5" class="row"/>

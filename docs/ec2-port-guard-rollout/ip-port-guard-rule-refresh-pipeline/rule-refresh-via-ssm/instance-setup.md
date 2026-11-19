@@ -47,7 +47,7 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_NAMED_IAM
 ```
 
-できるもの: 管理ポリシー `port-guard-rule-read-staging`（`s3://ip-port-guard-rules-<アカウント ID>-<リージョン>-an/port-guard/staging/current/*` の `s3:GetObject` だけ）。
+できるもの: 管理ポリシー `ip-port-guard-rules-read-staging`（`s3://ip-port-guard-rules-<アカウント ID>-<リージョン>-an/port-guard/staging/current/*` の `s3:GetObject` だけ）。
 
 ## 3. 前提を確かめる（台ごと）
 
@@ -80,7 +80,7 @@ aws ec2 create-tags --resources i-0123456789abcdef0 --tags Key=PortGuardSchedule
 
 ![ルールの更新の IAM ロールとポリシー](iam-policies.svg)
 
-このステップで付けるのは、図のいちばん上の「更新対象サーバーの IAM ロール」の `port-guard-rule-read-<環境>`。ほかのロール（関連付けのロール・失敗の通知の規則の実行ロール）は、7 のスタックが作る。
+このステップで付けるのは、図のいちばん上の「更新対象サーバーの IAM ロール」の `ip-port-guard-rules-read-<環境>`。ほかのロール（関連付けのロール・失敗の通知の規則の実行ロール）は、7 のスタックが作る。
 
 ```bash
 # 台の IAM ロールの名前を調べる（インスタンスプロファイル → ロール）
@@ -91,7 +91,7 @@ aws iam get-instance-profile --instance-profile-name <インスタンスプロ�
 
 # ポリシーを付ける
 aws iam attach-role-policy --role-name <ロールの名前> \
-  --policy-arn arn:aws:iam::<アカウント ID>:policy/port-guard-rule-read-staging
+  --policy-arn arn:aws:iam::<アカウント ID>:policy/ip-port-guard-rules-read-staging
 ```
 
 - 既存のロールに権限を足すことになる（暫定対応のフェーズ 1 `docs/ec2/ssm-setup` の「既存のロールに権限を足さない」とは違う扱い。[README の決めたこと A2](README.md#決めたこと)）

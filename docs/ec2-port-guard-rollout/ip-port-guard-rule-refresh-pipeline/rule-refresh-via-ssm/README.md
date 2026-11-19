@@ -26,7 +26,7 @@
 | 用途タグ | 定期更新に入れる台だけに付けるタグ。定期更新は、環境のタグと用途タグの**両方**が付いた台だけに流す。実際のキーと値は決まっていない（スタックのパラメータ `PurposeTagKey`・`PurposeTagValue`。仮の既定は `PortGuardScheduledRefresh` = `true`） |
 | ルールの更新ドキュメント | ルールの更新スクリプトを中身にした、自分で作る SSM のコマンドのドキュメント `port-guard-refresh-rules`（[cloudformation/rule-refresh-document.yml](cloudformation/rule-refresh-document.yml)。アカウントに 1 つ）。**ルールの更新スクリプトの正本**。ルールのデプロイ先・リージョン・IPv6 も流すかをパラメータで受け取る |
 | ルールの更新スクリプト | ルールの更新ドキュメントの中のシェルスクリプト（更新対象サーバーで root で流れる）。ルールのデプロイ先から照合の値（`SHA256SUMS`）と ipset 入れ替えスクリプトを取り、照合してから ipset 入れ替えスクリプトを流す |
-| ルールの読み取りポリシー | 更新対象サーバーの IAM ロールに付ける管理ポリシー `port-guard-rule-read-<環境>`。その環境のルールのデプロイ先の `s3:GetObject` だけを許す（[cloudformation/rule-read-policy.yml](cloudformation/rule-read-policy.yml)） |
+| ルールの読み取りポリシー | 更新対象サーバーの IAM ロールに付ける管理ポリシー `ip-port-guard-rules-read-<環境>`（名前は、ルールのデプロイ先バケットの名前の先頭部分 `RuleDeployBucketNamePrefix` に `-read-<環境>` を付けたもの）。その環境のルールのデプロイ先の `s3:GetObject` だけを許す（[cloudformation/rule-read-policy.yml](cloudformation/rule-read-policy.yml)） |
 | インスタンスの一覧ファイル | 手動の更新で使う、更新対象サーバーを 1 行 1 台で書いた TSV（`instance-lists/<環境>.tsv`）。列は「インスタンス ID・パブリック IP・Name タグ」 |
 | 定期更新の関連付け | 定期更新を行う State Manager の関連付け。環境ごとに 2 つ（`port-guard-refresh-rules-<環境>-mon`・`-thu`）（[cloudformation/scheduled-refresh.yml](cloudformation/scheduled-refresh.yml)） |
 | 失敗の通知の規則 | 定期更新で失敗した台を、SNS のトピックへ台ごとに知らせる EventBridge の規則 |
@@ -42,7 +42,7 @@
 | ルールの更新スクリプト | ルールの更新ドキュメント `port-guard-refresh-rules`（アカウントに 1 つ） | `AWS::SSM::Document`（`DocumentType: Command`） | [cloudformation/rule-refresh-document.yml](cloudformation/rule-refresh-document.yml) |
 | 定期実行のスケジュール | 定期更新の関連付け `port-guard-refresh-rules-<環境>-mon`・`-thu`（環境ごとに 2 つ） | `AWS::SSM::Association` | [cloudformation/scheduled-refresh.yml](cloudformation/scheduled-refresh.yml) |
 | 定期実行時のエラーの定義と通知 | 失敗の通知の規則 `port-guard-refresh-rules-<環境>-failed`（環境ごと） | `AWS::Events::Rule`（送り先は既存の SNS のトピック） | 同上（`NotificationTopicArn` を渡したときだけ） |
-| S3 を読む権限 | 更新対象サーバーの IAM ロール | `AWS::IAM::ManagedPolicy` `port-guard-rule-read-<環境>` | [cloudformation/rule-read-policy.yml](cloudformation/rule-read-policy.yml) |
+| S3 を読む権限 | 更新対象サーバーの IAM ロール | `AWS::IAM::ManagedPolicy` `ip-port-guard-rules-read-<環境>` | [cloudformation/rule-read-policy.yml](cloudformation/rule-read-policy.yml) |
 | 更新対象サーバーの一覧（手動の更新） | 作業者の手元のインスタンスの一覧ファイル `instance-lists/<環境>.tsv`（Git に入れない） | なし（ファイル） | `list_instances.rb` が環境のタグで引き、SSM で応答する台を書き出す。人が目で確かめて要らない行を消す |
 | 更新対象サーバーの一覧（定期更新） | 定期更新の関連付けの `Targets`（`tag:Environment = <環境>` と `tag:<用途タグ> = <値>` の**両方が付いた台**）。一覧は持たず、実行のたびに SSM が引く | `AWS::SSM::Association` の `Targets` | [cloudformation/scheduled-refresh.yml](cloudformation/scheduled-refresh.yml)（パラメータ `TagKey`・`TagValue`・`PurposeTagKey`・`PurposeTagValue`） |
 
@@ -84,7 +84,7 @@
 | ロール | 使う人・仕組み | 付けるポリシー | 種類 | 作り方・付け方 |
 |---|---|---|---|---|
 | 更新対象サーバーの IAM ロール（既存。インスタンスプロファイルのロール） | 各サーバー（SSM Agent と、ルールの更新スクリプトの `aws s3 cp`） | `AmazonSSMManagedInstanceCore` | AWS 管理ポリシー | 既に付いている前提（`docs/ec2/ssm-setup` で用意する。SSM で応答するのに要る） |
-| 〃 | 〃 | `port-guard-rule-read-<環境>`（その環境のルールのデプロイ先の `s3:GetObject` だけ） | カスタマー管理ポリシー | [rule-read-policy.yml](cloudformation/rule-read-policy.yml) で作り、`aws iam attach-role-policy` で付ける（[instance-setup.md の 5](instance-setup.md#5-iam-ロールにルールの読み取りポリシーを付けるロールごと)） |
+| 〃 | 〃 | `ip-port-guard-rules-read-<環境>`（その環境のルールのデプロイ先の `s3:GetObject` だけ） | カスタマー管理ポリシー | [rule-read-policy.yml](cloudformation/rule-read-policy.yml) で作り、`aws iam attach-role-policy` で付ける（[instance-setup.md の 5](instance-setup.md#5-iam-ロールにルールの読み取りポリシーを付けるロールごと)） |
 | 関連付けのロール `port-guard-refresh-rules-dispatch-<環境>` | State Manager（定期更新の関連付けがコマンドを送るとき） | `send-rule-refresh-document`（ルールの更新ドキュメントを EC2 のインスタンスに送る `ssm:SendCommand` だけ） | インラインポリシー（管理ポリシーは付けない） | [scheduled-refresh.yml](cloudformation/scheduled-refresh.yml) がロールごと作る |
 | 失敗の通知の規則の実行ロール（名前はスタックが付ける） | EventBridge（失敗の通知の規則が SNS へ送るとき） | `publish-failures`（そのトピックへの `sns:Publish` だけ） | インラインポリシー | 同上（`NotificationTopicArn` を渡したときだけ）。トピックが KMS で暗号化されているなら、そのキーの権限を足す（要る操作は SNS のドキュメントで確かめる。今は入れていない） |
 
@@ -138,7 +138,7 @@ EC2（環境のタグが合う台: インスタンス ID・パブリック IP・
 | `--server-list-host-column NAME` | サーバーリストのホスト名の列（見出しの名前） | `host`（先頭の定数） |
 | `--server-list-type-column NAME` | サーバーリストのサーバータイプの列（見出しの名前） | `type`（先頭の定数） |
 
-サーバーリスト（TSV）の想定する形（**実際の形は未確定**。列の名前はオプションで合わせる。見出しの行が 1 行目に要る。`#` で始まる行と空の行は読まない）:
+サーバーリスト（TSV）の想定する形（**実際の形は未確定**。列の名前はオプションで合わせる。見出しの行が 1 行目に要る。`#` で始まる行と空の行は読まない）。見本は [samples/server-list-staging.tsv](samples/server-list-staging.tsv):
 
 ```text
 host	type	memo
@@ -213,6 +213,7 @@ web-staging-1.example.com.   A   203.0.113.10   ← EC2 のパブリック IP（
 | `rb/lib/aws_cli.rb`・`rb/lib/cli.rb` | 汎用の部品（AWS CLI の呼び出し、オプション・確認・使い方の誤り）。`docs/ec2/ssm-setup/rb/lib/` から写した |
 | `rb/lib/server_list_check.rb` | `list_instances.rb` の照合: EC2・Route 53・DB のサーバーリストを突き合わせ、警告の文を作る（AWS には触らない） |
 | `instance-lists/` | インスタンスの一覧ファイルの既定の置き場所（Git には入れない） |
+| `samples/server-list-staging.tsv` | `list_instances.rb --server-list` に渡す DB のサーバーリストの見本（想定の形。実際の書き出しの形は未確定） |
 | `system-architecture.svg`・`refresh-schedule.svg`・`failure-handling.svg` | 図: システムの構成、定期実行のスケジュール、定期実行時のエラーの定義と取り扱い（手で書いた SVG） |
 | `setup-steps.svg` | 図: 設定のステップ（[instance-setup.md](instance-setup.md) の流れ） |
 | `iam-policies.svg` | 図: IAM ロールと付けるポリシー（引き受ける相手・ロール・ポリシー・許す対象） |

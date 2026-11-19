@@ -1,0 +1,9 @@
+# DB のサーバーリストの見本（list_instances.rb --server-list に渡す形）。実際の DB からの書き出しの形は未確定。
+# タブ区切り。# で始まる行と空の行は読まない。# でない最初の行が見出しで、ホスト名・サーバータイプの列を見出しの名前で選ぶ
+# （既定 host・type。違う名前なら --server-list-host-column・--server-list-type-column で合わせる）。ほかの列はあってもよい。
+# 1 つの環境（この見本は staging）の台だけを書き出す。ホスト名は FQDN でも短い名前（Route 53 の名前の最初のラベルと比べる）でもよい。
+host	type	memo
+web-staging-1.example.com	web	FQDN で書いた台
+web-staging-2	web	短い名前で書いた台（Route 53 の web-staging-2.example.com と合う）
+WEB-STAGING-3.EXAMPLE.COM.	web	大文字・末尾の . は区別しない
+batch-staging-1.example.com	batch	

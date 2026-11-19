@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" role="img" aria-labelledby="title desc">
   <title id="title">ルールの更新の IAM ロールとポリシー</title>
-  <desc id="desc">ルールの更新に関わる IAM ロールとポリシー。更新対象サーバーの IAM ロール（既存）は EC2 インスタンスが引き受け、AmazonSSMManagedInstanceCore（AWS 管理）とルールの読み取りポリシー port-guard-rule-read-&lt;環境&gt;（カスタマー管理。ルールのデプロイ先の s3:GetObject だけ）を付ける。関連付けのロールは State Manager（ssm.amazonaws.com）が引き受け、インラインポリシーでルールの更新ドキュメントを EC2 に送る ssm:SendCommand だけを許す。失敗の通知の規則の実行ロールは EventBridge（events.amazonaws.com）が引き受け、インラインポリシーで SNS のトピックへの sns:Publish だけを許す。作業者の IAM ユーザー・ロールには、決まった管理ポリシーを用意していない。</desc>
+  <desc id="desc">ルールの更新に関わる IAM ロールとポリシー。更新対象サーバーの IAM ロール（既存）は EC2 インスタンスが引き受け、AmazonSSMManagedInstanceCore（AWS 管理）とルールの読み取りポリシー ip-port-guard-rules-read-&lt;環境&gt;（カスタマー管理。ルールのデプロイ先の s3:GetObject だけ）を付ける。関連付けのロールは State Manager（ssm.amazonaws.com）が引き受け、インラインポリシーでルールの更新ドキュメントを EC2 に送る ssm:SendCommand だけを許す。失敗の通知の規則の実行ロールは EventBridge（events.amazonaws.com）が引き受け、インラインポリシーで SNS のトピックへの sns:Publish だけを許す。作業者の IAM ユーザー・ロールには、決まった管理ポリシーを用意していない。</desc>
   <defs>
     <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
       <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
@@ -60,7 +60,7 @@
 
   <rect x="570" y="162" width="300" height="72" rx="8" class="pol-cust"/>
   <text x="720" y="181" class="kind" fill="#d97706">カスタマー管理ポリシー（rule-read-policy.yml）</text>
-  <text x="720" y="203" class="name">port-guard-rule-read-&lt;環境&gt;</text>
+  <text x="720" y="203" class="name">ip-port-guard-rules-read-&lt;環境&gt;</text>
   <text x="720" y="224" class="mono">s3:GetObject だけ</text>
 
   <rect x="910" y="80" width="260" height="72" rx="8" class="res"/>

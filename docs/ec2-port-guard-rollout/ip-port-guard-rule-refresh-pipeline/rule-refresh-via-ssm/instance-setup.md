@@ -105,6 +105,8 @@ aws iam attach-role-policy --role-name <ロールの名前> \
 # 環境のタグで引き、SSM で応答する台をインスタンスの一覧ファイルに書き出す
 ruby rb/list_instances.rb --env staging
 # instance-lists/staging.tsv を目で確かめ、要らない行を消す（外した台の表示も見る）
+# Route 53 の名前と DB のサーバーリストとも照合するなら（差分は警告で出る。一覧に入る台は変わらない）:
+#   ruby rb/list_instances.rb --env staging --hosted-zone-id Z0123456789ABC --server-list db-servers-staging.tsv --overwrite
 
 # 流す（対象と取得元を表示し、y を受けてから送る。1 台ずつ、1 台でも失敗したら残りは流さない）
 ruby rb/refresh_rules.rb --env staging

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-# 環境のタグで適用対象サーバーを引き、SSM に登録されていて応答する台だけを、インスタンスの一覧ファイルに書き出す（読み取りだけ）。
-# 列は「インスタンス ID・パブリック IP・Name タグ」（タブ区切り）。人が目で確かめて要らない行を消してから、apply_rules.rb に渡す。
+# 環境のタグで更新対象サーバーを引き、SSM に登録されていて応答する台だけを、インスタンスの一覧ファイルに書き出す（読み取りだけ）。
+# 列は「インスタンス ID・パブリック IP・Name タグ」（タブ区切り）。人が目で確かめて要らない行を消してから、refresh_rules.rb に渡す。
 #
 #   ruby rb/list_instances.rb --env staging [--tag-key Environment] [--tag-value staging] [--out FILE] [--overwrite]
 #                             [--profile NAME] [--region NAME]
@@ -56,4 +56,4 @@ puts lines
 puts
 excluded.each { |row| puts "外した（SSM で応答しない）: #{row.join("\t")}" }
 puts "書き出した: #{out_path}（#{targets.size} 台。外した台 #{excluded.size} 台）"
-puts '目で確かめ、要らない行を消してから apply_rules.rb に渡す' unless targets.empty?
+puts '目で確かめ、要らない行を消してから refresh_rules.rb に渡す' unless targets.empty?

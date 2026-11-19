@@ -1,17 +1,17 @@
-# ルールの適用ドキュメント。ルールの適用スクリプト（ルールのデプロイ先から照合の値と ipset 入れ替えスクリプトを取り、照合してから流す）の正本。
-# 手動の適用（rb/apply_rules.rb）と定期適用（scheduled-apply.yml の関連付け）の両方が、このドキュメントを流す。
+# ルールの更新ドキュメント。ルールの更新スクリプト（ルールのデプロイ先から照合の値と ipset 入れ替えスクリプトを取り、照合してから流す）の正本。
+# 手動の更新（rb/refresh_rules.rb）と定期更新（scheduled-refresh.yml の関連付け）の両方が、このドキュメントを流す。
 # アカウント・リージョンに 1 つ（環境の間で共用する。環境ごとに違う値はパラメータで受け取る）。
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Port-guard rule apply document (fetch the rules from the rule deploy location, verify them, and swap the ipset sets).
+Description: Port-guard rule refresh document (fetch the rules from the rule deploy location, verify them, and swap the ipset sets).
 
 Parameters:
-  # ドキュメントの名前。apply_rules.rb の --document-name と scheduled-apply.yml の DocumentName の既定に合わせる。
+  # ドキュメントの名前。refresh_rules.rb の --document-name と scheduled-refresh.yml の DocumentName の既定に合わせる。
   DocumentName:
     Type: String
-    Default: port-guard-apply-rules
+    Default: port-guard-refresh-rules
 
 Resources:
-  RuleApplyDocument:
+  RuleRefreshDocument:
     Type: AWS::SSM::Document
     Properties:
       Name: !Ref DocumentName
@@ -34,29 +34,29 @@ Resources:
             type: String
             description: ルールのデプロイ先バケットのリージョン
             allowedPattern: '^[a-z]{2}(-[a-z]+)+-[0-9]$'
-          ApplyIpv6:
+          IncludeIpv6:
             type: String
             description: 1 なら refresh-ipv6.sh も流す（IPv6 も絞っている台）
             allowedValues: ['0', '1']
             default: '0'
         mainSteps:
           - action: aws:runShellScript
-            name: applyRules
+            name: refreshRules
             inputs:
               timeoutSeconds: '600'
               runCommand:
                 - |
                   #!/bin/bash
-                  # ルールの適用スクリプト（root で流れる）。値はドキュメントのパラメータから入る。
+                  # ルールの更新スクリプト（root で流れる）。値はドキュメントのパラメータから入る。
                   set -euo pipefail
                   PG_S3_URI='{{ S3Uri }}'
                   PG_REGION='{{ Region }}'
-                  PG_APPLY_IPV6='{{ ApplyIpv6 }}'
-                  echo "== $(hostname) $(date '+%F %T') apply-rules ${PG_S3_URI}"
+                  PG_INCLUDE_IPV6='{{ IncludeIpv6 }}'
+                  echo "== $(hostname) $(date '+%F %T') refresh-rules ${PG_S3_URI}"
                   command -v aws > /dev/null || { echo "PG blocked=aws-cli-not-found（AWS CLI がない）"; exit 1; }
 
                   files=(command/port_guard/refresh-ipv4.sh)
-                  [ "$PG_APPLY_IPV6" = 1 ] && files+=(command/port_guard/refresh-ipv6.sh)
+                  [ "$PG_INCLUDE_IPV6" = 1 ] && files+=(command/port_guard/refresh-ipv6.sh)
 
                   work=$(mktemp -d /tmp/port-guard-rules.XXXXXX)
                   trap 'rm -rf "$work"' EXIT
@@ -84,16 +84,16 @@ Resources:
                     bash "$f"
                   done
 
-                  # 4. 適用の記録フォルダに、流した ipset 入れ替えスクリプトの写しと日時を残す
+                  # 4. 更新の記録フォルダに、流した ipset 入れ替えスクリプトの写しと日時を残す
                   install -d -m 755 /var/lib/port-guard/rules
                   for f in "${files[@]}"; do
                     install -m 644 "$f" "/var/lib/port-guard/rules/$(basename "$f")"
                   done
                   install -m 644 SHA256SUMS /var/lib/port-guard/rules/SHA256SUMS
-                  echo "$(date '+%F %T') ${PG_S3_URI}" > /var/lib/port-guard/rules/last-applied
-                  echo "PG result=applied"
+                  echo "$(date '+%F %T') ${PG_S3_URI}" > /var/lib/port-guard/rules/last-refreshed
+                  echo "PG result=refreshed"
 
 Outputs:
-  # apply_rules.rb の --document-name と、scheduled-apply.yml の DocumentName に渡す。
-  RuleApplyDocumentName:
-    Value: !Ref RuleApplyDocument
+  # refresh_rules.rb の --document-name と、scheduled-refresh.yml の DocumentName に渡す。
+  RuleRefreshDocumentName:
+    Value: !Ref RuleRefreshDocument

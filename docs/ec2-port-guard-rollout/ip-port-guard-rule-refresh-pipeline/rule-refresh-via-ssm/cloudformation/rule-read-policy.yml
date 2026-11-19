@@ -1,4 +1,4 @@
-# ルールの読み取りポリシー。適用対象サーバーの IAM ロールに付け、その環境のルールのデプロイ先からルールを読めるようにする。
+# ルールの読み取りポリシー。更新対象サーバーの IAM ロールに付け、その環境のルールのデプロイ先からルールを読めるようにする。
 # 環境ごとに 1 つのスタック。ロールへの付与は、このスタックでは行わず、aws iam attach-role-policy で行う（ロールは既存のもの）。
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Port-guard rule read policy for the servers of one environment (attach it to the instance roles).

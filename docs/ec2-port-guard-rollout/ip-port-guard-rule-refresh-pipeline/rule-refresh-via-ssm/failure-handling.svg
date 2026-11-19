@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 560" width="1100" height="560" role="img" aria-labelledby="title desc">
+  <title id="title">定期更新のエラーの定義と取り扱い</title>
+  <desc id="desc">各更新対象サーバーでは、取得・照合・ipset の入れ替え・記録の順に進む。取得の失敗（S3 を読めない）、照合の失敗（上げている途中）、入れ替えの失敗（集合がない・件数が下限未満）のどれでも、その台は Failed になり、その台のルールは前のまま残る。ほかの台は止めない。失敗した台は関連付けの実行の履歴（正本）に残り、失敗の通知の規則（AWS::Events::Rule）が SNS へ台ごとに 1 通送る。次の予定で自動で流し直すか、原因を直して refresh_rules.rb でその台だけ流す。</desc>
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#475569"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif; }
+    .step { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; filter: url(#shadow); }
+    .ok   { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2; filter: url(#shadow); }
+    .ng   { fill: #fef2f2; stroke: #dc2626; stroke-width: 1.5; stroke-dasharray: 5 3; }
+    .failed { fill: #fef2f2; stroke: #dc2626; stroke-width: 2; filter: url(#shadow); }
+    .hist { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; filter: url(#shadow); }
+    .evt  { fill: #f5f3ff; stroke: #7c3aed; stroke-width: 2; filter: url(#shadow); }
+    .act  { fill: #ffffff; stroke: #64748b; stroke-width: 2; filter: url(#shadow); }
+    .title { font-size: 18px; font-weight: 700; fill: #0f172a; }
+    .phase { font-size: 13px; font-weight: 700; fill: #64748b; }
+    .name { font-size: 14px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+    .name-red { font-size: 14px; font-weight: 700; fill: #b91c1c; text-anchor: middle; }
+    .sub  { font-size: 12.5px; fill: #475569; text-anchor: middle; }
+    .sub-red { font-size: 12px; fill: #991b1b; text-anchor: middle; }
+    .mono { font-size: 11px; fill: #334155; text-anchor: middle; font-family: Menlo, Consolas, monospace; }
+    .line { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .line-red { stroke: #dc2626; stroke-width: 1.5; fill: none; stroke-dasharray: 4 3; marker-end: url(#arrow-red); }
+  </style>
+
+  <rect width="1100" height="560" fill="#ffffff"/>
+  <text x="30" y="36" class="title">定期更新のエラーの定義と取り扱い</text>
+  <text x="40" y="66" class="phase">各更新対象サーバー（全台に並列。1 台の失敗でほかの台は止めない）</text>
+
+  <!-- 台の中の段階 -->
+  <rect x="40" y="80" width="200" height="70" rx="8" class="step"/>
+  <text x="140" y="104" class="name">1. 取得</text>
+  <text x="140" y="126" class="sub">SHA256SUMS と</text>
+  <text x="140" y="142" class="sub">ipset 入れ替えスクリプト</text>
+  <rect x="270" y="80" width="200" height="70" rx="8" class="step"/>
+  <text x="370" y="108" class="name">2. 照合</text>
+  <text x="370" y="130" class="sub">sha256sum -c</text>
+  <rect x="500" y="80" width="200" height="70" rx="8" class="step"/>
+  <text x="600" y="108" class="name">3. ipset の入れ替え</text>
+  <text x="600" y="130" class="sub">一時の集合 → ipset swap</text>
+  <rect x="730" y="80" width="200" height="70" rx="8" class="step"/>
+  <text x="830" y="108" class="name">4. 記録</text>
+  <text x="830" y="130" class="sub">/var/lib/port-guard/rules/</text>
+  <rect x="960" y="80" width="110" height="70" rx="8" class="ok"/>
+  <text x="1015" y="110" class="name">Success</text>
+  <text x="1015" y="130" class="sub">新しいルール</text>
+  <line x1="240" y1="115" x2="266" y2="115" class="line"/>
+  <line x1="470" y1="115" x2="496" y2="115" class="line"/>
+  <line x1="700" y1="115" x2="726" y2="115" class="line"/>
+  <line x1="930" y1="115" x2="956" y2="115" class="line"/>
+
+  <!-- エラーの定義（段階ごと） -->
+  <rect x="40" y="180" width="200" height="80" rx="8" class="ng"/>
+  <text x="140" y="204" class="name-red">S3 を読めない</text>
+  <text x="140" y="226" class="sub-red">読み取りポリシーがない・</text>
+  <text x="140" y="244" class="sub-red">経路がない・ルールがない</text>
+  <rect x="270" y="180" width="200" height="80" rx="8" class="ng"/>
+  <text x="370" y="204" class="name-red">照合の値と合わない</text>
+  <text x="370" y="226" class="sub-red">ルールを上げている途中</text>
+  <text x="370" y="244" class="sub-red">PG blocked=checksum-mismatch</text>
+  <rect x="500" y="180" width="200" height="80" rx="8" class="ng"/>
+  <text x="600" y="204" class="name-red">入れ替えで止まる</text>
+  <text x="600" y="226" class="sub-red">集合がない（初期設定の前）・</text>
+  <text x="600" y="244" class="sub-red">件数が下限未満</text>
+  <line x1="140" y1="150" x2="140" y2="176" class="line-red"/>
+  <line x1="370" y1="150" x2="370" y2="176" class="line-red"/>
+  <line x1="600" y1="150" x2="600" y2="176" class="line-red"/>
+
+  <!-- その台は Failed -->
+  <rect x="40" y="300" width="660" height="64" rx="8" class="failed"/>
+  <text x="370" y="326" class="name-red">その台は Failed（何も変えずに止まる）</text>
+  <text x="370" y="348" class="sub-red">その台のルールは前のまま（絞り込みは前の一覧で効き続ける）。ほかの台は流し続ける（MaxErrors 100%）</text>
+  <line x1="140" y1="260" x2="140" y2="296" class="line-red"/>
+  <line x1="370" y1="260" x2="370" y2="296" class="line-red"/>
+  <line x1="600" y1="260" x2="600" y2="296" class="line-red"/>
+
+  <!-- 対処 -->
+  <rect x="740" y="286" width="330" height="96" rx="8" class="act"/>
+  <text x="905" y="310" class="name">対処</text>
+  <text x="905" y="332" class="sub">次の予定（月曜 → 木曜）で自動で流し直す</text>
+  <text x="905" y="352" class="sub">急ぐときは原因を直し、refresh_rules.rb で</text>
+  <text x="905" y="370" class="sub">その台だけ流す</text>
+  <line x1="700" y1="332" x2="736" y2="332" class="line"/>
+
+  <!-- 記録と通知 -->
+  <text x="40" y="410" class="phase">失敗した台の分かり方</text>
+  <rect x="40" y="420" width="320" height="110" rx="8" class="hist"/>
+  <text x="200" y="446" class="name">関連付けの実行の履歴（正本）</text>
+  <text x="200" y="468" class="sub">実行ごと・台ごとの結果が残る</text>
+  <text x="200" y="492" class="mono">describe-association-execution-targets</text>
+  <text x="200" y="510" class="mono">--filters Key=Status,Value=Failed</text>
+
+  <rect x="390" y="420" width="420" height="110" rx="8" class="evt"/>
+  <text x="600" y="446" class="name">失敗の通知の規則（AWS::Events::Rule）</text>
+  <text x="600" y="468" class="mono">detail-type: EC2 State Manager Instance</text>
+  <text x="600" y="484" class="mono">  Association State Change</text>
+  <text x="600" y="502" class="mono">status: Failed / association-id: 月曜・木曜の分</text>
+  <text x="600" y="520" class="sub">イベントは取りこぼすことがある</text>
+
+  <rect x="840" y="420" width="230" height="110" rx="8" class="evt"/>
+  <text x="955" y="452" class="name">SNS → メール</text>
+  <text x="955" y="476" class="sub">失敗した台ごとに 1 通</text>
+  <text x="955" y="496" class="sub">インスタンス ID・時刻・</text>
+  <text x="955" y="514" class="sub">エラーのコード・確かめ方</text>
+
+  <line x1="200" y1="364" x2="200" y2="416" class="line"/>
+  <line x1="600" y1="364" x2="600" y2="416" class="line"/>
+  <line x1="810" y1="475" x2="836" y2="475" class="line"/>
+</svg>

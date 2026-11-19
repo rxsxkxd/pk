@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1290 285" width="1290" height="285" role="img" aria-labelledby="title desc">
+  <title id="title">ルールの更新の設定のステップ</title>
+  <desc id="desc">ルールの更新の設定のステップ。ステップ 1 でルールの更新ドキュメントを作り（アカウントに 1 回）、ステップ 2 でルールの読み取りポリシーを作る（環境ごと）。ステップ 3〜5 で台ごとに前提を確かめ、環境のタグを付け、IAM ロールにポリシーを付ける。ステップ 6 で手動の更新で確かめ、ステップ 7 で定期更新を始め、ステップ 8 で最初の予定のあとに実行の履歴を確かめる。手順は instance-setup.md。</desc>
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif; }
+    .block-doc  { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; filter: url(#shadow); }
+    .block-pol  { fill: #fffbeb; stroke: #d97706; stroke-width: 2; filter: url(#shadow); }
+    .block-ec2  { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; filter: url(#shadow); }
+    .block-man  { fill: #f8fafc; stroke: #475569; stroke-width: 2; stroke-dasharray: 5 3; filter: url(#shadow); }
+    .block-sch  { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; filter: url(#shadow); }
+    .block-chk  { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2; filter: url(#shadow); }
+    .phase { font-size: 13px; font-weight: 700; fill: #64748b; }
+    .badge { font-size: 12px; font-weight: 700; text-anchor: middle; }
+    .name { font-size: 15px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+    .sub { font-size: 12.5px; fill: #475569; text-anchor: middle; }
+    .file { font-size: 11.5px; fill: #334155; text-anchor: middle; font-family: Menlo, Consolas, monospace; }
+    .unit { font-size: 11px; fill: #64748b; text-anchor: middle; }
+  </style>
+
+  <rect width="1290" height="285" fill="#ffffff"/>
+
+  <!-- ステップ 1: ルールの更新ドキュメント -->
+  <text x="20" y="40" class="phase">アカウントに 1 回</text>
+  <g transform="translate(20, 60)">
+    <path d="M 6,0 L 160,0 L 200,100 L 160,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-doc"/>
+    <text x="90" y="34" class="badge" fill="#2563eb">ステップ 1</text>
+    <text x="90" y="84" class="name">ルールの更新</text>
+    <text x="90" y="104" class="name">ドキュメント</text>
+    <text x="90" y="132" class="file">rule-refresh-</text>
+    <text x="90" y="148" class="file">document.yml</text>
+    <text x="90" y="176" class="unit">スクリプトの正本</text>
+  </g>
+
+  <!-- ステップ 2: ルールの読み取りポリシー -->
+  <text x="230" y="40" class="phase">環境ごとに 1 回</text>
+  <g transform="translate(230, 60)">
+    <path d="M 6,0 L 160,0 L 200,100 L 160,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-pol"/>
+    <text x="90" y="34" class="badge" fill="#d97706">ステップ 2</text>
+    <text x="90" y="84" class="name">ルールの</text>
+    <text x="90" y="104" class="name">読み取りポリシー</text>
+    <text x="90" y="132" class="file">rule-read-</text>
+    <text x="90" y="148" class="file">policy.yml</text>
+    <text x="90" y="176" class="unit">S3 の読み取りだけ</text>
+  </g>
+
+  <!-- ステップ 3〜5: 台の準備 -->
+  <text x="440" y="40" class="phase">台ごと（台を足すときも）</text>
+  <g transform="translate(440, 60)">
+    <path d="M 6,0 L 160,0 L 200,100 L 160,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-ec2"/>
+    <text x="90" y="34" class="badge" fill="#ea580c">ステップ 3〜5</text>
+    <text x="90" y="84" class="name">台の準備</text>
+    <text x="90" y="112" class="sub">前提を確かめる</text>
+    <text x="90" y="132" class="sub">環境のタグを付ける</text>
+    <text x="90" y="152" class="sub">IAM ロールに</text>
+    <text x="90" y="170" class="sub">ポリシーを付ける</text>
+  </g>
+
+  <!-- ステップ 6: 手動の更新で確かめる -->
+  <text x="650" y="40" class="phase">環境ごと</text>
+  <g transform="translate(650, 60)">
+    <path d="M 6,0 L 160,0 L 200,100 L 160,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-man"/>
+    <text x="90" y="34" class="badge" fill="#475569">ステップ 6</text>
+    <text x="90" y="84" class="name">手動の更新で</text>
+    <text x="90" y="104" class="name">確かめる</text>
+    <text x="90" y="132" class="file">list_instances.rb</text>
+    <text x="90" y="150" class="file">→ refresh_rules.rb</text>
+    <text x="90" y="176" class="unit">人が一覧を確かめる</text>
+  </g>
+
+  <!-- ステップ 7: 定期更新を始める -->
+  <text x="860" y="40" class="phase">環境ごとに 1 回</text>
+  <g transform="translate(860, 60)">
+    <path d="M 6,0 L 160,0 L 200,100 L 160,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-sch"/>
+    <text x="90" y="34" class="badge" fill="#2563eb">ステップ 7</text>
+    <text x="90" y="84" class="name">定期更新を始める</text>
+    <text x="90" y="112" class="file">scheduled-</text>
+    <text x="90" y="128" class="file">refresh.yml</text>
+    <text x="90" y="154" class="sub">月曜・木曜 11:00</text>
+    <text x="90" y="174" class="unit">失敗の通知の規則も</text>
+  </g>
+
+  <!-- ステップ 8: 実行の履歴を確かめる -->
+  <text x="1070" y="40" class="phase">最初の予定のあと</text>
+  <g transform="translate(1070, 60)">
+    <path d="M 6,0 L 160,0 L 200,100 L 160,200 L 6,200 Q 0,200 0,194 L 0,6 Q 0,0 6,0 Z" class="block-chk"/>
+    <text x="90" y="34" class="badge" fill="#16a34a">ステップ 8</text>
+    <text x="90" y="84" class="name">実行の履歴を</text>
+    <text x="90" y="104" class="name">確かめる</text>
+    <text x="90" y="132" class="sub">全台が Success か</text>
+    <text x="90" y="176" class="unit">関連付けの実行の履歴</text>
+  </g>
+</svg>

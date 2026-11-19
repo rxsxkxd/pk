@@ -1,9 +1,9 @@
-# ルールの定期適用（環境ごとに 1 つのスタック）。
-# 定期適用の関連付けを 2 つ（月曜・木曜の日本時間 11:00）、関連付けのロール、失敗の通知の規則（任意）を作る。
-# 先に rule-apply-document.yml（ルールの適用ドキュメント）と rule-read-policy.yml（ルールの読み取りポリシー）が要る。
-# 設計は ../scheduled-apply-design.md、手順は ../instance-setup.md。
+# ルールの定期更新（環境ごとに 1 つのスタック）。
+# 定期更新の関連付けを 2 つ（月曜・木曜の日本時間 11:00）、関連付けのロール、失敗の通知の規則（任意）を作る。
+# 先に rule-refresh-document.yml（ルールの更新ドキュメント）と rule-read-policy.yml（ルールの読み取りポリシー）が要る。
+# 設計は ../scheduled-refresh-design.md、手順は ../instance-setup.md。
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Port-guard scheduled rule apply for one environment (State Manager associations on Monday and Thursday, and failure notification).
+Description: Port-guard scheduled rule refresh for one environment (State Manager associations on Monday and Thursday, and failure notification).
 
 Parameters:
   # 環境の名前。ルールのデプロイ先 port-guard/<環境>/current と、関連付けの名前に使う。
@@ -17,16 +17,24 @@ Parameters:
   TagValue:
     Type: String
     Default: ''
-  # ルールの適用ドキュメントの名前（rule-apply-document.yml の DocumentName）。
+  # 用途タグ。定期更新に入れる台だけに付ける（環境のタグに加えて）。両方のタグが付いた台だけに流す。
+  # 実際のキーと値は決まっていない（仮の既定）。
+  PurposeTagKey:
+    Type: String
+    Default: PortGuardScheduledRefresh
+  PurposeTagValue:
+    Type: String
+    Default: 'true'
+  # ルールの更新ドキュメントの名前（rule-refresh-document.yml の DocumentName）。
   DocumentName:
     Type: String
-    Default: port-guard-apply-rules
+    Default: port-guard-refresh-rules
   # ルールのデプロイ先バケットの名前の先頭部分。実際の名前は <先頭部分>-<アカウント ID>-<リージョン>-an。
   RuleDeployBucketNamePrefix:
     Type: String
     Default: ip-port-guard-rules
   # 1 なら refresh-ipv6.sh も流す（IPv6 も絞っている環境）。
-  ApplyIpv6:
+  IncludeIpv6:
     Type: String
     Default: '0'
     AllowedValues: ['0', '1']
@@ -48,13 +56,13 @@ Conditions:
   NotifyFailures: !Not [!Equals [!Ref NotificationTopicArn, '']]
 
 Resources:
-  # 関連付けのロール。定期適用の関連付けが、適用対象サーバーにルールの適用ドキュメントを送るときに使う。
+  # 関連付けのロール。定期更新の関連付けが、更新対象サーバーにルールの更新ドキュメントを送るときに使う。
   # 信頼する相手は ssm.amazonaws.com、許すことは ssm:SendCommand だけ（AWS のドキュメント「Setup roles for AssociationDispatchAssumeRole」）。
   AssociationDispatchRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub port-guard-apply-rules-dispatch-${EnvironmentName}
-      Description: !Sub State Manager dispatch role for the port-guard scheduled rule apply (${EnvironmentName})
+      RoleName: !Sub port-guard-refresh-rules-dispatch-${EnvironmentName}
+      Description: !Sub State Manager dispatch role for the port-guard scheduled rule refresh (${EnvironmentName})
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -62,31 +70,34 @@ Resources:
             Principal: {Service: ssm.amazonaws.com}
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: send-rule-apply-document
+        - PolicyName: send-rule-refresh-document
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              # [変更] ルールの適用ドキュメントだけを、EC2 のインスタンスに送る。
-              - Sid: SendRuleApplyDocument
+              # [変更] ルールの更新ドキュメントだけを、EC2 のインスタンスに送る。
+              - Sid: SendRuleRefreshDocument
                 Effect: Allow
                 Action: ssm:SendCommand
                 Resource:
                   - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${DocumentName}
                   - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
 
-  # 定期適用の関連付け（月曜の分）。全台に並列で流し、失敗した台があっても残りの台に流し続ける。
+  # 定期更新の関連付け（月曜の分）。全台に並列で流し、失敗した台があっても残りの台に流し続ける。
   MondayAssociation:
     Type: AWS::SSM::Association
     Properties:
-      AssociationName: !Sub port-guard-apply-rules-${EnvironmentName}-mon
+      AssociationName: !Sub port-guard-refresh-rules-${EnvironmentName}-mon
       Name: !Ref DocumentName
       Targets:
+        # 環境のタグと用途タグの両方が付いた台だけ（複数のタグのキーを書くと、すべてが付いた台だけが対象になる）。
         - Key: !Sub tag:${TagKey}
           Values: [!If [TagValueIsEnvironment, !Ref EnvironmentName, !Ref TagValue]]
+        - Key: !Sub tag:${PurposeTagKey}
+          Values: [!Ref PurposeTagValue]
       Parameters:
         S3Uri: [!Sub 's3://${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current']
         Region: [!Ref AWS::Region]
-        ApplyIpv6: [!Ref ApplyIpv6]
+        IncludeIpv6: [!Ref IncludeIpv6]
       ScheduleExpression: !Ref MondaySchedule
       # 作った直後と、台が初めてオンラインになったときには流さず、予定の時刻にだけ流す。
       ApplyOnlyAtCronInterval: true
@@ -94,19 +105,22 @@ Resources:
       MaxErrors: '100%'
       AssociationDispatchAssumeRole: !GetAtt AssociationDispatchRole.Arn
 
-  # 定期適用の関連付け（木曜の分）。予定と名前のほかは月曜の分と同じ。
+  # 定期更新の関連付け（木曜の分）。予定と名前のほかは月曜の分と同じ。
   ThursdayAssociation:
     Type: AWS::SSM::Association
     Properties:
-      AssociationName: !Sub port-guard-apply-rules-${EnvironmentName}-thu
+      AssociationName: !Sub port-guard-refresh-rules-${EnvironmentName}-thu
       Name: !Ref DocumentName
       Targets:
+        # 環境のタグと用途タグの両方が付いた台だけ（複数のタグのキーを書くと、すべてが付いた台だけが対象になる）。
         - Key: !Sub tag:${TagKey}
           Values: [!If [TagValueIsEnvironment, !Ref EnvironmentName, !Ref TagValue]]
+        - Key: !Sub tag:${PurposeTagKey}
+          Values: [!Ref PurposeTagValue]
       Parameters:
         S3Uri: [!Sub 's3://${RuleDeployBucketNamePrefix}-${AWS::AccountId}-${AWS::Region}-an/port-guard/${EnvironmentName}/current']
         Region: [!Ref AWS::Region]
-        ApplyIpv6: [!Ref ApplyIpv6]
+        IncludeIpv6: [!Ref IncludeIpv6]
       ScheduleExpression: !Ref ThursdaySchedule
       ApplyOnlyAtCronInterval: true
       MaxConcurrency: '100%'
@@ -119,7 +133,7 @@ Resources:
     Type: AWS::IAM::Role
     Condition: NotifyFailures
     Properties:
-      Description: !Sub EventBridge role that publishes port-guard scheduled apply failures (${EnvironmentName})
+      Description: !Sub EventBridge role that publishes port-guard scheduled rule refresh failures (${EnvironmentName})
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -136,14 +150,14 @@ Resources:
                 Action: sns:Publish
                 Resource: !Ref NotificationTopicArn
 
-  # 失敗の通知の規則。定期適用の関連付け（2 つ）の、台ごとの結果が Failed になったら、台ごとに 1 通送る。
+  # 失敗の通知の規則。定期更新の関連付け（2 つ）の、台ごとの結果が Failed になったら、台ごとに 1 通送る。
   # EventBridge のイベントは取りこぼすことがあるので、正本は関連付けの実行の履歴（instance-setup.md の「失敗した台を確かめる」）。
   FailureNotificationRule:
     Type: AWS::Events::Rule
     Condition: NotifyFailures
     Properties:
-      Name: !Sub port-guard-apply-rules-${EnvironmentName}-failed
-      Description: !Sub Notify the instances where the port-guard scheduled rule apply failed (${EnvironmentName})
+      Name: !Sub port-guard-refresh-rules-${EnvironmentName}-failed
+      Description: !Sub Notify the instances where the port-guard scheduled rule refresh failed (${EnvironmentName})
       State: ENABLED
       EventPattern:
         source: [aws.ssm]
@@ -164,7 +178,7 @@ Resources:
               time: $.time
               code: $.detail.error-code
               summary: $.detail.execution-summary
-            InputTemplate: !Sub '"port-guard のルールの定期適用（${EnvironmentName}）が失敗した台: <instance>。時刻（UTC）: <time>。関連付け: <association>。エラー: <code> <summary>。確かめ方: aws ssm describe-association-executions --association-id <association> で実行の ID を調べ、aws ssm describe-association-execution-targets --association-id <association> --execution-id <実行の ID> --filters Key=Status,Value=Failed。流し直すときは apply_rules.rb でその台だけ流す。"'
+            InputTemplate: !Sub '"port-guard のルールの定期更新（${EnvironmentName}）が失敗した台: <instance>。時刻（UTC）: <time>。関連付け: <association>。エラー: <code> <summary>。確かめ方: aws ssm describe-association-executions --association-id <association> で実行の ID を調べ、aws ssm describe-association-execution-targets --association-id <association> --execution-id <実行の ID> --filters Key=Status,Value=Failed。流し直すときは refresh_rules.rb でその台だけ流す。"'
 
 Outputs:
   MondayAssociationId:

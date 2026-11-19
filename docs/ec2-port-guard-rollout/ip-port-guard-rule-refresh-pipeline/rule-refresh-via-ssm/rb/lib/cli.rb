@@ -8,7 +8,7 @@ require_relative 'aws_cli'
 module Cli
   ENVIRONMENTS = %w[development staging production].freeze
   ID_PATTERN = /\Ai-[0-9a-f]{8}([0-9a-f]{9})?\z/.freeze
-  # このフォルダ（rule-apply-via-ssm/）
+  # このフォルダ（rule-refresh-via-ssm/）
   BASE_DIR = File.expand_path('../..', __dir__)
 
   module_function

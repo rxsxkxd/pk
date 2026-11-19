@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" width="1000" height="420" role="img" aria-labelledby="title desc">
+  <title id="title">定期更新の予定</title>
+  <desc id="desc">毎週月曜と木曜の日本時間 9:00 に CodePipeline がルールを作ってルールのデプロイ先（S3）に上げ、2 時間後の 11:00 に定期更新の関連付けが全台のルールを更新する。CodePipeline の予定は 1 つ（cron(0 0 ? * MON,THU *)）、関連付けは曜日を 1 つしか書けないので月曜の分と木曜の分の 2 つ。時刻は UTC で書く。</desc>
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif; }
+    .box-pipe { fill: #f8fafc; stroke: #475569; stroke-width: 2; filter: url(#shadow); }
+    .box-ssm  { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; filter: url(#shadow); }
+    .lane { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; }
+    .axis { stroke: #94a3b8; stroke-width: 2; }
+    .tick { stroke: #94a3b8; stroke-width: 2; }
+    .drop { stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 4 3; }
+    .title { font-size: 18px; font-weight: 700; fill: #0f172a; }
+    .day { font-size: 16px; font-weight: 700; fill: #0f172a; }
+    .name { font-size: 14px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+    .sub  { font-size: 12.5px; fill: #475569; text-anchor: middle; }
+    .time { font-size: 12px; fill: #64748b; text-anchor: middle; }
+    .cron { font-size: 11.5px; fill: #334155; text-anchor: middle; font-family: Menlo, Consolas, monospace; }
+    .label { font-size: 12px; font-weight: 600; fill: #1e293b; text-anchor: middle; }
+    .note { font-size: 12.5px; fill: #475569; }
+    .line { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+  </style>
+
+  <rect width="1000" height="420" fill="#ffffff"/>
+  <text x="30" y="36" class="title">定期実行のスケジュール（毎週月曜・木曜。時刻は日本時間）</text>
+
+  <!-- ========== 月曜 ========== -->
+  <rect x="20" y="60" width="960" height="140" rx="8" class="lane"/>
+  <text x="40" y="96" class="day">月曜</text>
+  <rect x="260" y="72" width="190" height="56" rx="8" class="box-pipe"/>
+  <text x="355" y="95" class="name">CodePipeline</text>
+  <text x="355" y="115" class="sub">ルールを作って S3 に上げる</text>
+  <rect x="650" y="72" width="190" height="56" rx="8" class="box-ssm"/>
+  <text x="745" y="95" class="name">定期更新の関連付け</text>
+  <text x="745" y="115" class="sub">全台のルールを更新（並列）</text>
+  <line x1="450" y1="100" x2="646" y2="100" class="line"/>
+  <text x="548" y="92" class="label">2 時間あける</text>
+  <line x1="355" y1="128" x2="355" y2="148" class="drop"/>
+  <line x1="745" y1="128" x2="745" y2="148" class="drop"/>
+  <line x1="160" y1="148" x2="940" y2="148" class="axis"/>
+  <line x1="160" y1="142" x2="160" y2="154" class="tick"/><text x="160" y="168" class="time">8:00</text>
+  <line x1="355" y1="142" x2="355" y2="154" class="tick"/><text x="355" y="168" class="time">9:00</text>
+  <line x1="550" y1="142" x2="550" y2="154" class="tick"/><text x="550" y="168" class="time">10:00</text>
+  <line x1="745" y1="142" x2="745" y2="154" class="tick"/><text x="745" y="168" class="time">11:00</text>
+  <line x1="940" y1="142" x2="940" y2="154" class="tick"/><text x="940" y="168" class="time">12:00</text>
+  <text x="355" y="188" class="cron">cron(0 0 ? * MON,THU *)</text>
+  <text x="745" y="188" class="cron">cron(0 2 ? * MON *)</text>
+
+  <!-- ========== 木曜 ========== -->
+  <rect x="20" y="215" width="960" height="140" rx="8" class="lane"/>
+  <text x="40" y="251" class="day">木曜</text>
+  <rect x="260" y="227" width="190" height="56" rx="8" class="box-pipe"/>
+  <text x="355" y="250" class="name">CodePipeline</text>
+  <text x="355" y="270" class="sub">ルールを作って S3 に上げる</text>
+  <rect x="650" y="227" width="190" height="56" rx="8" class="box-ssm"/>
+  <text x="745" y="250" class="name">定期更新の関連付け</text>
+  <text x="745" y="270" class="sub">全台のルールを更新（並列）</text>
+  <line x1="450" y1="255" x2="646" y2="255" class="line"/>
+  <text x="548" y="247" class="label">2 時間あける</text>
+  <line x1="355" y1="283" x2="355" y2="303" class="drop"/>
+  <line x1="745" y1="283" x2="745" y2="303" class="drop"/>
+  <line x1="160" y1="303" x2="940" y2="303" class="axis"/>
+  <line x1="160" y1="297" x2="160" y2="309" class="tick"/><text x="160" y="323" class="time">8:00</text>
+  <line x1="355" y1="297" x2="355" y2="309" class="tick"/><text x="355" y="323" class="time">9:00</text>
+  <line x1="550" y1="297" x2="550" y2="309" class="tick"/><text x="550" y="323" class="time">10:00</text>
+  <line x1="745" y1="297" x2="745" y2="309" class="tick"/><text x="745" y="323" class="time">11:00</text>
+  <line x1="940" y1="297" x2="940" y2="309" class="tick"/><text x="940" y="323" class="time">12:00</text>
+  <text x="355" y="343" class="cron">（月曜と同じ予定）</text>
+  <text x="745" y="343" class="cron">cron(0 2 ? * THU *)</text>
+
+  <text x="30" y="380" class="note">予定の式は UTC（日本時間 9:00 ＝ UTC 0:00、11:00 ＝ UTC 2:00）。</text>
+  <text x="30" y="402" class="note">関連付けの cron 式は曜日を 1 つしか書けないので、月曜の分と木曜の分の 2 つ。CodePipeline の予定は 1 つで MON,THU と書ける。</text>
+</svg>

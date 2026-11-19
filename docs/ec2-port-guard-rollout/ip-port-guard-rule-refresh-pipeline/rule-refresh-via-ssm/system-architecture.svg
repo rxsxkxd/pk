@@ -150,5 +150,6 @@
   <line x1="950" y1="530" x2="971" y2="530" class="line"/>
 
   <!-- 対象の台の管理のまとめ -->
-  <text x="30" y="672" class="tgt" style="text-anchor: start; font-size: 12.5px;">更新対象サーバーの一覧: 手動の更新は作業者の手元のインスタンスの一覧ファイル（環境のタグで引く）、定期更新は関連付けの Targets（AWS 側。環境のタグと用途タグの両方）で決まる。</text>
+  <text x="30" y="668" class="tgt" style="text-anchor: start; font-size: 12.5px;">更新対象サーバーの一覧: 手動の更新は作業者の手元のインスタンスの一覧ファイル（環境のタグで引き、人が確かめる）、</text>
+  <text x="30" y="688" class="tgt" style="text-anchor: start; font-size: 12.5px;">定期更新は関連付けの Targets（AWS 側。環境のタグと用途タグの両方が付いた台）で決まる。</text>
 </svg>

@@ -182,16 +182,23 @@ class StacksTest(unittest.TestCase):
                          f"s3://{outputs['RuleDeployBucketName']['Value']}/port-guard/staging/current")
 
     def test_pipeline_flow_and_buildspecs_match(self):
-        for provider, approval in [(p, a) for p in ("GitHub", "CodeCommit") for a in ("true", "false")]:
+        for provider in ("GitHub", "CodeCommit"):
             observed = []
             for template in (self.yaml_pipeline, self.cdk_pipelines[provider]):
-                resources, _ = evaluate(template, self.source_parameters[provider] | {"RequireApproval": approval})
+                resources, _ = evaluate(template, self.source_parameters[provider])
                 flow = next(iter(of_type(resources, "AWS::CodePipeline::Pipeline").values()))["Properties"]
                 self.assertEqual(flow["ExecutionMode"], "QUEUED")
                 self.assertEqual(flow["PipelineType"], "V2")
                 stages = flow["Stages"]
-                self.assertEqual([s["Name"] for s in stages],
-                                 ["Source", "Make", "Check", "Publish"] if approval == "true" else ["Source", "Make", "Publish"])
+                self.assertEqual([s["Name"] for s in stages], ["Source", "Make", "Check", "Publish"])
+                # 承認は開始の仕方で分ける: 変数 APPROVAL（既定値 required）が required でなければ Check を飛ばす
+                self.assertIn({"Name": "APPROVAL", "DefaultValue": "required"},
+                              [{k: v[k] for k in ("Name", "DefaultValue")} for v in flow["Variables"]])
+                self.assertEqual(stages[2]["BeforeEntry"], {"Conditions": [{"Result": "SKIP", "Rules": [{
+                    "Name": "ApprovalRequired",
+                    "RuleTypeId": {"Category": "Rule", "Owner": "AWS", "Provider": "VariableCheck", "Version": "1"},
+                    "Configuration": {"Variable": "#{variables.APPROVAL}", "Value": "required", "Operator": "EQ"}}]}]})
+                self.assertEqual(stages[2]["Actions"][0]["ActionTypeId"]["Provider"], "Manual")
                 action = stages[0]["Actions"][0]
                 source = action["Configuration"]
                 self.assertEqual(action["OutputArtifacts"], [{"Name": "SourceFiles"}])
@@ -253,21 +260,31 @@ class StacksTest(unittest.TestCase):
         for provider in ("GitHub", "CodeCommit"):
             for template in (self.yaml_pipeline, self.cdk_pipelines[provider]):
                 parameters = self.source_parameters[provider]
-                # 既定は毎週月曜・木曜の UTC 0:00
+                # 既定は毎週月曜・木曜の UTC 0:00。EventBridge Scheduler が APPROVAL=skip を付けて開始する（承認を飛ばす）
                 resources, _ = evaluate(template, parameters)
-                rules = list(of_type(resources, "AWS::Events::Rule").values())
-                self.assertEqual(len(rules), 1)
-                rule = rules[0]["Properties"]
-                self.assertEqual(rule["ScheduleExpression"], "cron(0 0 ? * MON,THU *)")
-                self.assertEqual(rule["State"], "ENABLED")
+                schedules = list(of_type(resources, "AWS::Scheduler::Schedule").values())
+                self.assertEqual(len(schedules), 1)
+                schedule = schedules[0]["Properties"]
+                self.assertEqual(schedule["ScheduleExpression"], "cron(0 0 ? * MON,THU *)")
+                self.assertEqual(schedule["ScheduleExpressionTimezone"], "UTC")
+                self.assertEqual(schedule["State"], "ENABLED")
+                self.assertEqual(schedule["FlexibleTimeWindow"], {"Mode": "OFF"})
+                target = schedule["Target"]
+                self.assertEqual(target["Arn"], "arn:aws:scheduler:::aws-sdk:codepipeline:startPipelineExecution")
+                self.assertEqual(json.loads(target["Input"]), {
+                    "Name": "port-guard-list-refresh-staging",
+                    "Variables": [{"Name": "APPROVAL", "Value": "skip"}]})
+                self.assertFalse(of_type(resources, "AWS::Events::Rule"))
+                role = next(r for k, r in resources.items() if k.startswith("ScheduleRole"))["Properties"]
+                self.assertEqual([s["Principal"] for s in role["AssumeRolePolicyDocument"]["Statement"]],
+                                 [{"Service": "scheduler.amazonaws.com"}])
                 pipeline_arn = "arn:aws:codepipeline:ap-northeast-1:111122223333:port-guard-list-refresh-staging"
-                self.assertEqual([t["Arn"] for t in rule["Targets"]], [pipeline_arn])
                 schedule_statements = [s for key, found in self.policies(resources) if "Schedule" in key for s in found]
                 self.assertEqual([(s["Action"], s["Resource"]) for s in schedule_statements],
                                  [("codepipeline:StartPipelineExecution", pipeline_arn)])
-                # 空なら定期実行の規則もロールも作らない
+                # 空なら定期実行の予定もロールも作らない
                 resources, _ = evaluate(template, parameters | {"ScheduleExpression": ""})
-                self.assertFalse(of_type(resources, "AWS::Events::Rule"))
+                self.assertFalse(of_type(resources, "AWS::Scheduler::Schedule"))
                 self.assertFalse([k for k in resources if "Schedule" in k])
 
     def test_notification_only_when_topic_is_given(self):

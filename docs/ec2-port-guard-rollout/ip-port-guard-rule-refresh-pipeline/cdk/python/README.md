@@ -93,16 +93,14 @@ cdk deploy port-guard-list-refresh-staging --profile "$AWS_PROFILE" \
   --parameters ConnectionArn="$CONNECTION_ARN" \
   --parameters FullRepositoryId="$REPOSITORY_ID" \
   --parameters BranchName=main \
-  --parameters SourceDirectory="$SOURCE_DIRECTORY" \
-  --parameters RequireApproval=true
+  --parameters SourceDirectory="$SOURCE_DIRECTORY"
 
 # CodeCommit のとき（合成時と同じ -c sourceProvider=CodeCommit を付ける）
 cdk deploy port-guard-list-refresh-staging --profile "$AWS_PROFILE" -c sourceProvider=CodeCommit \
   --parameters EnvironmentName=staging \
   --parameters CodeCommitRepositoryName="$CODECOMMIT_REPOSITORY" \
   --parameters BranchName=main \
-  --parameters SourceDirectory="$SOURCE_DIRECTORY" \
-  --parameters RequireApproval=true
+  --parameters SourceDirectory="$SOURCE_DIRECTORY"
 ```
 
 

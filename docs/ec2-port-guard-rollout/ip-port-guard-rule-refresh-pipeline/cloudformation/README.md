@@ -52,7 +52,7 @@ aws --region "$AWS_REGION" --profile "$AWS_PROFILE" cloudformation deploy \
   --parameter-overrides \
     EnvironmentName=staging \
     "${SOURCE_PARAMETERS[@]}" \
-    BranchName=main SourceDirectory="$SOURCE_DIRECTORY" RequireApproval=true
+    BranchName=main SourceDirectory="$SOURCE_DIRECTORY"
 ```
 
 このプロジェクトをリポジトリ直下に置いているなら `SOURCE_DIRECTORY=.` にする。`allow-lists/<環境>/` は同じソースから読み込む。独自の ZIP 作成やスクリプトの S3 への事前配置は不要。
@@ -67,8 +67,7 @@ aws --region "$AWS_REGION" --profile "$AWS_PROFILE" cloudformation deploy \
 | `CodeCommitRepositoryName` | `CodeCommit` のとき必須。リポジトリの名前。`GitHub` のときは空 |
 | `BranchName` | `main`。両方で使う |
 | `SourceDirectory` | `.`。リポジトリ直下を基準としたプロジェクトの場所 |
-| `RequireApproval` | `true`。`false` なら承認ステージを省略（自動で上げるときは `false`） |
-| `ScheduleExpression` | `cron(0 0 ? * MON,THU *)`（毎週月曜・木曜の UTC 0:00 ＝ 日本時間 9:00）。定期実行の予定。空なら定期実行しない |
+| `ScheduleExpression` | `cron(0 0 ? * MON,THU *)`（毎週月曜・木曜の UTC 0:00 ＝ 日本時間 9:00）。定期実行の予定（EventBridge Scheduler の式。UTC で書く）。空なら定期実行しない。定期実行は承認を飛ばす |
 | `NotificationTopicArn` | 空。Make のビルドが失敗したとき（増減の確認で止まったときを含む）に、止まった理由と増減を送る既存の SNS のトピックの ARN。空なら送らない。KMS で暗号化されたトピックは、今は使えない（ロールにキーの権限がない） |
 | `LogRetentionInDays` | `90` |
 
@@ -76,18 +75,21 @@ aws --region "$AWS_REGION" --profile "$AWS_PROFILE" cloudformation deploy \
 
 ## 3. 開始と承認
 
-**スタックを作った直後に、パイプラインが自動で 1 回動く**（CodePipeline は作られたときに必ず 1 回動き、止める設定はない。[パイプラインの開始](https://docs.aws.amazon.com/codepipeline/latest/userguide/pipelines-about-starting.html)、2026-11-18 に確かめた）。`RequireApproval=true` なら Check のステージで止まるので、**この 1 回目は却下する**。そのあと、個別許可の一覧を確かめてから、次のコマンドで開始する。`RequireApproval=false` で作ると、この 1 回目が承認なしでルールのデプロイ先に上がるので、承認を省くのは 1 回目を済ませてからスタックを更新して行う。
+**スタックを作った直後に、パイプラインが自動で 1 回動く**（CodePipeline は作られたときに必ず 1 回動き、止める設定はない。[パイプラインの開始](https://docs.aws.amazon.com/codepipeline/latest/userguide/pipelines-about-starting.html)、2026-11-18 に確かめた）。この 1 回は変数 `APPROVAL` が既定値の `required` なので、Check のステージで止まる。**この 1 回目は却下する**。
+
+承認を挟むかは、開始するときの変数 `APPROVAL` で決まる。Web コンソールから人が開始すると既定値の `required` のままで承認で止まり、定期実行とコマンドからの開始では `skip` を渡して Check を飛ばす（Check のステージの入り口の条件。`VariableCheck` の規則で `#{variables.APPROVAL}` が `required` と等しくなければ、結果 Skip でステージを飛ばす）。
 
 ```bash
+# コマンドから開始する（承認を飛ばす。付け忘れると承認で止まる）
 aws --region "$AWS_REGION" --profile "$AWS_PROFILE" codepipeline start-pipeline-execution \
-  --name port-guard-list-refresh-staging
+  --name port-guard-list-refresh-staging --variables name=APPROVAL,value=skip
 
 # 増減を確認したうえで 5% の判定を通すとき
 aws --region "$AWS_REGION" --profile "$AWS_PROFILE" codepipeline start-pipeline-execution \
-  --name port-guard-list-refresh-staging --variables name=FORCE,value=1
+  --name port-guard-list-refresh-staging --variables name=FORCE,value=1 name=APPROVAL,value=skip
 ```
 
-ビルドログの件数・増減を確認し、CodePipeline のコンソールから承認する。後段は、承認したビルドの成果物（パイプラインの受け渡しバケットにある）に含まれる `deploy-rules.sh` と `work/<環境>/` を使う。Make のビルドは、渡すファイルを決まった名前のフォルダ `handoff/` に写してから成果物にする（buildspec の `base-directory` で環境変数が展開されるとはドキュメントに書かれていないため、`SourceDirectory` の値に頼らない）。ルールジェネレーターのリポジトリの最新内容を取り直して作り直すことはしない。
+Web コンソールから開始した回は、ビルドログの件数・増減を確認し、CodePipeline のコンソールから承認する。後段は、承認したビルドの成果物（パイプラインの受け渡しバケットにある）に含まれる `deploy-rules.sh` と `work/<環境>/` を使う。Make のビルドは、渡すファイルを決まった名前のフォルダ `handoff/` に写してから成果物にする（buildspec の `base-directory` で環境変数が展開されるとはドキュメントに書かれていないため、`SourceDirectory` の値に頼らない）。ルールジェネレーターのリポジトリの最新内容を取り直して作り直すことはしない。
 
 ソース変更による自動開始は無効（作成直後の 1 回は上のとおり）。`QUEUED` はこのパイプライン内の実行を直列にするが、ローカルでの実行とは排他しない。
 

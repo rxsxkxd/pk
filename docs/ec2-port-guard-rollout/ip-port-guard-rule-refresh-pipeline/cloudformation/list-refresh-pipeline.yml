@@ -51,16 +51,11 @@ Parameters:
     Type: String
     Default: '.'
     Description: Project directory relative to the repository root.
-  # true ならビルド後に人の確認を挟み、false ならそのままデプロイへ進む。
-  RequireApproval:
-    Type: String
-    Default: 'true'
-    AllowedValues: ['true', 'false']
   # ビルドとデプロイの実行ログを保存する日数。
   LogRetentionInDays:
     Type: Number
     Default: 90
-  # 定期実行の予定（EventBridge の予定の式。時刻は UTC）。既定は毎週月曜・木曜の UTC 0:00（日本時間 9:00。各サーバーのルールの取得 11:00 の 2 時間前）。空なら定期実行しない。
+  # 定期実行の予定（EventBridge Scheduler の式。時刻は UTC）。定期実行は承認を飛ばす（変数 APPROVAL=skip で開始する）。既定は毎週月曜・木曜の UTC 0:00（日本時間 9:00。各サーバーのルールの取得 11:00 の 2 時間前）。空なら定期実行しない。
   ScheduleExpression:
     Type: String
     Default: cron(0 0 ? * MON,THU *)
@@ -86,7 +81,6 @@ Rules:
 
 # 承認ステージの有無と、ルールジェネレーターのリポジトリのホストを、デプロイ時のパラメータで切り替える。
 Conditions:
-  UseApproval: !Equals [!Ref RequireApproval, 'true']
   UseGitHub: !Equals [!Ref SourceProvider, GitHub]
   UseSchedule: !Not [!Equals [!Ref ScheduleExpression, '']]
   UseNotification: !Not [!Equals [!Ref NotificationTopicArn, '']]
@@ -364,7 +358,7 @@ Resources:
                 # 確認済みの work/<環境>/ を S3 に上げる。ルールは作り直さない。
                 - bash deploy-rules.sh "$ENVIRONMENT_NAME"
 
-  # 定期実行で、EventBridge がこのパイプラインを開始するときに使うロール。
+  # 定期実行で、EventBridge Scheduler がこのパイプラインを開始するときに使うロール。
   ScheduleRole:
     Type: AWS::IAM::Role
     Condition: UseSchedule
@@ -373,7 +367,7 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal: {Service: events.amazonaws.com}
+            Principal: {Service: scheduler.amazonaws.com}
             Action: sts:AssumeRole
       Policies:
         - PolicyName: start-pipeline
@@ -385,18 +379,22 @@ Resources:
                 Action: codepipeline:StartPipelineExecution
                 Resource: !Sub arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
 
-  # 定期実行。予定の時刻に、このパイプラインを開始する（FORCE は既定の 0）。
+  # 定期実行。予定の時刻に、変数 APPROVAL=skip を付けてこのパイプラインを開始する（承認を飛ばす。FORCE は既定の 0）。
+  # EventBridge の規則のターゲットは CodePipeline に変数を渡せないので、Scheduler から CodePipeline の開始の API を直接呼ぶ。
   ScheduleRule:
-    Type: AWS::Events::Rule
+    Type: AWS::Scheduler::Schedule
     Condition: UseSchedule
     Properties:
-      Description: !Sub Scheduled start of port-guard-list-refresh-${EnvironmentName}
+      Description: !Sub Scheduled start of port-guard-list-refresh-${EnvironmentName} (approval skipped)
       ScheduleExpression: !Ref ScheduleExpression
+      ScheduleExpressionTimezone: UTC
+      FlexibleTimeWindow: {Mode: 'OFF'}
       State: ENABLED
-      Targets:
-        - Id: pipeline
-          Arn: !Sub arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
-          RoleArn: !GetAtt ScheduleRole.Arn
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:codepipeline:startPipelineExecution
+        RoleArn: !GetAtt ScheduleRole.Arn
+        # StartPipelineExecution の引数。変数の名前・値は、パイプラインの Variables と合わせる。
+        Input: !Sub '{"Name": "${Pipeline}", "Variables": [{"Name": "APPROVAL", "Value": "skip"}]}'
 
   # ステージを進める CodePipeline 自身のロール。ルールのデプロイ先に直接書く権限は持たない。
   PipelineRole:
@@ -463,7 +461,12 @@ Resources:
         - Name: FORCE
           DefaultValue: '0'
           Description: Set 1 after reviewing a change above 5 percent.
-      # ソース取得 → ビルド → 承認（省略可）→ デプロイの順に実行する。
+        # 承認を挟むか。Web コンソールから人が開始すると既定値の required のままで承認で止まる。
+        # 定期実行とコマンドからの開始は skip を渡し、Check のステージを飛ばす。
+        - Name: APPROVAL
+          DefaultValue: required
+          Description: required stops at the approval stage. Scheduled and command line starts pass skip.
+      # ソース取得 → ビルド → 承認（開始の仕方で飛ばす）→ デプロイの順に実行する。
       Stages:
         # 1. ルールジェネレーターのリポジトリ・ブランチから、同じ版のソース一式を取得する。
         #    GitHub と CodeCommit でアクションだけが違い、どちらも SourceFiles を Make へ渡す。
@@ -508,18 +511,25 @@ Resources:
               InputArtifacts: [{Name: SourceFiles}]
               # 作成したファイルを MadeFiles として保存し、承認後の Publish へ渡す。
               OutputArtifacts: [{Name: MadeFiles}]
-        # 3. RequireApproval=true のときだけ、以下の Check ステージを挟む。
-        - !If
-          - UseApproval
-          - Name: Check
-            Actions:
-              - Name: HumanCheck
-                ActionTypeId: {Category: Approval, Owner: AWS, Provider: Manual, Version: '1'}
-                Configuration:
-                  # 承認画面に、ビルドログの件数と増減を確認するよう案内を表示する。
-                  CustomData: Review counts and changes in the make build log before publishing.
-          # 承認不要なら、Check ステージの定義ごと取り除く。
-          - !Ref AWS::NoValue
+        # 3. 人の承認。変数 APPROVAL が required のとき（Web コンソールから人が開始したとき・構築直後の 1 回）だけ止まる。
+        #    定期実行とコマンドからの開始は APPROVAL=skip を渡すので、入り口の条件を満たさず、このステージを飛ばす（Skipped）。
+        - Name: Check
+          BeforeEntry:
+            Conditions:
+              - Result: SKIP
+                Rules:
+                  - Name: ApprovalRequired
+                    RuleTypeId: {Category: Rule, Owner: AWS, Provider: VariableCheck, Version: '1'}
+                    Configuration:
+                      Variable: '#{variables.APPROVAL}'
+                      Value: required
+                      Operator: EQ
+          Actions:
+            - Name: HumanCheck
+              ActionTypeId: {Category: Approval, Owner: AWS, Provider: Manual, Version: '1'}
+              Configuration:
+                # 承認画面に、ビルドログの件数と増減を確認するよう案内を表示する。
+                CustomData: Review counts and changes in the make build log before publishing.
         # 4. Make が作った成果物を、そのまま deploy-rules.sh で S3 に上げる。
         - Name: Publish
           Actions:

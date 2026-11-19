@@ -28,7 +28,7 @@ ${summary}
 次にすること（ip-port-guard-rule-refresh-pipeline/design-decisions.md の「ルールを作るときに問題が起きたときの扱い」）:
 - 下限の確認で止まったとき: 一覧そのものがおかしい。原因を直す（FORCE=1 では通せない）
 - 5% の確認で止まったとき: 手元で build-rules.sh ${ENVIRONMENT_NAME} を流して差分を確かめ、問題なければ次で開始する
-  aws codepipeline start-pipeline-execution --name ${pipeline} --variables name=FORCE,value=1"
+  aws codepipeline start-pipeline-execution --name ${pipeline} --variables name=FORCE,value=1 name=APPROVAL,value=skip"
 
 aws sns publish --topic-arn "$NOTIFICATION_TOPIC_ARN" --subject "$subject" --message "$message" > /dev/null
 echo "SNS のトピックへ送った: ${subject}"

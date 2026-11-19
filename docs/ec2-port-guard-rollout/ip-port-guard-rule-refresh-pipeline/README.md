@@ -1,5 +1,9 @@
 # ip-port-guard-rule-refresh-pipeline
 
+![全体の流れ: CodePipeline がルールを作ってルールのデプロイ先（S3）に上げ、各サーバーが SSM でそこから取って ipset を入れ替える](list-refresh-flow.svg)
+
+図の「ルールのビルド」「ルールのデプロイ」はこのフォルダの `build-rules.sh`・`deploy-rules.sh`（CodePipeline でも手動でも同じ）、「S3 ルールの管理」はルールのデプロイ先、「SSM ルール取得」「IP制限の有効化」は [rule-refresh-via-ssm/](rule-refresh-via-ssm/README.md) が受け持つ。図の「ルール」は iptables のルールではなく、ipset 入れ替えスクリプトとその中の IP の一覧を指す。
+
 日本・AWS（東京・大阪）・個別許可の IP の一覧から、各サーバーの ipset を入れ替えるスクリプトを作り、S3 に上げる。ローカル・踏み台サーバー・CodePipeline で、同じ `build-rules.sh` と `deploy-rules.sh` を使う。
 
 このフォルダだけをコピーして運用できる。`allow-lists/` と `command/` はすべてこのフォルダの中にあり、親フォルダのファイルを使わない。

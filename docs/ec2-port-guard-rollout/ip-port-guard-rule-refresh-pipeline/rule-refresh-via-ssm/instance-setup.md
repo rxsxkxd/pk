@@ -78,6 +78,10 @@ aws ec2 create-tags --resources i-0123456789abcdef0 --tags Key=PortGuardSchedule
 
 ## 5. IAM ロールにルールの読み取りポリシーを付ける（ロールごと）
 
+![ルールの更新の IAM ロールとポリシー](iam-policies.svg)
+
+このステップで付けるのは、図のいちばん上の「更新対象サーバーの IAM ロール」の `port-guard-rule-read-<環境>`。ほかのロール（関連付けのロール・失敗の通知の規則の実行ロール）は、7 のスタックが作る。
+
 ```bash
 # 台の IAM ロールの名前を調べる（インスタンスプロファイル → ロール）
 aws ec2 describe-instances --instance-ids i-0123456789abcdef0 \

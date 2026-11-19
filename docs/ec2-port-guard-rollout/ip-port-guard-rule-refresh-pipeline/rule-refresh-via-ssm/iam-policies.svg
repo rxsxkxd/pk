@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" width="1200" height="720" role="img" aria-labelledby="title desc">
+  <title id="title">ルールの更新の IAM ロールとポリシー</title>
+  <desc id="desc">ルールの更新に関わる IAM ロールとポリシー。更新対象サーバーの IAM ロール（既存）は EC2 インスタンスが引き受け、AmazonSSMManagedInstanceCore（AWS 管理）とルールの読み取りポリシー port-guard-rule-read-&lt;環境&gt;（カスタマー管理。ルールのデプロイ先の s3:GetObject だけ）を付ける。関連付けのロールは State Manager（ssm.amazonaws.com）が引き受け、インラインポリシーでルールの更新ドキュメントを EC2 に送る ssm:SendCommand だけを許す。失敗の通知の規則の実行ロールは EventBridge（events.amazonaws.com）が引き受け、インラインポリシーで SNS のトピックへの sns:Publish だけを許す。作業者の IAM ユーザー・ロールには、決まった管理ポリシーを用意していない。</desc>
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Segoe UI", sans-serif; }
+    .principal { fill: #f8fafc; stroke: #64748b; stroke-width: 2; filter: url(#shadow); }
+    .role      { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; filter: url(#shadow); }
+    .role-op   { fill: #ffffff; stroke: #64748b; stroke-width: 2; stroke-dasharray: 5 3; filter: url(#shadow); }
+    .pol-aws   { fill: #f1f5f9; stroke: #475569; stroke-width: 2; filter: url(#shadow); }
+    .pol-cust  { fill: #fffbeb; stroke: #d97706; stroke-width: 2; filter: url(#shadow); }
+    .pol-inl   { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; filter: url(#shadow); }
+    .pol-none  { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 5 3; }
+    .res       { fill: #f0fdf4; stroke: #16a34a; stroke-width: 2; filter: url(#shadow); }
+    .res-op    { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.5; stroke-dasharray: 5 3; }
+    .title { font-size: 18px; font-weight: 700; fill: #0f172a; }
+    .col { font-size: 13px; font-weight: 700; fill: #64748b; text-anchor: middle; }
+    .kind { font-size: 11.5px; font-weight: 700; text-anchor: middle; }
+    .name { font-size: 14px; font-weight: 700; fill: #0f172a; text-anchor: middle; }
+    .sub  { font-size: 12px; fill: #475569; text-anchor: middle; }
+    .mono { font-size: 11.5px; fill: #334155; text-anchor: middle; font-family: Menlo, Consolas, monospace; }
+    .label { font-size: 11.5px; font-weight: 600; fill: #1e293b; text-anchor: middle; }
+    .legend { font-size: 12px; fill: #334155; }
+    .line { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    .line-dash { stroke: #94a3b8; stroke-width: 1.5; fill: none; stroke-dasharray: 4 3; marker-end: url(#arrow); }
+  </style>
+
+  <rect width="1200" height="720" fill="#ffffff"/>
+  <text x="30" y="34" class="title">ルールの更新の IAM ロールとポリシー</text>
+
+  <!-- 列の見出し -->
+  <text x="130" y="66" class="col">引き受ける相手（信頼）</text>
+  <text x="400" y="66" class="col">IAM ロール</text>
+  <text x="720" y="66" class="col">付けるポリシー</text>
+  <text x="1040" y="66" class="col">許すこと → 対象</text>
+
+  <!-- ===== 1. 更新対象サーバーの IAM ロール ===== -->
+  <rect x="30" y="110" width="200" height="90" rx="8" class="principal"/>
+  <text x="130" y="140" class="name">EC2 インスタンス</text>
+  <text x="130" y="162" class="sub">更新対象サーバー</text>
+  <text x="130" y="182" class="sub">（インスタンスプロファイル）</text>
+
+  <rect x="270" y="100" width="260" height="110" rx="8" class="role"/>
+  <text x="400" y="124" class="kind" fill="#ea580c">既存（docs/ec2/ssm-setup など）</text>
+  <text x="400" y="150" class="name">更新対象サーバーの</text>
+  <text x="400" y="170" class="name">IAM ロール</text>
+  <text x="400" y="194" class="sub">環境ごとのポリシーを足す</text>
+
+  <rect x="570" y="80" width="300" height="72" rx="8" class="pol-aws"/>
+  <text x="720" y="99" class="kind" fill="#475569">AWS 管理ポリシー（付いている前提）</text>
+  <text x="720" y="121" class="name">AmazonSSMManagedInstanceCore</text>
+  <text x="720" y="142" class="sub">SSM に登録して応答する</text>
+
+  <rect x="570" y="162" width="300" height="72" rx="8" class="pol-cust"/>
+  <text x="720" y="181" class="kind" fill="#d97706">カスタマー管理ポリシー（rule-read-policy.yml）</text>
+  <text x="720" y="203" class="name">port-guard-rule-read-&lt;環境&gt;</text>
+  <text x="720" y="224" class="mono">s3:GetObject だけ</text>
+
+  <rect x="910" y="80" width="260" height="72" rx="8" class="res"/>
+  <text x="1040" y="108" class="name">Systems Manager</text>
+  <text x="1040" y="132" class="sub">SSM Agent の通信・Run Command</text>
+
+  <rect x="910" y="162" width="260" height="72" rx="8" class="res"/>
+  <text x="1040" y="186" class="name">S3: ルールのデプロイ先</text>
+  <text x="1040" y="206" class="mono">port-guard/&lt;環境&gt;/current/*</text>
+  <text x="1040" y="224" class="sub">その環境の分だけ</text>
+
+  <line x1="230" y1="155" x2="266" y2="155" class="line"/>
+  <path d="M 530 140 L 550 140 L 550 116 L 566 116" class="line"/>
+  <path d="M 530 170 L 550 170 L 550 197 L 566 197" class="line"/>
+  <line x1="870" y1="116" x2="906" y2="116" class="line"/>
+  <line x1="870" y1="197" x2="906" y2="197" class="line"/>
+
+  <!-- ===== 2. 関連付けのロール ===== -->
+  <rect x="30" y="275" width="200" height="90" rx="8" class="principal"/>
+  <text x="130" y="305" class="name">State Manager</text>
+  <text x="130" y="327" class="mono">ssm.amazonaws.com</text>
+  <text x="130" y="347" class="sub">定期更新の関連付けが送るとき</text>
+
+  <rect x="270" y="265" width="260" height="110" rx="8" class="role"/>
+  <text x="400" y="289" class="kind" fill="#ea580c">scheduled-refresh.yml が作る（環境ごと）</text>
+  <text x="400" y="315" class="name">関連付けのロール</text>
+  <text x="400" y="337" class="mono">port-guard-refresh-rules-</text>
+  <text x="400" y="353" class="mono">dispatch-&lt;環境&gt;</text>
+
+  <rect x="570" y="282" width="300" height="76" rx="8" class="pol-inl"/>
+  <text x="720" y="302" class="kind" fill="#2563eb">インラインポリシー</text>
+  <text x="720" y="324" class="name">send-rule-refresh-document</text>
+  <text x="720" y="344" class="mono">ssm:SendCommand だけ</text>
+
+  <rect x="910" y="275" width="260" height="90" rx="8" class="res"/>
+  <text x="1040" y="301" class="name">ルールの更新ドキュメント</text>
+  <text x="1040" y="321" class="mono">port-guard-refresh-rules</text>
+  <text x="1040" y="345" class="sub">＋ EC2 のインスタンス</text>
+
+  <line x1="230" y1="320" x2="266" y2="320" class="line"/>
+  <line x1="530" y1="320" x2="566" y2="320" class="line"/>
+  <line x1="870" y1="320" x2="906" y2="320" class="line"/>
+
+  <!-- ===== 3. 失敗の通知の規則の実行ロール ===== -->
+  <rect x="30" y="420" width="200" height="90" rx="8" class="principal"/>
+  <text x="130" y="450" class="name">EventBridge</text>
+  <text x="130" y="472" class="mono">events.amazonaws.com</text>
+  <text x="130" y="492" class="sub">失敗の通知の規則が送るとき</text>
+
+  <rect x="270" y="410" width="260" height="110" rx="8" class="role"/>
+  <text x="400" y="430" class="kind" fill="#ea580c">scheduled-refresh.yml が作る</text>
+  <text x="400" y="445" class="kind" fill="#ea580c">（トピックを渡したときだけ）</text>
+  <text x="400" y="468" class="name">失敗の通知の規則の</text>
+  <text x="400" y="488" class="name">実行ロール</text>
+  <text x="400" y="508" class="sub">名前はスタックが付ける</text>
+
+  <rect x="570" y="427" width="300" height="76" rx="8" class="pol-inl"/>
+  <text x="720" y="447" class="kind" fill="#2563eb">インラインポリシー</text>
+  <text x="720" y="469" class="name">publish-failures</text>
+  <text x="720" y="489" class="mono">sns:Publish だけ</text>
+
+  <rect x="910" y="420" width="260" height="90" rx="8" class="res"/>
+  <text x="1040" y="446" class="name">SNS のトピック</text>
+  <text x="1040" y="466" class="mono">NotificationTopicArn</text>
+  <text x="1040" y="490" class="sub">トピックのポリシーは書き換えない</text>
+
+  <line x1="230" y1="465" x2="266" y2="465" class="line"/>
+  <line x1="530" y1="465" x2="566" y2="465" class="line"/>
+  <line x1="870" y1="465" x2="906" y2="465" class="line"/>
+
+  <!-- ===== 4. 作業者 ===== -->
+  <rect x="30" y="565" width="200" height="90" rx="8" class="principal"/>
+  <text x="130" y="595" class="name">作業者</text>
+  <text x="130" y="617" class="sub">人・踏み台サーバー</text>
+  <text x="130" y="637" class="sub">（AWS CLI の認証情報）</text>
+
+  <rect x="270" y="555" width="260" height="110" rx="8" class="role-op"/>
+  <text x="400" y="579" class="kind" fill="#64748b">既存</text>
+  <text x="400" y="605" class="name">作業者の IAM ユーザー・ロール</text>
+  <text x="400" y="629" class="sub">手動の更新・スタックの作成・</text>
+  <text x="400" y="647" class="sub">ロールへのポリシーの付与</text>
+
+  <rect x="570" y="572" width="300" height="76" rx="8" class="pol-none"/>
+  <text x="720" y="596" class="name">決まったポリシーは用意していない</text>
+  <text x="720" y="618" class="sub">要る権限は README の表</text>
+  <text x="720" y="636" class="sub">（作業ごとの操作の一覧）</text>
+
+  <rect x="910" y="565" width="260" height="90" rx="8" class="res-op"/>
+  <text x="1040" y="591" class="name">EC2・SSM・IAM・</text>
+  <text x="1040" y="611" class="name">CloudFormation など</text>
+  <text x="1040" y="635" class="sub">作業に要る操作だけ</text>
+
+  <line x1="230" y1="610" x2="266" y2="610" class="line-dash"/>
+  <line x1="530" y1="610" x2="566" y2="610" class="line-dash"/>
+  <line x1="870" y1="610" x2="906" y2="610" class="line-dash"/>
+
+  <!-- 凡例 -->
+  <rect x="30" y="684" width="16" height="16" rx="3" class="pol-aws"/>
+  <text x="54" y="697" class="legend">AWS 管理ポリシー</text>
+  <rect x="190" y="684" width="16" height="16" rx="3" class="pol-cust"/>
+  <text x="214" y="697" class="legend">カスタマー管理ポリシー（このフォルダで作る）</text>
+  <rect x="510" y="684" width="16" height="16" rx="3" class="pol-inl"/>
+  <text x="534" y="697" class="legend">インラインポリシー（ロールと一緒にスタックが作る）</text>
+  <rect x="870" y="684" width="16" height="16" rx="3" class="role"/>
+  <text x="894" y="697" class="legend">IAM ロール</text>
+  <rect x="990" y="684" width="16" height="16" rx="3" class="res"/>
+  <text x="1014" y="697" class="legend">許す対象</text>
+</svg>

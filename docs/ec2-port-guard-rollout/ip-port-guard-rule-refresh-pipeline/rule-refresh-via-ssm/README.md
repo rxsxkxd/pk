@@ -77,8 +77,6 @@
 
 ## 設定のステップ
 
-![ルールの更新の設定のステップ](setup-steps.svg)
-
 各ステップのコマンドは [instance-setup.md](instance-setup.md) にある。
 
 ## IAM ロールと付けるポリシー
@@ -161,3 +159,4 @@ i-0fedcba9876543210	-	web-staging-2
 | `instance-lists/` | インスタンスの一覧ファイルの既定の置き場所（Git には入れない） |
 | `system-architecture.svg`・`refresh-schedule.svg`・`failure-handling.svg` | 図: システムの構成、定期実行のスケジュール、定期実行時のエラーの定義と取り扱い（手で書いた SVG） |
 | `setup-steps.svg` | 図: 設定のステップ（[instance-setup.md](instance-setup.md) の流れ） |
+| `iam-policies.svg` | 図: IAM ロールと付けるポリシー（引き受ける相手・ロール・ポリシー・許す対象） |

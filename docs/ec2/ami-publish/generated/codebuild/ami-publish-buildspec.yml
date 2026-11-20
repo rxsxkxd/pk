@@ -8,7 +8,7 @@ env:
 phases:
   install:
     commands:
-      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.11; fi
+      - if command -v rbenv >/dev/null 2>&1; then v="$(rbenv versions --bare | grep -E '^3\.4\.[0-9]+$' | sort -V | tail -n 1)"; if [ -z "$v" ]; then echo 'rbenv に Ruby 3.4 系がない' >&2; false; else rbenv local "$v"; fi; fi
       - ruby --version
       - echo 'Entered install phase.'
       - aws --version

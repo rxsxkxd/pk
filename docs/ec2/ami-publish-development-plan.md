@@ -237,7 +237,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 │  ── AMI 公開ツール（Ruby。AMI 公開パイプラインの CodeBuild 上で動く）──
 ├── Gemfile                                   # 使用する gem の定義（aws-sdk-ec2 / aws-sdk-ssm / aws-sdk-cloudformation / aws-sdk-iam / interactor / rspec / rubocop）
 ├── Gemfile.lock                              # gem のバージョン固定
-├── .ruby-version                             # 手元で使う Ruby のバージョン（3.4 系の最新）。CodeBuild はイメージにある 3.4 系を rbenv local で使う
+├── .ruby-version                             # 手元で使う Ruby のバージョン（3.4 系の最新）。CodeBuild はイメージにある 3.4 系の最新を rbenv local で使う
 ├── .rubocop.yml                              # Ruby のコード規約チェック（RuboCop）の設定
 ├── bin/
 │   └── ami_publish                           # AMI 公開ツールの実行コマンド。run = 実行、plan = AWS に書き込まずに実行予定の操作を表示（dry-run）、rollback = 起動テンプレートを公開済みの前の AMI に戻す
@@ -281,7 +281,7 @@ ami-publish/                                  # AMI 公開パイプライン一�
 
 ### CodeBuild の buildspec（generated/codebuild/ami-publish-buildspec.yml の生成イメージ）
 
-シェルで書くのは、Ruby の選択（rbenv）、Ruby の依存 gem のインストール、Ruby 製ツールの実行、ツールの出力値の受け渡しだけにする。Ruby は `runtime-versions` ではなく、CodeBuild 標準イメージに入っている rbenv で、イメージにある 3.4 系を選ぶ（Ruby のビルドはしない）。
+シェルで書くのは、Ruby の選択（rbenv）、Ruby の依存 gem のインストール、Ruby 製ツールの実行、ツールの出力値の受け渡しだけにする。Ruby は `runtime-versions` ではなく、CodeBuild 標準イメージに入っている rbenv で、イメージにある 3.4 系の最新をその場で選ぶ（Ruby のビルドはしない。バージョンは書かず、イメージの更新に合わせて自動で上がる）。
 
 ```yaml
 version: 0.2
@@ -292,7 +292,7 @@ env:
 phases:
   install:
     commands:
-      - if command -v rbenv >/dev/null 2>&1; then rbenv local 3.4.11; fi   # イメージにある 3.4 系を選ぶ
+      - if command -v rbenv >/dev/null 2>&1; then v="$(rbenv versions --bare | grep -E '^3\.4\.[0-9]+$' | sort -V | tail -n 1)"; ...; rbenv local "$v"; fi   # イメージにある 3.4 系の最新を選ぶ（3.4 系がなければ失敗）
       - ruby --version
       - echo 'Entered install phase.'
       - aws --version
@@ -386,8 +386,8 @@ flowchart LR
 
 | タスク | 内容 |
 |---|---|
-| buildspec の定義 | `internal/definitions/ami_publish_buildspec.go`（Ruby はイメージにある 3.4 系を `rbenv local` で選ぶ） |
-| ビルド環境 | CodeBuild 標準イメージに入っている Ruby 3.4 系のバージョンを確認し、buildspec の `rbenv local` に指定する |
+| buildspec の定義 | `internal/definitions/ami_publish_buildspec.go`（Ruby はイメージにある 3.4 系の最新を `rbenv local` で選ぶ） |
+| ビルド環境 | CodeBuild 標準イメージに Ruby 3.4 系が入っていることを確認する（buildspec がその中の最新を選ぶので、バージョンは指定しない） |
 | パイプラインのスタック | CodeBuild プロジェクト（同時実行数 1、タイムアウト）、AMI 公開パイプライン（V2、パイプライン変数 `VERSION`、実行モード `QUEUED`）の定義。ソースはインフラ用リポジトリの `main` ブランチで、push による自動起動は無効にする |
 | IAM | CodeBuild サービスロール（[権限一覧](./ami-build-pipeline.md#iam-権限)の AMI 作成側）。起動テンプレートの操作権限は、対象の起動テンプレート（Export の ID）だけに限定。IAM ロールの作成・変更の権限はパイプライン全体に持たせない |
 | ログ | CodeBuild のログを CloudWatch Logs に保存、SSM コマンドの出力も同じロググループへ |
@@ -445,7 +445,7 @@ flowchart LR
 | D3 | AMI 公開パイプラインの起動方法 | S3 の manifest 更新 / 手動実行（パイプライン変数で `VERSION`） | — | **決定: 起動する人がパイプライン変数 `VERSION` を指定して起動コマンドを実行**。実行モードは `QUEUED`。フェーズ 3 ではリリース検証パイプラインの最後のアクションが同じコマンドを実行する |
 | D4 | （欠番）Auto Scaling グループの配置 | — | — | **スコープ外**。起動テンプレートを使った実際のインスタンス構築は本計画の対象外。起動テンプレートのスタックには本番のリソースを含めない（ステップ 5 の差分検証で担保） |
 | D5 | 再起動後の確認に失敗した AMI | タグを付けて残す / すぐ削除 | — | **決定: すぐ削除する**（原因調査は起動したままのリリース用インスタンスで行う） |
-| D6 | Ruby のバージョン | CodeBuild の標準イメージが提供するバージョン / カスタムイメージ | — | **決定: 手元は `.ruby-version` の 3.4 系の最新（3.4.11）。CodeBuild は標準イメージに入っている rbenv で、イメージにある 3.4 系（3.4.11）を `rbenv local` で選ぶ**（`runtime-versions` は使わず、Ruby のビルドもしない） |
+| D6 | Ruby のバージョン | CodeBuild の標準イメージが提供するバージョン / カスタムイメージ | — | **決定: 手元は `.ruby-version` の 3.4 系の最新（3.4.11）。CodeBuild は標準イメージに入っている rbenv で、イメージにある 3.4 系の最新（2026-11-20 時点のイメージ定義では 3.4.12）を `rbenv local` で選ぶ**（`runtime-versions` は使わず、Ruby のビルドもしない。バージョンは書かず、イメージの更新に合わせて自動で上がる。使ったバージョンは CodeBuild のログの `ruby --version` で確かめる） |
 | D7 | ロールバックをツールに含めるか | サブコマンドとして実装 / 手順書で CLI 操作 | — | **決定: AMI 公開ツールのサブコマンド `rollback` として実装** |
 | D8 | AMI の保持数 | 世代数・期間 / 管理しない | — | **決定: このパイプラインでは保持数を管理しない**（古い AMI の整理は対象外） |
 | D9 | 仕組み（パイプライン・起動テンプレートのスタック本体・SSM ドキュメント）のデプロイ方法 | 担当者が AWS CLI で実行 / デプロイ用 Ruby コマンド / インフラ用 CI パイプライン | — | **決定: 担当者（または CLI 経由でエージェント）が AWS CLI で実行**。生成スクリプトの実行を含め、ツールの操作はすべて人が行う |

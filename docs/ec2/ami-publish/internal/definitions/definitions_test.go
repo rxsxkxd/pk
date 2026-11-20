@@ -407,14 +407,14 @@ func TestHealthCheckStackWithBasicAuth(t *testing.T) {
 func TestBuildspec(t *testing.T) {
 	files, _ := generate(t)
 	document := parse(t, files["codebuild/ami-publish-buildspec.yml"])
-	// Ruby は runtime-versions ではなく、イメージに入っている rbenv でイメージにある 3.4 系を選ぶ。
+	// Ruby は runtime-versions ではなく、イメージに入っている rbenv でイメージにある 3.4 系の最新を選ぶ。
 	install := dig(t, document, "phases", "install").(map[string]any)
 	if _, ok := install["runtime-versions"]; ok {
 		t.Error("runtime-versions を使わない")
 	}
 	installCommands := dig(t, install, "commands").([]any)
-	if !strings.Contains(installCommands[0].(string), "rbenv local "+codeBuildRubyVersion) {
-		t.Errorf("install の最初で rbenv local %s を実行する: %v", codeBuildRubyVersion, installCommands)
+	if installCommands[0] != selectRubyCommand() || !strings.Contains(selectRubyCommand(), `rbenv local "$v"`) {
+		t.Errorf("install の最初で、イメージにある %s 系の最新を rbenv local で選ぶ: %v", codeBuildRubySeries, installCommands)
 	}
 	exported := dig(t, document, "env", "exported-variables").([]any)
 	if len(exported) != 2 || exported[0] != "AMI_ID" || exported[1] != "LAUNCH_TEMPLATE_VERSION" {

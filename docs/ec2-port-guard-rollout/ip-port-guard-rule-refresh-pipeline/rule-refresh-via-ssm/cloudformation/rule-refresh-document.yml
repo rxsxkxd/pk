@@ -80,9 +80,20 @@ Resources:
 
                   # 3. ipset 入れ替えスクリプトを流す（一時の集合に入れて件数を確かめてから ipset swap。
                   #    port-guard を入れていない台では、今の集合がないので何も変えずに止まる）
+                  #    入れ替えの前後に、集合ごとの登録数を 1 行ずつ出す（差分は人が計算する。集合がなければ entries=-）
+                  sets=(port_guard_jp port_guard_allow port_guard_aws)
+                  [ "$PG_INCLUDE_IPV6" = 1 ] && sets+=(port_guard_jp6 port_guard_allow6 port_guard_aws6)
+                  pg_counts() {
+                    for s in "${sets[@]}"; do
+                      n=$(ipset list -t "$s" 2> /dev/null | awk -F': ' '/^Number of entries/ { print $2 }' || true)
+                      echo "PG count phase=$1 set=$s entries=${n:--}"
+                    done
+                  }
+                  pg_counts before
                   for f in "${files[@]}"; do
                     bash "$f"
                   done
+                  pg_counts after
 
                   # 4. 更新の記録フォルダに、流した ipset 入れ替えスクリプトの写しと日時を残す
                   install -d -m 755 /var/lib/port-guard/rules

@@ -92,7 +92,7 @@
 
   <rect x="570" y="282" width="300" height="76" rx="8" class="pol-inl"/>
   <text x="720" y="302" class="kind" fill="#2563eb">インラインポリシー</text>
-  <text x="720" y="324" class="name">send-rule-refresh-document</text>
+  <text x="720" y="324" class="name">send-port-guard-refresh-rules-document</text>
   <text x="720" y="344" class="mono">ssm:SendCommand だけ</text>
 
   <rect x="910" y="275" width="260" height="90" rx="8" class="res"/>
@@ -119,7 +119,7 @@
 
   <rect x="570" y="427" width="300" height="76" rx="8" class="pol-inl"/>
   <text x="720" y="447" class="kind" fill="#2563eb">インラインポリシー</text>
-  <text x="720" y="469" class="name">publish-failures</text>
+  <text x="720" y="469" class="name">publish-port-guard-refresh-rules-failures</text>
   <text x="720" y="489" class="mono">sns:Publish だけ</text>
 
   <rect x="910" y="420" width="260" height="90" rx="8" class="res"/>

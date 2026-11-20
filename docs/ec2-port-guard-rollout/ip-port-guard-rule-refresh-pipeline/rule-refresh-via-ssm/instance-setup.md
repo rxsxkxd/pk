@@ -113,7 +113,7 @@ ruby rb/refresh_rules.rb --env staging
 # IPv6 も絞っている環境なら --ipv6
 ```
 
-結果の見方: 台ごとに `== <インスタンス ID>: Success` と、ルールの更新ドキュメントの出力が出る。出力の最後が `PG result=refreshed` なら入った。失敗したときは、出力の `PG blocked=...` の理由を見る。
+結果の見方: 台ごとに `== <インスタンス ID>: Success` と、ルールの更新ドキュメントの出力が出る。出力の最後が `PG result=refreshed` なら入った。入れ替えの前後に、集合ごとの登録数が `PG count phase=before set=port_guard_jp entries=12345` と `phase=after` の形で 1 行ずつ出る（`port_guard_jp`・`port_guard_allow`・`port_guard_aws`。IPv6 も流すときは `…6` も。集合がなければ `entries=-`）。定期更新では、同じ出力が関連付けの実行の履歴（台ごとの出力）に残る。失敗したときは、出力の `PG blocked=...` の理由を見る。
 
 | 出力 | 理由 | 直し方 |
 |---|---|---|
@@ -139,8 +139,8 @@ aws cloudformation deploy \
 
 | もの | 名前 | 中身 |
 |---|---|---|
-| 定期更新の関連付け（月曜の分） | `port-guard-refresh-rules-staging-mon` | `cron(0 2 ? * MON *)`（月曜の日本時間 11:00）。環境のタグと用途タグの両方が付いた台に、ルールの更新ドキュメントを並列で流す。失敗した台があっても残りの台に流し続ける |
-| 定期更新の関連付け（木曜の分） | `port-guard-refresh-rules-staging-thu` | `cron(0 2 ? * THU *)`（木曜の日本時間 11:00）。ほかは月曜の分と同じ |
+| 定期更新の関連付け（1 番目の予定） | `port-guard-refresh-rules-staging-primary` | パラメータ `PrimarySchedule`。既定 `cron(0 0 2 ? * MON *)`（月曜の日本時間 11:00）。環境のタグと用途タグの両方が付いた台に、ルールの更新ドキュメントを並列で流す。失敗した台があっても残りの台に流し続ける |
+| 定期更新の関連付け（2 番目の予定） | `port-guard-refresh-rules-staging-secondary` | パラメータ `SecondarySchedule`。既定 `cron(0 0 2 ? * THU *)`（木曜の日本時間 11:00）。**空にすると作らない**（予定を 1 つだけにする）。ほかは 1 番目と同じ |
 | 関連付けのロール | `port-guard-refresh-rules-dispatch-staging` | ルールの更新ドキュメントを EC2 のインスタンスに送る（`ssm:SendCommand`）だけ |
 | 失敗の通知の規則 | `port-guard-refresh-rules-staging-failed` | 台ごとの結果が `Failed` になったら、トピックへ台ごとに 1 通送る（`NotificationTopicArn` が空なら作らない） |
 
@@ -151,8 +151,8 @@ aws cloudformation deploy \
 ## 8. 最初の予定のあとで確かめる（環境ごとに 1 回）
 
 ```bash
-# 関連付けの ID（スタックの出力 MondayAssociationId・ThursdayAssociationId でもよい）
-aws ssm list-associations --association-filter-list key=AssociationName,value=port-guard-refresh-rules-staging-mon
+# 関連付けの ID（スタックの出力 PrimaryAssociationId・SecondaryAssociationId でもよい）
+aws ssm list-associations --association-filter-list key=AssociationName,value=port-guard-refresh-rules-staging-primary
 
 # 実行の一覧（新しい順）と、ある実行の台ごとの結果
 aws ssm describe-association-executions --association-id <関連付けの ID>
@@ -185,7 +185,7 @@ aws ssm describe-association-execution-targets --association-id <関連付けの
 |---|---|
 | しばらく止める | 用途タグを外す（その台だけ。手動の更新はそのまま使える）か、スタックを消す（環境ごと） |
 | やめる | `aws cloudformation delete-stack --stack-name port-guard-scheduled-refresh-staging`。関連付け・ロール・通知の規則が消える。台の ipset は最後に入れたルールのまま残る |
-| 予定を変える | スタックのパラメータ `MondaySchedule`・`ThursdaySchedule`（UTC。関連付けの cron 式は曜日を 1 つしか書けない）を変えて更新する。**関連付けを変えると、すぐに 1 回流れる**（AWS のドキュメントの記述） |
+| 予定を変える | スタックのパラメータ `PrimarySchedule`・`SecondarySchedule`（UTC。秒から始まる 7 項目の cron 式。関連付けの cron 式は曜日を 1 つしか書けない。`SecondarySchedule` を空にすると 2 番目の関連付けを消す）を変えて更新する。**関連付けを変えると、すぐに 1 回流れる**（AWS のドキュメントの記述） |
 
 ### ルールの更新スクリプトを変える
 

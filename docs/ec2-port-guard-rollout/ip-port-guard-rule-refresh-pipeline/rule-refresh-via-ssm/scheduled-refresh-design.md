@@ -12,7 +12,7 @@
 |---|---|
 | 定期更新 | 決めた予定で、更新対象サーバーにルールの更新スクリプトを無人で流すこと。この設計では State Manager の関連付けで行う |
 | ルールの更新ドキュメント | ルールの更新スクリプトを中身にした、自分で作る SSM のコマンドのドキュメント（`port-guard-refresh-rules`。種類は `Command`）。ルールのデプロイ先などはパラメータで受け取る |
-| 定期更新の関連付け | ルールの更新ドキュメントを、予定と対象（環境のタグ）と流し方を決めて流し続ける State Manager の関連付け。**環境ごとに 2 つ**（月曜の分 `port-guard-refresh-rules-<環境>-mon` と木曜の分 `port-guard-refresh-rules-<環境>-thu`） |
+| 定期更新の関連付け | ルールの更新ドキュメントを、予定と対象（環境のタグ）と流し方を決めて流し続ける State Manager の関連付け。**環境ごとに 1〜2 つ**（1 番目の予定 `port-guard-refresh-rules-<環境>-primary`（既定は月曜）と、2 番目の予定 `port-guard-refresh-rules-<環境>-secondary`（既定は木曜。`SecondarySchedule` を空にすると作らない）） |
 | 関連付けのロール | 定期更新の関連付けが、更新対象サーバーにコマンドを送るときに使う IAM ロール（`AssociationDispatchAssumeRole`） |
 | 失敗の通知の規則 | 定期更新で失敗した台を、SNS のトピックへ知らせる EventBridge の規則。環境ごとに 1 つ |
 
@@ -27,8 +27,8 @@
 ```mermaid
 flowchart TD
   P["CodePipeline（親フォルダ）<br/>月曜・木曜 9:00（日本時間）<br/>build-rules.sh → deploy-rules.sh"] --> D["ルールのデプロイ先<br/>port-guard/&lt;環境&gt;/current/"]
-  A1["定期更新の関連付け（月曜の分）<br/>cron(0 2 ? * MON *) ＝ 月曜 11:00（日本時間）"] --> T
-  A2["定期更新の関連付け（木曜の分）<br/>cron(0 2 ? * THU *) ＝ 木曜 11:00（日本時間）"] --> T
+  A1["定期更新の関連付け（1 番目の予定）<br/>cron(0 0 2 ? * MON *) ＝ 月曜 11:00（日本時間）"] --> T
+  A2["定期更新の関連付け（2 番目の予定。省略できる）<br/>cron(0 0 2 ? * THU *) ＝ 木曜 11:00（日本時間）"] --> T
   T["対象: 環境のタグと用途タグの両方が付いた台<br/>（例: tag:Environment = staging かつ<br/>tag:PortGuardScheduledRefresh = true）<br/>全台に並列で流す"] --> S1
   subgraph S["各更新対象サーバー（並列。失敗しても、ほかの台は止めない）"]
     S1["ルールの更新ドキュメント:<br/>SHA256SUMS と ipset 入れ替えスクリプトを取る"] --> S2["照合する（合わなければ、その台は止める）"]
@@ -58,11 +58,11 @@ rate 式（例: `rate(84 hours)`）で 1 つにまとめる方法もあるが、
 
 | プロパティ | 値 | 理由 |
 |---|---|---|
-| `AssociationName` | `port-guard-refresh-rules-<環境>-mon`・`port-guard-refresh-rules-<環境>-thu` | 2 つを見分ける |
+| `AssociationName` | `port-guard-refresh-rules-<環境>-primary`・`port-guard-refresh-rules-<環境>-secondary` | 2 つを見分ける。曜日は予定のパラメータで変えられるので、名前には入れず番号にする |
 | `Name` | ルールの更新ドキュメントの名前 | — |
 | `Targets` | `Key: tag:<環境のタグのキー>`、`Values: [<環境>]` と、`Key: tag:<用途タグのキー>`、`Values: [<用途タグの値>]` の 2 つ | 環境のタグと用途タグの**両方**が付いた台だけを対象にする（複数のタグのキーを書くと、すべてが付いた台だけが対象になる。最大 5 つ。AWS のドキュメントの記述）。定期更新に入れる台を、用途タグで明示的に選ぶ（手動の `list_instances.rb` は環境のタグだけで引き、人が一覧を確かめる） |
 | `Parameters` | ルールのデプロイ先・リージョン・IPv6 も流すか | 環境ごとに違う値だけを渡す |
-| `ScheduleExpression` | 月曜の分は `cron(0 2 ? * MON *)`、木曜の分は `cron(0 2 ? * THU *)`（UTC 2:00 ＝ 日本時間 11:00） | ルールのデプロイ先へのデプロイ（CodePipeline の定期実行。月曜・木曜の日本時間 9:00）から 2 時間後に、インスタンスがルールを取得する。予定は UTC でしか書けない |
+| `ScheduleExpression` | 1 番目はパラメータ `PrimarySchedule`（既定 `cron(0 0 2 ? * MON *)`）、2 番目は `SecondarySchedule`（既定 `cron(0 0 2 ? * THU *)`。空なら 2 番目の関連付けを作らない）。どちらも UTC 2:00 ＝ 日本時間 11:00。先頭に秒（0 だけ）を付けた 7 項目の形で書く | ルールのデプロイ先へのデプロイ（CodePipeline の定期実行。月曜・木曜の日本時間 9:00）から 2 時間後に、インスタンスがルールを取得する。予定は UTC でしか書けない |
 | `ApplyOnlyAtCronInterval` | `true` | 既定では、関連付けを作った直後に 1 回流れる。作った直後には流さない |
 | `MaxConcurrency` | `100%` | 全台に並列で流す |
 | `MaxErrors` | `100%` | 失敗した台があっても、残りの台に流し続ける（`0` にすると、最初の失敗で残りの台に送らなくなる） |
@@ -166,7 +166,7 @@ EventBridge Scheduler の予定から、Run Command の `SendCommand` を直接�
 | | State Manager の関連付け | EventBridge Scheduler |
 |---|---|---|
 | 対象・流し方の書き方 | `Targets`・`MaxConcurrency: 100%`・`MaxErrors: 100%`・`Parameters` を、テンプレートのプロパティとしてそのまま書く | 同じ内容（対象のタグ・流し方・パラメータ）を、`SendCommand` の引数の **JSON を文字列にしたもの**として `Input` に書く。テンプレートの中で JSON の文字列を組み立てるので、引用符や `!Sub` の扱いに気を付ける必要があり、読みにくい |
-| 予定の書き方 | `cron(0 2 ? * MON *)` と `cron(0 2 ? * THU *)`（**UTC だけ**。日本時間から換算する）。同じ関連付けを 2 回書く | `cron(0 11 ? * MON,THU *)` と `ScheduleExpressionTimezone: Asia/Tokyo`（**日本時間のまま、1 つで書ける**） |
+| 予定の書き方 | `cron(0 0 2 ? * MON *)` と `cron(0 0 2 ? * THU *)`（**UTC だけ**。日本時間から換算する）。同じ関連付けを 2 回書く | `cron(0 11 ? * MON,THU *)` と `ScheduleExpressionTimezone: Asia/Tokyo`（**日本時間のまま、1 つで書ける**） |
 | 作った直後 | 既定では直後に 1 回流れる。`ApplyOnlyAtCronInterval: true` で止める | cron 式の予定は、予定の時刻まで流れない |
 | 書く量（目安） | 関連付け 2 つ分（同じ内容の繰り返し） | 予定 1 つ分だが、`FlexibleTimeWindow` の指定が要り、`Input` の JSON がある。全体ではおおむね同じくらいで、読みやすさは State Manager の関連付けの方がよい |
 

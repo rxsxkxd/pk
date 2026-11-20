@@ -28,7 +28,7 @@
 | ルールの更新スクリプト | ルールの更新ドキュメントの中のシェルスクリプト（更新対象サーバーで root で流れる）。ルールのデプロイ先から照合の値（`SHA256SUMS`）と ipset 入れ替えスクリプトを取り、照合してから ipset 入れ替えスクリプトを流す |
 | ルールの読み取りポリシー | 更新対象サーバーの IAM ロールに付ける管理ポリシー `ip-port-guard-rules-read-<環境>`（名前は、ルールのデプロイ先バケットの名前の先頭部分 `RuleDeployBucketNamePrefix` に `-read-<環境>` を付けたもの）。その環境のルールのデプロイ先の `s3:GetObject` だけを許す（[cloudformation/rule-read-policy.yml](cloudformation/rule-read-policy.yml)） |
 | インスタンスの一覧ファイル | 手動の更新で使う、更新対象サーバーを 1 行 1 台で書いた TSV（`instance-lists/<環境>.tsv`）。列は「インスタンス ID・パブリック IP・Name タグ」 |
-| 定期更新の関連付け | 定期更新を行う State Manager の関連付け。環境ごとに 2 つ（`port-guard-refresh-rules-<環境>-mon`・`-thu`）（[cloudformation/scheduled-refresh.yml](cloudformation/scheduled-refresh.yml)） |
+| 定期更新の関連付け | 定期更新を行う State Manager の関連付け。環境ごとに 1〜2 つ（1 番目の予定 `port-guard-refresh-rules-<環境>-primary`、2 番目の予定 `-secondary`。2 番目は省略できる）（[cloudformation/scheduled-refresh.yml](cloudformation/scheduled-refresh.yml)） |
 | 失敗の通知の規則 | 定期更新で失敗した台を、SNS のトピックへ台ごとに知らせる EventBridge の規則 |
 | 更新の記録フォルダ | 更新対象サーバーの `/var/lib/port-guard/rules/`。最後に流した ipset 入れ替えスクリプトの写しと、流した日時（`last-refreshed`）を残す |
 
@@ -40,7 +40,7 @@
 |---|---|---|---|
 | IP 許可ルール（ipset 入れ替えスクリプトと照合の値） | S3 のルールのデプロイ先 `port-guard/<環境>/current/` | S3 のバケット（親フォルダのルールのデプロイ先バケット） | 親フォルダの `deploy-rules.sh`（手動か CodePipeline。月曜・木曜 9:00） |
 | ルールの更新スクリプト | ルールの更新ドキュメント `port-guard-refresh-rules`（アカウントに 1 つ） | `AWS::SSM::Document`（`DocumentType: Command`） | [cloudformation/rule-refresh-document.yml](cloudformation/rule-refresh-document.yml) |
-| 定期実行のスケジュール | 定期更新の関連付け `port-guard-refresh-rules-<環境>-mon`・`-thu`（環境ごとに 2 つ） | `AWS::SSM::Association` | [cloudformation/scheduled-refresh.yml](cloudformation/scheduled-refresh.yml) |
+| 定期実行のスケジュール | 定期更新の関連付け `port-guard-refresh-rules-<環境>-primary`・`-secondary`（環境ごとに 1〜2 つ） | `AWS::SSM::Association` | [cloudformation/scheduled-refresh.yml](cloudformation/scheduled-refresh.yml) |
 | 定期実行時のエラーの定義と通知 | 失敗の通知の規則 `port-guard-refresh-rules-<環境>-failed`（環境ごと） | `AWS::Events::Rule`（送り先は既存の SNS のトピック） | 同上（`NotificationTopicArn` を渡したときだけ） |
 | S3 を読む権限 | 更新対象サーバーの IAM ロール | `AWS::IAM::ManagedPolicy` `ip-port-guard-rules-read-<環境>` | [cloudformation/rule-read-policy.yml](cloudformation/rule-read-policy.yml) |
 | 更新対象サーバーの一覧（手動の更新） | 作業者の手元のインスタンスの一覧ファイル `instance-lists/<環境>.tsv`（Git に入れない） | なし（ファイル） | `list_instances.rb` が環境のタグで引き、SSM で応答する台を書き出す。人が目で確かめて要らない行を消す |
@@ -85,8 +85,10 @@
 |---|---|---|---|---|
 | 更新対象サーバーの IAM ロール（既存。インスタンスプロファイルのロール） | 各サーバー（SSM Agent と、ルールの更新スクリプトの `aws s3 cp`） | `AmazonSSMManagedInstanceCore` | AWS 管理ポリシー | 既に付いている前提（`docs/ec2/ssm-setup` で用意する。SSM で応答するのに要る） |
 | 〃 | 〃 | `ip-port-guard-rules-read-<環境>`（その環境のルールのデプロイ先の `s3:GetObject` だけ） | カスタマー管理ポリシー | [rule-read-policy.yml](cloudformation/rule-read-policy.yml) で作り、`aws iam attach-role-policy` で付ける（[instance-setup.md の 5](instance-setup.md#5-iam-ロールにルールの読み取りポリシーを付けるロールごと)） |
-| 関連付けのロール `port-guard-refresh-rules-dispatch-<環境>` | State Manager（定期更新の関連付けがコマンドを送るとき） | `send-rule-refresh-document`（ルールの更新ドキュメントを EC2 のインスタンスに送る `ssm:SendCommand` だけ） | インラインポリシー（管理ポリシーは付けない） | [scheduled-refresh.yml](cloudformation/scheduled-refresh.yml) がロールごと作る |
-| 失敗の通知の規則の実行ロール（名前はスタックが付ける） | EventBridge（失敗の通知の規則が SNS へ送るとき） | `publish-failures`（そのトピックへの `sns:Publish` だけ） | インラインポリシー | 同上（`NotificationTopicArn` を渡したときだけ）。トピックが KMS で暗号化されているなら、そのキーの権限を足す（要る操作は SNS のドキュメントで確かめる。今は入れていない） |
+| 関連付けのロール `port-guard-refresh-rules-dispatch-<環境>` | State Manager（定期更新の関連付けがコマンドを送るとき） | `send-port-guard-refresh-rules-document`（ルールの更新ドキュメントを EC2 のインスタンスに送る `ssm:SendCommand` だけ） | インラインポリシー（管理ポリシーは付けない） | [scheduled-refresh.yml](cloudformation/scheduled-refresh.yml) がロールごと作る |
+| 失敗の通知の規則の実行ロール（名前はスタックが付ける） | EventBridge（失敗の通知の規則が SNS へ送るとき） | `publish-port-guard-refresh-rules-failures`（そのトピックへの `sns:Publish` だけ） | インラインポリシー | 同上（`NotificationTopicArn` を渡したときだけ）。トピックが KMS で暗号化されているなら、そのキーの権限を足す（要る操作は SNS のドキュメントで確かめる。今は入れていない） |
+
+定期更新のスタック（[scheduled-refresh.yml](cloudformation/scheduled-refresh.yml)）が作るものの名前は、ルールの更新ドキュメントの名前（パラメータ `DocumentName`。既定 `port-guard-refresh-rules`）から組み立てる: 関連付けのロール `<DocumentName>-dispatch-<環境>`、そのインラインポリシー `send-<DocumentName>-document`、関連付け `<DocumentName>-<環境>-primary`・`-secondary`、失敗の通知の規則 `<DocumentName>-<環境>-failed`、その実行ロールのインラインポリシー `publish-<DocumentName>-failures`。
 
 作業者（人・踏み台サーバー）の IAM ユーザー・ロールに付ける管理ポリシーは用意していない。要る権限は次のとおり（AWS のドキュメントで 1 つずつは確かめていない。足りなければ、エラーに出る操作を足す）。
 

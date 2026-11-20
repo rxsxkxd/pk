@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" width="1000" height="420" role="img" aria-labelledby="title desc">
   <title id="title">定期更新の予定</title>
-  <desc id="desc">毎週月曜と木曜の日本時間 9:00 に CodePipeline がルールを作ってルールのデプロイ先（S3）に上げ、2 時間後の 11:00 に定期更新の関連付けが全台のルールを更新する。CodePipeline の予定は 1 つ（cron(0 0 ? * MON,THU *)）、関連付けは曜日を 1 つしか書けないので月曜の分と木曜の分の 2 つ。時刻は UTC で書く。</desc>
+  <desc id="desc">毎週月曜と木曜の日本時間 9:00 に CodePipeline がルールを作ってルールのデプロイ先（S3）に上げ、2 時間後の 11:00 に定期更新の関連付けが全台のルールを更新する。CodePipeline の予定は 1 つ（cron(0 0 ? * MON,THU *)）、関連付けは曜日を 1 つしか書けないので 1 番目（月曜）と 2 番目（木曜。省略できる）の 2 つで、秒から始まる 7 項目の式（cron(0 0 2 ? * MON *) など）。時刻は UTC で書く。</desc>
   <defs>
     <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%">
       <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.06"/>
@@ -51,7 +51,7 @@
   <line x1="745" y1="142" x2="745" y2="154" class="tick"/><text x="745" y="168" class="time">11:00</text>
   <line x1="940" y1="142" x2="940" y2="154" class="tick"/><text x="940" y="168" class="time">12:00</text>
   <text x="355" y="188" class="cron">cron(0 0 ? * MON,THU *)</text>
-  <text x="745" y="188" class="cron">cron(0 2 ? * MON *)</text>
+  <text x="745" y="188" class="cron">1 番目: cron(0 0 2 ? * MON *)</text>
 
   <!-- ========== 木曜 ========== -->
   <rect x="20" y="215" width="960" height="140" rx="8" class="lane"/>
@@ -73,8 +73,8 @@
   <line x1="745" y1="297" x2="745" y2="309" class="tick"/><text x="745" y="323" class="time">11:00</text>
   <line x1="940" y1="297" x2="940" y2="309" class="tick"/><text x="940" y="323" class="time">12:00</text>
   <text x="355" y="343" class="cron">（月曜と同じ予定）</text>
-  <text x="745" y="343" class="cron">cron(0 2 ? * THU *)</text>
+  <text x="745" y="343" class="cron">2 番目: cron(0 0 2 ? * THU *)</text>
 
   <text x="30" y="380" class="note">予定の式は UTC（日本時間 9:00 ＝ UTC 0:00、11:00 ＝ UTC 2:00）。</text>
-  <text x="30" y="402" class="note">関連付けの cron 式は曜日を 1 つしか書けないので、月曜の分と木曜の分の 2 つ。CodePipeline の予定は 1 つで MON,THU と書ける。</text>
+  <text x="30" y="402" class="note">関連付けは曜日を 1 つしか書けないので 2 つ（2 番目は省略できる）。関連付けは秒から始まる 7 項目、CodePipeline は 6 項目。</text>
 </svg>

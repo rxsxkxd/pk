@@ -143,6 +143,7 @@ AWS の上の設定を変える 3 つは、次の順に進む（共通の流れ 
 | `rb/ssm_role.rb` | `ec2:DescribeInstances`、`ec2:DescribeIamInstanceProfileAssociations`、`ec2:AssociateIamInstanceProfile`、`iam:GetInstanceProfile`、`iam:ListAttachedRolePolicies`（権限状態の確認）、`iam:PassRole`（関連付けるロールだけ） |
 | `rb/ssm_role_targets.rb` | `ec2:DescribeInstances`、`ec2:DescribeIamInstanceProfileAssociations` |
 | `rb/ssm_role_force.rb` | `ec2:AssociateIamInstanceProfile`、`iam:PassRole`（関連付けるロールだけ） |
+| `rb/ssm_role_verify.rb` | `ec2:DescribeIamInstanceProfileAssociations`、`iam:GetInstanceProfile`、`iam:ListAttachedRolePolicies` |
 | `rb/ssm_check.rb` | `ec2:DescribeInstances`、`ec2:DescribeIamInstanceProfileAssociations`、`iam:GetInstanceProfile`、`iam:ListAttachedRolePolicies`、`iam:ListRolePolicies`、`ssm:DescribeInstanceInformation` |
 | `rb/backup.rb` | `ec2:DescribeInstances`、`ec2:CreateImage`、`ec2:CreateTags` |
 | `rb/backup_check.rb` | `ec2:DescribeImages` |
@@ -251,20 +252,21 @@ SVG 版: [IAM ロールとインスタンスプロファイルの関係](images/
 
 **すでに IAM ロールがある稼働サーバーには何もしない**（そのロールに `AmazonSSMManagedInstanceCore` を足すことは、この道具では行わない。必要なら別に手で行う）。1 台のインスタンスに関連付けられるインスタンスプロファイルは 1 つだけ、1 つのインスタンスプロファイルに入れられるロールも 1 つだけなので、付け替えもしない。
 
-### 分けた版: `rb/ssm_role_targets.rb` → `rb/ssm_role_force.rb`
+### 分けた版: `rb/ssm_role_targets.rb` → `rb/ssm_role_force.rb` → `rb/ssm_role_verify.rb`
 
-`rb/ssm_role.rb` を、確かめる部分と付与する部分に分けた版。付与する前に一覧を作って見直したいとき、付与だけを流し直したいときに使う。`rb/ssm_role.rb` はそのまま使える。
+`rb/ssm_role.rb` を、確かめる部分・付与する部分・付与の後の確認に分けた版。付与する前に一覧を作って見直したいとき、付与だけ・確認だけを流したいときに使う（使い方だけをまとめたもの: [ロールの付与だけ・ロールの確認だけを行う](./role-grant-and-verify.md)）。`rb/ssm_role.rb` はそのまま使える。
 
 ```bash
 ruby rb/ssm_role_targets.rb --out role-targets.txt < instance-ids.txt        # 付与できる台の一覧を作る（読み取りだけ）
 ruby rb/ssm_role_force.rb --instance-profile <用意したインスタンスプロファイル> < role-targets.txt
-ruby rb/ssm_check.rb --ok-out enabled.txt --ng-out ng.txt < instance-ids.txt   # 数分置いてから確かめる（権限状態の確認の代わり）
+ruby rb/ssm_role_verify.rb --instance-profile <用意したインスタンスプロファイル> < role-targets.txt   # 権限状態の確認（SSM の登録は見ない）
 ```
 
 | 道具 | 行うこと | 行わないこと |
 |---|---|---|
 | `rb/ssm_role_targets.rb` | `rb/ssm_role.rb` の 1・2（インスタンスの存在チェック、ロールの状態チェック）。付与できる（`running` か `stopped` で、IAM ロールが未設定）・何もしない（すでにある）・対象外 に分けて表示し、`--out` で付与できる台だけの一覧を書き出す | 何も変えない |
 | `rb/ssm_role_force.rb` | `rb/ssm_role.rb` の 3（ロールの付与）だけ。渡した台に 1 台ずつ `associate-iam-instance-profile`。試行するかの確認（`[y/N]`・`--yes`・`--check-only`）はある | 必須でない確かめ（インスタンスの存在、ロールの状態、インスタンスプロファイルがあるか、付与の後の権限状態の確認）。すでに関連付けがある台・見つからない台・インスタンスプロファイルがないときは、AWS の側が拒み、その台の失敗として表示される |
+| `rb/ssm_role_verify.rb` | `rb/ssm_role.rb` の 4（権限状態の確認）だけ。関連付けがあるか、そのロールに `AmazonSSMManagedInstanceCore` が付いているかを見る。`--instance-profile` を付けると、関連付けられているのがそのインスタンスプロファイルかも見る。`--ok-out` で正しく付いていた台を書き出す | 何も変えない。SSM の登録（`Online` か）は見ない（付与の直後でも確かめられる。登録まで見るなら 2-1 の `rb/ssm_check.rb`） |
 
 `rb/ssm_check.rb` も 1 台ずつインスタンスプロファイルの有無を見るが、「インスタンスプロファイルがない」台は「手で直す」に入り、付与できる台だけの一覧は書き出さない。付与の前の一覧には `rb/ssm_role_targets.rb` を使う。
 

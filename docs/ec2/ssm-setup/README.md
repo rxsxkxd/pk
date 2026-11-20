@@ -8,7 +8,7 @@
 
 80・443 番を国内だけに絞る設定を入れる [port-guard-rollout](../../ec2-port-guard-rollout/README.md) の**前のフェーズ**として、作業を完全に分けている。port-guard-rollout は、このフェーズの接続の確認で「入れる」になった台を、SSM で操作する。
 
-手順の正本は [steps.md](./steps.md)（用語、流れの図、各道具の使い方、権限、元に戻す方法）。
+手順の正本は [steps.md](./steps.md)（用語、流れの図、各道具の使い方、権限、元に戻す方法）。ロールの付与だけ・ロールの確認だけを行うときは [role-grant-and-verify.md](./role-grant-and-verify.md)。
 
 ## 構成: 操作を 3 つに分ける
 
@@ -31,6 +31,7 @@
 | AWS の操作 | `rb/ssm_role.rb` | IAM ロールが未設定の台に、SSM 用のインスタンスプロファイルを関連付ける（存在・ロールの状態を確かめてから付与し、付与の後に権限状態も確かめる） | インスタンスプロファイルの関連付け |
 | | `rb/ssm_role_targets.rb` | `ssm_role.rb` の「確かめる」だけ。インスタンスプロファイルを付与できる台の一覧を書き出す | なし |
 | | `rb/ssm_role_force.rb` | `ssm_role.rb` の「行う」だけ。渡した台に、確かめずに関連付ける（一覧は `ssm_role_targets.rb` で作る） | インスタンスプロファイルの関連付け |
+| | `rb/ssm_role_verify.rb` | `ssm_role.rb` の「権限状態の確認」だけ。関連付けがあり、そのロールに `AmazonSSMManagedInstanceCore` が付いているかを見る（SSM の登録は見ない） | なし |
 | | `rb/ssm_check.rb` | 権限と AWS の上の状態で、SSM 有効・SSM Agent で直す・手で直す に分ける | なし |
 | | `rb/backup.rb` | SSM Agent で直す台の AMI を作る（再起動しない） | AMI |
 | | `rb/backup_check.rb` | バックアップがそろったかを確かめ、そろった台の一覧を書き出す | なし |
@@ -44,6 +45,7 @@ cd ssm-setup
 ruby rb/ssm_role.rb --help
 ruby rb/ssm_role_targets.rb --help
 ruby rb/ssm_role_force.rb --help
+ruby rb/ssm_role_verify.rb --help
 ruby rb/ssm_check.rb --help
 ruby rb/backup.rb --help
 ruby rb/backup_check.rb --help
